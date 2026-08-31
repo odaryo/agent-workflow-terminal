@@ -69,4 +69,4 @@ codesign --force --sign - "${APP}" >/dev/null 2>&1 \
 
 log "OK: ${APP}"
 log "  起動: open '${APP}'   /   '${APP}/Contents/MacOS/TerminalSpike'"
-log "  コマンド差し替え: TERMINAL_SPIKE_COMMAND='tmux new-session -A -s spike' (M2 用)"
+log "  コマンド差し替え: TERMINAL_SPIKE_COMMAND='tmux -L gate1-spike new-session -A -s gate1-spike' (M2)"

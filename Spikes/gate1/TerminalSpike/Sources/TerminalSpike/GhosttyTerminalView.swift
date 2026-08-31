@@ -245,12 +245,36 @@ final class GhosttyRuntime {
             }
             return true
 
+        // M2: URL / path hit testing の観測点。
+        // libghostty がセル下のテキストをリンクと判定すると、hover のたびにここへ
+        // URL が飛んでくる。tmux 越しでも通るかを確認するため必ずログに出す。
+        case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+            let link = action.action.mouse_over_link
+            if let url = link.url, link.len > 0 {
+                let str = String(
+                    decoding: UnsafeRawBufferPointer(start: url, count: Int(link.len)), as: UTF8.self)
+                NSLog("[spike] MOUSE_OVER_LINK url=\(str)")
+            } else {
+                NSLog("[spike] MOUSE_OVER_LINK <cleared>")
+            }
+            return true
+
+        // M2: リンクの実クリック。既定ブラウザを開いてしまうと検証の邪魔なので
+        // スパイクでは開かずログのみ。
+        case GHOSTTY_ACTION_OPEN_URL:
+            let open = action.action.open_url
+            if let url = open.url, open.len > 0 {
+                let str = String(
+                    decoding: UnsafeRawBufferPointer(start: url, count: Int(open.len)), as: UTF8.self)
+                NSLog("[spike] OPEN_URL kind=\(open.kind.rawValue) url=\(str)")
+            }
+            return true
+
         case GHOSTTY_ACTION_MOUSE_SHAPE, GHOSTTY_ACTION_MOUSE_VISIBILITY,
              GHOSTTY_ACTION_PWD, GHOSTTY_ACTION_RENDER,
              GHOSTTY_ACTION_RENDERER_HEALTH, GHOSTTY_ACTION_CELL_SIZE,
              GHOSTTY_ACTION_CONFIG_CHANGE, GHOSTTY_ACTION_COLOR_CHANGE,
-             GHOSTTY_ACTION_KEY_SEQUENCE, GHOSTTY_ACTION_SECURE_INPUT,
-             GHOSTTY_ACTION_MOUSE_OVER_LINK:
+             GHOSTTY_ACTION_KEY_SEQUENCE, GHOSTTY_ACTION_SECURE_INPUT:
             // M1 では観測しない (ログのみ)。M2/M3 で扱う。
             return true
 
@@ -587,6 +611,186 @@ final class GhosttySurfaceNSView: NSView {
     var processExited: Bool {
         guard let surface else { return true }
         return ghostty_surface_process_exited(surface)
+    }
+}
+
+// MARK: - M2 検証用フック (スパイク専用。本体には持ち込まない)
+//
+// なぜ必要か: このマシンには自動化ツール (cliclick 等) が無く、Claude Code の
+// 実行コンテキストにはアクセシビリティ権限も無いため、`CGEvent` / `System Events`
+// による物理的なキー・マウス送出ができない。
+//
+// そこで **AppKit のイベント配送層をバイパスして、libghostty の入力 API を直接叩く**。
+// 検証したいのは「AppKit がイベントを配れるか」(自明) ではなく、その先の
+// 「libghostty がキー / マウスをどうエンコードして PTY へ流し、tmux がどう解釈するか」
+// なので、この省略で失われる情報は小さい。ただし **NSEvent → 引数への変換部分
+// (`makeKeyEvent` / `reportMousePosition` / `scrollWheel`) は検証されない**ことを明記する。
+extension GhosttySurfaceNSView {
+    /// US ANSI キーボードの仮想キーコード。M2 で使うものだけ。
+    private static let keycodes: [Character: UInt32] = [
+        "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9,
+        "b": 11, "q": 12, "w": 13, "e": 14, "r": 15, "y": 16, "t": 17,
+        "1": 18, "2": 19, "3": 20, "4": 21, "6": 22, "5": 23, "=": 24, "9": 25, "7": 26,
+        "-": 27, "8": 28, "0": 29, "]": 30, "o": 31, "u": 32, "[": 33, "i": 34, "p": 35,
+        "l": 37, "j": 38, "'": 39, "k": 40, ";": 41, "\\": 42, ",": 43, "/": 44,
+        "n": 45, "m": 46, ".": 47, " ": 49, "`": 50,
+    ]
+    private static let namedKeycodes: [String: UInt32] = [
+        "return": 36, "enter": 36, "tab": 48, "space": 49,
+        "delete": 51, "escape": 53, "esc": 53,
+        "left": 123, "right": 124, "down": 125, "up": 126,
+    ]
+    /// shift を伴う記号。US ANSI。
+    private static let shifted: [Character: Character] = [
+        "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
+        "*": "8", "(": "9", ")": "0", "_": "-", "+": "=", "{": "[", "}": "]",
+        "|": "\\", ":": ";", "\"": "'", "<": ",", ">": ".", "?": "/", "~": "`",
+    ]
+
+    /// `ctrl+b` / `cmd+v` / `escape` / `z` のような指定を 1 打鍵として送る。
+    /// 戻り値は libghostty がキーバインドとして消費したか (= PTY へ流れなかったか)。
+    @discardableResult
+    func spikeSendKey(_ spec: String) -> Bool {
+        guard let surface else { return false }
+        var mods = GHOSTTY_MODS_NONE.rawValue
+        var parts = spec.lowercased().split(separator: "+").map(String.init)
+        guard let last = parts.popLast() else { return false }
+        for m in parts {
+            switch m {
+            case "shift": mods |= GHOSTTY_MODS_SHIFT.rawValue
+            case "ctrl", "control": mods |= GHOSTTY_MODS_CTRL.rawValue
+            case "alt", "opt", "option": mods |= GHOSTTY_MODS_ALT.rawValue
+            case "cmd", "super", "command": mods |= GHOSTTY_MODS_SUPER.rawValue
+            default: NSLog("[spike] unknown modifier: \(m)")
+            }
+        }
+
+        // 元の spec (大文字も保持) から文字を取り直す
+        let rawLast = String(spec.split(separator: "+").last ?? "")
+        let keycode: UInt32
+        var unshifted: UInt32 = 0
+        var printable: String?
+
+        if let named = Self.namedKeycodes[last] {
+            keycode = named
+            if named == 49 { printable = " " }
+        } else if rawLast.count == 1, let ch = rawLast.first {
+            if let code = Self.keycodes[Character(ch.lowercased())] {
+                keycode = code
+                unshifted = Character(ch.lowercased()).unicodeScalars.first?.value ?? 0
+                if ch.isUppercase { mods |= GHOSTTY_MODS_SHIFT.rawValue }
+            } else if let base = Self.shifted[ch], let code = Self.keycodes[base] {
+                keycode = code
+                unshifted = base.unicodeScalars.first?.value ?? 0
+                mods |= GHOSTTY_MODS_SHIFT.rawValue
+            } else {
+                NSLog("[spike] unknown key: \(rawLast)")
+                return false
+            }
+            printable = String(ch)
+        } else {
+            NSLog("[spike] unknown key: \(rawLast)")
+            return false
+        }
+
+        var key = ghostty_input_key_s()
+        key.keycode = keycode
+        key.mods = ghostty_input_mods_e(mods)
+        key.consumed_mods = ghostty_input_mods_e(
+            mods & ~(GHOSTTY_MODS_CTRL.rawValue | GHOSTTY_MODS_SUPER.rawValue))
+        key.unshifted_codepoint = unshifted
+        key.composing = false
+
+        // 重要 (M2 の実測): `ghostty_surface_text` は **paste** 経路であり
+        // (`Surface.textCallback` → `completeClipboardPaste`)、bracketed paste で
+        // 包まれる。素の打鍵として文字を送るには `ghostty_input_key_s.text` に
+        // 「その打鍵が生成する文字」を入れる必要がある。AppKit 経路の
+        // `event.characters` に相当する。
+        let sendsText = printable != nil
+            && (mods & (GHOSTTY_MODS_CTRL.rawValue | GHOSTTY_MODS_SUPER.rawValue
+                        | GHOSTTY_MODS_ALT.rawValue)) == 0
+            && Self.namedKeycodes[last] == nil
+
+        key.action = GHOSTTY_ACTION_PRESS
+        let consumed: Bool
+        if sendsText, let printable {
+            consumed = printable.withCString { ptr -> Bool in
+                key.text = ptr
+                return ghostty_surface_key(surface, key)
+            }
+        } else {
+            key.text = nil
+            consumed = ghostty_surface_key(surface, key)
+        }
+        key.text = nil
+        key.action = GHOSTTY_ACTION_RELEASE
+        _ = ghostty_surface_key(surface, key)
+        return consumed
+    }
+
+    /// 文字列をそのまま PTY へ流す (IME 確定文字と同じ経路)。
+    func spikeSendText(_ text: String) {
+        guard let surface else { return }
+        let bytes = Array(text.utf8)
+        bytes.withUnsafeBufferPointer { buf in
+            buf.baseAddress?.withMemoryRebound(to: CChar.self, capacity: buf.count) { ptr in
+                ghostty_surface_text(surface, ptr, UInt(buf.count))
+            }
+        }
+    }
+
+    /// ビュー座標 (左上原点、point 単位) でのマウス位置。
+    /// `shift` は「mouse reporting を一時的にバイパスする」既定の修飾キー。
+    func spikeMousePos(_ x: Double, _ y: Double, shift: Bool = false, cmd: Bool = false) {
+        guard let surface else { return }
+        ghostty_surface_mouse_pos(surface, x, y, Self.spikeMods(shift: shift, cmd: cmd))
+    }
+
+    func spikeMouseButton(press: Bool, right: Bool = false,
+                          shift: Bool = false, cmd: Bool = false) {
+        guard let surface else { return }
+        _ = ghostty_surface_mouse_button(
+            surface,
+            press ? GHOSTTY_MOUSE_PRESS : GHOSTTY_MOUSE_RELEASE,
+            right ? GHOSTTY_MOUSE_RIGHT : GHOSTTY_MOUSE_LEFT,
+            Self.spikeMods(shift: shift, cmd: cmd))
+    }
+
+    private static func spikeMods(shift: Bool, cmd: Bool = false) -> ghostty_input_mods_e {
+        var v = GHOSTTY_MODS_NONE.rawValue
+        if shift { v |= GHOSTTY_MODS_SHIFT.rawValue }
+        if cmd { v |= GHOSTTY_MODS_SUPER.rawValue }
+        return ghostty_input_mods_e(v)
+    }
+
+    func spikeScroll(_ dx: Double, _ dy: Double) {
+        guard let surface else { return }
+        // precise deltas (トラックパッド相当) として送る
+        ghostty_surface_mouse_scroll(surface, dx, dy, ghostty_input_scroll_mods_t(1))
+    }
+
+    /// surface の観測可能な状態をまとめて 1 行にする。
+    func spikeReport() -> String {
+        guard let surface else { return "surface=<nil>" }
+        var out = "window=\(window?.windowNumber ?? -1)"
+        out += " size[\(sizeDescription)]"
+        out += " mouse_captured=\(ghostty_surface_mouse_captured(surface))"
+        out += " process_exited=\(ghostty_surface_process_exited(surface))"
+        let hasSel = ghostty_surface_has_selection(surface)
+        out += " has_selection=\(hasSel)"
+        if hasSel {
+            var text = ghostty_text_s()
+            if ghostty_surface_read_selection(surface, &text) {
+                if let ptr = text.text, text.text_len > 0 {
+                    let str = String(
+                        decoding: UnsafeRawBufferPointer(start: ptr, count: Int(text.text_len)),
+                        as: UTF8.self)
+                    out += " selection=\(str.debugDescription)"
+                }
+                ghostty_surface_free_text(surface, &text)
+            }
+        }
+        return out
     }
 }
 

@@ -18,9 +18,12 @@ struct TerminalSpikeApp: App {
 
     var body: some Scene {
         WindowGroup("Gate1 Terminal Spike") {
+            // NOTE(M2): M1 では `.ignoresSafeArea()` を付けていたが、これだと
+            // ターミナル面がタイトルバーの下へ潜り込み、**先頭行が隠れる**。
+            // ユーザー環境の tmux は `status-position top` なので、ステータス行が
+            // まるごと見えなくなっていた。安全領域を尊重する形に直す。
             GhosttyTerminalView(command: command)
                 .frame(minWidth: 480, minHeight: 320)
-                .ignoresSafeArea()
         }
         .defaultSize(width: 900, height: 560)
     }
@@ -37,6 +40,14 @@ final class SpikeAppDelegate: NSObject, NSApplicationDelegate {
             NSLog("[spike] ghostty runtime init error: \(error)")
         }
         NSLog("[spike] GHOSTTY_RESOURCES_DIR=\(runtime.resourcesDir ?? "<none>")")
+
+        // M2: 外部からキー / マウスを駆動するための制御チャネル (スパイク専用)
+        if let path = ProcessInfo.processInfo.environment["TERMINAL_SPIKE_CONTROL"],
+           !path.isEmpty {
+            let control = SpikeControl(path: path)
+            self.control = control
+            control.start()
+        }
 
         NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
@@ -77,4 +88,5 @@ final class SpikeAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var resizeTestStarted = false
+    private var control: SpikeControl?
 }

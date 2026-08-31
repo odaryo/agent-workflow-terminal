@@ -110,10 +110,14 @@ zig build \
   -Doptimize=ReleaseFast
 ```
 
-- 成果物: `zig-out/macos/GhosttyKit.xcframework`
+- 成果物: **`macos/GhosttyKit.xcframework`**(ghostty リポジトリ**直下**の `macos/`。`zig-out/` **ではない**)
   - `Headers/ghostty.h`(公開Cヘッダ 1枚)
   - `Modules/module.modulemap`(module 名は `GhosttyKit`。Swift から `import GhosttyKit` になる)
   - 静的ライブラリ本体 + dSYM
+  - **訂正(M0 実測、2026-08-31):** 当初この節は `zig-out/macos/GhosttyKit.xcframework` と書いていたが誤り。
+    v1.3.1 の `src/build/GhosttyXCFramework.zig` は `out_path = "macos/GhosttyKit.xcframework"` であり、
+    xcframework はリポジトリ直下の `macos/` に出る。`zig-out/` に入るのは
+    `share/`(terminfo・shell-integration・themes)と `include/`、および `libghostty-vt` の dylib のみ。
 - `-Dxcframework-target` は `native` | `universal` の2値。**PoC は `native`(arm64のみ)で十分**。`universal` は macOS の universal ビルドを作る。
 - `-Demit-xcframework=true` の場合、**resources も必ず install される**(ビルドスクリプトのコメント: "The xcframework build always installs resources because our macOS xcode project contains references to them")。→ §4.5
 - デバッグしたい場合は `-Doptimize` を外すと debug ビルドになる。
@@ -184,8 +188,16 @@ ghostty_surface_t ghostty_surface_new(ghostty_app_t, const ghostty_surface_confi
 
 **プロセス観測(Agent Adapter にとって重要)**
 - `ghostty_surface_process_exited(surface) -> bool`
-- **`ghostty_surface_foreground_pid(surface) -> uint64_t`**
-- **`ghostty_surface_tty_name(surface) -> ghostty_string_s`**
+- ~~`ghostty_surface_foreground_pid(surface) -> uint64_t`~~
+- ~~`ghostty_surface_tty_name(surface) -> ghostty_string_s`~~
+
+> **訂正(M0 実測、2026-08-31): `ghostty_surface_foreground_pid` と `ghostty_surface_tty_name` は
+> v1.3.1 の `ghostty.h` に存在しない。** 本節は upstream `main` のヘッダを読んで書かれており、
+> この 2 関数は v1.3.1 より後に追加されたもの。v1.3.1(§4.7 案A)へピン留めする限り、
+> surface からプロセスを直接観測する手段は `ghostty_surface_process_exited` のみである。
+> → **Gate 3(Agent Adapter)への申し送り:** pane / プロセス特定は
+> `tmux list-panes -F '#{pane_pid}'` 等の tmux CLI に頼る必要がある。
+> §6.3 の懸念は「tmux を挟むと何が返るか」以前に「そもそも API が無い」だった。
 
 **コールバック**(`ghostty_runtime_config_s` に関数ポインタで登録)
 - wakeup(イベントループ起床)
@@ -202,6 +214,16 @@ ghostty_surface_t ghostty_surface_new(ghostty_app_t, const ghostty_surface_confi
 - ghostty は `GHOSTTY_RESOURCES_DIR` 環境変数でバンドルリソースの位置を探す(`src/os/resourcesdir.zig`)。release ビルドではこれを最優先で見る。debug ビルドでは terminfo 検出を先に試す。
 - リソース内容: `share/terminfo/ghostty.terminfo`(+ termcap、コンパイル済みDB)、`src/shell-integration/`(bash/zsh/fish/elvish)。
 - `zig build -Demit-xcframework=true` はこれらを `zig-out/share/...` へ install する。
+- **訂正(M0/M1 実測、2026-08-31): `GHOSTTY_RESOURCES_DIR` が指すのは `share/ghostty` ディレクトリそのもの**
+  (`zig-out/share/ghostty`)。かつ libghostty は子プロセスへ `TERMINFO=<resources_dir>/../terminfo` を
+  渡す(`src/termio/Exec.zig`)ため、**`ghostty/` と `terminfo/` が同じ親の下に兄弟として並んでいる配置が必須**。
+
+  ```
+  <root>/ghostty/     ← GHOSTTY_RESOURCES_DIR に設定する
+  <root>/terminfo/    ← 兄弟。ここが無いと TERM=xterm-ghostty を引けない
+  ```
+
+  `Spikes/gate1/scripts/build-app.sh` は `.app/Contents/Resources/{ghostty,terminfo}` にこの構造を作る。
 - **PoCアプリ側で `GHOSTTY_RESOURCES_DIR` を設定する必要がある。** ここを飛ばすと `TERM=xterm-ghostty` の terminfo が引けず、TUI(= Claude Code/Codex)の挙動検証が最初から歪む。M1 の必須項目とする。
 
 ### 4.6 iOS に関する重大な変更(Gate 2 への影響 — 本Gateの範囲外だが記録)
@@ -289,6 +311,7 @@ ghostty_surface_t ghostty_surface_new(ghostty_app_t, const ghostty_surface_confi
 ### M2. tmux attach と split / zoom / detach
 
 - [ ] surface の `command` を `tmux new-session -A -s <name>` にして attach
+      (実施時のセッション名は **`gate1-spike`** 固定。ユーザーの既存 tmux セッションには触らない)
 - [ ] tmux 内での split / zoom / pane 移動が期待どおり動く(prefix キーが libghostty のキーバインドに食われないか)
 - [ ] detach → 再 attach で状態が保たれる
 - [ ] tmux の mouse mode(`set -g mouse on`)で pane 選択・リサイズ・スクロールが効く(mouse protocol)
@@ -296,7 +319,11 @@ ghostty_surface_t ghostty_surface_new(ghostty_app_t, const ghostty_surface_confi
 - [ ] copy / paste(⌘C / ⌘V、bracketed paste、複数行貼り付け)
 - [ ] URL / path の hit testing(`GHOSTTY_ACTION_MOUSE_OVER_LINK` / `OPEN_URL` の挙動、tmux 経由でも OSC 8 が通るか)
 - [ ] **同一 tmux session に Ghostty.app と PoC アプリを同時 attach**(§4.2 複数端末接続の確定仕様の予行)
-- [ ] `ghostty_surface_foreground_pid` / `tty_name` が tmux 越しに何を返すか記録(Gate 3 の前哨。**ここで pane 特定に使えないと分かることが重要**)
+- [ ] ~~`ghostty_surface_foreground_pid` / `tty_name` が tmux 越しに何を返すか記録~~
+      → **v1.3.1 に両関数とも存在しない**(§4.4 訂正)。代わりに `tmux list-panes` / `list-clients` で
+      pane・クライアント・プロセスがどこまで特定できるかを記録する(Gate 3 の前哨)
+- [ ] app 側から `tmux split-window` 等の **CLI 操作**を叩いたとき、surface の表示が即時追随するか
+      (本体設計 §21.3 は「tmux を CLI で扱う」方針であり、ここが成立しないと操作 API が作れない)
 
 **Gate 1 項目:** tmux split／zoom／attach／detach、mouse protocol、copy／paste・selection・URL/path hit testing
 **成果物:** `Spikes/gate1/M2-findings.md`(tmux 版数、キーバインド衝突一覧、Gate 3 への申し送り)
@@ -362,6 +389,10 @@ libghostty の split 系 action が飛んできた場合にどう握り潰すか
 `ghostty_surface_foreground_pid` / `ghostty_surface_tty_name` は Gate 3(Agent Adapter)にとって魅力的だが、
 tmux を挟むと surface の foreground process は `tmux` クライアントになる可能性が高い。
 → M2 で実測し、Gate 3 では別途 `tmux list-panes -F '#{pane_pid}'` 系が必要かを申し送る。
+
+> **訂正(M0 実測): この 2 関数は v1.3.1 に存在しない**(§4.4 の訂正を参照)。
+> したがって「tmux を挟むと何が返るか」を測る対象自体が無く、`tmux list-panes` 系の利用は
+> 選択肢ではなく**前提**になる。M2 では tmux CLI 側で何が取れるかを記録する。
 
 ---
 

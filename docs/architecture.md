@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-08-31(モバイルTerminal rendererのlibghostty非依存を確定へ昇格)
+> 最終更新: 2026-08-31(PoC Gate 1通過。macOS版rendererへのlibghostty採用を確定へ昇格)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -835,7 +835,7 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 
 ## 21. 現在の推奨技術アーキテクチャ
 
-> この章は**確定仕様ではなく、PoC通過を条件とする現在の第一候補**である。
+> この章は**確定仕様ではなく、PoC通過を条件とする現在の第一候補**である。ただし章内で明示的に**確定**と記した項目(§21.5のrenderer方針)は除く。
 
 ### 21.1 推奨構成
 
@@ -843,7 +843,7 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 |---|---|
 | 言語 | Swift 6 |
 | UI | SwiftUI + 必要最小限のAppKit／UIKit |
-| Terminal core (macOS) | libghostty C API(完全版) |
+| Terminal core (macOS) | libghostty C API(完全版)。採用は**確定**(Gate 1通過、§21.5) |
 | Terminal core (iOS/iPadOS) | 未確定。libghostty(完全版)への依存は要求しない(制約自体は**確定**、§21.5) |
 | Terminal abstraction | `TerminalRenderer` protocolでrenderer依存を隔離し、platformごとに実装を差し替える |
 | Multiplexer | tmux CLIを外部processとして操作 |
@@ -923,19 +923,21 @@ One SSH connection
 
 ### 21.5 libghostty隔離とplatformごとのrenderer
 
+**確定**: macOS版の`TerminalRenderer`にlibghostty(完全版)を採用する。
+
 **確定**: libghostty(完全版)の採用対象はmacOS版のみとする。iPhone/iPadのTerminal rendererはmacOS版と共通であることを要求せず、実現可能なものを採用する。
 
-根拠: 2026-08-31時点の調査で、ghostty upstreamはv1.3.1以降、iOSを完全版ビルド(GhosttyKit)の対象から除外している。iOS向けに提供されるのはVTパーサのみを含む`libghostty-vt`であり、描画層は含まれない。
+根拠: 2026-08-31時点の調査で、ghostty upstreamはv1.3.1以降、iOSを完全版ビルド(GhosttyKit)の対象から除外している。iOS向けに提供されるのはVTパーサのみを含む`libghostty-vt`であり、描画層は含まれない。macOS版の採用はGate 1の通過(2026-08-31、§24)を根拠とする。
 
 アプリ全体をlibghostty APIへ直接依存させず、`TerminalRenderer` protocolでrendererを隔離する方針は維持する。
 
 ```text
 TerminalRenderer
-├─ GhosttyRenderer            # macOS、現在の推奨(Gate 1待ち)
+├─ GhosttyRenderer            # macOS、確定(Gate 1通過)
 └─ MobileRenderer             # iOS/iPadOS、未確定
 ```
 
-macOS側のlibghostty採用可否(lifecycle、IME、アクセシビリティ、selection、Metal描画、background／foreground復帰)はGate 1で確認する。PoCが成立しない場合にrendererだけ差し替えられる境界を維持する。
+libghosttyの配布方法と固定versionの方針は**未確定**(§25)。Gate 1のスパイクはタグ`v1.3.1`にピン留めして実施したが、この版数固定を製品としての方針にするか、upstream追随に切り替えるかは決めていない。
 
 モバイル側rendererの**候補**(列挙のみ。選定は未確定、§25):
 
@@ -1022,7 +1024,7 @@ SQLite候補テーブル:
 
 | Component | 2026-08-31時点で確認したlicense | 方針 |
 |---|---|---|
-| [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | macOS版の採用候補。iOSの完全版は対象外(§21.5)。固定commit／配布物の依存も再監査 |
+| [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | macOS版で採用(確定、§21.5)。iOSの完全版は対象外。固定commit／配布物の依存も再監査 |
 | [libghostty-vt](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT(Ghostty本体と同一repository) | モバイルrenderer候補の一つ。VTパーサのみで描画層を含まない |
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | モバイルrenderer候補の一つ。採用時は固定versionで再確認 |
 | [tmux](https://github.com/tmux/tmux) | ISC | source組込みではなく外部CLIとして利用 |
@@ -1048,6 +1050,8 @@ SQLite候補テーブル:
 
 ### Gate 1: macOS Terminal品質 — 最優先
 
+**状態: 通過(2026-08-31)。** この結果を根拠に、macOS版rendererへのlibghostty採用を確定とした(§21.5)。
+
 `SwiftUI + libghostty + PTY + tmux attach`で、実際のClaude Code／Codex／shellを動かす。
 
 確認事項:
@@ -1060,6 +1064,15 @@ SQLite候補テーブル:
 - tmux split／zoom／attach／detach
 - 大量output、長時間稼働、memory
 - AppKit bridgeが必要な範囲
+
+検証の証跡(実測値、スクリーンショット、再現手順)と、撤退基準への当てはめ、本体実装への申し送り15項目は`Spikes/gate1/README.md`の判定サマリにまとめてある。自動検証で残った項目(実IMEでのかな漢字変換、物理キーボード／マウス／トラックパッド、描画品質・体感遅延)は2026-08-31に手動で確認し、問題なしとした。
+
+以下は本Gateでは検証しきれておらず、**本実装後に計測**する。
+
+- 数時間〜数日規模の長時間稼働(スパイクでの実測は35分ソークまで)
+- 複数surface(5〜10)同時のメモリ／CPUと`ghostty_surface_free`のリーク
+- 外部ディスプレイ間の移動、scale factor変化、スリープ／復帰
+- `vttest`相当の網羅的なVT検証
 
 ### Gate 2: iPad/iPhone Terminal
 
@@ -1121,7 +1134,7 @@ Claude CodeとCodexについて、共通状態をどこまで正確に取得で�
 
 ### PoC後の判断
 
-Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候補を再評価する。Gate 2が不成立でも、macOS版を先行し、モバイルは外部SSH／Moshアプリ連携で段階提供できる。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
+Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価する必要はない(§21.5で確定)。Gate 2が不成立でも、macOS版を先行し、モバイルは外部SSH／Moshアプリ連携で段階提供できる。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
 
 ## 25. Terminal本体の未確定事項一覧
 
@@ -1146,9 +1159,10 @@ Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候�
 - 新規検出worktreeのActive化確認
 - session命名とcollision回避
 - tmux未導入時のセットアップ
-- tmux version support matrix
+- tmux version support matrix(Gate 1でtmux 3.4がZWJ絵文字の表示を壊すことを確認。サポート下限版数の決定が必要)
 - Close時の安全確認
 - session消失時の再作成方針
+- detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、タブとsurfaceのライフサイクル設計(Gate 1)
 
 ### Agent
 
@@ -1190,7 +1204,7 @@ Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候�
 - Contributor License Agreement／DCOの要否
 - license scan tool
 - SBOM形式
-- libghostty配布方法と固定version
+- libghostty配布方法と固定version(Gate 1のスパイクはタグ`v1.3.1`にピン留めして実施。製品としてこの版数を固定するか、upstream追随に切り替えるかは未決定)
 - Ghostty attribution文言
 - App Store審査上の確認
 
@@ -1425,6 +1439,7 @@ PR_READY
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
+- [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
 - [x] Project登録はlocal選択またはclone
 - [x] Git認証は既存環境へ完全委譲
@@ -1449,7 +1464,7 @@ PR_READY
 # 付録B. 現在の推奨構成チェックリスト
 
 - [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
-- [ ] libghostty(完全版)をmacOS版で正式採用 — Gate 1 PoC待ち
+- [ ] libghosttyの配布方法と固定versionの方針を決定 — スパイクは`v1.3.1`ピン留め、製品方針は未確定(§25)
 - [ ] モバイルTerminal rendererを選定 — 候補比較とGate 2 PoC待ち(§25)
 - [ ] tmux CLI Adapterを正式採用 — version検証待ち
 - [ ] git CLI Adapterを正式採用 — output parsing設計待ち

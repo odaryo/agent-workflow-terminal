@@ -121,6 +121,15 @@ final class GhosttyRuntime {
         if ProcessInfo.processInfo.environment["TERMINAL_SPIKE_USER_CONFIG"] == "1" {
             ghostty_config_load_default_files(cfg)
         }
+
+        // M4: scrollback-limit などを検証ごとに差し替えるためのフック。
+        // ユーザーの ~/.config/ghostty/config を書き換えずに設定を変えられるようにする。
+        if let path = ProcessInfo.processInfo.environment["TERMINAL_SPIKE_CONFIG_FILE"],
+           !path.isEmpty {
+            path.withCString { ghostty_config_load_file(cfg, $0) }
+            NSLog("[spike] loaded config file: \(path)")
+        }
+
         ghostty_config_finalize(cfg)
         config = cfg
 

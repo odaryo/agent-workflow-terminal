@@ -1,14 +1,88 @@
-# Gate 1 スパイク — M0 / M1 / M2 / M3 実施記録
+# Gate 1 スパイク — M0 / M1 / M2 / M3 / M4 実施記録
 
 - 実施日: 2026-08-31
 - ブランチ: `spike/gate1-terminal-poc`
 - 対象: `PLAN.md` の **M0(準備)** / **M1(SwiftUI ウィンドウで zsh が動く)** / **M2(tmux attach と操作検証)** /
-  **M3(Claude Code / Codex の TUI 実動 + VT互換性 + 日本語・絵文字・grapheme width)**
-- 状態: **M0 完了 / M1 完了 / M2 完了 / M3 完了**。M4 は未着手。
+  **M3(Claude Code / Codex の TUI 実動 + VT互換性 + 日本語・絵文字・grapheme width)** /
+  **M4(大量出力・長時間稼働・メモリ)**
+- 状態: **M0 / M1 / M2 / M3 / M4 すべて完了。** 判定サマリは下記。
 
 > この文書は「やってみて何が分かったか」の記録である。
 > `docs/architecture.md` の状態区分(確定／現在の推奨／未確定／対象外)は一切変更していない。
 > libghostty は依然 §21.1 の「現在の推奨」であり、本スパイクは昇格も降格もしない。
+
+---
+
+## Gate 1 判定サマリ
+
+**この節は判断材料の整理であり、「Gate 1 成立 / 不成立」の最終判断はユーザーが行う。**
+スパイクの役割は §24 のチェック項目を実測で潰し、撤退基準(PLAN.md §7)に触れるものが
+あるかどうかを示すところまでである。
+
+### S.1 §24 チェックリストの最終状態
+
+凡例: ✅ 確認済み / ⚠️ 条件付き・制約あり / ❌ 破綻 / ❓ 未検証(要手動確認)
+
+| §24 の項目 | 最終状態 | 根拠 | 残っている確認 |
+|---|---|---|---|
+| **VT互換性** | ✅ | §10.2(色 16/256/truecolor、SGR 全種、box drawing、DECSTBM、alternate screen、`less` / `vim`) | `vttest` 未導入のためスキップ(§10.1 #7)。網羅検証は本実装後 |
+| **Metal描画とresize** | ✅ | §4.2(cols/rows がピクセル幅に線形追随)、§12.3(**大量出力中でもリサイズが効く**) | 外部ディスプレイ間の移動・scale factor 変化は**未検証**(実機に外部ディスプレイ無し) |
+| **IME、日本語入力** | ⚠️ | §10.6(`preedit` 描画 ✅ / `ime_point` 取得 ✅) | ❓ **実際のかな漢字変換操作が未検証(要手動)**。手順は §10.8。`ime_point` の width スケール問題あり |
+| **絵文字、grapheme width** | ⚠️ | §10.3(全角幅・VS15/16・肌色修飾・国旗は ✅) | ⚠️ **ZWJ シーケンスは tmux 3.4 が壊す**(libghostty 単体では正しい)。tmux 下限版数の決定が必要 |
+| **copy／paste** | ✅ | §8.6(⌘C / ⌘V、bracketed paste、複数行・日本語) | ❓ 物理キーボード経由は未検証(§8.9) |
+| **selection** | ⚠️ | §8.6(mouse on/off・Shift バイパスとも動作) | ⚠️ libghostty の選択が **pane 境界を無視する**(§8.1 #22)。仕様上の制約 |
+| **URL／path hit testing** | ⚠️ | §8.6(URL hover / click / OSC 8 は ✅) | ⚠️ path の hit testing は部分的。**mouse reporting ON のとき hover 検出が抑止される** |
+| **mouse protocol** | ✅ | §8.1 #16〜21(pane 選択・境界リサイズ・ホイールで copy-mode) | ❓ 物理マウス / トラックパッド慣性 / 右クリックは未検証(§8.9) |
+| **tmux split／zoom／attach／detach** | ✅ | §8.2〜8.5(CLI 操作・キーバインドとも表示が即時追随、衝突ゼロ) | ⚠️ **detach すると surface のプロセスが死ぬ**(§8.2)。タブのライフサイクル設計が必要 |
+| **大量output** | ✅ | §12.2(50MB の `cat` が tmux 経由 3.2 秒 / 直結 0.75 秒)、§12.3(**出力中も UI 応答は劣化しない**) | — |
+| **長時間稼働** | ⚠️ | §12.6(35 分ソーク: メモリはプラトー、リーク傾向なし) | ❓ **数時間〜数日規模は未検証**。本実装後に実作業で計測する |
+| **memory** | ✅ | §12.4(起動 98MB / 出力ピーク 143MB / 出力後 102MB)、§12.5(`scrollback-limit` が上限として機能) | ❓ **複数 surface(5〜10)同時と `ghostty_surface_free` のリークは未検証**(§12.7) |
+| **AppKit bridgeが必要な範囲** | ✅ | §5.1(一覧化済み。`NSTextInputClient` を M3 で追加) | 判断事項: 「ターミナル面は AppKit の `NSView` 1 枚」を許容するか(撤退基準 §7-7) |
+
+### S.2 撤退基準(PLAN.md §7)への当てはめ
+
+| # | 撤退基準 | 判定 | 根拠 |
+|---|---|---|---|
+| 1 | 致命: `GhosttyKit.xcframework` を自力ビルドできない | **抵触なし** | §3.2(clean ビルド 1分47秒)。ただし `libtool` のシムが必要(§3.4) |
+| 2 | 致命: Claude Code / Codex の TUI が実用にならない | **抵触なし** | §10.4 / §10.5。両者とも表示崩れ・入力取りこぼし無し |
+| 3 | 致命: 日本語 IME が実用にならない | **抵触なし(条件付き)** | §10.6。preedit 描画・候補位置 API とも動作。**実変換操作は未検証** |
+| 4 | 致命: tmux attach 下で split / zoom / detach / mouse が壊れる | **抵触なし** | §8。キーバインド衝突ゼロ |
+| 5 | 致命: ライセンス上の障害 | **抵触なし** | §3.5 / PLAN.md §4.8(ghostty は MIT。tmux / ripgrep は外部 CLI) |
+| 6 | 重大: 大量出力で入力応答が失われる / 長時間で RSS が単調増加 | **抵触なし(観測範囲では)** | §12.3(応答性は劣化せず)、§12.6(35分でプラトー)。**長期は未検証** |
+| 7 | 重大: AppKit bridge の必要範囲が大きすぎる | **要判断** | §5.1。周辺 UI は SwiftUI で書けるが、**ターミナル面は AppKit の `NSView` 1 枚**になる |
+| 8 | 重大: API 非安定性が実害として現れる | **現時点では未発生** | v1.3.1 にピン留めして作業。upstream `main` との差分(存在しない関数)は §3.3 に記録 |
+| 9 | 重大: `TerminalRenderer` による隔離が成立しない | **抵触なし** | libghostty 呼び出しは `GhosttyTerminalView.swift` 1 ファイルに閉じたまま M1〜M4 を完了できた |
+
+### S.3 本体実装フェーズへの申し送り
+
+M1〜M4 で判明した、**本体の設計・実装に直接効く事項**の一覧(詳細は各節)。
+
+| # | 事項 | 節 |
+|---|---|---|
+| 1 | **ビルド: upstream の `libtool` merge が Xcode 26.5 で壊れる。** シムが必要 | §3.4 |
+| 2 | **`ghostty_surface_foreground_pid` / `tty_name` は v1.3.1 に存在しない。** プロセス観測は `tmux list-panes` 系が**前提**になる | §3.3 / §8.10 |
+| 3 | **Swift 6 並行性: C コールバックの入口で必ず main へ移す規約が要る。** `TerminalRenderer` 実装体は `@MainActor` 固定 | §5.2 |
+| 4 | **`GHOSTTY_RESOURCES_DIR` と `terminfo` は兄弟ディレクトリに置く**(バンドル構造の制約) | §3.3 |
+| 5 | **pane へのテキスト注入は `load-buffer` + `paste-buffer -p`。** `send-keys -l` は改行がそのまま実行になる | §8.8 |
+| 6 | **detach すると surface のプロセスが死ぬ。** 同一 surface でのコマンド再実行 API が無く、surface の作り直しかラッパー起動が要る | §8.2 |
+| 7 | **ディスプレイスリープ中は surface を作れない。** 生成失敗時のフォールバック(遅延生成・リトライ)が要る | §9.3 |
+| 8 | **tmux の版数が grapheme 表示に効く**(3.4 は ZWJ を壊す)。サポート下限版数を決める必要がある | §10.3 |
+| 9 | **`ime_point` の width だけ content scale が未適用。** ホスト側で吸収する責務を `TerminalRenderer` に置く | §10.6 |
+| 10 | **East Asian Ambiguous は幅 1 として扱われる**(tmux 有無で差なし)。設定で変えられるかは未調査 | §10.1 #9 |
+| 11 | **`window-size` の選択(smallest / latest / largest)は複数クライアント同時接続時の体験を決める**(§4.2 のマルチデバイス想定に直結) | §8.7 |
+| 12 | **libghostty の選択は pane 境界を無視する。** 「pane 単位のコピー」は tmux 側 copy-mode に寄せる判断が要る | §8.1 #22 |
+| 13 | **`scrollback-limit` がメモリ予算の主要パラメータ。** 設定ロード経路(`ghostty_config_load_file`)が `TerminalRenderer` に要る | §12.5 / §12.8 |
+| 14 | **メモリはアプリと tmux サーバの 2 か所に載る。** `history-limit` を製品としてどう扱うかを決める必要がある | §12.5 |
+| 15 | **libghostty 側の split / tab は action callback で `false` を返して握り潰す**(§4.1 確定と整合)。実証済み | §8.5 |
+
+### S.4 未検証で残ったもの(要手動確認 / 本実装後)
+
+1. 実 IME(かな漢字変換)の操作一式 — 手順は §10.8
+2. 物理キーボード / 物理マウス / トラックパッド、描画品質・体感遅延 — 手順は §8.9
+3. 外部ディスプレイ間の移動、スリープ / 復帰、background / foreground 復帰 — §12.7
+4. 数時間〜数日規模の長時間稼働 — §12.7
+5. 複数 surface(5〜10)同時のメモリ / CPU、`ghostty_surface_free` のリーク — §12.7
+6. `vttest` 相当の網羅的な VT 検証 — §10.2
 
 ---
 
@@ -50,8 +124,10 @@ Spikes/gate1/build/TerminalSpike.app/Contents/MacOS/TerminalSpike
 | `TERMINAL_SPIKE_RESIZE_TEST=1` | 起動後に 3 サイズへリサイズして `ghostty_surface_size()` をログ出力する計測フック |
 | `TERMINAL_SPIKE_EXIT_AFTER=<秒>` | 指定秒後に自動終了(検証用) |
 | `TERMINAL_SPIKE_CONTROL=<path>` | **M2 の制御チャネル**。このファイルへ追記した行をコマンドとして実行する(§9.2) |
+| `TERMINAL_SPIKE_CONFIG_FILE=<path>` | **M4 で追加**。`ghostty_config_load_file` でこの設定ファイルを読む。`scrollback-limit` の実験用(§11.1)。ユーザーの `~/.config/ghostty/config` は読まない |
 
-M2 の検証は `scripts/m2-harness.sh`、M3 の検証は `scripts/m3-harness.sh` から駆動する(§9.1)。
+M2 の検証は `scripts/m2-harness.sh`、M3 は `scripts/m3-harness.sh`、M4 は `scripts/m4-harness.sh`
+から駆動する(§9.1 / §11.1)。いずれも同じ隔離方式(専用ソケット `-L gate1-spike`)を共有する。
 
 ```shell
 export M2_RUN_DIR=/tmp/gate1-m2
@@ -229,7 +305,7 @@ Retina(backingScaleFactor = 2.0)、外部ディスプレイなし。
 | mouse protocol | ✅ M2 で確認 | §8 参照 |
 | copy/paste・selection・URL hit testing | ✅ M2 で確認 | §8 参照 |
 | IME・日本語・絵文字・grapheme width | 未着手 | M3 |
-| 大量output・長時間稼働・memory | 未着手 | M4。参考値として起動直後 RSS ≒ 100MB |
+| 大量output・長時間稼働・memory | ✅ M4 で確認 | §12 参照。起動直後 RSS ≒ 100MB という M1 時点の参考値は M4 でも再現した |
 
 ### 5.1 AppKit bridge が必要だった範囲(§24 の主要チェック項目)
 
@@ -288,11 +364,16 @@ Spikes/gate1/
 │   ├── build-app.sh            TerminalSpike.app の組み立て (M1)
 │   ├── m2-harness.sh           M2 検証ハーネス (launch / ctl / shot / teardown)
 │   ├── m3-harness.sh           M3 検証ハーネス (m2 を再利用 + inject / run / launch-bare)
-│   └── m3-checks/              M3 の検証スクリプト (pane 内で実行する)
-│       ├── vt-color.sh         256色 / truecolor / SGR / box drawing
-│       ├── vt-scrollregion.sh  DECSTBM スクロールリージョン
-│       ├── wide.sh             日本語 / 絵文字 / grapheme の目視確認
-│       └── width-probe.sh      DSR(CPR) で grapheme width を数値確認
+│   ├── m3-checks/              M3 の検証スクリプト (pane 内で実行する)
+│   │   ├── vt-color.sh         256色 / truecolor / SGR / box drawing
+│   │   ├── vt-scrollregion.sh  DECSTBM スクロールリージョン
+│   │   ├── wide.sh             日本語 / 絵文字 / grapheme の目視確認
+│   │   └── width-probe.sh      DSR(CPR) で grapheme width を数値確認
+│   ├── m4-harness.sh           M4 検証ハーネス (m3 を再利用 + ping / mem / sampler / footprint)
+│   └── m4-checks/              M4 の検証スクリプト (pane 内で実行する)
+│       ├── throughput.sh       大量出力スループット計測
+│       ├── fastui.sh           高速更新 TUI (進捗バー + top)
+│       └── soak.sh             中期ソーク (周期出力 + burst)
 ├── TerminalSpike/
 │   ├── Package.swift           SwiftPM executable + binaryTarget
 │   └── Sources/TerminalSpike/
@@ -302,7 +383,12 @@ Spikes/gate1/
 ├── evidence/
 │   ├── m1-zsh.png              M1 の証跡(ウィンドウのみ)
 │   ├── m2-01..23-*.png         M2 の証跡
-│   └── m3-00..37-*.png         M3 の証跡
+│   ├── m3-00..37-*.png         M3 の証跡
+│   ├── m4-01..07-*.png         M4 の証跡
+│   ├── m4-throughput.csv       M4 スループット生データ
+│   ├── m4-mem-*.csv            M4 メモリ生データ (tmux / bare / scrollback)
+│   ├── m4-soak-samples.csv     M4 ソークのサンプリング (15秒間隔)
+│   └── m4-footprint-*.txt      footprint(1) の全文
 ├── vendor/ghostty/             ghostty v1.3.1 の shallow clone (git 管理外)
 ├── build/                      TerminalSpike.app (git 管理外)
 └── .build-shim/                libtool シム (git 管理外)
@@ -900,11 +986,303 @@ TERMINAL_SPIKE_COMMAND='tmux -L gate1-spike new-session -A -s gate1-spike' \
 
 ---
 
-## 11. 次にやること(M4)
+## 11. M4 の進め方(実際に採った方法)
 
-1. 大量出力(`yes` / 巨大ログ `cat` / `find /`)で描画が詰まらないか、入力応答が保たれるか。
-2. 高速更新 TUI(`top` / 進捗バー)。
-3. スクロールバック上限とメモリ増加。長時間稼働(8時間以上)の RSS 推移。
-4. 複数 surface 同時(5〜10)での メモリ / CPU、`ghostty_surface_free` のリーク確認。
-5. スリープ / 復帰、外部ディスプレイ抜き差し、background / foreground 復帰
-   (§9.3 のディスプレイスリープ問題は M4 でも継続して観察する)。
+### 11.1 M2 / M3 の隔離方式をそのまま再利用
+
+専用 tmux サーバソケット `-L gate1-spike` + セッション `gate1-spike`、`TERMINAL_SPIKE_CONTROL`
+制御チャネル、`load-buffer` + `paste-buffer -p` によるテキスト注入、`launch-bare`(tmux を挟まない
+比較用の起動)をそのまま使った。`scripts/m4-harness.sh` は `m3-harness.sh` に委譲する薄いラッパで、
+M4 で足したのは**計測系のコマンド(`ping` / `mem` / `sampler` / `soak-sampler` / `footprint`)だけ**である。
+tmux サーバ単体のメモリ測定(§12.5)にだけ、アプリを介さない別ソケット `-L gate1-hist` を一時的に使った。
+
+```shell
+export M2_RUN_DIR=/tmp/gate1-m2
+Spikes/gate1/scripts/m4-harness.sh launch 1400x900        # tmux attach で起動
+Spikes/gate1/scripts/m4-harness.sh launch-bare 1400x900   # tmux 無しで bash 直起動
+Spikes/gate1/scripts/m4-harness.sh ping 5                 # main thread の応答性 (往復ms)
+Spikes/gate1/scripts/m4-harness.sh mem <label> [csv]      # RSS / phys_footprint を 1 サンプル
+Spikes/gate1/scripts/m4-harness.sh sampler 15 <csv> <lbl> # 定期サンプリング (アプリのみ)
+Spikes/gate1/scripts/m4-harness.sh soak-sampler 15 <csv>  # 定期サンプリング (アプリ + tmux サーバ)
+Spikes/gate1/scripts/m4-harness.sh footprint <label>      # footprint(1) の全文を evidence へ
+Spikes/gate1/scripts/m4-harness.sh teardown
+```
+
+| 追加物 | 目的 |
+|---|---|
+| `scripts/m4-harness.sh` | 上記の計測コマンド。証跡接頭辞は `m4` |
+| `scripts/m4-checks/throughput.sh` | 大量出力スループット計測(pane 内で実行) |
+| `scripts/m4-checks/fastui.sh` | 高速更新 TUI(`\r` 進捗バー + `top`) |
+| `scripts/m4-checks/soak.sh` | 中期ソーク(5秒周期出力 + 60秒ごとの burst) |
+| `TERMINAL_SPIKE_CONFIG_FILE` | **スパイク側の唯一のコード追加。** `ghostty_config_load_file` を呼ぶ環境変数フック。`scrollback-limit` を検証ごとに差し替えるために足した。ユーザーの `~/.config/ghostty/config` は読まない |
+
+### 11.2 「UI の応答性」をどう測ったか
+
+物理入力を合成できない環境なので(§7.2)、**制御チャネルの往復時間**を main thread の
+応答性の代理指標にした。`m4-harness.sh ping` は
+
+1. 制御ファイルへ `log PING-<id>` を追記する
+2. アプリのログに `PING-<id>` が現れるまで 5ms 間隔でポーリングする
+3. その所要時間を ms で出す
+
+を行う。制御チャネルは main run loop 上の 100ms Timer で駆動されるため、
+**アイドル時の期待値は 0〜100ms**(実測の中央値は約 93ms)。描画やパースで main thread が
+詰まれば、この値がそのまま伸びる。伸びなければ「詰まっていない」と言える。
+
+これに加えて、出力を流しっぱなしにした状態で
+
+- ウィンドウリサイズ(`ctl resize` → `ghostty_surface_size()` の cols/rows が変わるか)
+- `tmux split-window` / `select-pane`(CLI 操作に表示が追随するか)
+- スクリーンショット撮影
+
+を実際に行い、**機能が効くこと**も確認した。
+
+### 11.3 スリープ対策(M4 で踏んだ罠)
+
+**`caffeinate -u` はディスプレイスリープしか止めない。** M4 の途中で Mac 本体がシステムスリープし、
+計測セッションが中断した。以後は `caffeinate -dimsu -t 7200` を 1 本立てて
+システムスリープごと抑止し(**電源設定そのものは変更していない**)、作業終了時に確実に落とした。
+`pmset -g assertions` で、終了後にアサーションが残っていないことを確認済み。
+
+- §9.3 のとおり、ディスプレイスリープ中は `ghostty_surface_new` が失敗し `screencapture` も空振りする。
+  M4 の 30〜45 分ソークは「放っておくと必ず寝る」長さなので、抑止は必須だった。
+- ソークのサンプリングは**1 サンプルごとにファイルへ追記**する方式にしてある。
+  再度中断されても途中までのデータが残り、集計を再開できる。
+
+### 11.4 後片付け(M2 / M3 と同じ手順)
+
+検証後、スパイクアプリ・`gate1-spike` / `gate1-hist` の tmux サーバ・`caffeinate`・一時ファイル
+(`/tmp/gate1-m2`、`/tmp/gate1-m4`)をすべて破棄した。
+**ユーザーの既定 tmux サーバのセッション一覧・`mouse` / `window-size` / `prefix` / `history-limit` が
+検証前と完全一致することを確認済み**(`evidence/m4-default-tmux-before.txt` と
+`m4-default-tmux-after.txt` は `diff` で差分ゼロ)。`open -na Ghostty` は M2 の教訓どおり一度も使っていない。
+
+### 11.5 スループットの測り方
+
+`scripts/m4-checks/throughput.sh` は各ワークロードについて
+
+1. まず `| wc -lc` へ流してバイト数・行数を確定(端末へは出さない)= `gen_sec`
+2. 同じコマンドを端末へ流し、その所要時間を測る = `term_sec`
+
+を行う。`term_sec` は「生成コスト + 端末が受け取り切るまで」であり、**端末単体の描画時間ではない**。
+`gen_sec` を併記してあるので、生成側の寄与は読み取れる。同じスクリプトを
+**tmux 経由(`launch`)と tmux 無し(`launch-bare`)の両方**で回して比較した。
+
+---
+
+## 12. M4 の結果
+
+環境: macOS 26.5.2 (25F84) arm64 / ghostty v1.3.1 / tmux 3.4 / ウィンドウ 1400x900 pt
+(= 174桁 × 50行、Retina backingScaleFactor 2.0)。ユーザーの `~/.tmux.conf` をそのまま使用
+(`history-limit 10000`、`window-size latest`、prefix `C-q`、`mouse on`)。pane 内の shell は fish。
+
+### 12.1 結果一覧
+
+| # | 検証項目 | 結果 | 証跡 |
+|---|---|---|---|
+| 1 | 大量出力: `seq 1 1000000` / 50MB ファイルの `cat` / `yes` 300万行 / base64 50MB / `find /usr` | ✅ 全て完走。詰まり・取りこぼし無し | §12.2 |
+| 2 | 出力中の UI 応答性(制御チャネル往復) | ✅ **悪化しない**(アイドル中央値 93ms → 出力中 12〜119ms) | §12.3 |
+| 3 | 出力中のウィンドウリサイズ | ✅ 174x50 → 112x33 に追随 | §12.3 |
+| 4 | 出力中の `tmux split-window` / `select-pane` | ✅ 即時追随。新 pane も正常描画 | `m4-01-during-output-split.png` |
+| 5 | 出力停止後の表示収束 | ✅ `capture-pane` の内容と画面が完全一致 | `m4-02-convergence-after-output.png` |
+| 6 | 高速更新 TUI(`\r` 進捗バー 268更新/秒) | ✅ 残像・欠け無し | `m4-03-fastui-progress.png` / `m4-04-fastui-top.png` |
+| 7 | `top`(alternate screen、1秒更新) | ✅ 正常 | `m4-04` |
+| 8 | tmux 無し(`launch-bare`)での同一ワークロード | ✅ 完走。応答性も維持 | §12.2 / `m4-05-bare-convergence.png` |
+| 9 | メモリ: 起動直後 → 大量出力直後 → 出力後アイドル | ✅ 出力中に一時増加し、停止後に戻る | §12.4 |
+| 10 | `scrollback-limit` とメモリの関係 | ✅ **設定値がそのままメモリ量になる**(10MB → +17MB / 100MB → +103MB) | §12.5 |
+| 11 | tmux サーバ側のメモリ / `history-limit` の効き | ⚠️ **無視できない**(履歴を溜めると 140MB。`history-limit × 桁数` に比例) | §12.5 |
+| 12 | 中期ソーク(35.6分、416 回の周期出力 + 34 回の burst = 約68万行) | ✅ **プラトー。リーク疑いなし**(前半平均 104,607 KB / 後半平均 104,626 KB) | §12.6 / `m4-soak-samples.csv` / `m4-07-soak-end.png` |
+| 13 | 数時間〜数日規模の長時間稼働 | **未検証**(スパイクの範囲外。本実装後に計測する) | — |
+| 14 | 複数 surface 同時(5〜10)のメモリ / CPU | **未検証**。スパイクは 1 surface 固定で、複数 surface は実装していない | §12.7 |
+| 15 | `ghostty_surface_free` の反復生成/破棄によるリーク | **未検証**(同上。surface の作り直し経路が無い) | §12.7 |
+| 16 | スリープ / 復帰、外部ディスプレイ抜き差し、background / foreground 復帰 | **未検証(要手動確認)**。§9.3 のディスプレイスリープ問題は M4 でも再現 | §12.7 |
+
+### 12.2 大量出力スループット(実測値)
+
+`term_sec` = 端末へ流し切るまでの秒数。`gen_sec` = 同じコマンドを `wc` へ流したときの秒数(生成コストの目安)。
+生データ: `evidence/m4-throughput.csv`。
+
+| ワークロード | バイト数 | 行数 | tmux 経由 `term_sec` / MB/s | tmux 無し `term_sec` / MB/s | `gen_sec`(参考) |
+|---|---:|---:|---|---|---|
+| `seq 1 1000000` | 6,888,900 | 1,000,001 | 0.774 s / **8.49** | 1.004 s / 6.54 | 0.17 s |
+| `cat` 50MB テキスト(65桁) | 50,160,000 | 760,000 | 3.157 s / **15.15** | 0.746 s / **64.12** | 0.07 s |
+| `yes \| head -n 3000000`(2バイト行) | 6,000,000 | 3,000,000 | 2.048 s / **2.79** | 3.608 s / 1.59 | 0.15 s |
+| `base64 -b 76` 50MB | 50,657,895 | 657,895 | 3.091 s / **15.63** | 3.056 s / 15.81 | 0.11 s |
+| base64 改行なし(10MB を 1 行) | 10,000,001 | 1 | 0.552 s / **17.28** | 0.639 s / 14.92 | 0.03 s |
+| `find /usr -print` | 1,003,430 | 23,245 | 0.164 s / 5.84 | 0.275 s / 3.48 | 0.11〜0.24 s |
+
+読み取れること:
+
+- **どのワークロードも数秒で完走し、ハングも取りこぼしも無い。** 50MB のログを `cat` しても
+  3 秒(tmux 経由)/ 0.75 秒(tmux 無し)で収まる。ビルドログを流す用途で問題になる水準ではない。
+- **tmux を挟むと長い行では遅くなり、短い行の連打では速くなる。**
+  - `cat` 50MB は tmux 経由が 4 倍遅い(15 vs 64 MB/s)。tmux が全バイトをパースして自分の
+    履歴へ積み、さらにクライアント向けに再エンコードするコストが乗るため。
+  - 逆に `yes`(300万行)は tmux 経由のほうが速い(2.79 vs 1.59 MB/s)。tmux が画面更新を
+    まとめてからクライアントへ送るので、**libghostty が処理する行数自体が減る**。
+  - つまり tmux は「スループットの上限を下げる代わりに、クライアント側の負荷を平滑化する」。
+    本製品は常に tmux を挟む(§4.1 確定)ので、**後者の特性が効く。**
+- 改行なし 10MB の単一行(折り返し 57,000 行相当)でも破綻しない。
+
+### 12.3 出力中の UI 応答性
+
+制御チャネル往復(ms)。アイドル時の期待値は 0〜100ms(100ms ポーリング)。
+
+| 局面 | 往復時間 |
+|---|---|
+| アイドル(基準) | 44.4 / 95.3 / 95.4 / 99.0 / 93.3 / 94.5 / 101.0 / 91.8 |
+| `seq` 出力中 | 119.1 / 6.4 |
+| `cat` 50MB 出力中 | 25.3 / 50.4 / 44.1 / 49.5 / 50.4 / 43.4 / 42.0 / 56.7 |
+| `yes`+base64+`find` 連続出力中 | 12.7〜76.2(16 サンプル) |
+| `yes` 連続出力中(無限) | 88.2 / 94.4 / 93.6 |
+| tmux 無し・大量出力中 | 37.8〜67.8(20 サンプル) |
+
+**基準値より悪化していない。** むしろ出力中のほうが小さい値が出るのは、
+Timer の位相と偶然揃うため(出力があると main thread が頻繁に起きる)。
+撤退基準 §7-6「大量出力で入力応答が失われる」に**該当する事象は観測されなかった**。
+
+出力を流しっぱなしにした状態で行った機能確認:
+
+- `ctl resize 900 600` → `ghostty_surface_size()` が `cols=112 rows=33 px=1800x1136` に更新される。
+  tmux クライアントも 112x32 へ追随(SIGWINCH が通っている)。
+- `tmux split-window -h` → 2 pane に分割され、**出力中の pane も新しい pane も正しく描かれる**
+  (`m4-01-during-output-split.png`。左 pane に日本語・絵文字混じりの高速出力、右 pane に fish のプロンプト)。
+- `tmux select-pane` → active pane が切り替わる。
+- 出力停止 → `clear` + sentinel 出力後、**画面と `capture-pane -p` の内容が完全一致**
+  (`m4-02-convergence-after-output.png`)。取り残しや古い描画は無い。
+
+### 12.4 メモリ(RSS / phys_footprint)
+
+`ps -o rss` と `footprint -p` の実測。生データ: `evidence/m4-mem-tmux.csv` / `m4-mem-bare.csv`。
+
+**tmux 経由(合計 約125MB を出力)**
+
+| 局面 | RSS | phys_footprint |
+|---|---:|---:|
+| (a) 起動直後 | 100,848 KB (98.5 MB) | 100,352 KB (98.0 MB) |
+| 出力中のピーク | 105,104 KB | **146,432 KB (143 MB)** |
+| (b) 大量出力直後 | 109,216 KB (106.7 MB) | 106,496 KB (104.0 MB) |
+| 高速更新 TUI 後 | 111,136 KB | 106,496 KB |
+| (c) 出力停止後 5〜6 分アイドル | 110,768 KB (108.2 MB) | 104,448 KB (102.0 MB) |
+
+**tmux 無し(同一ワークロード、既定 `scrollback-limit` = 10MB)**
+
+| 局面 | RSS | phys_footprint |
+|---|---:|---:|
+| 起動直後 | 100,368 KB | 103,424 KB |
+| 大量出力直後 | 117,696 KB (114.9 MB) | 126,976 KB (124 MB)、peak 149 MB |
+
+- **出力中に一時的に 40MB ほど増え、停止後に解放される。** (b)→(c) で footprint がむしろ
+  減っている(106.5MB → 104.4MB)ので、出力そのものによるリークは見えない。
+- tmux 経由のほうが増加が小さい(+6MB vs +23MB)。**履歴を持つのが tmux 側だから**である。
+  tmux 無しでは libghostty が自前の scrollback に全部積む(§12.5)。
+- 起動直後の約 100MB は Metal / フォント / libghostty の固定コスト。M1 の参考値と一致する。
+
+### 12.5 scrollback とメモリ(§24「スクロールバック上限の挙動」)
+
+`TERMINAL_SPIKE_CONFIG_FILE` で `scrollback-limit` だけを変え、tmux 無しで
+50MB のファイルを 3 回(計 150MB)流した。生データ: `evidence/m4-mem-scrollback.csv`。
+
+| `scrollback-limit` | 起動直後 footprint | 150MB 出力後 footprint | 増分 |
+|---|---:|---:|---:|
+| 10,000,000(**既定**) | 99,328 KB | 116,736 KB | **+17.0 MB** |
+| 100,000,000 | 98,304 KB | 201,728 KB | **+103.1 MB** |
+
+- **`scrollback-limit`(バイト)がほぼそのまま常駐メモリ増になる。** 上限に達すると頭から
+  捨てられるので、いくら出力してもそれ以上は増えない(= 上限として正しく機能している)。
+- 既定の 10MB は「1 surface あたり最大 +17MB 程度」を意味する。
+  **§4.1 の「1タスク=1タブ」で 5〜10 タブを同時に開く設計では、この値が直接効く。**
+
+**tmux サーバ側のメモリも無視できない。**
+
+| 対象 | RSS |
+|---|---:|
+| `gate1-spike` サーバ(起動直後、1 pane) | 4,368 KB |
+| `gate1-spike` サーバ(§12.2 の全ワークロードを流した後、最大 2 pane) | **143,904 KB (140 MB)** |
+| ユーザーの既定サーバ(アイドルのセッション 3 つ) | 1,456 KB |
+
+`history-limit 10000`(ユーザー設定)× 174 桁 × pane 数ぶんの履歴が tmux サーバに載る。
+**アプリのメモリだけを見ていると全体像を見誤る**ことが分かった。
+
+これを切り分けるため、**アプリを一切介さず**別ソケット(`-L gate1-hist`、`-f /dev/null`)で
+174x50 の pane を作り、50MB のファイルを `cat` させて tmux サーバ単体のメモリを測った。
+
+| `history-limit` | 開始時 RSS | 50MB 出力後 RSS | `#{history_bytes}` | 1 行あたり |
+|---|---:|---:|---:|---:|
+| 10,000 | 3,680 KB | **25,376 KB** | 19,714,292 | 約 1,980 B |
+| 100,000 | 3,760 KB | **215,632 KB** | 197,014,292 | 約 1,970 B |
+
+- **tmux の履歴メモリは `history-limit × 桁数` にきれいに比例する**(174 桁で 1 行あたり約 2KB)。
+- **これは pane 単位である。** §4.1 の「1タスク = 1 worktree = 1 tmux session」で
+  10 タスク × 各数 pane を開けば、tmux サーバだけで数百 MB になりうる。
+  `history-limit` の既定値をユーザーの `~/.tmux.conf` 任せにするのか、
+  セッション生成時に製品として明示するのかは**設計判断が要る**。
+
+### 12.6 中期稼働ソーク(35分)
+
+`scripts/m4-checks/soak.sh 35` を tmux pane で回した。5 秒ごとに
+「時刻 + カラー + 日本語 + 絵文字 + 下線」の 1 行、60 秒ごとに 2 万行の burst。
+サンプリングは `m4-harness.sh soak-sampler 15`(アプリと tmux サーバの両方を 15 秒間隔)。
+**セッションが切れても途中まで残るよう、1 サンプルごとに `evidence/m4-soak-samples.csv` へ追記する**方式にした。
+
+- 期間: 20:32:26 〜 21:07:30(**35.6 分**、416 イテレーション、burst 34 回 = 約 68 万行)
+- サンプル数: アプリ 142 / tmux サーバ 142
+
+| 指標 | 開始 | 終了 | 最小 | 最大 |
+|---|---:|---:|---:|---:|
+| アプリ RSS | 100,064 KB | 104,608 KB | 100,064 KB | 104,816 KB |
+| アプリ phys_footprint | 99,328 KB | 105,472 KB | 99,328 KB | 106,496 KB |
+| tmux サーバ RSS | 4,448 KB | 10,128 KB | 4,448 KB | 10,128 KB |
+
+**判定: プラトー(リークの疑いなし)。**
+
+- RSS の増加 +4,544 KB は**最初の 1 分でほぼ全部**起きている(初回描画とフォントアトラスの
+  ウォームアップ)。以後は横ばい。
+- **前半 17.8 分の平均 104,607 KB に対し、後半 17.8 分の平均は 104,626 KB。差は +19 KB**
+  (0.02%)。単調増加なら後半平均が明確に上回るはずであり、その傾向は出ていない。
+- `phys_footprint_peak` は 136 MB(burst 中の一時的なピーク)だが、定常値は 103 MB に戻る。
+- tmux サーバは `history-limit 10000` に達するまで増え、そこで頭打ち(10 MB)になった。
+  **上限が上限として機能している。**
+- ソーク終了直後の制御チャネル往復は 60.9 / 87.0 / 104.8 / 72.4 ms で、**起動直後の基準値と同じ**。
+  35 分連続稼働で応答性が劣化していない。
+- アプリのログには 35 分を通して**エラー・警告が 1 行も出ていない**(`/tmp/gate1-m2/app.log`)。
+- 最終画面(`m4-07-soak-end.png`)は burst の末尾・色付き行・`SOAK COMPLETE` まで正しく描かれている。
+
+**この結果が言えること / 言えないこと:**
+
+- 言える: **35 分・68 万行規模では、libghostty 側にも tmux 側にもリーク傾向は見えない。**
+- 言えない: 数時間〜数日規模。撤退基準 §7-6 の「長時間稼働で RSS が単調増加し実用時間内に破綻する」を
+  完全に否定するには不足であり、**未検証(本実装後に実作業で計測)として残す**(§12.7-1)。
+
+### 12.7 未検証(手動確認が必要 / 本実装後に回すもの)
+
+M2 §8.9・M3 §10.8 の項目に加えて、M4 では以下が残った。**楽観的に埋めず、未検証として記録する。**
+
+1. **数時間〜数日規模の長時間稼働。** 今回は 35 分。PLAN.md M4 は「8時間以上」を挙げていたが、
+   スパイクの実行環境(セッションが切れる、スリープする)では信頼できる計測ができない。
+   **本実装後、実際の開発作業で 1 日走らせて RSS を記録するのが正しい測り方**であり、
+   ここでの 35 分は「短期のリーク傾向が無い」ことしか言えない。
+2. **複数 surface(5〜10)同時のメモリ / CPU。** スパイクは 1 surface 固定で、
+   複数 surface / 複数ウィンドウを実装していない。§12.5 の測定から
+   「1 surface あたり固定 ~100MB(プロセス共有部分を含む) + scrollback 上限まで」という
+   見積り式は立つが、**surface を N 枚にしたときの実測ではない**。
+3. **`ghostty_surface_free` の反復生成/破棄によるリーク。** 同上。
+   なお §8.2 の「detach すると surface のプロセスが死ぬ」問題により、
+   本体では surface の作り直しが**必須**になる見込みなので、ここは本実装の初期に潰すべき。
+4. **スリープ / 復帰、外部ディスプレイ抜き差し、background / foreground 復帰。**
+   §9.3 のディスプレイスリープ問題(surface 生成失敗)は M4 でも再現しており、
+   計測中は `caffeinate` でスリープを抑止して回避した。**復帰時の挙動は未検証。**
+5. **物理入力・描画品質・体感遅延**(M2 §8.9 から継続)。
+
+### 12.8 M4 で見つかった設計影響事項
+
+1. **`scrollback-limit` はメモリ予算の主要パラメータである**(§12.5)。
+   `TerminalRenderer` は **設定ロード経路**(v1.3.1 では `ghostty_config_load_file`)を
+   持つ必要があり、scrollback をタブ単位で変えられるかは本体の設計事項になる。
+2. **メモリはアプリと tmux サーバの 2 か所に載る**(§12.5)。`history-limit` の既定値を
+   製品としてどう扱うか(ユーザーの `~/.tmux.conf` を尊重するのか、セッション生成時に
+   明示指定するのか)を決める必要がある。
+3. **tmux は負荷の平滑化装置として働く**(§12.2)。tmux を挟むぶん最大スループットは
+   下がるが、クライアント側の描画負荷は減る。tmux 前提(§4.1 確定)はここでも有利に働く。
+4. **`footprint` のピーク値は定常値より 40MB 高い**(§12.4)。メモリ上限を設計するときは
+   定常 RSS ではなくピークで見積もること。

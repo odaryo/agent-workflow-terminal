@@ -2,13 +2,23 @@ import Foundation
 import TerminalCore
 
 public struct TmuxPane: Sendable, Hashable, Codable {
+  /// tmux `#{pane_id}` の `%N` 形式を、pane 指定に再利用できるよう変更せず保持する。
   public let paneID: PaneID
+  /// tmux `#{session_name}` が返す生成時符号化済みの正式名。`-t` へそのまま渡す値であり、
+  /// 人間可読形ではない。表示用の復号が必要になった場合は別 API に分離する。
   public let sessionName: String
+  /// tmux `#{window_index}` を非負整数へ変換した値。
   public let windowIndex: Int
+  /// tmux `#{window_id}` の `@N` 形式を、window 指定に再利用できるよう変更せず保持する。
   public let windowID: String
+  /// tmux `#{pane_index}` を非負整数へ変換した値。
   public let paneIndex: Int
+  /// tmux `#{pane_pid}` を正のプロセス ID へ変換した値。
   public let panePID: Int32
+  /// tmux `#{pane_active}` の `0` / `1` だけを Bool へ変換した値。
   public let isActive: Bool
+  /// tmux `#{pane_current_command}` の生値。名前フィールドと異なり `\`・TAB・LF も
+  /// 二重化されないため、表示文字列として復号しない。
   public let currentCommand: String
 
   public init(
@@ -34,8 +44,6 @@ public struct TmuxPane: Sendable, Hashable, Codable {
 
 public enum TmuxListPanesParseError: Error, Sendable, Equatable {
   case invalidFieldCount(actual: Int)
-  case invalidVisEscape(fieldNumber: Int, value: String, byteOffset: Int)
-  case invalidUTF8(fieldNumber: Int, value: String)
   case invalidPaneID(String)
   case invalidWindowIndex(String)
   case invalidWindowID(String)
@@ -70,9 +78,10 @@ public enum TmuxListPanes {
   private static let formatSeparator = "\u{1F}"
   private static let encodedSeparator: [UInt8] = [0x5C, 0x30, 0x33, 0x37]
 
-  /// 生の Unit Separator を渡す一方で出力側の `\037` を境界にするのは、非 control-mode の
-  /// stdout では tmux の `format_draw` が `utf8_stravisx` を
-  /// `VIS_OCTAL | VIS_CSTYLE | VIS_TAB | VIS_NL` で呼ぶため。control-mode の入力には使わない。
+  /// tmux 3.4 の非 control-mode 実出力では、format に埋めた生の Unit Separator が
+  /// `\037` になる一方、展開値の `\`・TAB・LF は一律には符号化されない
+  /// (`tmux-3.4-list-panes-session-round-trip.txt` /
+  /// `tmux-3.4-list-panes-raw-current-command.txt` で実測)。
   public static let format = [
     "#{pane_id}",
     "#{session_name}",
@@ -84,14 +93,12 @@ public enum TmuxListPanes {
     "#{pane_current_command}",
   ].joined(separator: formatSeparator)
 
+  /// 1レコード内でもフィールドごとに tmux の文法が異なるため、区切りを除いた文字列を復号しない。
+  /// とくに `session_name` は tmux の正式名であり、表示向けの vis 復号対象ではない。
   public static func parse(line: String) throws(TmuxListPanesParseError) -> TmuxPane {
-    let encodedFields = splitEncodedFields(line)
-    guard encodedFields.count == 8 else {
-      throw .invalidFieldCount(actual: encodedFields.count)
-    }
-    var fields: [String] = []
-    for (index, field) in encodedFields.enumerated() {
-      fields.append(try unescapeVis(field, fieldNumber: index + 1))
+    let fields = splitEncodedFields(line)
+    guard fields.count == 8 else {
+      throw .invalidFieldCount(actual: fields.count)
     }
 
     guard fields[0].first == "%", Int(fields[0].dropFirst()) != nil else {
@@ -129,8 +136,8 @@ public enum TmuxListPanes {
     )
   }
 
-  /// 非 control-mode の `tmux list-panes -F format` stdout 専用。tmux はレコードを LF で
-  /// 終端し、各レコード全体を上記の vis flags で符号化するため、他の改行文字では分割しない。
+  /// 非 control-mode の `tmux list-panes -F format` stdout 専用。LF をレコード終端として
+  /// 扱うため、生 LF を含む非名前フィールドを既に1レコードへ切り出した場合は `parse(line:)` を使う。
   public static func parse(output: String) -> TmuxListPanesParseResult {
     guard !output.isEmpty else {
       return TmuxListPanesParseResult(panes: [], failures: [])
@@ -166,6 +173,9 @@ public enum TmuxListPanes {
         index += 1
         continue
       }
+      // tmux 3.4 は名前の生成時に `\` を `\\` にするため、名前中のリテラル `\037` は
+      // `\\037` となり区切りではない。一方 `pane_current_command` 等の非名前フィールドは
+      // 二重化されないので、この走査は値を復号せず byte 列のまま保持する (上記 fixture で実測)。
       if index + 1 < bytes.count, bytes[index + 1] == 0x5C {
         index += 2
         continue
@@ -181,114 +191,5 @@ public enum TmuxListPanes {
 
     fields.append(String(decoding: bytes[fieldStart...], as: UTF8.self))
     return fields
-  }
-
-  private static func unescapeVis(
-    _ value: String,
-    fieldNumber: Int
-  ) throws(TmuxListPanesParseError) -> String {
-    let bytes = Array(value.utf8)
-    var decoded: [UInt8] = []
-    var index = 0
-
-    while index < bytes.count {
-      guard bytes[index] == 0x5C else {
-        decoded.append(bytes[index])
-        index += 1
-        continue
-      }
-
-      let escapeOffset = index
-      index += 1
-      guard index < bytes.count else {
-        throw .invalidVisEscape(fieldNumber: fieldNumber, value: value, byteOffset: escapeOffset)
-      }
-
-      switch bytes[index] {
-      case 0x5C:
-        decoded.append(0x5C)
-        index += 1
-      case 0x61:
-        decoded.append(0x07)
-        index += 1
-      case 0x62:
-        decoded.append(0x08)
-        index += 1
-      case 0x65, 0x45:
-        decoded.append(0x1B)
-        index += 1
-      case 0x66:
-        decoded.append(0x0C)
-        index += 1
-      case 0x6E:
-        decoded.append(0x0A)
-        index += 1
-      case 0x72:
-        decoded.append(0x0D)
-        index += 1
-      case 0x73:
-        decoded.append(0x20)
-        index += 1
-      case 0x74:
-        decoded.append(0x09)
-        index += 1
-      case 0x76:
-        decoded.append(0x0B)
-        index += 1
-      case 0x30...0x37:
-        var octalValue: UInt8 = 0
-        var digitCount = 0
-        while index < bytes.count, digitCount < 3, (0x30...0x37).contains(bytes[index]) {
-          octalValue = octalValue &* 8 &+ (bytes[index] - 0x30)
-          index += 1
-          digitCount += 1
-        }
-        decoded.append(octalValue)
-      case 0x4D:
-        guard index + 2 < bytes.count else {
-          throw .invalidVisEscape(fieldNumber: fieldNumber, value: value, byteOffset: escapeOffset)
-        }
-        let marker = bytes[index + 1]
-        let character = bytes[index + 2]
-        switch marker {
-        case 0x2D:
-          decoded.append(character | 0x80)
-        case 0x5E:
-          guard let control = controlCharacter(for: character) else {
-            throw .invalidVisEscape(
-              fieldNumber: fieldNumber, value: value, byteOffset: escapeOffset)
-          }
-          decoded.append(control | 0x80)
-        default:
-          throw .invalidVisEscape(fieldNumber: fieldNumber, value: value, byteOffset: escapeOffset)
-        }
-        index += 3
-      case 0x5E:
-        guard index + 1 < bytes.count,
-          let control = controlCharacter(for: bytes[index + 1])
-        else {
-          throw .invalidVisEscape(fieldNumber: fieldNumber, value: value, byteOffset: escapeOffset)
-        }
-        decoded.append(control)
-        index += 2
-      default:
-        throw .invalidVisEscape(fieldNumber: fieldNumber, value: value, byteOffset: escapeOffset)
-      }
-    }
-
-    guard let result = String(bytes: decoded, encoding: .utf8) else {
-      throw .invalidUTF8(fieldNumber: fieldNumber, value: value)
-    }
-    return result
-  }
-
-  private static func controlCharacter(for byte: UInt8) -> UInt8? {
-    if byte == 0x3F {
-      return 0x7F
-    }
-    guard (0x40...0x5F).contains(byte) else {
-      return nil
-    }
-    return byte & 0x1F
   }
 }

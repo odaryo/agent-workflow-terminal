@@ -51,29 +51,38 @@ struct TmuxListPanesTests {
     #expect(pane.currentCommand == "agent worker [&]")
   }
 
-  @Test("tmux 3.4 の実出力からバックスラッシュ・リテラル\\037・TAB・LFを復元する")
-  func unescapesHostileSessionNameFromTmux34Fixture() throws {
+  @Test("tmux 3.4 が正式名として返すバックスラッシュ符号化を保持する")
+  func preservesOfficialSessionNameFromTmux34Fixture() throws {
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-hostile-session.txt")
     )
 
     #expect(result.failures.isEmpty)
     #expect(result.panes.count == 1)
-    #expect(result.panes.first?.sessionName == "pilot\\name \\037 literal\ttab\nline")
+    #expect(result.panes.first?.sessionName == "pilot\\\\name \\\\037 literal\\ttab\\nline")
   }
 
-  @Test("vis の C-style・八進・meta・二重バックスラッシュをフィールドごとに復元する")
-  func unescapesVisEncodingsInFields() throws {
-    let separator = "\\037"
-    let line = [
-      "%7", "slash\\\\ literal\\\\037 tab\\t octal\\141 meta\\M-C\\M-8", "2", "@4", "3",
-      "4242", "1", "command\\nline\\rreturn",
-    ].joined(separator: separator)
+  @Test("パース結果の正式 session 名は pilot-fixture3 の has-session -t で往復確認できる")
+  func preservesRoundTrippableSessionNameFromTmux34Fixture() throws {
+    let result = TmuxListPanes.parse(
+      output: try fixture(named: "tmux-3.4-list-panes-session-round-trip.txt")
+    )
 
+    #expect(result.failures.isEmpty)
+    #expect(
+      result.panes.first?.sessionName
+        == "pilot\\\\roundtrip \\\\037 literal\\ttab\\nline"
+    )
+  }
+
+  @Test("非名前フィールドのバックスラッシュ・TAB・LFを復号せず保持する")
+  func preservesRawCurrentCommandFromTmux34Fixture() throws {
+    let output = try fixture(named: "tmux-3.4-list-panes-raw-current-command.txt")
+    let line = String(output.dropLast())
     let pane = try TmuxListPanes.parse(line: line)
 
-    #expect(pane.sessionName == "slash\\ literal\\037 tab\t octala metaø")
-    #expect(pane.currentCommand == "command\nline\rreturn")
+    #expect(output.last == "\n")
+    #expect(pane.currentCommand == "cmd\\sl\nash\tz")
   }
 
   @Test("空の出力は pane が無いものとして空配列にする")
@@ -128,21 +137,6 @@ struct TmuxListPanesTests {
   func rejectsInvalidActiveValue() {
     #expect(throws: TmuxListPanesParseError.invalidPaneActive("2")) {
       try TmuxListPanes.parse(line: "%0\\037session\\0370\\037@0\\0370\\037123\\0372\\037zsh")
-    }
-  }
-
-  @Test("不正な vis エスケープはフィールド番号と UTF-8 byte offset を返す")
-  func rejectsInvalidVisEscape() {
-    #expect(
-      throws: TmuxListPanesParseError.invalidVisEscape(
-        fieldNumber: 2,
-        value: "broken\\x",
-        byteOffset: 6
-      )
-    ) {
-      try TmuxListPanes.parse(
-        line: "%0\\037broken\\x\\0370\\037@0\\0370\\037123\\0371\\037zsh"
-      )
     }
   }
 

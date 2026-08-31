@@ -4,6 +4,8 @@
 >
 > 作成日: 2026-08-31
 >
+> 最終更新: 2026-08-31(全体レビューにより8項目を確定へ昇格)
+>
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
 > 開発名称: `agent_workflow_terminal`
@@ -52,6 +54,7 @@ TerminalはAgent開発フローの表示・操作・レビューを支援する�
 8. Mac/PCを唯一の実行ホストとし、iPhone/iPadにはrepositoryやAgent実行環境を置かない。
 9. Terminal本体とAgent Skillsを疎結合に保つ。
 10. 復元・履歴・Evidenceは、worktreeがなくなった後も必要に応じて参照できるようにする。
+11. **単一ユーザー**を前提とする。1人の開発者が自分のMac/PC hostと自分のデバイス群で利用する。
 
 ### 1.2 明示的に作らないもの
 
@@ -65,6 +68,8 @@ TerminalはAgent開発フローの表示・操作・レビューを支援する�
 - Claude Code出力を解析して再構成する独自Chat UI
 - 独自Remote Terminal protocol
 - Git認証情報、SSH鍵、アクセストークンの管理機能
+- マルチユーザー／チーム共有機能(アカウント、権限管理、複数人での同一Host共有)
+- 独自のリレーサーバやNAT越えインフラ(到達性は既存VPNへ委譲する)
 
 ## 2. 概念モデル
 
@@ -312,11 +317,11 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - 基本はread-only。
 - 編集は外部エディタ、vim、Agentなどに任せる。
 - ファイル変更を検知したら表示内容を自動更新する。
-- 行または行範囲を選択し、コメントまたは`Ask Claude`を実行できる。
+- 行または行範囲を選択し、コメントまたは`Ask Agent`を実行できる。
 - ファイル単位のGit履歴を表示できる。
 - 過去commit時点のコード／Diffを表示できる。
 - blameを表示できる。
-- 履歴上のコードを選択して`Ask Claude`へ渡せる。
+- 履歴上のコードを選択して`Ask Agent`へ渡せる。
 
 軽量なsyntax highlightingは必要だが、v1でEditor engineやLSPを作ることはしない。
 
@@ -362,6 +367,8 @@ base branchの自動判定方法、merge-baseの使い方、未commit変更を�
 - 複数コメントをReview batchとしてまとめてAgentへ送信できる。
 - GitHub PR reviewへの直接投稿は行わない。
 
+コメントの送信先は、そのworktreeの**実装Agent pane**とする。Consultation paneへは送らず、相談機能とレビュー修正依頼の役割を分離する。
+
 ### 9.3 snapshot
 
 Diffは開いた時点でsnapshotとして固定する。Agentが裏で変更を続けても、レビュー中の表示とコメント位置を自動で動かさない。
@@ -391,9 +398,9 @@ Diff snapshotにはシンプルな状態だけを持たせる。
 
 Agentの実装サイクル、修正回、レビュー回の対応関係まではTerminal側で管理しない。
 
-## 10. Ask ClaudeとConsultation Log
+## 10. Ask AgentとConsultation Log
 
-> 注: UI名として`Ask Claude`が会話で使われたが、プロダクト全体はClaude専用にしない。名称をAgent非依存に一般化するかは未確定。
+> 注: UI名称はAgent非依存の`Ask Agent`とすることで確定した(旧称: `Ask Claude`)。実行時にどのAgent CLIを使うかの選択方法は未確定。
 
 ### 10.1 質問の起点
 
@@ -409,7 +416,7 @@ Agentの実装サイクル、修正回、レビュー回の対応関係までは
 
 - 各worktreeに相談用paneを1つ持つ。
 - pane自体は再利用する。
-- `Ask Claude`ごとのAgent sessionは原則fresh contextにする。
+- `Ask Agent`ごとのAgent sessionは原則fresh contextにする。
 - 必要なら現在のconsultationを継続できる。
 - 新規質問のデフォルトは`New conversation`とする。
 - Agentはそのworktreeをcwdとして起動し、必要に応じて自由に他ファイル、Git履歴、テスト等を調査できる。
@@ -480,7 +487,7 @@ worktree削除後もsnapshotで当時の質問対象を確認できる。Git参�
 
 通知上でAllow／Denyなどを直接実行する機能は対象外とする。
 
-Push通知をMac hostからiOSへ届ける具体的方式は未確定。
+Push通知は、APNsへ橋渡しする軽量な通知中継をopt-inで利用する方式とする(確定)。中継へ送るpayloadはworktree ID・通知種別などの最小限に留め、コードやTerminal出力を含めない。中継を有効にしない場合は、hostへ接続中のローカル通知のみとなる。中継の具体的な実装・提供形態(自前hosting等)は未確定。
 
 ## 12. Agent Adapterと状態モデル
 
@@ -799,6 +806,8 @@ iPhone / iPad
 - Mobile端末にGit repositoryやAgent processを複製しない。
 - GUI動作確認をローカル環境で行うため、現時点ではクラウドではなくMac/PCを母艦とする。
 - iPhone/iPadは監視、レビュー、質問対応を主用途とし、必要なときに完全なTerminal操作へ入る。
+- 外出先からの到達性はTailscale等の既存VPN／private networkへ委譲する。アプリはSSH接続のみを担当し、独自のリレーやNAT越え機能を持たない。
+- Agent状態・Diff・Evidence等の構造化データをモバイルから取得できるのは、Mac側アプリ(Host Core)の起動中のみとする。アプリ非起動時もtmux sessionとAgentは動作し続け、素のSSH + tmux attachは可能である。
 
 Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMacとなる。他OSのPC host対応は未確定。
 
@@ -930,6 +939,7 @@ libghosttyのiOS lifecycle、IME、アクセシビリティ、selection、Metal�
 | 独自Remote Terminal protocol | 不採用 | SSH + tmuxで代替できる |
 | Mosh組み込み | 回避 | copyleft／App Store配布上の検討をプロジェクトへ持ち込まない |
 | Tree-sitter | v1後回し | read-only Code Viewerに対して初期スコープが大きい |
+| 独立Host Core daemon(launchd常駐) | 不採用 | Host Coreはアプリプロセス内に置く。構造化データ提供はアプリ起動中のみで十分とし、プロセス間通信の複雑さを避ける |
 
 ## 22. Local data architecture
 
@@ -963,6 +973,8 @@ SQLite候補テーブル:
 
 これは論理候補であり、schema、migration、ID、foreign key、retentionは未確定。
 
+なお`device_ui_states`はhost Mac自身のUI stateを保存する用途とする。iPhone/iPadのUI stateは§19の端末独立原則に従い各デバイスのローカル保存とし、host DBへは同期しない。
+
 ### 22.2 保存原則
 
 - 画像本体や大きなsnapshotはfilesystemへ置く。
@@ -986,6 +998,8 @@ SQLite候補テーブル:
 - 既存プロジェクトのコードを「参考」と称してコピーしない。必要な場合は正規dependencyとして利用するか、clean-roomで実装する。
 
 このポリシー自体は会話で推奨されたものであり、プロジェクトの正式採用決定は未確定である。
+
+ただし**本体のlicenseはMITで確定**とする(repositoryの`LICENSE`ファイルと一致)。
 
 ### 23.2 主要候補の確認結果
 
@@ -1118,7 +1132,7 @@ Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候�
 - Adapter API
 - Agentごとの状態取得手段
 - 質問fallbackのデータ交換形式
-- `Ask Claude`のAgent非依存名称と送り先選択
+- `Ask Agent`実行時に使用するAgent CLIの選択方法
 - Unknown通知のデフォルト時間
 
 ### Git／Diff
@@ -1133,9 +1147,9 @@ Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候�
 
 - iOS認証情報の安全な保存方法
 - SSH接続設定の同期範囲
-- Push通知backend
+- Push通知中継の具体的な実装・提供形態(自前hosting等)
 - Host発見、pairing、複数Host
-- VPN／NAT越しの推奨運用
+- 推奨するVPN構成の具体例とドキュメント化
 - Host Core CLI protocol
 
 ### Storage
@@ -1149,7 +1163,6 @@ Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候�
 
 ### OSS
 
-- 本体license
 - Contributor License Agreement／DCOの要否
 - license scan tool
 - SBOM形式
@@ -1193,9 +1206,9 @@ Terminalは、Agent Skillsが存在しなくても通常Terminalおよびworktre
 
 ただし、次章以降の詳細なphase構成、artifact名、state machineは参照会話で提案された設計案であり、ユーザーによる最終確定はしていない。
 
-## 28. 現在のAgent Skills設計案 — 未確定
+## 28. 現在のAgent Skills設計
 
-### 28.1 phase案
+### 28.1 phase構成 — 確定
 
 ```text
 Requirement Session
@@ -1216,7 +1229,7 @@ Review Session (fresh context)
   └─ OK → PR creation
 ```
 
-当初の3phaseに、実装とは別contextのReview／Verify sessionを追加する案である。これは有力な提案だが、まだ確定ではない。
+当初の3phaseに、実装とは別contextのReview／Verify sessionを追加した**4phase構成を最終目標として確定**とする。各phaseの入力・出力・終了条件などの詳細は未確定である(§31)。
 
 ### 28.2 context isolation案
 
@@ -1332,7 +1345,6 @@ PR_READY
 
 ## 31. Agent Skills側の未確定事項
 
-- 3phaseのままにするか、Review／Verifyを正式phaseにするか
 - 要件定義後のHuman reviewだけで十分とする条件
 - 自動Design Gateの検査内容
 - 不足要件と設計裁量の判定基準
@@ -1400,6 +1412,14 @@ PR_READY
 - [x] 容量上限は設定可能なsoft limit、自動削除なし
 - [x] URLはlocalhostを含め外部browser
 - [x] Web Preview／DevTools／VNCは作らない
+- [x] 単一ユーザー前提(マルチユーザー／チーム共有は対象外)
+- [x] 本体licenseはMIT
+- [x] リモート到達性は既存VPNへ委譲、独自リレー／NAT越えは持たない
+- [x] 構造化データ提供はMacアプリ(Host Core)起動中のみ、独立daemonは作らない
+- [x] Push通知はopt-inの軽量中継 + 最小payload(コード・出力は載せない)
+- [x] UI名称は`Ask Agent`(Agent非依存)
+- [x] Diffコメントの送信先は実装Agent pane
+- [x] Agent開発フローはReview独立sessionを含む4phase構成
 
 # 付録B. 現在の推奨構成チェックリスト
 

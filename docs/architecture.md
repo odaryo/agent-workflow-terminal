@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-08-31(全体レビューにより8項目を確定へ昇格)
+> 最終更新: 2026-08-31(モバイルTerminal rendererのlibghostty非依存を確定へ昇格)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -808,6 +808,7 @@ iPhone / iPad
 - iPhone/iPadは監視、レビュー、質問対応を主用途とし、必要なときに完全なTerminal操作へ入る。
 - 外出先からの到達性はTailscale等の既存VPN／private networkへ委譲する。アプリはSSH接続のみを担当し、独自のリレーやNAT越え機能を持たない。
 - Agent状態・Diff・Evidence等の構造化データをモバイルから取得できるのは、Mac側アプリ(Host Core)の起動中のみとする。アプリ非起動時もtmux sessionとAgentは動作し続け、素のSSH + tmux attachは可能である。
+- **iPhone/iPadのTerminal描画方式は、macOS版と共通であることを要求しない。** macOS版でlibghostty(完全版)を採用する場合でも、モバイル側は実現可能なrendererを独立に選定してよい。モバイル側の具体的なrenderer選定は未確定(§21.5、§25)。
 
 Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMacとなる。他OSのPC host対応は未確定。
 
@@ -842,8 +843,9 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 |---|---|
 | 言語 | Swift 6 |
 | UI | SwiftUI + 必要最小限のAppKit／UIKit |
-| Terminal core | libghostty C API |
-| Terminal abstraction | `TerminalRenderer` protocolでlibghostty依存を隔離 |
+| Terminal core (macOS) | libghostty C API(完全版) |
+| Terminal core (iOS/iPadOS) | 未確定。libghostty(完全版)への依存は要求しない(制約自体は**確定**、§21.5) |
+| Terminal abstraction | `TerminalRenderer` protocolでrenderer依存を隔離し、platformごとに実装を差し替える |
 | Multiplexer | tmux CLIを外部processとして操作 |
 | Git | git CLIを外部processとして操作 |
 | Remote terminal | SSH |
@@ -886,12 +888,14 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
                             ▼
 ┌────────────────────────────────────────────────────────┐
 │ iPhone / iPad SwiftUI App                              │
-│ ├─ libghostty-based TerminalRenderer candidate         │
+│ ├─ TerminalRenderer (mobile, TBD; not libghostty)      │
 │ ├─ SwiftNIO SSH                                        │
 │ ├─ Code / Diff / Evidence UI                           │
 │ └─ device-local UI state                               │
 └────────────────────────────────────────────────────────┘
 ```
+
+図中のlibghostty(完全版)はMac Host側のみに置く。iPhone/iPad側の`TerminalRenderer`実装は未確定であり、macOS版と同一である必要はない(§21.5)。
 
 ### 21.3 tmuxとgitをCLIで扱う理由
 
@@ -917,22 +921,35 @@ One SSH connection
 
 この構成は現在の推奨案であり、`hostctl`のprotocol、versioning、権限、再接続は未確定。
 
-### 21.5 libghostty隔離
+### 21.5 libghostty隔離とplatformごとのrenderer
 
-macOSとiOSで同じTerminal品質を狙うが、アプリ全体をlibghostty APIへ直接依存させない。
+**確定**: libghostty(完全版)の採用対象はmacOS版のみとする。iPhone/iPadのTerminal rendererはmacOS版と共通であることを要求せず、実現可能なものを採用する。
+
+根拠: 2026-08-31時点の調査で、ghostty upstreamはv1.3.1以降、iOSを完全版ビルド(GhosttyKit)の対象から除外している。iOS向けに提供されるのはVTパーサのみを含む`libghostty-vt`であり、描画層は含まれない。
+
+アプリ全体をlibghostty APIへ直接依存させず、`TerminalRenderer` protocolでrendererを隔離する方針は維持する。
 
 ```text
 TerminalRenderer
-├─ GhosttyRenderer
-└─ FutureAlternativeRenderer
+├─ GhosttyRenderer            # macOS、現在の推奨(Gate 1待ち)
+└─ MobileRenderer             # iOS/iPadOS、未確定
 ```
 
-libghosttyのiOS lifecycle、IME、アクセシビリティ、selection、Metal描画、background／foreground復帰はPoCで確認する。PoCが成立しない場合にrendererだけ差し替えられる境界を維持する。
+macOS側のlibghostty採用可否(lifecycle、IME、アクセシビリティ、selection、Metal描画、background／foreground復帰)はGate 1で確認する。PoCが成立しない場合にrendererだけ差し替えられる境界を維持する。
+
+モバイル側rendererの**候補**(列挙のみ。選定は未確定、§25):
+
+| 候補 | 概要 | 補足 |
+|---|---|---|
+| `libghostty-vt` + 自前描画層 | iOSで利用可能なVTパーサの上に描画・入力を自前実装 | 描画・IME・selectionをすべて自作する負荷が大きい |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)等の既存Swift renderer | permissive licenseの既存端末エミュレータを利用 | SwiftTermは2026-08-31時点でMIT(GitHub license metadataで確認)。採用時は固定versionで再監査する |
+| 外部SSHアプリ連携 | 当面はBlink等の外部Terminalへ委譲(§20.3) | 専用アプリ内Terminalの最終形とは別の段階的手段 |
 
 ### 21.6 採用しない／後回しの候補
 
 | 候補 | 状態 | 理由 |
 |---|---|---|
+| iOSでの完全版libghostty(GhosttyKit) | 対象外 | upstreamがv1.3.1以降、iOSを完全版ビルドの対象から除外(2026-08-31確認)。iOS向けは`libghostty-vt`のみ提供される |
 | Rust Core + Swift UI | 次点、未採用 | Swift + Rust + libghostty側Zig/Cの多言語構成が初期段階では過剰 |
 | Tauri + xterm.js | 未採用 | UI開発は速いが、最重要のTerminal品質目標で第一候補に劣る可能性 |
 | libgit2 | v1不採用 | 実Gitとの挙動差と依存増を避ける |
@@ -1005,7 +1022,9 @@ SQLite候補テーブル:
 
 | Component | 2026-08-31時点で確認したlicense | 方針 |
 |---|---|---|
-| [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | 採用候補。固定commit／配布物の依存も再監査 |
+| [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | macOS版の採用候補。iOSの完全版は対象外(§21.5)。固定commit／配布物の依存も再監査 |
+| [libghostty-vt](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT(Ghostty本体と同一repository) | モバイルrenderer候補の一つ。VTパーサのみで描画層を含まない |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | モバイルrenderer候補の一つ。採用時は固定versionで再確認 |
 | [tmux](https://github.com/tmux/tmux) | ISC | source組込みではなく外部CLIとして利用 |
 | [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | iOS SSH候補 |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | MIT | SQLite access候補 |
@@ -1044,10 +1063,14 @@ SQLite候補テーブル:
 
 ### Gate 2: iPad/iPhone Terminal
 
-`SwiftNIO SSH → tmux attach → libghostty描画`を実機で確認する。
+`SwiftNIO SSH → tmux attach → 選定したmobile renderer描画`を実機で確認する。
+
+前提: モバイル側rendererはmacOS版と共通である必要がない(**確定**、§21.5)。libghostty(完全版)はiOS対象外のため、Gate 2はrenderer候補の比較から始める。
 
 確認事項:
 
+- mobile renderer候補の比較(`libghostty-vt` + 自前描画／SwiftTerm等の既存renderer／外部SSHアプリ連携)
+- 選定rendererのVT互換性、日本語・絵文字のgrapheme width、selection
 - host key verification
 - password／public key／SSH agent相当の認証方式
 - connection lossと再接続
@@ -1145,6 +1168,7 @@ Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候�
 
 ### Mobile／remote
 
+- モバイル側Terminal rendererの選定(`libghostty-vt` + 自前描画／SwiftTerm等の既存renderer／外部SSHアプリ連携)
 - iOS認証情報の安全な保存方法
 - SSH接続設定の同期範囲
 - Push通知中継の具体的な実装・提供形態(自前hosting等)
@@ -1401,6 +1425,7 @@ PR_READY
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
+- [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
 - [x] Project登録はlocal選択またはclone
 - [x] Git認証は既存環境へ完全委譲
 - [x] Git GUIは閲覧中心
@@ -1424,7 +1449,8 @@ PR_READY
 # 付録B. 現在の推奨構成チェックリスト
 
 - [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
-- [ ] libghosttyを正式採用 — macOS/iOS PoC待ち
+- [ ] libghostty(完全版)をmacOS版で正式採用 — Gate 1 PoC待ち
+- [ ] モバイルTerminal rendererを選定 — 候補比較とGate 2 PoC待ち(§25)
 - [ ] tmux CLI Adapterを正式採用 — version検証待ち
 - [ ] git CLI Adapterを正式採用 — output parsing設計待ち
 - [ ] SwiftNIO SSHを正式採用 — iOS実機PoC待ち
@@ -1437,6 +1463,7 @@ PR_READY
 
 - [Ghostty license](https://github.com/ghostty-org/ghostty/blob/main/LICENSE)
 - [Ghostling: minimal libghostty C API example](https://github.com/ghostty-org/ghostling)
+- [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE)
 - [tmux](https://github.com/tmux/tmux)
 - [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh)
 - [GRDB.swift](https://github.com/groue/GRDB.swift)

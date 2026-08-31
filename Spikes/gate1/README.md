@@ -1,9 +1,10 @@
-# Gate 1 スパイク — M0 / M1 / M2 実施記録
+# Gate 1 スパイク — M0 / M1 / M2 / M3 実施記録
 
 - 実施日: 2026-08-31
 - ブランチ: `spike/gate1-terminal-poc`
-- 対象: `PLAN.md` の **M0(準備)** / **M1(SwiftUI ウィンドウで zsh が動く)** / **M2(tmux attach と操作検証)**
-- 状態: **M0 完了 / M1 完了 / M2 完了**。M3 以降は未着手。
+- 対象: `PLAN.md` の **M0(準備)** / **M1(SwiftUI ウィンドウで zsh が動く)** / **M2(tmux attach と操作検証)** /
+  **M3(Claude Code / Codex の TUI 実動 + VT互換性 + 日本語・絵文字・grapheme width)**
+- 状態: **M0 完了 / M1 完了 / M2 完了 / M3 完了**。M4 は未着手。
 
 > この文書は「やってみて何が分かったか」の記録である。
 > `docs/architecture.md` の状態区分(確定／現在の推奨／未確定／対象外)は一切変更していない。
@@ -50,7 +51,7 @@ Spikes/gate1/build/TerminalSpike.app/Contents/MacOS/TerminalSpike
 | `TERMINAL_SPIKE_EXIT_AFTER=<秒>` | 指定秒後に自動終了(検証用) |
 | `TERMINAL_SPIKE_CONTROL=<path>` | **M2 の制御チャネル**。このファイルへ追記した行をコマンドとして実行する(§9.2) |
 
-M2 の検証は `scripts/m2-harness.sh` から駆動する。
+M2 の検証は `scripts/m2-harness.sh`、M3 の検証は `scripts/m3-harness.sh` から駆動する(§9.1)。
 
 ```shell
 export M2_RUN_DIR=/tmp/gate1-m2
@@ -245,7 +246,7 @@ Retina(backingScaleFactor = 2.0)、外部ディスプレイなし。
 | Retina / ディスプレイ移動 | `viewDidChangeBackingProperties` | `backingScaleFactor`、`NSScreenNumber` |
 | フォーカス | `acceptsFirstResponder` / `becomeFirstResponder` / `resignFirstResponder` | `ghostty_surface_set_focus` |
 | キー入力 | `keyDown` / `keyUp` / `flagsChanged` | keycode・左右修飾キー・`characters(byApplyingModifiers:)` は SwiftUI の `onKeyPress` では取れない |
-| IME(M3) | `NSTextInputClient` 準拠、`interpretKeyEvents`、`markedText` | preedit と候補ウィンドウ位置 |
+| IME(**M3 で実装済み**) | `NSTextInputClient` 準拠、`interpretKeyEvents`、`markedText`、`doCommand(by:)` の握り潰し | preedit(`ghostty_surface_preedit`)と候補ウィンドウ位置(`ghostty_surface_ime_point`)。SwiftUI にこの経路は無い。§10.6 |
 | マウス | `updateTrackingAreas` / `mouseDown` 等 / `scrollWheel` | tracking area と scroll phase / momentum |
 | アプリのフォーカス | `NSApplicationDelegate` + 通知 | `ghostty_app_set_focus` |
 
@@ -285,16 +286,23 @@ Spikes/gate1/
 ├── scripts/
 │   ├── build-ghostty.sh        GhosttyKit.xcframework のビルド (M0)
 │   ├── build-app.sh            TerminalSpike.app の組み立て (M1)
-│   └── m2-harness.sh           M2 検証ハーネス (launch / ctl / shot / teardown)
+│   ├── m2-harness.sh           M2 検証ハーネス (launch / ctl / shot / teardown)
+│   ├── m3-harness.sh           M3 検証ハーネス (m2 を再利用 + inject / run / launch-bare)
+│   └── m3-checks/              M3 の検証スクリプト (pane 内で実行する)
+│       ├── vt-color.sh         256色 / truecolor / SGR / box drawing
+│       ├── vt-scrollregion.sh  DECSTBM スクロールリージョン
+│       ├── wide.sh             日本語 / 絵文字 / grapheme の目視確認
+│       └── width-probe.sh      DSR(CPR) で grapheme width を数値確認
 ├── TerminalSpike/
 │   ├── Package.swift           SwiftPM executable + binaryTarget
 │   └── Sources/TerminalSpike/
 │       ├── TerminalSpikeApp.swift    SwiftUI App / AppDelegate / 計測フック
 │       ├── GhosttyTerminalView.swift libghostty 呼び出しの唯一の場所
-│       └── SpikeControl.swift        M2 の制御チャネル (GhosttyKit を import しない)
+│       └── SpikeControl.swift        M2/M3 の制御チャネル (GhosttyKit を import しない)
 ├── evidence/
 │   ├── m1-zsh.png              M1 の証跡(ウィンドウのみ)
-│   └── m2-01..23-*.png         M2 の証跡
+│   ├── m2-01..23-*.png         M2 の証跡
+│   └── m3-00..37-*.png         M3 の証跡
 ├── vendor/ghostty/             ghostty v1.3.1 の shallow clone (git 管理外)
 ├── build/                      TerminalSpike.app (git 管理外)
 └── .build-shim/                libtool シム (git 管理外)
@@ -608,11 +616,295 @@ name=/dev/ttys006 tty=/dev/ttys006 pid=2501 term=xterm-ghostty size=137x39 activ
 
 ---
 
-## 9. 次にやること(M3)
+## 9. M3 の進め方(実際に採った方法)
 
-1. tmux 内で **Claude Code** と **Codex CLI** を実際に動かす(§12 の Agent 非依存方針上、片方だけでは不可)。
-2. 日本語 IME: `NSTextInputClient` 準拠 → `ghostty_surface_preedit` / `ghostty_surface_ime_point` の接続。
-   **M1 / M2 とも IME は未実装のまま。** ここが撤退基準 §7-3 に直結する。
-3. 全角幅・絵文字・grapheme cluster・tmux pane 境界での欠け。
-4. 質問 / 権限プロンプト時の表示崩れ(設計書 §11 の前提)。
-5. `Ghostty.app` との差分表を作り、差分があれば「埋め込み方の問題」か「libghostty の問題」かを切り分ける。
+### 9.1 M2 の隔離方式をそのまま再利用
+
+専用 tmux サーバソケット `-L gate1-spike` + セッション `gate1-spike`、および
+`TERMINAL_SPIKE_CONTROL` 制御チャネル(§7.2)を M3 でもそのまま使った。
+`scripts/m3-harness.sh` は `m2-harness.sh` に委譲する薄いラッパで、証跡の接頭辞だけ
+`m3` に切り替える(`SPIKE_SHOT_PREFIX`)。M3 で足したサブコマンドは 3 つだけ:
+
+```shell
+Spikes/gate1/scripts/m3-harness.sh launch 1400x900       # tmux attach で起動
+Spikes/gate1/scripts/m3-harness.sh launch-bare 1400x900  # tmux を挟まず bash 直起動
+Spikes/gate1/scripts/m3-harness.sh tmux <args...>        # gate1-spike サーバへ tmux コマンド
+echo 'cmd' | Spikes/gate1/scripts/m3-harness.sh run      # paste-buffer -p して Enter
+Spikes/gate1/scripts/m3-harness.sh inject <file>         # ファイルを pane へ貼り付け
+```
+
+- `run` / `inject` は M2 §8.8 の結論どおり **`load-buffer` + `paste-buffer -p`** を使う。
+- **`launch-bare` が M3 の切り分けの要**。同じテキストを「tmux 経由」と「tmux 無し」で
+  出力させると、grapheme の扱いが tmux 側か libghostty 側かを一発で判定できる(§10.3)。
+
+pane 内で実行する検証スクリプトは `scripts/m3-checks/` に置いてある(再現用)。
+
+```shell
+Spikes/gate1/scripts/m3-harness.sh launch 1400x900
+echo 'bash Spikes/gate1/scripts/m3-checks/vt-color.sh' | Spikes/gate1/scripts/m3-harness.sh run
+Spikes/gate1/scripts/m3-harness.sh shot 01-vt-color
+```
+
+エージェント起動は **scratchpad 配下の空ディレクトリ**で行い、本リポジトリ内では起動していない
+(エージェントがリポジトリを読み始めるのを防ぐため)。プロンプトは日本語 1 回 (`1+1は? 短く答えて`) のみ。
+検証後、スパイクアプリ・`claude` / `codex` プロセス・`gate1-spike` サーバ・作業ディレクトリは全て破棄し、
+**ユーザーの既定 tmux サーバのセッション一覧・`mouse` / `window-size` / `prefix` が検証前と同一である**
+ことを確認済み。`open -na Ghostty` は M2 の教訓どおり一度も使っていない。
+
+### 9.2 M3 でスパイク側に足したもの
+
+| 追加物 | 場所 | 目的 |
+|---|---|---|
+| **`NSTextInputClient` 準拠** | `GhosttyTerminalView.swift` | M1 / M2 で未実装だった IME 経路。`setMarkedText` → `ghostty_surface_preedit`、`firstRect(forCharacterRange:)` → `ghostty_surface_ime_point` |
+| `keyDown` の書き換え | 同上 | `interpretKeyEvents` を通し、`insertText` が積んだ確定文字列を打鍵として送る。変換中は `ghostty_input_key_s.composing = true` にして端末へエンコードさせない |
+| `doCommand(by:)` の握り潰し | 同上 | 端末アプリで AppKit の編集コマンド (`insertNewline:` 等) を実行させない。通常の打鍵経路 (`ghosttyText(for:)`) に任せる |
+| `preedit` / `ime` / `keydown` コマンド | `SpikeControl.swift` | 実 IME 無しで preedit 描画と `ime_point` を確認する。`keydown` は **合成 `NSEvent` を `keyDown(with:)` に流す**(書き換えた keyDown 経路の回帰確認) |
+
+libghostty を呼ぶのは引き続き `GhosttyTerminalView.swift` だけで、§21.5 の隔離境界は M3 でも保っている。
+`TerminalRenderer` 候補として `setPreedit` / `imePoint` の 2 つが増えた(`// [RENDERER]` 印)。
+
+### 9.3 ディスプレイスリープの罠(M3 で最初に踏んだ)
+
+**ディスプレイがスリープしていると `ghostty_surface_new` が失敗する。**
+
+```
+[com.apple.corevideo] CVDisplayLinkCreateWithCGDisplays error -6661 due to invalid display count (0)
+[com.mitchellh.ghostty:embedded_window] embedded_window: error initializing surface err=error.OutOfMemory
+```
+
+- 検証時のこのマシンは `displaysleep 2` / `sleep 1`(バッテリー)で、放置すると即ディスプレイが落ちる。
+  その状態では **surface が作れず、`screencapture -l <winid>` も空振りする**。
+- 対策として `m3-harness.sh` の `launch` / `shot` は毎回 `caffeinate -u -t 30` を**新規に**起動して
+  「今ユーザー操作があった」と宣言し直す(既に走っている caffeinate では寝たディスプレイは起きない)。
+  `shot` は撮れるまで最大 3 回リトライする。
+- **申し送り(本体設計):** libghostty の surface 生成はアクティブなディスプレイに依存する。
+  「Mac のフタを閉じた / ディスプレイスリープ中でもエージェントを走らせ続ける」という本製品の
+  想定運用(§4.2 のマルチデバイス、iPhone から attach)では、**Mac 側 UI の surface が作れない / 描けない
+  局面がありうる**。エージェント本体は tmux 側で走り続けるので実害は「Mac の画面が使えない間だけ」だが、
+  Host Core が surface 生成に失敗したときのフォールバック(遅延生成・リトライ)は設計に要る。
+
+---
+
+## 10. M3 の結果
+
+環境: tmux 3.4 / ghostty v1.3.1 / macOS 26.5.2 arm64 / Claude Code 2.1.251 / Codex CLI 0.147.0。
+ユーザーの `~/.tmux.conf` をそのまま使用(prefix `C-q`、`mouse on`、`status-position top`、
+`default-terminal tmux-256color`)。pane 内の shell は fish。
+
+### 10.1 結果一覧
+
+| # | 検証項目 | 結果 | 証跡 |
+|---|---|---|---|
+| 1 | ANSI 16 / 256色 / grayscale / truecolor(24bit) | ✅ `COLORTERM=truecolor` で 24bit が通る | `m3-01-vt-color.png` |
+| 2 | SGR: bold / dim / italic / underline / curly / 下線色(SGR58) / blink / reverse / strike / double-underline | ✅ 全て描き分けられる | `m3-01` |
+| 3 | box drawing(`┌─┬┐ │ └┴┘ ╚═╩╝ █▓▒░ ▲▼◀▶`)、braille | ✅ セル境界で罫線が繋がる(欠けなし) | `m3-01` |
+| 4 | スクロールリージョン(DECSTBM) | ✅ 固定行が動かず、指定範囲だけスクロールする | `m3-02-scroll-region-during.png` |
+| 5 | alternate screen 出入り(`less`) | ✅ 入り / 移動 / `q` で元画面に復帰 | `m3-03` / `m3-04` / `m3-05` |
+| 6 | alternate screen 出入り(`vim`) | ✅ 全画面 TUI + ステータス行、`:q!` で復帰 | `m3-06` / `m3-07` |
+| 7 | `vttest` | ⏭️ **未導入のためスキップ**(新規インストールしない方針)。代替として 1〜6 を自動化して確認 | — |
+| 8 | 日本語(ひらがな / 漢字 / カタカナ / 全角英数 / 約物)の全角幅 | ✅ 桁定規と一致 | `m3-08-wide-text.png` |
+| 9 | East Asian Ambiguous(`± ○ △ × ※ ¶ § °`) | ✅ = **半角(幅1)扱い**。tmux 有無で差なし | `m3-08` / `m3-11` |
+| 10 | 絵文字(単一 codepoint / VS16 / VS15 / 肌色修飾 / 国旗) | ✅ 幅・字形とも正しい。VS15 は白黒字形、VS16 は絵文字字形で描き分け | `m3-08` / `m3-11` |
+| 11 | ZWJ シーケンス | ⚠️ **tmux 経由でのみ 👨‍👩‍👧‍👦 が 4 セルに割れる**(libghostty 単体では 2 セル正解)。詳細 §10.3 | `m3-09` / `m3-10` / `m3-11` |
+| 12 | 日本語ファイル名の `ls` / `ls -la` の桁揃え | ✅ 崩れなし | `m3-12-ls-japanese-filenames.png` |
+| 13 | tmux ステータス行 / window 名の日本語・絵文字 | ✅ 日本語は正常。⚠️ ZWJ を含めると tmux が消し残す(§10.3) | `m3-12` / `m3-13` |
+| 14 | pane 分割時の全角文字の欠け・境界越え | ✅ 境界での欠け・にじみ無し。折り返しも全角境界を割らない | `m3-13-split-japanese-boundary.png` |
+| 15 | リサイズ時の再折り返し(日本語) | ✅ 破綻なし | `m3-14` / `m3-15` |
+| 16 | Claude Code 起動画面・ロゴ・罫線 | ✅ 半ブロック文字のロゴ・区切り線・入力枠すべて正常 | `m3-17-claude-ready.png` |
+| 17 | Claude Code の権限確認プロンプト(フォルダ信頼) | ✅ 選択肢・`❯` カーソル・注意文が読める(設計書 §11 の前提を満たす) | `m3-16-claude-launch.png` |
+| 18 | Claude Code の日本語入力表示 / 応答 / 進捗バー | ✅ composer の日本語も桁ずれ無し。`ctx ▍░░` 系のバーも正常 | `m3-18` / `m3-19` / `m3-20` |
+| 19 | Claude Code の pane split / リサイズ再レイアウト | ✅ 87 桁・narrow へ即時再レイアウト。ゴミ残りなし | `m3-21` / `m3-22` / `m3-23` |
+| 20 | Codex TUI 起動 / 角丸罫線ボックス / OSC8 リンク | ✅ `╭─╮ │ ╰─╯` が繋がる。リンクは下線付き | `m3-25` / `m3-26` / `m3-27` |
+| 21 | Codex の日本語入力 / 応答 | ✅ 認証済みで実応答まで確認(`2です。`) | `m3-28` / `m3-30` |
+| 22 | Codex の pane split / リサイズ再レイアウト | ✅ ボックス幅が追随。崩れなし | `m3-31` / `m3-32` / `m3-33` |
+| 23 | エージェント終了(`/exit` / `/quit`)後の画面復帰 | ✅ 両者とも元画面に戻る | `m3-24` / `m3-34` |
+| 24 | preedit(変換中文字列)の描画 | ✅ **下線付きで正しく描画される**。全角幅も正しい | `m3-35-ime-preedit.png` / `m3-37` |
+| 25 | `ghostty_surface_ime_point`(候補ウィンドウ位置) | ✅ 端末カーソルに追随。⚠️ width のスケール規約に難あり(§10.6) | ログ(§10.6) |
+| 26 | 書き換えた `keyDown` 経路(合成 `NSEvent` → `interpretKeyEvents`) | ✅ ASCII / 日本語 / Enter が期待どおり pane へ届く | `m3-37-keydown-and-preedit.png` |
+| 27 | **実 IME(かな漢字変換)の操作** | ❓ **未検証(要手動確認)**。プログラムから入力ソースを切り替えられないため。手順は §10.8 | — |
+
+### 10.2 VT互換性(§24「VT互換性」)
+
+`vttest` はこのマシンに無く、方針上インストールしないので、**自動化できる範囲で代替した**。
+色・SGR・box drawing・DECSTBM・alternate screen という「TUI が実際に使う経路」は全て通っている。
+`m3-01-vt-color.png` を拡大すると、`┌─┬─┐` `╚═╩═╝` がセルをまたいで**隙間なく連結**しており、
+libghostty が box drawing グリフを合成描画していることが分かる(フォント依存の切れ目が出ない)。
+
+未確認:
+- `vttest` の網羅項目(DECALN、DECCOLM、各種 CSI のエッジケース、二重高さ文字など)。
+- **これは Gate 1 の合否を左右しないと判断した**。Agent Terminal で動かす対象は
+  Claude Code / Codex / less / vim / git であり、その全てが実動している。
+
+### 10.3 日本語・絵文字・grapheme width(§24「絵文字・grapheme width」)
+
+DSR(CPR, `ESC[6n`)で「文字列を出力した直後のカーソル桁」を実測した。
+**同じスクリプトを `launch`(tmux 経由)と `launch-bare`(tmux 無し)の両方で走らせて切り分けた。**
+
+| 入力 | 期待 | tmux 経由 | tmux 無し(= libghostty 単体) |
+|---|---|---|---|
+| `abcdef` | 6 | 6 ✅ | 6 ✅ |
+| `あいう` | 6 | 6 ✅ | 6 ✅ |
+| `漢字混在` | 8 | 8 ✅ | 8 ✅ |
+| `ＡＢＣ`(全角英字) | 6 | 6 ✅ | 6 ✅ |
+| `±○△×`(Ambiguous) | 4(narrow 前提) | 4 ✅ | 4 ✅ |
+| `😀🍣` | 4 | 4 ✅ | 4 ✅ |
+| **`👨‍👩‍👧‍👦`(ZWJ×3、4人家族)** | 2 | **4 ❌** | **2 ✅** |
+| `👩‍💻`(ZWJ×1) | 2 | 2 ✅ | 2 ✅ |
+| `👍🏽`(肌色修飾) | 2 | 2 ✅ | 2 ✅ |
+| `🇯🇵`(国旗 = RIS ペア) | 2 | 2 ✅ | 2 ✅ |
+| `❤️`(VS16) | 2 | 2 ✅ | 2 ✅ |
+| `❤︎`(VS15) | 1 | 1 ✅ | 1 ✅ |
+| `é`(結合文字) | 1 | 1 ✅ | 1 ✅ |
+| `한국어` | 6 | 6 ✅ | 6 ✅ |
+
+**結論: grapheme width の不一致は 1 件だけで、原因は tmux 3.4 側。libghostty は 14/14 正解。**
+
+- 目視でも一致する。tmux 経由の `m3-08` では ZWJ 行が
+  `👨‍👩‍👧‍👦` `👩` `👩‍💻` `Ă` `🌈` のように**割れて**表示され、
+  tmux 無しの `m3-11` では `👨‍👩‍👧‍👦` `👩‍💻` `🏳️‍🌈` が**それぞれ 1 グリフ**として出る。
+- 副作用として、ZWJ を `status-right` に入れると **tmux が幅を読み違えて右端に消し残しが出る**
+  (`m3-13` の `... 👨‍👩‍👧‍👦 19:19 26` の `26` は前の内容の残骸)。
+- **これは「埋め込み方の問題」でも「libghostty の問題」でもなく、tmux の問題**。
+  tmux は 3.5 以降 grapheme 対応が改善しているので、**本体では tmux の下限版数を検討する余地がある**
+  (本スパイクでは決めない)。実害は「4人家族絵文字とその類が 2 セル余分に見える」程度。
+- 補足: `ls` が `絵文字👨‍👩‍👧‍👦テスト.txt` を `絵文字👨?👩?👧?👦テスト.txt` と出すのは **BSD `ls` が ZWJ を
+  非表示文字として `?` に置換している**ためで、端末側の問題ではない(`printf` では正しく出る)。
+
+その他の所見:
+
+- **East Asian Ambiguous は幅 1**(`± ○ △ ×` など)。日本語環境では「全角で見たい」ユーザーが居るが、
+  v1.3.1 の libghostty にこれを切り替える設定は見当たらない。**本体で設定を出すなら要調査**(申し送り)。
+- ハングルは幅こそ正しい(2セル)が、**グリフが 2 セル幅より細く描かれる**(フォントフォールバックの見た目差)。
+  桁ずれは起きないので実害なし。
+- 全角の折り返し・pane 境界での欠けは**一切無し**(`m3-13` / `m3-14`)。
+
+### 10.4 Claude Code TUI(撤退基準 §7-2 の対象)
+
+- 起動画面の半ブロック文字ロゴ(`▐▛███▛█` 等)が**ドット絵として正しく組み上がる**。
+  ここが崩れる端末は多いので、良い指標になる。
+- **権限確認プロンプト**(フォルダ信頼の Yes/No 選択)が問題なく読める(`m3-16`)。
+  設計書 §11「質問 UI」は、この見た目を前提にできる。
+- 日本語プロンプトの composer 表示、確定後のユーザー発話ハイライト帯、
+  応答(`⏺ 2`)、スピナー(`✻ Sautéed for 3s`)、`ctx ▍░░░░░░░░░ 4%` 形式のバーまで全て正常。
+- `tmux split-window -h` で 174桁 → 87桁になった瞬間に**再レイアウトされ、パスが `/…/` で省略される**。
+  ウィンドウリサイズ(820x560 まで縮小)でも同様。ゴミ・二重描画は観測されなかった。
+- `/exit` で通常終了し、pane は fish に戻る。
+
+**表示崩れ・入力取りこぼしは観測されなかった。**
+
+### 10.5 Codex TUI
+
+- 角丸ボックス(`╭ ─ ╮ │ ╰ ╯`)が連結して描かれる。OSC 8 ハイパーリンクも下線付きで出る。
+- 起動時の 2 段の対話(アップデート案内 / ディレクトリ信頼)はどちらも選択肢が正しく描かれ、
+  数字キーで選択できた。
+- 認証済みだったので **実応答まで確認できた**(日本語プロンプト → `2です。`)。
+  PLAN.md が想定していた「認証で進めない場合は起動画面だけ」には**該当しなかった**。
+- split / リサイズでボックス幅が追随し、崩れない。`/quit` で通常終了。
+
+→ **§12「Agent 非依存」の観点で、両エージェントとも同等に動くことを確認した。**
+
+### 10.6 IME(撤退基準 §7-3 の対象)
+
+**M1 / M2 で未実装だった IME 経路を M3 で実装した。** その上で、自動化できる範囲を実測した。
+
+判明したこと:
+
+1. `ghostty_surface_preedit(surface, utf8, len)` に変換中文字列を渡すと、
+   **libghostty が下線付きでカーソル位置に描画する**(`m3-35` / `m3-37`)。
+   全角文字の幅も正しく、確定前後で端末側の文字が壊れることもない。クリアは `(nil, 0)`。
+2. `ghostty_surface_ime_point(surface, &x, &y, &w, &h)` は候補ウィンドウを出すべき矩形を返し、
+   **端末カーソルに追随する**(fish のプロンプト 2 桁目 → `x=22.0pt`、cell幅 8.0pt)。
+3. ⚠️ **`ime_point` の width だけスケール規約が違う。** `x` / `y` / `height` は content scale で割られて
+   pt で返るが、**`width` は割られない**(`にほんご` = 8セル → 期待 64pt に対し `128.0` が返る)。
+   upstream `src/Surface.zig` に
+   「we don't apply content scale here because it looks like for some reason in macOS its already scaled」
+   というコメントがあり、**upstream 自身が未整理と認めている箇所**。
+   Retina では候補ウィンドウ矩形の幅が 2 倍になる。実害は候補パネルの位置決めだけなので、
+   **ホスト側で `/ backingScaleFactor` する回避が必要**(本スパイクでは補正していない。生値を記録する方針)。
+   → **`TerminalRenderer` の `imePoint` は「libghostty の座標規約を吸収する」責務を持つ**、という
+   §21.5 の具体例が 1 つ増えた。
+4. 書き換えた `keyDown`(`interpretKeyEvents` → `NSTextInputClient` → accumulator)は、
+   **合成 `NSEvent` を流す回帰テストで期待どおり動いた**(`echo keyDown経路OK 12345` が実行される)。
+   Enter は `doCommand(by: insertNewline:)` に落ちて握り潰され、通常経路で `\r` として送られる。
+
+**未検証(重要):** 実際のかな漢字変換操作。macOS の入力ソースはプログラムから切り替えられず、
+このマシンにはアクセシビリティ権限も無いため、**「変換候補ウィンドウが正しい位置に出るか」
+「変換中の Enter / Esc が端末へ漏れないか」「確定文字列が二重に入らないか」は人手で確認する必要がある。**
+手順は §10.8。
+
+**撤退基準 §7-3 との関係:** 「preedit が出ない」「候補ウィンドウ位置が取れない」という
+**致命ケースは否定された**(API は存在し、実際に描画・取得できた)。
+残るのは実操作の品質確認であり、現時点で Gate 1 不成立と判断する材料は無い。
+
+### 10.7 撤退基準(PLAN.md §7)への当てはめ
+
+| # | 撤退基準 | M3 時点の判定 |
+|---|---|---|
+| 2 | Claude Code / Codex の TUI が実用にならない | **抵触なし。** 両者とも表示崩れ・入力取りこぼし無し。権限プロンプトも読める |
+| 3 | 日本語 IME が実用にならない | **抵触なし(ただし条件付き)。** preedit 描画と `ime_point` は動作。実変換操作は未検証 |
+| 4 | tmux attach 下で split / zoom / detach / mouse が壊れる | M2 で抵触なし。M3 でも TUI 稼働中の split / resize が正常 |
+| 6〜9 | 重大(条件付き) | M4 の対象。M3 の範囲では新たな抵触なし |
+
+新たに見つかった**条件付きの論点**(致命ではない):
+
+- **ディスプレイスリープ中は surface を作れない**(§9.3)。フォールバック設計が要る。
+- **tmux 3.4 の ZWJ grapheme 幅**(§10.3)。tmux の下限版数を検討する余地。
+- **`ime_point` の width スケール**(§10.6)。ホスト側で吸収する。
+
+### 10.8 未検証(手動確認が必要な項目)
+
+M2 §8.9 の項目に加えて、**IME の実操作**が残っている。以下を人手で確認してほしい。
+
+```shell
+Spikes/gate1/scripts/build-ghostty.sh          # 未ビルドなら
+Spikes/gate1/scripts/build-app.sh
+tmux -L gate1-spike kill-server 2>/dev/null
+TERMINAL_SPIKE_COMMAND='tmux -L gate1-spike new-session -A -s gate1-spike' \
+  Spikes/gate1/build/TerminalSpike.app/Contents/MacOS/TerminalSpike
+```
+
+確認項目(IME):
+
+1. **入力ソースを「日本語 - ローマ字入力」に切り替えて `あいうえお` と打つ。**
+   - 変換中に**下線付きの preedit** が出るか(自動検証では `preedit` コマンド経由でのみ確認済み)。
+   - **変換候補ウィンドウがカーソルの真下に出るか**(`ime_point` の width スケール問題により、
+     候補パネルの幅方向がずれる可能性がある)。
+2. **変換中の Enter / Esc** — Enter で確定したときに端末へ改行が漏れないか、
+   Esc で変換を取り消したときに端末側の文字が消えないか(`composing` フラグの効き)。
+3. **確定文字列が二重に入らないか**(accumulator 経路と `ghosttyText(for:)` 経路の二重送信)。
+4. **変換中に Backspace** — preedit だけが縮み、確定済みの文字が消えないか。
+5. **Claude Code の composer に日本語を IME で直接打ち込む** — 上記が TUI 側でも成立するか。
+6. **他の入力方式**(かな入力、ライブ変換 ON、Google 日本語入力等のサードパーティ IME)。
+7. **絵文字ビューア(⌃⌘Space)からの挿入** — `keyDown` の外から `insertText` が来る経路
+   (現在は paste 経路にフォールバックしている)。
+
+確認項目(M2 から継続): 物理キーボード / 物理マウス / 描画品質 / 体感遅延 / リサイズ中の追随 /
+外部ディスプレイ。M2 §8.9 を参照。
+
+**終了後は必ず `tmux -L gate1-spike kill-server` すること。**
+
+### 10.9 本体設計 / 後続 Gate への申し送り(M3 分)
+
+1. **`TerminalRenderer` に `setPreedit` / `imePoint` が要る。** `imePoint` は libghostty の
+   座標規約(左上原点・width だけ未スケール)を吸収する責務を持つ。
+2. **`NSTextInputClient` は AppKit bridge の必須要素**(§5.1 の一覧に追加すべき項目)。
+   SwiftUI だけでは日本語入力が成立しない。
+3. **tmux の版数が grapheme 表示に効く。** ZWJ を含むブランチ名 / worktree 名 / エージェント出力は
+   tmux 3.4 で幅が狂う。UI 側で「tmux が壊す前提」の逃げは作れないので、
+   **サポートする tmux の下限版数を決める必要がある**(未確定事項として起票)。
+4. **ディスプレイスリープ / ヘッドレス時の surface 生成失敗**に対する扱いを決める必要がある。
+   エージェント自体は tmux 側で走り続けるので、**UI が作れないことと作業が止まることは別**である、
+   という設計上の分離がここでも効く。
+5. **エージェントの TUI は「pane 幅が変わると自分で再レイアウトする」** ことが両者で確認できた。
+   Viewer Drawer の開閉(= pane 幅の変更)を tmux 側のリサイズで実現しても、エージェント側は追随する。
+
+---
+
+## 11. 次にやること(M4)
+
+1. 大量出力(`yes` / 巨大ログ `cat` / `find /`)で描画が詰まらないか、入力応答が保たれるか。
+2. 高速更新 TUI(`top` / 進捗バー)。
+3. スクロールバック上限とメモリ増加。長時間稼働(8時間以上)の RSS 推移。
+4. 複数 surface 同時(5〜10)での メモリ / CPU、`ghostty_surface_free` のリーク確認。
+5. スリープ / 復帰、外部ディスプレイ抜き差し、background / foreground 復帰
+   (§9.3 のディスプレイスリープ問題は M4 でも継続して観察する)。

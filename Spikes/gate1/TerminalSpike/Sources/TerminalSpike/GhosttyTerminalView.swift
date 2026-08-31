@@ -310,6 +310,27 @@ final class GhosttySurfaceNSView: NSView {
     /// M1 の resize 検証用。スパイク専用のフック (本体には持ち込まない)。
     nonisolated(unsafe) static weak var current: GhosttySurfaceNSView?
 
+    // MARK: IME (M3 で追加)
+    //
+    // AppKit bridge が必須な理由その 3。
+    // `NSTextInputClient` に準拠しないと日本語 IME の preedit (変換中文字列) が
+    // 一切取れない。SwiftUI の `TextField` 系にはこの経路が無い。
+
+    /// 変換中文字列。`NSTextInputClient` の実装からのみ更新する。
+    fileprivate let imeMarkedText = NSMutableAttributedString()
+
+    /// `keyDown` の実行中だけ非 nil。`insertText` が確定文字列をここへ積む。
+    /// nil なら「keyDown の外から来た挿入」(ディクテーション・文字ビューア等)。
+    fileprivate var imeTextAccumulator: [String]?
+
+    /// 1 セルのサイズ (pt)。`firstRect(forCharacterRange:)` のフォールバック用。
+    fileprivate var imeCellSize: CGSize {
+        guard let size = lastReportedSize else { return CGSize(width: 8, height: 16) }
+        let scale = window?.backingScaleFactor ?? 2.0
+        return CGSize(width: Double(size.cell_width_px) / scale,
+                      height: Double(size.cell_height_px) / scale)
+    }
+
     /// `ghostty_surface_size()` の生値を文字列化する
     var sizeDescription: String {
         guard let size = lastReportedSize else { return "<none>" }
@@ -434,10 +455,50 @@ final class GhosttySurfaceNSView: NSView {
 
     override func keyDown(with event: NSEvent) {
         guard let surface else { return super.keyDown(with: event) }
+
+        // --- IME (M3) ---------------------------------------------------
+        // まず AppKit の入力コンテキストへ渡す。変換中なら `setMarkedText`、
+        // 確定したら `insertText` がこの呼び出しの内側で呼ばれる。
+        let hadMarkedText = imeMarkedText.length > 0
+        imeTextAccumulator = []
+        interpretKeyEvents([event])
+        // 制御文字が accumulator に混ざった場合は使わない (M2 で検証済みの
+        // `ghosttyText(for:)` 経路に落として ctrl エンコードを libghostty に任せる)。
+        let inserted = (imeTextAccumulator ?? []).filter { text in
+            guard text.count == 1, let scalar = text.unicodeScalars.first else { return true }
+            return scalar.value >= 0x20 && scalar.value != 0x7F
+        }
+        imeTextAccumulator = nil
+
+        // preedit を libghostty へ反映する。
+        syncPreedit(clearIfNeeded: hadMarkedText)
+
+        // 変換が確定して文字列が出た場合は、それを「この打鍵が生成したテキスト」
+        // として送る。composing は立てない (端末へ届く必要がある)。
+        if !inserted.isEmpty {
+            for text in inserted {
+                var k = makeKeyEvent(event, action: GHOSTTY_ACTION_PRESS)
+                k.composing = false
+                text.withCString { ptr in
+                    k.text = ptr
+                    _ = ghostty_surface_key(surface, k)
+                }
+            }
+            return
+        }
+
         var key = makeKeyEvent(event, action: GHOSTTY_ACTION_PRESS)
 
-        // NOTE(M3): IME はここで `interpretKeyEvents` → `NSTextInputClient` へ渡し、
-        // markedText を `ghostty_surface_preedit` に流す必要がある。M1 では未実装。
+        // 変換中の打鍵、および「直前まで変換中だった」打鍵 (Esc / Backspace で
+        // preedit を消した場合) は端末へ送らない。後者を送ると、変換の取り消しが
+        // 端末側の文字削除として二重に効いてしまう。
+        key.composing = imeMarkedText.length > 0 || hadMarkedText
+        if key.composing {
+            key.text = nil
+            _ = ghostty_surface_key(surface, key)
+            return
+        }
+
         if let text = ghosttyText(for: event) {
             text.withCString { ptr in
                 key.text = ptr
@@ -511,6 +572,24 @@ final class GhosttySurfaceNSView: NSView {
             if scalar.value >= 0xF700 && scalar.value <= 0xF8FF { return nil }
         }
         return characters
+    }
+
+    /// markedText の現在値を libghostty の preedit 状態へ同期する。 // [RENDERER] setPreedit
+    ///
+    /// `ghostty_surface_preedit` は「長さ付き UTF-8」を取り、NUL 終端は数えない。
+    /// 空にするときは `(nil, 0)`。
+    fileprivate func syncPreedit(clearIfNeeded: Bool) {
+        guard let surface else { return }
+        if imeMarkedText.length > 0 {
+            let utf8 = Array(imeMarkedText.string.utf8)
+            utf8.withUnsafeBufferPointer { buf in
+                buf.baseAddress?.withMemoryRebound(to: CChar.self, capacity: buf.count) { ptr in
+                    ghostty_surface_preedit(surface, ptr, UInt(buf.count))
+                }
+            }
+        } else if clearIfNeeded {
+            ghostty_surface_preedit(surface, nil, 0)
+        }
     }
 
     private static func mods(from flags: NSEvent.ModifierFlags) -> ghostty_input_mods_e {
@@ -612,6 +691,112 @@ final class GhosttySurfaceNSView: NSView {
         guard let surface else { return true }
         return ghostty_surface_process_exited(surface)
     }
+}
+
+// MARK: - IME (NSTextInputClient) — M3 で追加
+//
+// AppKit bridge が必須な範囲の 3 つ目。日本語 IME の変換中文字列 (preedit) は
+// `NSTextInputClient` を実装した `NSView` にしか届かない。
+//
+// libghostty 側の契約 (`include/ghostty.h` / `src/Surface.zig` を実読して確認):
+//   - `ghostty_surface_preedit(surface, utf8, len)` — 変換中文字列を渡す。
+//     クリアは `(nil, 0)`。libghostty が自前でアンダーライン付き描画をする。
+//   - `ghostty_surface_ime_point(surface, &x, &y, &w, &h)` — 変換候補ウィンドウを
+//     出すべき矩形を **左上原点**で返す。y はセルの下端、x はセル中央。
+//     ⚠️ M3 実測: `x` / `y` / `height` は content scale で割られて pt で返るが、
+//     **`width` だけ割られない (px のまま)**。upstream `src/Surface.zig` にも
+//     「macOS では既にスケールされているように見えるので割っていない」という
+//     未整理のコメントがある。Retina では候補矩形の幅が 2 倍になる。
+//   - `ghostty_input_key_s.composing` — 変換中の打鍵であることの印。
+//     true の打鍵は端末へエンコードされない。
+extension GhosttySurfaceNSView: @preconcurrency NSTextInputClient {
+    func hasMarkedText() -> Bool { imeMarkedText.length > 0 }
+
+    func markedRange() -> NSRange {
+        imeMarkedText.length > 0 ? NSRange(location: 0, length: imeMarkedText.length) : NSRange()
+    }
+
+    /// 端末には「選択中のテキスト」の概念を IME へ渡す必要がないので、
+    /// 変換中文字列の末尾 (キャレット位置) を返す。
+    func selectedRange() -> NSRange {
+        NSRange(location: imeMarkedText.length, length: 0)
+    }
+
+    func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        switch string {
+        case let value as NSAttributedString:
+            imeMarkedText.setAttributedString(value)
+        case let value as String:
+            imeMarkedText.mutableString.setString(value)
+        default:
+            imeMarkedText.mutableString.setString("")
+        }
+
+        // keyDown の外から来た場合 (入力ソース切り替え等) はここで直接同期する。
+        // keyDown 中なら keyDown 側が syncPreedit を呼ぶので二重に呼ばない。
+        if imeTextAccumulator == nil { syncPreedit(clearIfNeeded: true) }
+    }
+
+    func unmarkText() {
+        guard imeMarkedText.length > 0 else { return }
+        imeMarkedText.mutableString.setString("")
+        if imeTextAccumulator == nil { syncPreedit(clearIfNeeded: true) }
+    }
+
+    func validAttributesForMarkedText() -> [NSAttributedString.Key] { [] }
+
+    func attributedSubstring(
+        forProposedRange range: NSRange, actualRange: NSRangePointer?
+    ) -> NSAttributedString? { nil }
+
+    func characterIndex(for point: NSPoint) -> Int { 0 }
+
+    /// 変換候補ウィンドウの表示位置。スクリーン座標で返す必要がある。
+    func firstRect(forCharacterRange range: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        let cell = imeCellSize
+        guard let surface else { return NSRect(origin: frame.origin, size: .zero) }
+
+        var x: Double = 0, y: Double = 0
+        var width = Double(cell.width), height = Double(cell.height)
+        ghostty_surface_ime_point(surface, &x, &y, &width, &height)   // [RENDERER] imePoint
+
+        // libghostty は左上原点。この NSView は非 flipped なので反転する。
+        // width は上記の理由で未スケールなので、ここでは **生値のまま記録する**
+        // (スパイクは観測が目的。本体では TerminalRenderer 側で吸収すること)。
+        let viewRect = NSRect(x: x, y: frame.height - y,
+                              width: width, height: max(height, cell.height))
+        let windowRect = convert(viewRect, to: nil)
+        guard let window else { return windowRect }
+        return window.convertToScreen(windowRect)
+    }
+
+    func insertText(_ string: Any, replacementRange: NSRange) {
+        let chars: String
+        switch string {
+        case let value as NSAttributedString: chars = value.string
+        case let value as String: chars = value
+        default: return
+        }
+
+        // insertText が来た時点で変換は終わっている。
+        unmarkText()
+
+        // keyDown の内側なら accumulator へ積むだけ (keyDown が打鍵として送る)。
+        if imeTextAccumulator != nil {
+            imeTextAccumulator?.append(chars)
+            return
+        }
+
+        // keyDown の外 (ディクテーション・絵文字ビューア・文字ビューア) からの挿入。
+        // 対応する打鍵が無いので paste 経路で流す。
+        // NOTE(M2 の知見): `ghostty_surface_text` は bracketed paste で包まれる。
+        spikeSendText(chars)
+    }
+
+    /// `interpretKeyEvents` が変換以外のコマンドへ落としたもの (insertNewline: など) は
+    /// ここへ来る。端末アプリでは AppKit の編集コマンドを実行してはいけないので握り潰し、
+    /// keyDown 側の通常経路 (`ghosttyText(for:)` → `ghostty_surface_key`) に任せる。
+    override func doCommand(by selector: Selector) {}
 }
 
 // MARK: - M2 検証用フック (スパイク専用。本体には持ち込まない)
@@ -791,6 +976,53 @@ extension GhosttySurfaceNSView {
             }
         }
         return out
+    }
+
+    // MARK: M3 — IME 経路のフック
+    //
+    // 実 IME (かな漢字変換) は自動化できないので、`NSTextInputClient` の
+    // `setMarkedText` 相当を直接叩いて **preedit の描画そのもの**を確認する。
+    // 変換候補ウィンドウの位置決めに使う `ghostty_surface_ime_point` も同時に読む。
+
+    /// 変換中文字列を直接セットする (空文字でクリア)。
+    func spikeSetPreedit(_ text: String) {
+        imeMarkedText.mutableString.setString(text)
+        syncPreedit(clearIfNeeded: true)
+    }
+
+    /// `NSEvent` を合成して `keyDown(with:)` を通す。
+    ///
+    /// M2 の `spikeSendKey` は libghostty の入力 API を直接叩くため、M3 で書き換えた
+    /// keyDown (`interpretKeyEvents` → `NSTextInputClient` → accumulator) を
+    /// 素通りしてしまう。ここだけは AppKit の入力経路を通す必要がある。
+    /// **実 IME の変換は再現できない**(入力ソースは Roman のまま)。
+    func spikeKeyDown(_ characters: String, keyCode: UInt16) {
+        guard let window else { return }
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: keyCode
+        ) else { return }
+        keyDown(with: event)
+    }
+
+    /// `ghostty_surface_ime_point` の生値と、そこから作った候補ウィンドウ矩形。
+    func spikeIMEReport() -> String {
+        guard let surface else { return "surface=<nil>" }
+        var x = 0.0, y = 0.0, w = 0.0, h = 0.0
+        ghostty_surface_ime_point(surface, &x, &y, &w, &h)
+        let rect = firstRect(forCharacterRange: NSRange(), actualRange: nil)
+        return "ime_point(topleft,pt)=(\(x), \(y)) size=\(w)x\(h)"
+            + " marked=\(imeMarkedText.string.debugDescription)"
+            + " firstRect(screen)=\(NSStringFromRect(rect))"
+            + " cell=\(imeCellSize.width)x\(imeCellSize.height)"
     }
 }
 

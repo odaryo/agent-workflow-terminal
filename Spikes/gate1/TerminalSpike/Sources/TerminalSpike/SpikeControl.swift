@@ -26,6 +26,9 @@
 //   scroll <dx> <dy>
 //   drag <c1> <r1> <c2> <r2> [shift]  セル座標でドラッグ (down → move → up)
 //   resize <w> <h>         ウィンドウの content size (pt)
+//   keydown <string>       **M3** NSEvent を合成して keyDown 経路を通す (1文字ずつ)
+//   preedit <string>       **M3** 変換中文字列を直接セット (空文字でクリア)
+//   ime [label]            **M3** ghostty_surface_ime_point / 候補ウィンドウ矩形をログへ
 //   report [label]         surface の観測値をログへ
 //   log <text>             ログに任意のマーカーを書く
 //   sleep <ms>             以降のコマンドを遅延実行する
@@ -147,6 +150,17 @@ final class SpikeControl: NSObject {
             if n.count == 2 {
                 view.window?.setContentSize(NSSize(width: n[0], height: n[1]))
             }
+        case "keydown":
+            // M3: AppKit の keyDown 経路 (interpretKeyEvents 経由) を通す
+            for ch in unescape(arg) {
+                let code: UInt16 = ch == "\r" || ch == "\n" ? 36 : 0
+                view.spikeKeyDown(ch == "\n" ? "\r" : String(ch), keyCode: code)
+            }
+        case "preedit":
+            // M3: 実 IME 無しで preedit (変換中文字列) の描画だけを確認する
+            view.spikeSetPreedit(unescape(arg))
+        case "ime":
+            NSLog("[spike] IME \(arg): \(view.spikeIMEReport())")
         case "report":
             NSLog("[spike] REPORT \(arg): \(view.spikeReport())")
         case "log":

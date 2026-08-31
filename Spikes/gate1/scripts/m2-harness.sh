@@ -29,6 +29,8 @@ CTL="${RUN}/ctl"
 LOG="${RUN}/app.log"
 SOCK=gate1-spike
 SESSION=gate1-spike
+# 証跡ファイル名の接頭辞。M3 以降は scripts/m3-harness.sh が m3 を渡す。
+PREFIX="${SPIKE_SHOT_PREFIX:-m2}"
 
 mkdir -p "${RUN}" "${EV}"
 
@@ -67,8 +69,8 @@ shot)
   if [ -z "${id}" ]; then echo 'report shot' >> "${CTL}"; naptime 0.6
      id="$(grep -o 'window=[0-9]*' "${LOG}" | tail -1 | cut -d= -f2)"; fi
   [ -n "${id}" ] || { echo "no window id" >&2; exit 1; }
-  screencapture -x -o -l "${id}" "${EV}/m2-${2}.png"
-  echo "${EV}/m2-${2}.png"
+  screencapture -x -o -l "${id}" "${EV}/${PREFIX}-${2}.png"
+  echo "${EV}/${PREFIX}-${2}.png"
   ;;
 log)
   tail -n "${2:-40}" "${LOG}"

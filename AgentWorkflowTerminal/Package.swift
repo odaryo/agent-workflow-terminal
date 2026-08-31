@@ -1,15 +1,10 @@
 // swift-tools-version: 6.0
-//
-// agent_workflow_terminal の Swift Package。
-// 詳細は AgentWorkflowTerminal/README.md および docs/coding-guidelines.md を参照。
 
 import PackageDescription
 
-/// 全ターゲット共通の Swift 設定。
-///
-/// - `swiftLanguageModes: [.v6]` により strict concurrency (complete) が有効になる。
-/// - `ExistentialAny` は `any` の明示を強制し、protocol-oriented な設計方針
-///   (docs/coding-guidelines.md) と整合させるために有効化する。
+/// strict concurrency をここで指定していないのは、末尾の `swiftLanguageModes: [.v6]` が
+/// complete を含むため。`ExistentialAny` は既定では off だが、`any` の明示を強制して
+/// protocol 中心の設計 (docs/coding-guidelines.md §2.1) を型で担保するため有効にしている。
 let commonSwiftSettings: [SwiftSetting] = [
   .enableUpcomingFeature("ExistentialAny")
 ]
@@ -24,13 +19,13 @@ let package = Package(
     .library(name: "TerminalCore", targets: ["TerminalCore"]),
     .library(name: "Adapters", targets: ["Adapters"]),
   ],
+  // 依存は TerminalCore ← Adapters の一方向だけに保つ。ビルドシステムは逆向きの依存を
+  // 検出しないため、ここを目視で守るしかない (docs/coding-guidelines.md §2.2)。
   targets: [
-    // ドメインモデル層。UI・外部プロセスへの依存を持たない。
     .target(
       name: "TerminalCore",
       swiftSettings: commonSwiftSettings
     ),
-    // 外部世界(tmux / git CLI 等)との境界。TerminalCore にのみ依存する。
     .target(
       name: "Adapters",
       dependencies: ["TerminalCore"],

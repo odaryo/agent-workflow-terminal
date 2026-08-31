@@ -1,8 +1,7 @@
 import Foundation
 
-/// tmux の pane 識別子 (`%0` 形式)。
-///
-/// 値の生成元は tmux CLI の `#{pane_id}` (Spikes/gate1/README.md §8.10)。
+/// 値は tmux CLI の `#{pane_id}` をそのまま入れる (`%0` 形式、`%` 込み。
+/// Spikes/gate1/README.md §8.10)。アプリ側で採番しない。
 public struct PaneID: Sendable, Hashable, Codable, RawRepresentable {
   public let rawValue: String
 
@@ -11,12 +10,11 @@ public struct PaneID: Sendable, Hashable, Codable, RawRepresentable {
   }
 }
 
-/// pane 単位で観測した Agent 状態のスナップショット。
 public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public let id: PaneID
-  /// 正規化済みの Agent 状態。
   public let state: AgentState
-  /// この状態を最後に更新した時刻。§12.2 の「最終更新順」の判定に使う。
+  /// このフィールドが必要なのは、§12.2 が同順位の pane を「最終更新順」で並べるため。
+  /// 観測した時刻ではなく、状態が変化した時刻を入れる。
   public let lastUpdatedAt: Date
 
   public init(id: PaneID, state: AgentState, lastUpdatedAt: Date) {
@@ -26,13 +24,11 @@ public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   }
 }
 
-/// worktree タブへ1つだけ表示する代表状態。
 public struct WorktreeRepresentativeState: Sendable, Hashable, Codable {
-  /// タブの優先順位を決める大分類。
   public let category: WorktreeStateCategory
-  /// 代表となった pane の詳細状態 (アイコン等での区別に使う)。
+  /// `category` から導ける情報だが別に持たせているのは、needsAttention の中の
+  /// question / permission / error を UI が区別して表示するため。
   public let state: AgentState
-  /// 代表となった pane。
   public let paneID: PaneID
 
   public init(category: WorktreeStateCategory, state: AgentState, paneID: PaneID) {
@@ -42,22 +38,14 @@ public struct WorktreeRepresentativeState: Sendable, Hashable, Codable {
   }
 }
 
-/// worktree 内の pane 状態から、タブへ表示する代表状態を1つ決める純粋関数。
+/// 規則の出典は設計書 §12.2「pane状態とworktree代表状態」および §12.3。
 ///
-/// 設計書 §12.2「pane状態とworktree代表状態」の規則:
-///
-/// 1. 大分類の優先順位は `Needs Attention > Ready for Review > Working > Idle`。
-/// 2. `Question` / `Permission` / `Error` は `Needs Attention` として同列に扱い、
-///    その中では最終更新順とする。
-/// 3. Agent 完了は `Needs Attention` ではなく `Ready for Review` に分類する。
-///
-/// 加えて §12.3 に従い、`Unknown` は `Working` / `Idle` へ丸めない。
-///
-/// - Note: 同列内の並びは §12.2 が `Needs Attention` についてのみ言及しているが、
-///   実装では全分類に対して一様に「最終更新が新しい pane を優先」を適用する。
-///   分類・時刻ともに同じ場合は入力順の先頭を採り、結果を決定的にする。
-/// - Parameter panes: worktree に属する pane の状態。順序は問わない。
-/// - Returns: 代表状態。pane が1つも無ければ `nil`。
+/// - Note: 同順位内の並びについて §12.2 は `Needs Attention` にしか言及していない。
+///   実装では全分類へ一様に「最終更新が新しい pane を優先」を適用し、分類・時刻とも
+///   同じ場合は入力順の先頭を採る。設計書に無い判断であり、UI のちらつきを避けるために
+///   結果を決定的にすることだけを根拠にしている。
+/// - Returns: pane が1つも無ければ `nil`。「pane が無い」と「Idle」は別物なので、
+///   ここで `.idle` を捏造しない。
 public func resolveWorktreeRepresentativeState(
   panes: [PaneAgentState]
 ) -> WorktreeRepresentativeState? {

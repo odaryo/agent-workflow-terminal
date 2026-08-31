@@ -3,16 +3,15 @@ import Testing
 
 @testable import TerminalCore
 
-/// 設計書 §12.2「pane状態とworktree代表状態」/ §12.3「Unknown」に対するテスト。
-///
-/// 本ファイルは Phase 1 の TDD リファレンス実装であり、
-/// docs/coding-guidelines.md「TDD方針」の実例を兼ねる。
+/// このファイルは docs/coding-guidelines.md §3.1 から TDD のリファレンス実装として
+/// 参照されている。書き方を変えるときは同節も直す。
 @Suite("worktree代表状態の解決 (設計書 §12.2 / §12.3)")
 struct WorktreeRepresentativeStateTests {
 
   // MARK: - Helpers
 
-  /// テスト用の基準時刻。相対秒でのみ差をつける。
+  /// `Date()` を使わず固定値にしているのは、実行時刻に依存させないため。
+  /// 各 pane の時刻はここからの相対秒でのみ差をつける。
   private static let epoch = Date(timeIntervalSince1970: 1_700_000_000)
 
   private func pane(

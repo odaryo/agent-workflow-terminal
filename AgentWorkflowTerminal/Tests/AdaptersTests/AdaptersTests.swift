@@ -3,11 +3,9 @@ import Testing
 @testable import Adapters
 @testable import TerminalCore
 
-/// `Adapters` ターゲットのテスト置き場。
-///
-/// Phase 1 では実装が無いため、モジュール構成と依存方向が壊れていないことだけを確認する。
-/// 実際の CLI 出力パーサが入ったら、`Tests/AdaptersTests/Fixtures/` に保存した
-/// 実出力を入力とするテストをここへ追加する (docs/coding-guidelines.md「TDD方針」)。
+/// 検証内容が薄いのは、Phase 1 の `Adapters` に実装が無いため。
+/// モジュール構成と依存方向の破壊をビルドで検出することだけが目的で、
+/// 実装が入ったら本来のテストへ置き換える。
 @Suite("Adapters ターゲットの足場")
 struct AdaptersScaffoldTests {
 

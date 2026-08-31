@@ -1,6 +1,7 @@
 import Foundation
 
-/// `AgentAdapter` の識別子 (`claude-code`、`codex`、`process-detection` 等)。
+/// `rawValue` は `"claude-code"` / `"codex"` / `"process-detection"` のような
+/// 安定した識別子を入れる。UI 表示名を入れない (永続化と診断表示に使うため)。
 public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
   public let rawValue: String
 
@@ -9,14 +10,12 @@ public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
   }
 }
 
-/// tmux CLI から観測できる pane の情報。
-///
 /// フィールドは Spikes/gate1/README.md §8.10 で実測した
 /// `#{pane_id}` / `#{pane_pid}` / `#{pane_tty}` / `#{pane_current_command}` /
-/// `#{pane_current_path}` / `#{pane_title}` / `#{pane_dead}` に対応する。
+/// `#{pane_current_path}` / `#{pane_title}` / `#{pane_dead}` に一対一で対応する。
 ///
 /// - Important: libghostty v1.3.1 には `ghostty_surface_foreground_pid` /
-///   `tty_name` が存在しないため、プロセス観測の一次情報源は tmux CLI とする
+///   `tty_name` が存在しないため、プロセス観測を renderer から取らず tmux CLI に寄せている
 ///   (Spikes/gate1/README.md 申し送り #2、設計書 §21.3 と整合)。
 public struct PaneSnapshot: Sendable, Hashable, Codable {
   public let id: PaneID
@@ -46,20 +45,16 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
   }
 }
 
-/// Adapter が返す状態観測の結果。
-///
-/// `state` が `.unknown` の場合に何が分かっているかを併せて返せるようにしている
+/// `AgentState` を裸で返さないのは、`.unknown` のときに「何が分かっているか」を
+/// ユーザーへ提示する必要があるため
 /// (設計書 §12.3「`Unknown` から Adapter 名、最終成功時刻、エラー詳細を確認できる」)。
 public struct AgentStateObservation: Sendable, Hashable, Codable {
-  /// 正規化済みの状態。
   public let state: AgentState
-  /// 観測を行った Adapter。
   public let adapterID: AgentAdapterID
-  /// この観測を行った時刻。
   public let observedAt: Date
-  /// 直近で状態を確定できた時刻。一度も確定できていない場合は `nil`。
+  /// 直近で状態を**確定できた**時刻。`observedAt` とは別物で、一度も確定できていなければ `nil`。
   public let lastKnownAt: Date?
-  /// `.unknown` / `.error` の理由。UI での診断表示に使う。
+  /// `.unknown` / `.error` の理由。診断表示専用で、分岐の条件に使わない。
   public let diagnostics: String?
 
   public init(
@@ -79,14 +74,6 @@ public struct AgentStateObservation: Sendable, Hashable, Codable {
 
 /// Agent 固有の情報を Terminal 共通状態へ正規化する境界 (設計書 §12.1)。
 ///
-/// ```text
-/// AgentAdapter
-/// ├─ ClaudeCodeAdapter
-/// ├─ CodexAdapter
-/// └─ UnsupportedAgentFallback
-///         └─ process detection
-/// ```
-///
 /// - Important: この protocol より上のレイヤに、特定 Agent (Claude Code 等) を
 ///   前提とした分岐を書かない。Agent 固有の知識はすべて実装体の内側に閉じる。
 /// - Important: 状態を確定できない場合は `.working` / `.idle` へ丸めず
@@ -95,13 +82,13 @@ public struct AgentStateObservation: Sendable, Hashable, Codable {
 /// - Note: Phase 1 時点では宣言のみで実装体を持たない。取得可能な signal と
 ///   `Permission` / `Question` / `Completed` / `Error` の厳密な検出条件は
 ///   設計書 §12.4 で未確定であり、確定後にこの protocol の形も見直す。
+///   いま在る形を確定仕様として扱わない。
 public protocol AgentAdapter: Sendable {
-  /// この Adapter の識別子。
   var id: AgentAdapterID { get }
 
-  /// pane がこの Adapter の担当かどうかを判定する。
   func canHandle(_ pane: PaneSnapshot) -> Bool
 
-  /// pane の現在状態を観測する。
+  /// 観測に失敗しても `throws` にしないのは、失敗そのものを `.unknown` として
+  /// 返す設計だから (§12.3)。呼び出し側に「状態が無い」経路を作らない。
   func observeState(of pane: PaneSnapshot) async -> AgentStateObservation
 }

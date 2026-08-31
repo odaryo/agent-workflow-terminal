@@ -74,5 +74,7 @@ Spikes/**/.zig-cache/
 Spikes/**/zig-cache/
 Spikes/**/DerivedData/
 Spikes/**/*.xcframework/
+Spikes/**/.build-shim/
+Spikes/gate1/build/
 # 検証エビデンス(スクリーンショット・ログ・CSV)は容量が大きいため追跡しない。
 Spikes/gate1/evidence/

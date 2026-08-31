@@ -17,8 +17,10 @@ struct TmuxListPanesTests {
 
   @Test("tmux 3.4 の実出力を複数 pane の値型へ変換する")
   func parsesTmux34Fixture() throws {
-    let panes = try TmuxListPanes.parse(output: fixture(named: "tmux-3.4-list-panes.txt"))
+    let result = TmuxListPanes.parse(output: try fixture(named: "tmux-3.4-list-panes.txt"))
+    let panes = result.panes
 
+    #expect(result.failures.isEmpty)
     #expect(panes.count == 2)
     #expect(panes[0].paneID == PaneID(rawValue: "%0"))
     #expect(panes[0].sessionName == "pilot fixture [&]")
@@ -49,9 +51,70 @@ struct TmuxListPanesTests {
     #expect(pane.currentCommand == "agent worker [&]")
   }
 
+  @Test("tmux 3.4 の実出力からバックスラッシュ・リテラル\\037・TAB・LFを復元する")
+  func unescapesHostileSessionNameFromTmux34Fixture() throws {
+    let result = TmuxListPanes.parse(
+      output: try fixture(named: "tmux-3.4-list-panes-hostile-session.txt")
+    )
+
+    #expect(result.failures.isEmpty)
+    #expect(result.panes.count == 1)
+    #expect(result.panes.first?.sessionName == "pilot\\name \\037 literal\ttab\nline")
+  }
+
+  @Test("vis の C-style・八進・meta・二重バックスラッシュをフィールドごとに復元する")
+  func unescapesVisEncodingsInFields() throws {
+    let separator = "\\037"
+    let line = [
+      "%7", "slash\\\\ literal\\\\037 tab\\t octal\\141 meta\\M-C\\M-8", "2", "@4", "3",
+      "4242", "1", "command\\nline\\rreturn",
+    ].joined(separator: separator)
+
+    let pane = try TmuxListPanes.parse(line: line)
+
+    #expect(pane.sessionName == "slash\\ literal\\037 tab\t octala metaø")
+    #expect(pane.currentCommand == "command\nline\rreturn")
+  }
+
   @Test("空の出力は pane が無いものとして空配列にする")
-  func emptyOutputProducesNoPanes() throws {
-    #expect(try TmuxListPanes.parse(output: "").isEmpty)
+  func emptyOutputProducesNoPanes() {
+    let result = TmuxListPanes.parse(output: "")
+
+    #expect(result.panes.isEmpty)
+    #expect(result.failures.isEmpty)
+  }
+
+  @Test("1行の異常があっても正常 pane と行番号・原文・エラーを両方返す")
+  func preservesPartialSuccessAndLineFailure() {
+    let validFirst = "%0\\037first\\0370\\037@0\\0370\\037123\\0371\\037zsh"
+    let invalid = "%1\\037broken\\0370\\037@1\\0370\\037124\\0372\\037sleep"
+    let validLast = "%2\\037last\\0371\\037@2\\0370\\037125\\0370\\037codex"
+
+    let result = TmuxListPanes.parse(
+      output: [validFirst, invalid, validLast].joined(separator: "\n"))
+
+    #expect(result.panes.map(\.paneID) == [PaneID(rawValue: "%0"), PaneID(rawValue: "%2")])
+    #expect(
+      result.failures
+        == [
+          TmuxListPanesParseFailure(
+            lineNumber: 2,
+            line: invalid,
+            error: .invalidPaneActive("2")
+          )
+        ]
+    )
+  }
+
+  @Test("tmux の LF だけをレコード区切りとして U+2028 はフィールド内に保持する")
+  func onlyLineFeedSeparatesRecords() {
+    let sessionName = "before\u{2028}after"
+    let line = "%0\\037\(sessionName)\\0370\\037@0\\0370\\037123\\0371\\037zsh"
+
+    let result = TmuxListPanes.parse(output: line + "\n")
+
+    #expect(result.failures.isEmpty)
+    #expect(result.panes.first?.sessionName == sessionName)
   }
 
   @Test("フィールド数が8でなければ拒否する")
@@ -68,11 +131,25 @@ struct TmuxListPanesTests {
     }
   }
 
+  @Test("不正な vis エスケープはフィールド番号と UTF-8 byte offset を返す")
+  func rejectsInvalidVisEscape() {
+    #expect(
+      throws: TmuxListPanesParseError.invalidVisEscape(
+        fieldNumber: 2,
+        value: "broken\\x",
+        byteOffset: 6
+      )
+    ) {
+      try TmuxListPanes.parse(
+        line: "%0\\037broken\\x\\0370\\037@0\\0370\\037123\\0371\\037zsh"
+      )
+    }
+  }
+
   private func fixture(named name: String) throws -> String {
-    let fixtureURL = URL(fileURLWithPath: #filePath)
-      .deletingLastPathComponent()
-      .appendingPathComponent("Fixtures")
-      .appendingPathComponent(name)
+    let fixtureURL = try #require(
+      Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures")
+    )
     return try String(contentsOf: fixtureURL, encoding: .utf8)
   }
 }

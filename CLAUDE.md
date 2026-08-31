@@ -30,7 +30,9 @@ swiftlint lint --config .swiftlint.yml                    # requires `brew insta
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 
-Documentation is written in Japanese; keep that language when editing docs. Commits follow Conventional Commits (`docs: ...`).
+**Code = How / tests = What / commit log = Why / code comments = Why not.** Comments — `///` doc comments included — carry only what the code cannot: constraints, pitfalls, units, and design-doc section references. Never restate a name or a signature. See `docs/coding-guidelines.md` §8.
+
+Documentation is written in Japanese; keep that language when editing docs. Commits follow Conventional Commits (`docs: ...`), with the *why* in the body.
 
 ## The product in one line
 

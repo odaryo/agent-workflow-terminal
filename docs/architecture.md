@@ -1,0 +1,1425 @@
+# AI開発用Terminalアプリ 設計書
+
+> 文書ステータス: 会話で確定した仕様の整理 + 未確定事項の明示
+>
+> 作成日: 2026-08-31
+>
+> 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
+>
+> 開発名称: `agent_workflow_terminal`
+>
+> 正式プロダクト名: 未決定
+
+## 0. この文書の読み方
+
+この文書は、参照会話で検討した内容を次の4区分に分けて記録する。
+
+| 表記 | 意味 |
+|---|---|
+| **確定** | ユーザー回答によって採用が明示された仕様、または後続の会話で明確に上書きされた最終仕様 |
+| **現在の推奨** | 技術検討上の第一候補。実装決定ではなく、PoCに合格した場合の採用候補 |
+| **未確定** | 会話で提案されたが、ユーザーによる採用確定がない内容、または詳細が未定の内容 |
+| **対象外／不採用** | 実装しないこと、または後続の決定で撤回されたことが明確な内容 |
+
+特に、次の2領域を混在させない。
+
+- **Part I: Terminalアプリ本体** — Project、worktree、tmux、Viewer、状態検出、モバイル接続、ローカル保存など。
+- **Part II: Agent Skills／開発フロー** — 要件定義、設計、実装、検証、成果物による引き継ぎなど。
+
+TerminalはAgent開発フローの表示・操作・レビューを支援するが、Agent Skillsのオーケストレーターそのものにはしない。
+
+---
+
+# Part I. Terminalアプリ本体
+
+## 1. プロダクト思想
+
+### 1.1 確定した中核思想
+
+本プロダクトは、単なるターミナルエミュレーターでも、AI専用IDEでも、Agentダッシュボードでもない。
+
+> **Mac/PCを実行母艦として複数のAI Agentをworktree単位で並行稼働させ、人間がAgent Terminalを中心に、必要なときだけコード・Diff・Evidenceを確認し、どこからでも介入できるTerminalアプリ**
+
+確定した設計原則は次のとおり。
+
+1. **1開発Task = 1 worktree = 1タブ**とする。
+2. 各worktreeは独立したtmux sessionを持つ。
+3. UIの主役は常に**Agent Terminal**とする。
+4. Code、Diff、Evidenceは必要時だけViewer Drawerで開く。
+5. tmuxのpane構造と操作体系を活用し、独自のTerminal pane managerを再実装しない。
+6. Claude Code専用アプリにはせず、Agent Adapterで複数Agentを扱う。
+7. Gitの閲覧機能は強くするが、Git変更操作はAgentまたは通常Terminalに任せる。
+8. Mac/PCを唯一の実行ホストとし、iPhone/iPadにはrepositoryやAgent実行環境を置かない。
+9. Terminal本体とAgent Skillsを疎結合に保つ。
+10. 復元・履歴・Evidenceは、worktreeがなくなった後も必要に応じて参照できるようにする。
+
+### 1.2 明示的に作らないもの
+
+- 高機能なコードエディタ／IDE
+- フル機能のGitクライアント
+- GitHub PRレビュークライアント
+- CIダッシュボード
+- tmuxの完全GUI置換
+- Chrome DevTools相当のWeb Preview
+- リモートデスクトップ／VNC機能
+- Claude Code出力を解析して再構成する独自Chat UI
+- 独自Remote Terminal protocol
+- Git認証情報、SSH鍵、アクセストークンの管理機能
+
+## 2. 概念モデル
+
+### 2.1 確定モデル
+
+```text
+Application
+└─ Projects
+   └─ Project
+      ├─ Main / Project Root
+      │  └─ permanent tmux session
+      │     └─ panes
+      │
+      ├─ Active Worktrees
+      │  └─ Worktree / Task Tab
+      │     └─ dedicated tmux session
+      │        ├─ Agent implementation pane
+      │        ├─ Agent consultation pane
+      │        ├─ shell pane
+      │        └─ test/dev-server pane
+      │
+      └─ Inactive Worktrees
+         └─ detected but not shown as normal task tabs
+```
+
+### 2.2 用語
+
+| 用語 | 定義 |
+|---|---|
+| Project | Terminalに登録された1つのGit repository |
+| Main / Project Root | worktree Taskとは別枠の、repository root用の常設作業空間 |
+| Worktree | 1つの開発Taskを隔離するGit worktree |
+| Task Tab | Active worktreeを開くためのUIタブ。1 worktreeと1:1 |
+| tmux session | Mainまたは各worktreeに対応する独立した端末セッション |
+| pane | tmuxが管理する分割領域。Agent、shell、test watcherなどを実行 |
+| Agent Terminal | tmux paneに表示される通常のAgent TUI。アプリの中心画面 |
+| Viewer Drawer | Code、Diff、Evidence、Consultationなどを必要時だけ表示する補助領域 |
+| Active | 通常タブおよびOverviewに表示する現在作業中のworktree |
+| Inactive | Git上には存在するが、通常の作業タブには表示しないworktree |
+
+### 2.3 Project Rootの位置付け
+
+Project登録時に、Project Root用の常設tmux sessionを作成する。
+
+Project Rootは次の用途を持つ。
+
+- repository全体の調査
+- Agentへの実装前相談
+- `+ New Task`の開始地点
+- `CLAUDE.md`、`.claude/`、Agent Skills、各種設定ファイルの試験・変更
+- 通常のshell作業
+
+Git上は通常のrepositoryとして書き込み可能とし、Read-onlyにはしない。ただしTask worktreeとの誤認を防ぐため、UI上で明確に区別し、未commit変更があれば目立つ状態表示を行う。
+
+Project Rootで変更した設定を既存worktreeへ同期する専用機能は作らない。commit、merge、rebase、cherry-pick、コピーなどはAgentまたは通常Terminalから行う。
+
+## 3. worktree lifecycle
+
+### 3.1 作成
+
+worktree作成は原則としてAgent側が担当する。
+
+理由は、branch名、配置ディレクトリ、命名規則、base branchなどがProject固有ルールに依存するためである。Terminal UIは`git worktree add`の業務ルールを持たない。
+
+```text
+User selects + New Task
+        ↓
+Mac host starts a normal interactive Agent
+        ↓
+User and Agent clarify the task
+        ↓
+Agent creates a worktree according to project rules
+        ↓
+Terminal detects the worktree
+        ↓
+Worktree is registered/activated
+        ↓
+Dedicated tmux session and Task Tab become available
+```
+
+モバイルからも`+ New Task`を開始できる。ただし、モバイルアプリ自身がGit worktreeを作るのではなく、Mac上のAgentを起動して同じフローへ入る。
+
+### 3.2 検出とActive/Inactive
+
+- TerminalはProjectに存在する全worktreeを検出する。
+- 通常のTask TabにはActive worktreeだけを表示する。
+- 既存・過去・別用途のworktreeはInactiveとして保持できる。
+- AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。
+- Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
+
+### 3.3 Active化とtmux
+
+Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
+
+worktreeのActive状態とtmux sessionの存在は独立して扱う。
+
+### 3.4 完了とClose
+
+Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない。完了状態を表示し、PRレビュー後の追加修正を可能にする。
+
+最終的に人が`Close`を実行したときだけInactiveへ移す。Close時には次の処理を選択できる。
+
+1. UI上でInactiveにするだけ
+2. Inactive化し、tmux sessionも終了する
+3. Inactive化し、tmux sessionを終了し、worktreeも削除する
+
+削除を選ばない限り、tmux sessionとworktreeは保持する。
+
+### 3.5 未確定事項
+
+- Agentが新規作成したworktreeを、検出直後に常にActive化するか、確認を挟むか
+- worktree削除前の未commit、未push、未merge検証と警告条件
+- `Close`後にActiveへ戻す具体的UI
+- branch削除をClose操作に含めるか
+- Project Root用tmux sessionの命名規則
+- worktreeとtmux sessionの安定ID設計
+
+## 4. tmuxモデル
+
+### 4.1 確定仕様
+
+- **1 worktree = 1独立tmux session**とする。
+- 1 worktree内ではtmux windowを増やす運用を基本にせず、1 window相当の作業空間をpane分割して使う。
+- pane分割はtmuxに任せ、Terminalアプリ独自のpane engineは作らない。
+- Terminalはpane構成、実行中process、対応Agent、Agent状態を読み取る。
+- 操作主体はtmuxのままだが、Terminal UIから日常操作を呼び出せる。
+- tmuxのキーバインドもそのまま利用可能にする。
+
+Terminal UIで提供する操作は最小限とする。
+
+- 縦分割
+- 横分割
+- paneを閉じる
+- paneの選択／移動
+- pane zoom
+- 各操作のショートカット
+
+window/sessionの高度な管理、名前変更、並べ替え、swap-paneなどを網羅する完全GUIは作らない。
+
+### 4.2 複数端末からの接続
+
+同じtmux sessionをMac、iPhone、iPadから同時に表示・操作できる。独自の`Take Control`や入力排他制御は設けない。
+
+複数クライアントからの同時入力が起こり得ることを前提とし、誤操作防止は将来のUX課題として扱う。
+
+## 5. Agent Terminal中心UI
+
+### 5.1 通常状態
+
+通常はAgent Terminalだけを最大表示する。
+
+```text
+┌─────────────────────────────────────────┐
+│ feature/payment                ●  ⚠  ↑2 │
+├─────────────────────────────────────────┤
+│                                         │
+│            tmux / Agent TUI             │
+│                                         │
+│ > Implementing...                       │
+│                                         │
+└─────────────────────────────────────────┘
+```
+
+これは「Terminal中心」よりも厳密には**Agent Terminal中心**である。通常のshell、vim、dev serverなども同じTerminalとして自然に利用できる。
+
+### 5.2 paneとAgent表示
+
+- pane上には`Claude · Working`、`Codex · Needs Attention`、`zsh`など最小限の情報を表示する。
+- 必要なときだけ、そのworktree内のAgent一覧を開ける。
+- Agentが存在しないpaneも通常のTerminalとして扱う。
+- Agentがいないworktreeの代表状態は`Idle`とする。`npm`やvimなど非Agent processをworktree代表状態へ昇格させない。
+
+### 5.3 タブ表示
+
+Task Tabには次を圧縮表示する。
+
+- worktree名
+- Agent代表状態
+- Git状態を示す小さなマーク
+  - uncommitted changes
+  - clean
+  - unpushed commits等
+
+詳細なアイコン体系、色、アクセシビリティ表現は未確定。
+
+## 6. Viewer Drawer
+
+### 6.1 確定仕様
+
+Code、Diff、Evidenceは常設せず、必要時にViewer Drawerとして開く。
+
+```text
+┌──────────────────────┬──────────────────┐
+│                      │ Diff             │
+│ Agent / tmux         │                  │
+│                      │ User.php         │
+│                      │ + ...            │
+└──────────────────────┴──────────────────┘
+```
+
+- MacとiPad横画面では右Drawerを基本とする。
+- 通常はAgent領域を縮めて並べる。
+- 必要ならDrawerをAgent上へのOverlayに切り替えられる。
+- ViewerだけをFullscreen表示できる。
+- iPhoneでは基本的にFullscreen sheetとして表示する。
+- Drawer内部は最大2分割とする。
+- 2分割は左右または上下を選び、Code／Diff／Evidenceを任意に組み合わせる。
+- Viewer側に自由な多分割レイアウトは持たせない。
+
+### 6.2 Terminal出力からの遷移
+
+Terminal出力で確実に認識できる対象をリンク化する。
+
+| 対象 | 動作 |
+|---|---|
+| ファイルパス、行番号 | Code Viewerの該当位置を直接開く |
+| URL | OSの外部ブラウザで開く |
+| commit hash | Commit Diffを開く |
+
+Agent固有の出力形式を深く解析せず、汎用的かつ誤判定の少ない対象だけをリンク化する。曖昧な文字列はリンクにしない。
+
+PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構造化出力パーサーは対象外とする。
+
+## 7. File BrowserとCode Viewer
+
+### 7.1 File Browser
+
+現在のworktreeに存在する全ファイルを表示する。Git trackedだけには限定しない。
+
+- trackedファイルは通常表示
+- untracked／ignoredファイルはグレー等で区別
+- modified／added／deleted等のGit状態を表示
+- `node_modules`、`vendor`、build成果物、ログもアクセス可能
+- 巨大ディレクトリの性能を守るため、ディレクトリはlazy loadする
+
+### 7.2 大容量／バイナリファイル
+
+- バイナリまたは大容量ファイルは、クリック直後に本文を展開しない。
+- サイズ、行数、バイナリ判定を示し、`Open anyway`の確認を出す。
+- 警告対象となるサイズ／行数は設定可能にする。
+- デフォルト閾値は未確定。
+
+### 7.3 Code Viewer
+
+- 基本はread-only。
+- 編集は外部エディタ、vim、Agentなどに任せる。
+- ファイル変更を検知したら表示内容を自動更新する。
+- 行または行範囲を選択し、コメントまたは`Ask Claude`を実行できる。
+- ファイル単位のGit履歴を表示できる。
+- 過去commit時点のコード／Diffを表示できる。
+- blameを表示できる。
+- 履歴上のコードを選択して`Ask Claude`へ渡せる。
+
+軽量なsyntax highlightingは必要だが、v1でEditor engineやLSPを作ることはしない。
+
+## 8. 検索
+
+### 8.1 確定仕様
+
+- ファイル名検索と全文検索を提供する。
+- 検索専用DBやworktree別indexは必須としない。
+- 検索範囲は常に現在のworktree内だけとする。
+- 複数worktreeを横断する検索は提供しない。
+- 検索結果から該当ファイル／行を開ける。
+- 複数検索結果を選択し、ファイル、行番号、コード断片をfresh Agentへまとめて渡せる。
+
+### 8.2 現在の推奨
+
+全文検索はripgrep CLIをworktree rootで実行する。インデックス更新や削除時cleanupが不要であり、Git ignoreを尊重した検索と全ファイル検索を切り替えやすい。
+
+次のscope UIは提案されたが、詳細は未確定である。
+
+- Tracked files
+- All files（ignoredを含む）
+- Current directory
+
+検索開始タイミング、debounce、最大結果数、バイナリ／巨大ファイルの扱いも未確定。
+
+## 9. Diff Viewerとレビューsnapshot
+
+### 9.1 Diff種別
+
+次の3種類を提供する。
+
+1. **Commit Diff** — 指定commitの変更
+2. **Base Diff** — base branchとの差分
+3. **Branch Diff** — 指定した任意branchとの差分
+
+base branchの自動判定方法、merge-baseの使い方、未commit変更をどのDiffへ含めるかは未確定。
+
+### 9.2 コメント
+
+- Diffの行または範囲にローカルレビューコメントを付けられる。
+- コメント単体でAgentへ送信できる。
+- 複数コメントをReview batchとしてまとめてAgentへ送信できる。
+- GitHub PR reviewへの直接投稿は行わない。
+
+### 9.3 snapshot
+
+Diffは開いた時点でsnapshotとして固定する。Agentが裏で変更を続けても、レビュー中の表示とコメント位置を自動で動かさない。
+
+```text
+Diff snapshot opened
+        ↓
+Agent changes files
+        ↓
+Viewer shows "files changed since this diff was opened"
+        ↓
+User selects Refresh
+        ↓
+New snapshot is created
+        ↓
+Old snapshot and comments remain in review history
+```
+
+Refreshは既存snapshotの上書きではなく、新しいsnapshotの作成である。古いコメントを新Diffへ推測追従させない。
+
+### 9.4 Review状態
+
+Diff snapshotにはシンプルな状態だけを持たせる。
+
+- `Reviewing`
+- `Reviewed`
+
+Agentの実装サイクル、修正回、レビュー回の対応関係まではTerminal側で管理しない。
+
+## 10. Ask ClaudeとConsultation Log
+
+> 注: UI名として`Ask Claude`が会話で使われたが、プロダクト全体はClaude専用にしない。名称をAgent非依存に一般化するかは未確定。
+
+### 10.1 質問の起点
+
+次の対象から質問を開始できる。
+
+- Code Viewerの選択行／行範囲
+- Diffの選択範囲
+- Evidence画像または注釈
+- 複数の検索結果
+- 過去のCode／Diff履歴
+
+### 10.2 Consultation pane
+
+- 各worktreeに相談用paneを1つ持つ。
+- pane自体は再利用する。
+- `Ask Claude`ごとのAgent sessionは原則fresh contextにする。
+- 必要なら現在のconsultationを継続できる。
+- 新規質問のデフォルトは`New conversation`とする。
+- Agentはそのworktreeをcwdとして起動し、必要に応じて自由に他ファイル、Git履歴、テスト等を調査できる。
+- Terminalは巨大なcontext builderを持たず、「何について質問したか」を起点情報として渡す。
+
+PCでは回答を右サイドパネルに表示し、コード等を見ながら相談できる。iPhoneではsheet／overlay表示とする。これは独自Chat backendではなく、背後の通常Agent paneを別表現で見せる位置付けである。
+
+### 10.3 Consultation Log
+
+Agent sessionのresume履歴とは別に、TerminalがProject単位で永続保存する。
+
+保存対象:
+
+- 質問
+- 最終回答
+- 質問の起点Context
+- 選択したコード／Diffのsnapshot
+- Evidenceと注釈の参照
+- commit hash、file path、line range等のGit参照情報
+- 作成日時
+- 元worktreeとそのActive／Closed状態
+
+保存しないもの:
+
+- Agent内部の全tool call
+- 読み取った全ファイル一覧
+- Agent sessionの完全ログ
+- Gitにcommitする相談履歴ファイル
+
+worktree削除後もsnapshotで当時の質問対象を確認できる。Git参照が有効なら、そのcommit時点のrepositoryへも辿れる。
+
+過去ログから`Ask new question`を実行する場合は、過去sessionをresumeせず、fresh sessionを開始する。過去ログを新しい質問へ渡す場合は明示的に選択する。
+
+## 11. 質問UIと通知
+
+### 11.1 質問UIの優先順位
+
+1. Agentネイティブの質問UIを最優先する。
+2. AgentネイティブUIが使えない場合だけ、Terminal共通Questions UIをfallbackとして利用する。
+3. TerminalはAgentの質問システムを置き換えない。
+
+全worktree横断のQuestions Inboxは作らない。質問待ちはTask Tabの状態で把握し、対象worktreeを開いて対応する。
+
+質問待ちタブを開くと、Terminal表示を維持したまま質問カードをoverlayする。閉じれば通常Terminal操作へ戻れる。
+
+### 11.2 通知
+
+通知はモバイル固有ではなく、Mac/PCとモバイルの共通機能とする。
+
+対象は原則として、人間の対応が必要なイベントである。
+
+- Question
+- Permission
+- Agent Error
+- PR Ready／Ready for Review
+- 長時間継続する`Unknown`
+
+通知種別は個別にON/OFFできるようにする。
+
+通知を開いた場合、対象worktreeだけでなく対応箇所までdeep linkする。
+
+| 通知 | 遷移先 |
+|---|---|
+| Question | worktree → 該当pane → 質問overlay |
+| Permission | worktree → 該当pane |
+| Error | worktree → 該当pane／詳細 |
+| Ready for Review | worktree → Diff |
+
+通知上でAllow／Denyなどを直接実行する機能は対象外とする。
+
+Push通知をMac hostからiOSへ届ける具体的方式は未確定。
+
+## 12. Agent Adapterと状態モデル
+
+### 12.1 Adapter境界
+
+TerminalにAgent Adapter層を持たせる。
+
+```text
+AgentAdapter
+├─ ClaudeCodeAdapter
+├─ CodexAdapter
+└─ UnsupportedAgentFallback
+        └─ process detection
+```
+
+各AdapterはAgent固有のhook、API、process、状態情報を利用し、Terminal共通状態へ正規化する。未対応Agentはprocess検出へfallbackする。
+
+Agent Skill側からTerminal APIへの状態pushを必須にはしない。これによりTerminalとSkillsの密結合を避ける。
+
+### 12.2 pane状態とworktree代表状態
+
+pane単位ではAgent固有の詳細状態を保持できる。worktree全体には代表状態を1つだけ表示する。
+
+大分類の優先順位:
+
+```text
+Needs Attention
+    > Ready for Review
+    > Working
+    > Idle
+```
+
+`Question`、`Permission`、`Error`は`Needs Attention`として同列に扱い、その中では最終更新順とする。種類はアイコン等で区別する。
+
+Agent完了は`Needs Attention`ではなく`Ready for Review`に分類する。
+
+複数Agent paneがある場合でも、タブには最重要の代表状態を1つ表示し、paneごとの詳細はworktreeを開いて確認する。
+
+### 12.3 Unknown
+
+Agent processの存在は確認できるが、Adapterが状態を確定できない場合は推測で`Working`や`Idle`へ丸めず、正式な`Unknown`状態とする。
+
+- 一時的な`Unknown`では通知しない。
+- 設定可能な時間を超えて継続した場合に通知する。
+- 会話では約10分が初期値候補として示されたが、デフォルト値は最終確定していない。
+- `Unknown`からAdapter名、最終成功時刻、エラー詳細を確認できる。
+- Agentそのものの失敗とAdapterの状態取得失敗を混同しない。
+
+### 12.4 状態遷移の未確定事項
+
+- Agentごとに実際に取得可能なsignal
+- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件
+- PR Readyの検出元
+- process fallback時に`Working`と`Idle`を区別できる範囲
+- Adapter eventの永続化期間
+- false positive／false negativeの許容条件
+
+## 13. Active Worktrees Overview
+
+複数Project／worktreeの状況を一時的に確認する軽量Overviewを提供する。メイン画面や常設Dashboardにはしない。
+
+表示例:
+
+```text
+Project A
+  ? fix-login         Question
+  ● feature-search    Working
+  ✓ payment-api       Ready for Review
+
+Project B
+  ○ Main              Idle
+```
+
+Overviewは閲覧と対象worktreeへの移動だけを行う。質問回答、Agent停止、Close、PR操作などはOverviewから行わない。
+
+並び順は次のとおり。
+
+1. 人間の対応が必要な状態
+2. それ以外を最終操作順
+
+`Question`、`Permission`、`Error`間に固定優先順位は付けず、最終更新順とする。
+
+## 14. Evidence
+
+### 14.1 責務分担
+
+| 領域 | Agent／外部ツール | Terminal |
+|---|---|---|
+| スクリーンショット撮影 | 担当 | 担当しない |
+| 撮影タイミング決定 | 担当 | 担当しない |
+| PRへ掲載するEvidenceの選択 | 担当 | 担当しない |
+| Evidence検出・取り込み | 登録可能 | 担当 |
+| 表示、注釈、検索、保存 | 利用可能 | 担当 |
+| Agentへのフィードバック | 受信 | 送信UIを提供 |
+
+### 14.2 Evidence形式
+
+v1の対象はスクリーンショットとメタ情報に限定する。
+
+メタ情報の例:
+
+- URL
+- viewport
+- browser
+- 撮影時刻
+- Project／worktree
+- 任意の説明
+
+画面録画、テスト結果、performance reportなどへの一般化は未確定であり、v1対象外とする。
+
+### 14.3 注釈
+
+PC、iPad、iPhoneで次の注釈を付けられる。
+
+- ピン
+- 矩形範囲
+- コメント
+
+フリーハンド描画は対象外とする。
+
+注釈は元画像を破壊せず、別データとして保持する。座標は表示サイズに依存しない正規化座標で保持する案が示されている。具体的schemaは未確定。
+
+画像、注釈座標、コメントをAgentへ送って修正依頼できる。
+
+### 14.4 取り込み
+
+次の2経路に対応する。
+
+1. 特定ディレクトリのファイル監視
+2. 登録API
+
+v1はファイル監視から開始してよい。登録APIを必須にせず、Agent SkillとTerminalを密結合しない。
+
+### 14.5 保存
+
+```text
+Agent creates evidence in worktree
+        ↓
+Terminal detects/registers it
+        ↓
+Terminal-managed project storageへ取り込む
+        ↓
+MetadataをDBへ保存
+        ↓
+Worktree削除後も保持
+```
+
+画像本体をSQLiteへ入れず、filesystemへ保存し、DBにはpathとmetadataを保存する構成が現在の推奨である。
+
+## 15. Storage管理
+
+### 15.1 管理対象
+
+Storage画面を一本化し、Projectおよびデータ種別ごとの使用容量を確認できる。
+
+- Evidence
+- Diff Review snapshots／comments
+- Consultation Logs／code snapshots
+- その他のTerminal履歴
+
+### 15.2 Cleanup
+
+少なくとも次の単位で削除できる。
+
+- Evidence単体
+- worktree単位
+- Project単位
+- データ種別単位
+- 古いEvidenceの一括削除
+
+### 15.3 soft limit
+
+- 容量上限は設定可能にする。
+- 上限は保存を停止するhard limitではなく、cleanupを促すsoft limitとする。
+- 超過しても新しいEvidenceを保存し続ける。
+- 古いデータを削除候補として表示する。
+- ユーザーの明示操作なしにEvidenceを自動削除しない。
+
+Project別上限と全体上限のどちらを必須にするか、保存期間ベースcleanupを追加するか、初期上限値はいくつかは未確定。
+
+## 16. Project登録、clone、Git認証
+
+### 16.1 Project登録経路
+
+次の2経路に限定する。
+
+#### 既存Local Repository
+
+1. ローカルディレクトリを選択
+2. Git repositoryであることを検証
+3. repository rootを抽出
+4. Project Rootとして登録
+
+#### Clone Repository
+
+1. repository URLを入力
+2. clone先のローカルディレクトリを指定
+3. `git clone`を実行
+4. cloneされたrepository rootをProject Rootとして登録
+
+親ディレクトリ監視によるProject自動登録／discoveryは行わない。これはworktree自動検出とは別である。
+
+### 16.2 Git認証
+
+- 認証はOS、Git、SSH agent、Git Credential Manager等の既存環境へ完全委譲する。
+- Terminal自身はtoken、password、SSH private keyを保存・管理しない。
+- clone失敗時はGitのエラー出力をそのまま表示する。
+- 専用の認証診断UIやトラブルシューティングシステムは作らない。
+- 必要なら通常Terminalから原因を調査する。
+
+## 17. Git操作方針
+
+### 17.1 強くする閲覧機能
+
+- status
+- Commit／Base／Branch Diff
+- worktree全体のシンプルなCommit Log
+- commit選択からCommit Diff
+- ファイル履歴
+- blame
+- branch、ahead／behind、未commit等の状態表示
+
+### 17.2 GUI化しない変更操作
+
+- commit
+- push／pull
+- stage／partial commit
+- merge／rebase
+- cherry-pick
+- stash
+- reset
+- branch作成／削除
+
+これらはAgentまたは通常Terminalから実行する。Project Rootからworktreeへの設定同期も同様である。
+
+Git graphは提供せず、シンプルなCommit Logに留める。
+
+## 18. Web／GUI確認
+
+### 18.1 最終決定
+
+- アプリ内Web Previewは実装しない。
+- 通常URLも`localhost`も、すべてOSの外部ブラウザで開く。
+- GUI確認はMac/PC上の外部ブラウザをAgentが操作して行う。
+- Terminalアプリはbrowser、DevTools、DOM Inspector、Console、Network panelを再実装しない。
+- PC画面をモバイルから操作するVNC機能は持たない。
+- GUI確認結果はEvidence screenshotとしてモバイルから閲覧・注釈できる。
+
+途中で検討されたDrawer内Web Preview案は撤回済みである。
+
+## 19. 状態復元
+
+### 19.1 復元単位
+
+アプリ起動時、デバイスごとに次の状態を可能な範囲で復元する。
+
+- Project
+- worktree
+- tmux session
+- 選択pane
+- Viewer Drawerの開閉
+- Drawerの幅
+- Viewerの左右／上下分割
+- 開いていたCode／Diff／Evidence
+- Diff review途中のsnapshot
+
+PC、iPad、iPhoneの表示状態は完全に独立して保存する。PCで最後に見ていた位置をiPhoneへ同期しない。
+
+### 19.2 復元前の再検証
+
+前回位置をそのまま信用せず、起動時にProject／worktree／tmuxの現在状態を再取得する。
+
+```text
+Load device-local last location
+        ↓
+Refresh current project/worktree/session state
+        ↓
+Is previous worktree still Active and usable?
+  ├─ Yes → restore
+  └─ No  → do not restore silently
+             ↓
+          show candidates in same Project
+```
+
+前回worktreeがInactive、削除済み、または利用不能なら、別Projectへ勝手に移動しない。同じProject内のActive worktreeとMainを候補として表示する。
+
+候補は、人間対応が必要なAgent状態を最優先し、その後を最終操作順に並べる。
+
+対象tmux sessionだけが消えている場合は、Project／worktree画面へfallbackする。sessionを自動再作成するかは未確定。
+
+## 20. Mac hostとiPhone/iPad architecture
+
+### 20.1 確定した配置
+
+```text
+Mac / PC Host
+├─ Git repositories and worktrees
+├─ tmux sessions
+├─ Claude Code / Codex / shell
+├─ Docker / local DB / dev servers
+├─ external browser and GUI verification
+├─ Terminal Host Core
+└─ local persistent storage
+        ▲
+        │ remote connection
+        ▼
+iPhone / iPad
+├─ Project / worktree navigation
+├─ Agent states and notifications
+├─ Question handling
+├─ Code / Diff / Evidence
+└─ Terminal view connected to the host
+```
+
+- 実行環境はMac/PC hostだけに置く。
+- Mobile端末にGit repositoryやAgent processを複製しない。
+- GUI動作確認をローカル環境で行うため、現時点ではクラウドではなくMac/PCを母艦とする。
+- iPhone/iPadは監視、レビュー、質問対応を主用途とし、必要なときに完全なTerminal操作へ入る。
+
+Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMacとなる。他OSのPC host対応は未確定。
+
+### 20.2 Mobile Terminal UX
+
+- 最終形は専用アプリ内Terminalとする。
+- 同じtmux session、同じAgent TUIをそのまま表示する。
+- Claude出力を解析した独自Chat UIには変換しない。
+- Agent専用操作ボタンではなく、汎用Terminal補助キーバーを持つ。
+
+補助キーバー例:
+
+```text
+[Esc] [Ctrl] [Alt] [Tab] [↑] [↓] [←] [→] [...]
+```
+
+外付けキーボードも通常どおり利用可能にする。
+
+### 20.3 移行段階
+
+- 初期段階ではBlink等の外部TerminalからSSHまたはMoshでhostへ接続し、tmuxへattachする構成を利用できる。
+- 最終構成は専用iOS/iPadOSアプリ内でSSH接続し、tmuxへattachする。
+- Moshは外部アプリとして使うことは許容するが、プロダクト本体へは組み込まない。
+
+## 21. 現在の推奨技術アーキテクチャ
+
+> この章は**確定仕様ではなく、PoC通過を条件とする現在の第一候補**である。
+
+### 21.1 推奨構成
+
+| 領域 | 現在の推奨 |
+|---|---|
+| 言語 | Swift 6 |
+| UI | SwiftUI + 必要最小限のAppKit／UIKit |
+| Terminal core | libghostty C API |
+| Terminal abstraction | `TerminalRenderer` protocolでlibghostty依存を隔離 |
+| Multiplexer | tmux CLIを外部processとして操作 |
+| Git | git CLIを外部processとして操作 |
+| Remote terminal | SSH |
+| iOS SSH | SwiftNIO SSH |
+| Local DB | SQLite + GRDB.swift |
+| Large binary storage | filesystem |
+| Search | ripgrep CLI |
+| Code Viewer | TextKit／SwiftUIベースのread-only viewer |
+| Syntax highlight | v1は軽量実装。必要なら後でTree-sitter |
+| Mobile data access | SSH上の別channelでHost Core CLIを呼ぶ案 |
+
+### 21.2 推奨全体図
+
+```text
+                         Mac Host
+┌────────────────────────────────────────────────────────┐
+│ Swift 6 / SwiftUI App                                  │
+│                                                        │
+│ ┌──────────────────┐  ┌──────────────────────────────┐ │
+│ │ TerminalRenderer │  │ Viewer Drawer                │ │
+│ │ └─ libghostty    │  │ Code / Diff / Evidence      │ │
+│ └────────┬─────────┘  └──────────────────────────────┘ │
+│          │ PTY                                           │
+│          ▼                                               │
+│        tmux CLI                                          │
+│          │                                               │
+│   Agent / shell / test                                   │
+│                                                        │
+│ Host Core                                              │
+│ ├─ Project / Worktree manager                          │
+│ ├─ TmuxAdapter                                         │
+│ ├─ AgentAdapters                                       │
+│ ├─ Git reader                                          │
+│ ├─ File watcher                                        │
+│ ├─ Evidence manager                                    │
+│ ├─ Search adapter                                      │
+│ └─ SQLite + GRDB / filesystem                          │
+└───────────────────────────┬────────────────────────────┘
+                            │ SSH
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ iPhone / iPad SwiftUI App                              │
+│ ├─ libghostty-based TerminalRenderer candidate         │
+│ ├─ SwiftNIO SSH                                        │
+│ ├─ Code / Diff / Evidence UI                           │
+│ └─ device-local UI state                               │
+└────────────────────────────────────────────────────────┘
+```
+
+### 21.3 tmuxとgitをCLIで扱う理由
+
+- source codeをアプリへコピーしない。
+- ユーザーがTerminalで使う実体と、アプリが観測する実体を一致させる。
+- tmux／gitのversion差をAdapter境界で吸収できる。
+- libgit2等との挙動差を避ける。
+- ライセンスおよび更新責任の境界を明確にする。
+
+### 21.4 SSH channel分離案
+
+Terminal画面と構造化データを同じ文字列streamから無理に抽出しない。
+
+```text
+One SSH connection
+├─ Channel 1: tmux attach
+├─ Channel 2: hostctl stream         # Agent/Git/state events
+├─ Channel 3: hostctl diff ...
+└─ Channel 4: hostctl evidence ...
+```
+
+`hostctl`はJSON Lines等を返す小さな内部CLIとし、SSHが認証、暗号化、host verificationを担当する案である。
+
+この構成は現在の推奨案であり、`hostctl`のprotocol、versioning、権限、再接続は未確定。
+
+### 21.5 libghostty隔離
+
+macOSとiOSで同じTerminal品質を狙うが、アプリ全体をlibghostty APIへ直接依存させない。
+
+```text
+TerminalRenderer
+├─ GhosttyRenderer
+└─ FutureAlternativeRenderer
+```
+
+libghosttyのiOS lifecycle、IME、アクセシビリティ、selection、Metal描画、background／foreground復帰はPoCで確認する。PoCが成立しない場合にrendererだけ差し替えられる境界を維持する。
+
+### 21.6 採用しない／後回しの候補
+
+| 候補 | 状態 | 理由 |
+|---|---|---|
+| Rust Core + Swift UI | 次点、未採用 | Swift + Rust + libghostty側Zig/Cの多言語構成が初期段階では過剰 |
+| Tauri + xterm.js | 未採用 | UI開発は速いが、最重要のTerminal品質目標で第一候補に劣る可能性 |
+| libgit2 | v1不採用 | 実Gitとの挙動差と依存増を避ける |
+| 独自Remote Terminal protocol | 不採用 | SSH + tmuxで代替できる |
+| Mosh組み込み | 回避 | copyleft／App Store配布上の検討をプロジェクトへ持ち込まない |
+| Tree-sitter | v1後回し | read-only Code Viewerに対して初期スコープが大きい |
+
+## 22. Local data architecture
+
+### 22.1 現在の推奨データ配置
+
+```text
+Application Support/
+└─ <app>/
+   ├─ app.sqlite
+   └─ projects/
+      └─ <project-id>/
+         ├─ evidence/
+         └─ snapshots/
+            ├─ diff-reviews/
+            └─ consultations/
+```
+
+SQLite候補テーブル:
+
+- `projects`
+- `worktrees`
+- `tmux_sessions`
+- `device_ui_states`
+- `consultations`
+- `diff_reviews`
+- `review_comments`
+- `evidence_metadata`
+- `evidence_annotations`
+- `agent_events`
+- `settings`
+
+これは論理候補であり、schema、migration、ID、foreign key、retentionは未確定。
+
+### 22.2 保存原則
+
+- 画像本体や大きなsnapshotはfilesystemへ置く。
+- SQLiteにはmetadata、path、関連ID、状態を保存する。
+- device UI stateは端末ごとに分離する。
+- Project／worktreeの外部実体をDBだけで信用せず、起動時に再検証する。
+- worktree削除とTerminal履歴削除を連動させない。
+
+## 23. OSS／ライセンス方針
+
+> この節は法的助言ではない。実際の配布前に、採用する固定versionと全transitive dependencyを再確認する。
+
+### 23.1 現在の推奨ポリシー
+
+- MIT、BSD、ISC、Apache-2.0等のpermissive licenseを原則許可する。
+- GPL、LGPL、AGPL、unknown licenseは原則不採用とし、例外承認制にする。
+- 依存追加時とCIでlicense scanを実施する。
+- source、binary、font、icon、grammar、sample assetを別々に監査する。
+- license text、copyright notice、NOTICE等の配布要件をThird-Party Noticesへ反映する。
+- 依存versionを固定し、releaseごとにSBOM／license reportを生成する。
+- 既存プロジェクトのコードを「参考」と称してコピーしない。必要な場合は正規dependencyとして利用するか、clean-roomで実装する。
+
+このポリシー自体は会話で推奨されたものであり、プロジェクトの正式採用決定は未確定である。
+
+### 23.2 主要候補の確認結果
+
+| Component | 2026-08-31時点で確認したlicense | 方針 |
+|---|---|---|
+| [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | 採用候補。固定commit／配布物の依存も再監査 |
+| [tmux](https://github.com/tmux/tmux) | ISC | source組込みではなく外部CLIとして利用 |
+| [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | iOS SSH候補 |
+| [GRDB.swift](https://github.com/groue/GRDB.swift) | MIT | SQLite access候補 |
+| [ripgrep](https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#how-is-ripgrep-licensed) | MIT または Unlicense | 外部CLI候補。プロジェクトではMIT条件を採用する案 |
+| [Tree-sitter core](https://github.com/tree-sitter/tree-sitter/blob/master/LICENSE) | MIT | 将来候補。各言語grammarは個別確認 |
+| [Mosh](https://github.com/mobile-shell/mosh) | GPL-3.0系。iOS向け追加文書あり | アプリへの組込みを避け、必要なら外部アプリとして利用 |
+
+### 23.3 branding
+
+コードのlicenseと、名称・ロゴ・アイコンの利用可否は別問題として扱う。
+
+- 独自プロダクト名を使う。
+- 独自アイコンを作る。
+- `Ghostty Mobile`等、公式派生に見える名称を避ける。
+- Ghostty公式アイコンやブランド資産を流用しない。
+- 必要な場合はAbout／Third-Party Noticesで「Terminal rendering powered by libghostty」等の正確なクレジットを行う。
+
+プロダクト名は未決定であり、採用前にGitHub、Homebrew、App Store、商標、ドメイン等の名称衝突を別途確認する。
+
+## 24. PoC優先項目
+
+### Gate 1: macOS Terminal品質 — 最優先
+
+`SwiftUI + libghostty + PTY + tmux attach`で、実際のClaude Code／Codex／shellを動かす。
+
+確認事項:
+
+- VT互換性
+- Metal描画とresize
+- IME、日本語入力、絵文字、grapheme width
+- copy／paste、selection、URL／path hit testing
+- mouse protocol
+- tmux split／zoom／attach／detach
+- 大量output、長時間稼働、memory
+- AppKit bridgeが必要な範囲
+
+### Gate 2: iPad/iPhone Terminal
+
+`SwiftNIO SSH → tmux attach → libghostty描画`を実機で確認する。
+
+確認事項:
+
+- host key verification
+- password／public key／SSH agent相当の認証方式
+- connection lossと再接続
+- app background／foreground
+- software keyboard、IME、補助キーバー
+- iPhoneの狭い幅でAgent TUIが実用になるか
+- iPad multi-window／external keyboard
+- 同一tmux sessionへのMac＋mobile同時attach
+
+### Gate 3: Agent Adapter
+
+Claude CodeとCodexについて、共通状態をどこまで正確に取得できるか検証する。
+
+確認事項:
+
+- Working
+- Question
+- Permission
+- Completed／Ready for Review
+- Error
+- Idle
+- Unknown
+- pane／processとの安定した紐付け
+- version update耐性
+- fallback時の誤判定
+
+### Gate 4: Host Core over SSH
+
+別SSH channelでAgent状態、Git状態、Diff、Evidence metadataを安全に取得できるか検証する。
+
+確認事項:
+
+- JSON Lines framing
+- reconnectとcursor
+- protocol versioning
+- large Diff／image transfer
+- command injection防止
+- path traversal防止
+- project access boundary
+
+### Gate 5: snapshotと復元
+
+- Diffを固定したまま背後のファイルが変更されるケース
+- Refreshで新snapshotを作成し、旧コメントを保持できること
+- worktree／tmux消失後の安全な復元fallback
+- device別Drawer状態の復元
+- worktree削除後のConsultation／Evidence参照
+
+### PoC後の判断
+
+Gate 1が不成立なら、UI全体の実装へ進む前にTerminal renderer候補を再評価する。Gate 2が不成立でも、macOS版を先行し、モバイルは外部SSH／Moshアプリ連携で段階提供できる。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
+
+## 25. Terminal本体の未確定事項一覧
+
+### Product／scope
+
+- プロダクト名
+- 対応OSの初期version
+- Mac専用から他PC hostへ広げるか
+- v1、v2の正式な機能境界
+
+### UI
+
+- Project／Task Tab／Overviewの詳細レイアウト
+- 状態アイコン、色、accessibility label
+- Drawerの初期幅、最大幅、split比率
+- iPhone上のAgent TUI縮小戦略
+- keyboard shortcut体系
+- multi-window対応
+
+### Worktree／tmux
+
+- 新規検出worktreeのActive化確認
+- session命名とcollision回避
+- tmux未導入時のセットアップ
+- tmux version support matrix
+- Close時の安全確認
+- session消失時の再作成方針
+
+### Agent
+
+- Adapter API
+- Agentごとの状態取得手段
+- 質問fallbackのデータ交換形式
+- `Ask Claude`のAgent非依存名称と送り先選択
+- Unknown通知のデフォルト時間
+
+### Git／Diff
+
+- base branchの決定方法
+- Diff rangeの厳密な定義
+- working tree／staged／untrackedの扱い
+- rename、binary Diff、submodule、LFS
+- comment anchor schema
+
+### Mobile／remote
+
+- iOS認証情報の安全な保存方法
+- SSH接続設定の同期範囲
+- Push通知backend
+- Host発見、pairing、複数Host
+- VPN／NAT越しの推奨運用
+- Host Core CLI protocol
+
+### Storage
+
+- DB schemaとmigration
+- Application Support上の正式path
+- encryption at restの要否
+- soft limitの初期値と適用単位
+- cleanup候補の選び方
+- backup／export／import
+
+### OSS
+
+- 本体license
+- Contributor License Agreement／DCOの要否
+- license scan tool
+- SBOM形式
+- libghostty配布方法と固定version
+- Ghostty attribution文言
+- App Store審査上の確認
+
+---
+
+# Part II. Agent Skills／AI開発フロー内部設計
+
+## 26. Terminal本体との責務分離
+
+Agent Skillsの内部設計は、Terminalアプリ本体の仕様とは別に管理する。
+
+| 領域 | Agent Skills | Terminal本体 |
+|---|---|---|
+| Project規則に従うworktree作成 | 担当 | 検出・表示・Active管理 |
+| 要件対話 | 担当 | Terminal／質問UIを提供 |
+| 詳細設計 | 担当 | 状態と成果物を表示 |
+| 実装、test、commit | 担当 | Agent TerminalとGit閲覧を提供 |
+| 検証、PR作成 | 担当 | Ready for Review／Diff／Evidenceを表示 |
+| Evidence撮影 | 担当 | 取り込み・閲覧・注釈・保存 |
+| 不足要件の質問生成 | 担当 | Agent-native UIを優先し、必要ならfallback表示 |
+| phase orchestration | Agent Skills側 | 実装サイクル自体は管理しない |
+| Agent状態の通知 | 任意のsignal提供 | Adapterで正規化して通知 |
+
+Terminalは、Agent Skillsが存在しなくても通常Terminalおよびworktree managerとして動作できることを目標とする。
+
+## 27. Agent開発フローで確認できた意図
+
+次はユーザーから提示された方針であり、Agent Skills側の設計入力として扱う。
+
+- 開発を要件定義、詳細設計、実装のphaseに分ける。
+- 要件定義は人とAIの対話で進め、人がレビューする。
+- 要件レビュー後は、可能な限りPR作成までノンストップで進める。
+- phaseごとにAgent contextをclearする。
+- phase間の引き継ぎはchat historyではなくfileで行う。
+- worktreeの命名、配置、作成はProject rulesに従ってAgentが担当する。
+- Agentが生成したEvidenceをPR作成時に利用できるようにする。
+
+ただし、次章以降の詳細なphase構成、artifact名、state machineは参照会話で提案された設計案であり、ユーザーによる最終確定はしていない。
+
+## 28. 現在のAgent Skills設計案 — 未確定
+
+### 28.1 phase案
+
+```text
+Requirement Session
+  Human × AI
+  ↓ requirements artifact
+  Human approval
+        ↓
+Design Session (fresh context)
+  ↓ design + task plan artifacts
+  automatic design gate
+        ↓
+Implementation Session (fresh context)
+  ↓ code + tests + commits
+        ↓
+Review Session (fresh context)
+  ↓ requirement/design/diff verification
+  ├─ NG → new Implementation Session
+  └─ OK → PR creation
+```
+
+当初の3phaseに、実装とは別contextのReview／Verify sessionを追加する案である。これは有力な提案だが、まだ確定ではない。
+
+### 28.2 context isolation案
+
+- Requirement、Design、Implementation、Reviewはそれぞれfresh sessionを使う。
+- 却下案や試行錯誤を次phaseのcontextへ暗黙継承しない。
+- 引き継ぐ情報は明示したartifact fileに限定する。
+- Review NG後も以前のImplementation sessionをresumeせず、新しいsessionへreview artifactを渡す案とする。
+
+### 28.3 Human interrupt案
+
+「ノンストップ」と「Agentが不足要件を勝手に決める」を分離する。
+
+- 設計裁量内の判断はAgentが続行する。
+- product behaviorや受け入れ条件を変える要件不足はHumanへ質問する。
+- Human回答が必要なときだけ処理を中断する。
+
+何を設計判断とし、何を要件判断とするかの境界は未確定である。
+
+## 29. Artifact案 — 未確定
+
+会話では次の固定artifact案が提示された。
+
+```text
+.ai/
+├─ requirements.md
+├─ design.md
+├─ task-plan.md
+├─ status.json
+└─ review.md
+```
+
+### requirements.md案
+
+- Goal
+- Requirements
+- Acceptance Criteria
+- Out of Scope
+- 人が承認した結果
+
+### design.md案
+
+- Architecture
+- Changes
+- Decisions
+- Risks
+
+### task-plan.md案
+
+- Implementation Agentが順に実行する作業項目
+- designを再解釈するのではなく、設計をcodeへ変換するための計画
+
+### review.md案
+
+- Requirement coverage
+- Design compliance
+- Bug
+- Security
+- Test coverage
+- Unnecessary changes
+- 修正要求または承認
+
+### status.json案
+
+- 現在phase
+- status
+- block reason
+- artifact versions
+- next action
+
+これらのfile名、schema、配置、Gitへcommitするか、更新責任、承認表現はすべて未確定である。
+
+## 30. Agent state machine案 — 未確定
+
+```text
+DRAFT
+  ↓
+REQUIREMENT
+  ↓
+REQUIREMENT_REVIEW
+  ├─ Reject → REQUIREMENT
+  └─ Approve
+       ↓
+DESIGN
+  ├─ requirement ambiguity → HUMAN_REQUIRED
+  └─ design complete
+       ↓
+IMPLEMENT
+  ├─ retryable failure → IMPLEMENT
+  └─ implementation complete
+       ↓
+VERIFY
+  ├─ reject → new IMPLEMENT session
+  └─ approve
+       ↓
+PR_CREATING
+  ↓
+PR_READY
+```
+
+このstate machineはAgent Skills側の内部状態であり、Terminal共通Agent Stateと同一にしない。
+
+対応関係の例:
+
+| Agent Skills内部状態 | Terminal共通表示の候補 |
+|---|---|
+| REQUIREMENT／DESIGN／IMPLEMENT／VERIFY | Working |
+| HUMAN_REQUIRED | Needs Attention / Question |
+| retry不能error | Needs Attention / Error |
+| PR_READY | Ready for Review |
+| 判定不能 | Unknown |
+
+このmappingもAgent Adapter実験後に確定する。
+
+## 31. Agent Skills側の未確定事項
+
+- 3phaseのままにするか、Review／Verifyを正式phaseにするか
+- 要件定義後のHuman reviewだけで十分とする条件
+- 自動Design Gateの検査内容
+- 不足要件と設計裁量の判定基準
+- 各phaseの入力、出力、終了条件
+- artifact file名とschema
+- artifactをGit管理するか
+- review NG時の最大loop回数
+- retry不能時の停止条件
+- Implementation Agentが設計不備を発見した場合の戻り先
+- Review Agentの独立性と利用model
+- PR作成条件
+- Evidence撮影の必須条件
+- Agent-native質問UIとfile-based質問の使い分け
+- Terminalへの任意signal／registration API
+- Claude CodeとCodexで共通Skillを使う方法
+
+## 32. TerminalとAgent Skillsの統合原則
+
+今後の設計では、次の原則を維持する。
+
+1. Agent SkillsがTerminal専用APIなしでも実行できる。
+2. TerminalはAgent Skills固有fileの存在を必須にしない。
+3. より正確な状態が取得できる場合だけAdapterで拡張する。
+4. 質問はAgent-native UIを優先し、file／API方式はfallbackまたは拡張とする。
+5. worktree作成規則、設計判断、実装loopはAgent Skills側に置く。
+6. TerminalはProject、worktree、tmux、状態、通知、閲覧、review snapshot、履歴、Evidenceを担当する。
+7. Agent Skills内部状態が取れない場合、Terminalが推測でphaseを作らない。
+8. Agent Skillsの実装サイクルとTerminalのDiff Review履歴を強制的に1:1対応させない。
+
+---
+
+# 付録A. 確定事項チェックリスト
+
+- [x] 1 Task = 1 worktree = 1 Task Tab
+- [x] Project Rootは別枠の常設tmux session
+- [x] worktreeごとに独立tmux session
+- [x] worktree内はpane分割中心、tmux window追加を基本にしない
+- [x] Agent Terminal中心
+- [x] Viewer Drawerは最大2分割
+- [x] Code／Diff／Evidenceを必要時だけ表示
+- [x] File Browserはignoredを含む全ファイル、lazy load
+- [x] Code Viewerはread-only、自動更新、history／blameあり
+- [x] DiffはCommit／Base／Branchの3種
+- [x] Diffはsnapshot、Refreshで新snapshot
+- [x] Diffコメントは単体／batchでAgentへ送信
+- [x] GitHub PR review連携はしない
+- [x] Consultationはfresh contextが基本、paneは再利用
+- [x] Consultation LogはProject単位で永続化し、Gitには載せない
+- [x] Agent-native質問UIを優先
+- [x] 全worktree横断Questions Inboxは作らない
+- [x] Mac／mobile通知とdeep link
+- [x] Agent Adapterで複数Agentを抽象化
+- [x] Unknownを正式状態として扱う
+- [x] Mac/PC host、iPhone/iPad client
+- [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
+- [x] mobileは同じTerminal TUI + 汎用補助キーバー
+- [x] Project登録はlocal選択またはclone
+- [x] Git認証は既存環境へ完全委譲
+- [x] Git GUIは閲覧中心
+- [x] UI状態はdeviceごとに独立復元
+- [x] Evidenceはscreenshot + metadata、pin／rectangle annotation
+- [x] Evidence取り込みはfile watch + API
+- [x] EvidenceはTerminal管理領域へ保存し、worktree削除後も保持
+- [x] Storage画面を一本化
+- [x] 容量上限は設定可能なsoft limit、自動削除なし
+- [x] URLはlocalhostを含め外部browser
+- [x] Web Preview／DevTools／VNCは作らない
+
+# 付録B. 現在の推奨構成チェックリスト
+
+- [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
+- [ ] libghosttyを正式採用 — macOS/iOS PoC待ち
+- [ ] tmux CLI Adapterを正式採用 — version検証待ち
+- [ ] git CLI Adapterを正式採用 — output parsing設計待ち
+- [ ] SwiftNIO SSHを正式採用 — iOS実機PoC待ち
+- [ ] SQLite + GRDBを正式採用 — schema設計待ち
+- [ ] ripgrep CLIを正式採用 — bundle／host依存方針待ち
+- [ ] hostctl over SSHを正式採用 — protocol PoC待ち
+- [ ] permissive-only license policyを正式採用 — governance決定待ち
+
+# 付録C. 参照先
+
+- [Ghostty license](https://github.com/ghostty-org/ghostty/blob/main/LICENSE)
+- [Ghostling: minimal libghostty C API example](https://github.com/ghostty-org/ghostling)
+- [tmux](https://github.com/tmux/tmux)
+- [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh)
+- [GRDB.swift](https://github.com/groue/GRDB.swift)
+- [ripgrep licensing FAQ](https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#how-is-ripgrep-licensed)
+- [Tree-sitter license](https://github.com/tree-sitter/tree-sitter/blob/master/LICENSE)
+- [Mosh](https://github.com/mobile-shell/mosh)

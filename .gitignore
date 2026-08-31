@@ -63,3 +63,16 @@ fastlane/test_output
 
 # Claude Code
 .claude/settings.local.json
+
+# Spikes (PoC/使い捨てコード置き場)
+#
+# スパイクは調査結果のみをコミットし、ビルド成果物・外部ソースの
+# チェックアウト・取得したバイナリは追跡しない。
+Spikes/**/vendor/
+Spikes/**/zig-out/
+Spikes/**/.zig-cache/
+Spikes/**/zig-cache/
+Spikes/**/DerivedData/
+Spikes/**/*.xcframework/
+# 検証エビデンス(スクリーンショット・ログ・CSV)は容量が大きいため追跡しない。
+Spikes/gate1/evidence/

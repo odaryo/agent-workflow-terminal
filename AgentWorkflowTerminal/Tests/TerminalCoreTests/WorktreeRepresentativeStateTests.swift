@@ -1,7 +1,6 @@
 import Foundation
+import TerminalCore
 import Testing
-
-@testable import TerminalCore
 
 /// このファイルは docs/coding-guidelines.md §3.1 から TDD のリファレンス実装として
 /// 参照されている。書き方を変えるときは同節も直す。

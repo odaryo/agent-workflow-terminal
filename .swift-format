@@ -17,7 +17,7 @@
   },
   "rules": {
     "AlwaysUseLowerCamelCase": true,
-    "NeverForceUnwrap": false,
+    "NeverForceUnwrap": true,
     "NeverUseForceTry": true,
     "NeverUseImplicitlyUnwrappedOptionals": true,
     "NoBlockComments": true,

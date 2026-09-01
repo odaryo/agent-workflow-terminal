@@ -1,8 +1,7 @@
+import Adapters
 import Foundation
+import TerminalCore
 import Testing
-
-@testable import Adapters
-@testable import TerminalCore
 
 @Suite("tmux list-panes 出力のパース")
 struct TmuxListPanesTests {
@@ -11,6 +10,9 @@ struct TmuxListPanesTests {
   func formatContainsRequiredFields() {
     #expect(
       TmuxListPanes.format
+        // tmux へ渡す format と1文字も違わないことの検証。分割・連結で組み立てると
+        // フォーマットの再実装になり検証の意味が消えるため、原文のまま1行で置く。
+        // swiftlint:disable:next line_length
         == "#{pane_id}\u{1F}#{session_name}\u{1F}#{window_index}\u{1F}#{window_id}\u{1F}#{pane_index}\u{1F}#{pane_pid}\u{1F}#{pane_active}\u{1F}#{pane_current_command}"
     )
   }

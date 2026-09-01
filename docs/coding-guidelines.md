@@ -44,11 +44,16 @@
 
 したがって、
 
-- **C コールバックの入口で必ず main へ移す。** コールバック本体は
-  `MainActor.assumeIsolated` あるいは `DispatchQueue.main.async` を経由してから
-  Swift 側の状態へ触る。
-- `wakeup_cb` は libghostty の IO スレッドから飛んでくるため、
-  `DispatchQueue.main.async` で `ghostty_app_tick` を呼ぶ形にする。
+- **C コールバックの入口で必ず main へ移す。** 手段は呼び出し元スレッドで使い分ける。
+  両者は代替関係ではない。
+  - **main thread 上で呼ばれることが保証されている**コールバックに限り、入口で
+    `MainActor.assumeIsolated` を使う。保証の無いスレッドから呼ぶと実行時にクラッシュする。
+  - それ以外 (`wakeup_cb` は libghostty の IO スレッドから飛んでくる) は
+    `DispatchQueue.main.async { MainActor.assumeIsolated { ... } }` で移す。
+    `DispatchQueue.main.async` のクロージャは MainActor 隔離とは見なされないため、
+    中の `assumeIsolated` を省略できない。
+- 移送に `Task { @MainActor in ... }` を使わない。FIFO 順序が保証されず、
+  ターミナルのイベント順が入れ替わり得るため。
 - この規約を破ると、`nonisolated(unsafe)` がコードベース全体へ伝染する。
   スパイクではそれで逃がしたが、本体では逃がさない。
 
@@ -64,6 +69,9 @@
 - **外部世界との境界は protocol で抽象化し、`actor` または `class` で実装する。**
   対象: tmux CLI 実行、git CLI 実行、SSH、PTY、libghostty、ファイル監視、SQLite。
 - protocol は「境界」に対してだけ切る。テストのためだけの抽象を先回りして作らない。
+- `ExistentialAny` を有効にしており (`Package.swift`)、existential は `any` の明示が必須。
+  ジェネリクスで表現できる箇所は `some` / 型パラメータを優先し、`any` は
+  異種コレクションや実装体の動的差し替えが必要な境界に限る。
 
 ### 2.2 モジュールと依存方向
 
@@ -81,7 +89,16 @@ TerminalCore  ←  Adapters  ←  (将来) App / Host Core
 
 - 境界 (CLI 実行、パース、IO) では `throws` を使う。ドメインの純粋関数では
   「あり得ない入力」を型で排除し、`Optional` か明示的な結果型で返す。
-- `fatalError` / `try!` / `as!` は本番コードで使わない。
+- エラー集合が閉じている境界 (CLI 出力のパーサ等) では **typed throws**
+  (`throws(ParseError)`) を使い、呼び出し側の網羅を型で担保する。
+- 複数レコードのパースは fail-fast にせず、行番号・原文を保持した失敗と成功を
+  **両方返す部分成功型**にする。1行の異常で全体を見失わないため。
+  参照実装: `AgentWorkflowTerminal/Sources/Adapters/TmuxListPanes.swift`。
+- 外部 CLI の出力バイト列は非失敗デコード (`String(decoding:_:as: UTF8.self)`) で受ける。
+  不正バイトは U+FFFD へ置換して残し、1バイトの異常でレコード全体を失わない
+  (部分成功型と同じ理由)。
+- `fatalError` / `try!` / `as!` / 強制アンラップ (`x!`) は使わない。テストコードも同様
+  (前提条件は Swift Testing の `#require` で表現できる)。担保の対応は §7。
 
 ---
 
@@ -124,6 +141,10 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 
 - テスト名と `@Suite` / `@Test` の表示名は日本語で書いてよい。
   設計書の節番号 (`§12.2` 等) を表示名に入れ、仕様との対応を追えるようにする。
+- 失敗したら後続の検証が無意味になる前提条件は `#require`、検証そのものは `#expect` で書く。
+- 同型の検証の繰り返しは `arguments:` で parameterize する。
+- `@testable import` は非 public な宣言に触るときだけ使う。public API のテストは
+  利用者と同じ `import` で書き、公開面の使い勝手もテストに語らせる。
 
 ---
 
@@ -162,6 +183,12 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 - tmux / git / ripgrep は外部 CLI として呼ぶ。version 差は Adapter 境界で吸収する。
 - サポートする下限 version を決め、`Adapters` 側で検出する (tmux の下限は未決定、
   Gate 1 申し送り #8)。
+- CLI は shell を経由せず argv 配列で起動し、パイプ・リダイレクトに依存しない
+  (`TerminalRendererConfiguration.command` と同じ方針)。
+- 出力をパースする CLI は `LC_ALL=C` を明示して起動し、ロケール依存の出力
+  (git のメッセージ・日付書式) をパーサへ流さない。
+- 実行するバイナリの解決 (どの `tmux` / `git` を使うか) は Adapter に一元化し、
+  呼び出し側のコードへ暗黙の `PATH` 依存を散らさない。
 
 ---
 
@@ -206,7 +233,24 @@ CI とローカルの版数を揃える手間が増える)。Lint は代替が�
 SwiftLint を採用する。
 
 ルールは**既定 + 軽い調整**に留めます。書式は `swift-format`、設計上まずい書き方は SwiftLint、
-と責務を分けています。
+と責務を分けています。§1.1 / §2.3 の禁止事項は次で機械的に担保します。
+
+| 禁止事項 | 担保するルール |
+|---|---|
+| `try!` | swift-format `NeverUseForceTry` |
+| `as!` / 強制アンラップ (`x!`) | swift-format `NeverForceUnwrap` |
+| `fatalError` / `@unchecked Sendable` / `nonisolated(unsafe)` | SwiftLint `custom_rules` |
+| TODO / FIXME コメント (Issue 一元化) | SwiftLint `todo` |
+
+§1.1 の例外 (C API 境界) を使うときは、理由コメントに加えて
+`// swiftlint:disable:next` で行単位に局所化します。ファイル単位の disable はしない。
+
+SwiftLint の既定ルールが本規約の方針と衝突したときは、**規約が勝ちます**。
+方針そのものと衝突するルールは `disabled_rules` へ理由コメント付きで移し、
+特定の行だけが例外ならその行を `swiftlint:disable:next` で局所化する。
+ルールに合わせてコードを直すのは、その書き方に設計として同意できるときだけ。
+SwiftLint の版数は CI で固定していないため、更新で既定ルールが増えて落ちることが
+ある。その場合も同じ原則で処理する。
 
 ```shell
 # フォーマット確認 / 適用
@@ -220,6 +264,9 @@ swiftlint lint --config .swiftlint.yml
 ```
 
 `Spikes/` は両方の対象外です (`.swiftlint.yml` の `excluded`)。
+
+CI (`.github/workflows/ci.yml`) は swift-format lint と SwiftLint の両方を実行します。
+ローカルの SwiftLint 導入 (`brew install swiftlint`) は任意のままですが、CI では必須です。
 
 ---
 

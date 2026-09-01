@@ -21,6 +21,7 @@
       "Bash(scripts/wf-project-status.sh:*)",
       "Bash(scripts/wf-pr-create.sh:*)",
       "Bash(scripts/wf-pr-merge.sh:*)",
+      "Bash(scripts/wf-pr-close.sh:*)",
       "Bash(scripts/wf-pr-comments.sh:*)",
       "Bash(scripts/wf-pr-reply.sh:*)",
       "Bash(scripts/wf-cleanup-branches.sh:*)",

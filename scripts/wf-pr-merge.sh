@@ -120,10 +120,18 @@ merge_sha=$(gh api -X PUT "repos/$repo_nwo/pulls/$pr_number/merge" \
 
 info "マージしました (sha=$merge_sha)"
 
+# ここから先が失敗してもリモートのマージは完了している。中断時にその事実が
+# exit コードだけで誤読されないよう明示する (Issue #37)。
+trap 'info "注意: マージ自体は成功しています (sha=$merge_sha)。失敗したのはマージ後のローカル後処理です"' ERR
+
 git fetch --prune origin
 
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$current_branch" == "$pr_head" ]]; then
+  # 陳腐化したローカル main へ直接 checkout すると、PR が変更したファイルに
+  # 作業ツリーの未コミット差分がある場合に中断する (Issue #37)。先に main を
+  # origin/main へ合わせれば、マージ済み内容と作業ツリーの間に差は生じない。
+  git branch -f main origin/main
   git checkout main
   current_branch="main"
 fi

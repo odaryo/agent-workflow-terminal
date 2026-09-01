@@ -15,11 +15,15 @@ name: Project Status
 on:
   pull_request:
     types: [opened, reopened, ready_for_review, closed]
+  # Issue 追加時の Status=Todo も built-in automation が無効化されていた (Issue #49)。
+  # reopened は拾わない — 一度進んだ Issue を Todo へ巻き戻すことになるため。
+  issues:
+    types: [opened]
 
 permissions: {}
 
 concurrency:
-  group: project-status-${{ github.event.pull_request.number }}
+  group: project-status-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.issue.number }}
 
 defaults:
   run:
@@ -29,7 +33,7 @@ jobs:
   sync:
     name: Sync linked issue status
     # merge を伴わない close は「タスク完了」ではないため Status を動かさない
-    if: github.event.action != 'closed' || github.event.pull_request.merged
+    if: github.event_name == 'issues' || github.event.action != 'closed' || github.event.pull_request.merged
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -37,6 +41,7 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       IS_DRAFT: ${{ github.event.pull_request.draft }}
       IS_MERGED: ${{ github.event.pull_request.merged }}
+      ISSUE_NUMBER: ${{ github.event.issue.number }}
       PROJECT_OWNER: odaryo
       PROJECT_NUMBER: 6
     steps:
@@ -48,40 +53,74 @@ jobs:
             exit 0
           fi
 
-          if [[ "$IS_MERGED" == "true" ]]; then
-            status="Done"
-          elif [[ "$IS_DRAFT" == "true" ]]; then
-            echo "draft PR のため Status を更新しません"
-            exit 0
-          else
-            status="In Review"
-          fi
-
           owner="${GITHUB_REPOSITORY%/*}"
           repo="${GITHUB_REPOSITORY#*/}"
 
-          # PR 本文の Closes #N でリンクされた Issue の project item を引く。
-          # リンクが無い場合に何もしないのは仕様 (CLAUDE.md: Closes #N が無ければ
-          # In Progress から先へ進まない)。
-          items=$(gh api graphql -f query='
-            query($owner:String!,$repo:String!,$pr:Int!){
-              repository(owner:$owner,name:$repo){
-                pullRequest(number:$pr){
-                  closingIssuesReferences(first:20){
-                    nodes{ number projectItems(first:10){ nodes{ id project{ number } } } }
+          # 対象 Issue の project item を引く。issue_items <番号>
+          issue_items() {
+            gh api graphql -f query='
+              query($owner:String!,$repo:String!,$issue:Int!){
+                repository(owner:$owner,name:$repo){
+                  issue(number:$issue){
+                    projectItems(first:10){ nodes{ id project{ number } } }
                   }
                 }
-              }
-            }' -f owner="$owner" -f repo="$repo" -F pr="$PR_NUMBER" \
-            | jq -r --argjson p "$PROJECT_NUMBER" '
-                .data.repository.pullRequest.closingIssuesReferences.nodes[]
-                | .number as $n
-                | .projectItems.nodes[]
-                | select(.project.number == $p)
-                | "\($n)\t\(.id)"')
-          if [[ -z "$items" ]]; then
-            echo "リンクされた Issue が Project #$PROJECT_NUMBER にありません。何もしません"
-            exit 0
+              }' -f owner="$owner" -f repo="$repo" -F issue="$1" \
+              | jq -r --argjson p "$PROJECT_NUMBER" --arg n "$1" '
+                  .data.repository.issue.projectItems.nodes[]
+                  | select(.project.number == $p)
+                  | "\($n)\t\(.id)"'
+          }
+
+          if [[ "$GITHUB_EVENT_NAME" == "issues" ]]; then
+            status="Todo"
+            # wf-issue-create.sh の --project による追加と本 workflow の起動は競合する
+            # ため、item が見えるまで短くリトライする (Issue #49)。項目を自分で
+            # 追加してしまうと --no-project で意図的に board から外した Issue まで
+            # 載せることになるので、追加はせず待つだけにする。
+            items=""
+            for _ in 1 2 3 4 5 6; do
+              items=$(issue_items "$ISSUE_NUMBER")
+              [[ -z "$items" ]] || break
+              sleep 5
+            done
+            if [[ -z "$items" ]]; then
+              echo "Issue #$ISSUE_NUMBER は Project #$PROJECT_NUMBER にありません (--no-project 等)。何もしません"
+              exit 0
+            fi
+          else
+            if [[ "$IS_MERGED" == "true" ]]; then
+              status="Done"
+            elif [[ "$IS_DRAFT" == "true" ]]; then
+              echo "draft PR のため Status を更新しません"
+              exit 0
+            else
+              status="In Review"
+            fi
+
+            # PR 本文の Closes #N でリンクされた Issue の project item を引く。
+            # リンクが無い場合に何もしないのは仕様 (CLAUDE.md: Closes #N が無ければ
+            # In Progress から先へ進まない)。
+            linked=$(gh api graphql -f query='
+              query($owner:String!,$repo:String!,$pr:Int!){
+                repository(owner:$owner,name:$repo){
+                  pullRequest(number:$pr){
+                    closingIssuesReferences(first:20){ nodes{ number } }
+                  }
+                }
+              }' -f owner="$owner" -f repo="$repo" -F pr="$PR_NUMBER" \
+              --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[].number')
+
+            items=""
+            for n in $linked; do
+              found=$(issue_items "$n")
+              [[ -z "$found" ]] || items+="${found}"$'\n'
+            done
+            items=$(printf '%s' "$items" | sed '/^$/d')
+            if [[ -z "$items" ]]; then
+              echo "リンクされた Issue が Project #$PROJECT_NUMBER にありません。何もしません"
+              exit 0
+            fi
           fi
 
           field_json=$(gh api graphql -f query='

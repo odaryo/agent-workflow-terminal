@@ -93,7 +93,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 **Roles**
 - **Director** (the main Claude session): research, decisions, task decomposition, spec writing, progress judgment, reporting. Does not implement.
 - **Implementer** (Codex): `codex exec` non-interactively with the workspace-write sandbox; follow-ups via `codex exec resume --last` (no sandbox flags — the session's settings carry over). Codex reads `AGENTS.md`, not this file; `AGENTS.md` is a thin bridge that points here and to `docs/coding-guidelines.md` — keep it a pointer, never a second copy of the rules.
-- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. Critical findings block completion.
+- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
 
 **The loop**
 1. Director writes an Issue-style spec: 背景 / 要求 / スコープ (files allowed to change) / 完了条件 (the exact GREEN commands) / "on ambiguity or contradiction, stop and ask". Known limitation: in exec mode Codex tends to work around contradictions and report them instead of stopping — treat a reported workaround as a spec defect and widen the scope explicitly in the next round rather than blaming the implementer.

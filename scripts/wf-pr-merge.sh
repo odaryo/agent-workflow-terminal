@@ -62,10 +62,10 @@ require_cmd git gh
 [[ "$pr_number" =~ ^[0-9]+$ ]] || die "PR番号は数値で指定してください: $pr_number"
 
 pr_line=$(gh pr view "$pr_number" \
-  --json state,isDraft,baseRefName,mergeable,title,headRefName \
-  --jq '[.state, (.isDraft|tostring), .baseRefName, .mergeable, .title, .headRefName] | join("\t")') \
+  --json state,isDraft,baseRefName,mergeable,title,headRefName,headRefOid \
+  --jq '[.state, (.isDraft|tostring), .baseRefName, .mergeable, .title, .headRefName, .headRefOid] | join("\t")') \
   || die "PR #$pr_number の情報取得に失敗しました"
-IFS=$'\t' read -r pr_state pr_is_draft pr_base pr_mergeable pr_title pr_head <<<"$pr_line"
+IFS=$'\t' read -r pr_state pr_is_draft pr_base pr_mergeable pr_title pr_head pr_head_oid <<<"$pr_line"
 
 [[ "$pr_state" == "OPEN" ]] || die "PR #$pr_number は OPEN ではありません (state=$pr_state)"
 [[ "$pr_is_draft" == "false" ]] || die "PR #$pr_number は draft です"
@@ -134,9 +134,17 @@ fi
 
 if [[ "$delete_local" -eq 1 ]]; then
   # squash マージ後は上流とコミットが一致しないため `git branch -d` が通らない。
-  # merged は直前の API 応答 (sha 取得) で確認済みという前提で -D を使う。
+  # merged は直前の API 応答 (sha 取得) で確認済みという前提で -D を使うが、
+  # ローカルの head が PR の headRefOid (前提条件検証時点で取得) と一致する場合に限る。
+  # 不一致 = マージ後にローカルへ積まれた未 push コミットがあるということで、
+  # -D はそれらを到達不能にしてしまうため削除をスキップする。
   if git show-ref --verify --quiet "refs/heads/$pr_head"; then
-    git branch -D "$pr_head"
+    local_head_oid=$(git rev-parse "refs/heads/$pr_head" 2>/dev/null || true)
+    if [[ -n "$local_head_oid" && "$local_head_oid" == "$pr_head_oid" ]]; then
+      git branch -D "$pr_head"
+    else
+      info "警告: ローカルブランチ '$pr_head' はマージした PR の head と一致しないため削除をスキップしました (local=$local_head_oid, pr_head=$pr_head_oid)"
+    fi
   fi
 fi
 

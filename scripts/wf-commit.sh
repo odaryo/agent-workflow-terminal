@@ -25,10 +25,12 @@ allow_main=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t | --title)
+      require_value "-t/--title" "$#"
       title="$2"
       shift 2
       ;;
     -b | --body)
+      require_value "-b/--body" "$#"
       body="$2"
       shift 2
       ;;
@@ -59,7 +61,7 @@ fi
 conventional_pattern='^(feat|fix|docs|refactor|test|chore|ci|build|perf|style)(\([^)]+\))?!?: .+'
 [[ "$title" =~ $conventional_pattern ]] || die "タイトルが Conventional Commits 形式ではありません: $title"
 
-current_branch=$(git rev-parse --abbrev-ref HEAD)
+current_branch=$(current_branch_or_die)
 if [[ "$current_branch" == "main" && "$allow_main" -ne 1 ]]; then
   die "main ブランチへの直接コミットは禁止です (docs 等の1行変更のみ --allow-main で許可)"
 fi

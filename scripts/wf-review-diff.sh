@@ -21,6 +21,7 @@ branch=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --branch)
+      require_value "--branch" "$#"
       branch="$2"
       shift 2
       ;;

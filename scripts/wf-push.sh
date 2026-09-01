@@ -42,7 +42,7 @@ done
 repo_root_cd
 require_cmd git
 
-current_branch=$(git rev-parse --abbrev-ref HEAD)
+current_branch=$(current_branch_or_die)
 
 if [[ "$current_branch" == "main" ]]; then
   [[ "$force" -eq 0 ]] || die "main への --force push は組み合わせ自体が禁止です"

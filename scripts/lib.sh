@@ -24,6 +24,19 @@ require_cmd() {
   done
 }
 
+# 値必須フラグの値欠落を bash の "unbound variable" ではなく日本語エラーにするためのガード。
+# $1 = フラグ名 (エラー表示用), $2 = 呼び出し元の "$#" (シフト前の残り引数数)。
+require_value() {
+  [[ "$2" -ge 2 ]] || die "$1 には値が必要です"
+}
+
+# 現在ブランチ名を返す。detached HEAD の場合は日本語エラーで exit する。
+current_branch_or_die() {
+  local ref
+  ref=$(git symbolic-ref --quiet HEAD) || die "detached HEAD 状態です。ブランチを checkout してから実行してください"
+  echo "${ref#refs/heads/}"
+}
+
 WF_NWO=""
 # gh repo view の結果をプロセス内でキャッシュする (同一スクリプト内で複数回呼ばれるため)。
 nwo() {

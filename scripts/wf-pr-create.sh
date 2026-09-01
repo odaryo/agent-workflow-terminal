@@ -28,18 +28,22 @@ dry_run=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t | --title)
+      require_value "-t/--title" "$#"
       title="$2"
       shift 2
       ;;
     -b | --body)
+      require_value "-b/--body" "$#"
       body="$2"
       shift 2
       ;;
     -F | --body-file)
+      require_value "-F/--body-file" "$#"
       body_file="$2"
       shift 2
       ;;
     -B | --base)
+      require_value "-B/--base" "$#"
       base="$2"
       shift 2
       ;;

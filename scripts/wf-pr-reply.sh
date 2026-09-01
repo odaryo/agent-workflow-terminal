@@ -26,6 +26,7 @@ dry_run=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --reply-to)
+      require_value "--reply-to" "$#"
       reply_to="$2"
       shift 2
       ;;
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -b | --body)
+      require_value "-b/--body" "$#"
       body="$2"
       shift 2
       ;;

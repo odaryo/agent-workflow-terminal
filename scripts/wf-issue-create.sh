@@ -30,18 +30,22 @@ dry_run=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -t | --title)
+      require_value "-t/--title" "$#"
       title="$2"
       shift 2
       ;;
     -b | --body)
+      require_value "-b/--body" "$#"
       body="$2"
       shift 2
       ;;
     -l | --label)
+      require_value "-l/--label" "$#"
       labels+=("$2")
       shift 2
       ;;
     -m | --milestone)
+      require_value "-m/--milestone" "$#"
       milestone="$2"
       shift 2
       ;;
@@ -75,23 +79,27 @@ grep -qF '## 完了条件' <<<"$body" || die "本文に '## 完了条件' 見出
 project_name="agent-workflow-terminal"
 
 args=(issue create --title "$title" --body "$body")
+display="gh issue create --title \"$title\" --body <inline>"
 
 if [[ ${#labels[@]} -gt 0 ]]; then
   for label in "${labels[@]}"; do
     args+=(--label "$label")
+    display+=" --label \"$label\""
   done
 fi
 
 if [[ -n "$milestone" ]]; then
   args+=(--milestone "$milestone")
+  display+=" --milestone \"$milestone\""
 fi
 
 if [[ "$no_project" -ne 1 ]]; then
   args+=(--project "$project_name")
+  display+=" --project \"$project_name\""
 fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  info "[dry-run] gh ${args[*]}"
+  info "[dry-run] $display"
   exit 0
 fi
 

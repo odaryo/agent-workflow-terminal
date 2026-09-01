@@ -51,6 +51,8 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 
 Both agents and humans perform these operations through the scripts, never through raw `git`/`gh` write commands. If a request can't be expressed through a script, fix the script — don't route around it with a raw command.
 
+Always invoke these from the repository root as `scripts/wf-*.sh <args>` — the `.claude/settings.json` allow rules are defined against that exact string form.
+
 Merging is squash-only, with commit title `<PR title> (#N)`; `scripts/wf-pr-merge.sh` enforces checks-GREEN before it will merge.
 
 ## The product in one line

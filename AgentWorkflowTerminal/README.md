@@ -50,6 +50,21 @@ swift build
 swift test
 ```
 
+### tmux 統合テスト
+
+既定の `swift test` は、tmux の版数差やローカル server の状態に依存させないため、実際の tmux を
+起動しません。実バイナリの解決、専用 server での detached session 作成、pane 取得、非ゼロ終了の
+変換までを確認するときだけ、次のように opt-in で実行します。
+
+```shell
+cd AgentWorkflowTerminal
+AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
+```
+
+統合テストは `-L awt-integration` の専用 socket だけを使い、開始前と終了時に `kill-server` を
+実行します。途中でテストが失敗した場合も終了処理を行います。2026-09-02 に tmux 3.4 で成功を
+確認しています。
+
 ## Lint / Format
 
 repository ルートの設定ファイルを使います。ツール本体はこのリポジトリでは配布していません。

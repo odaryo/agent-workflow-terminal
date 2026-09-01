@@ -22,7 +22,7 @@ public enum ProcessRunnerError: Error, Sendable, Equatable {
   case launchFailed(executableURL: URL, message: String)
   case timedOut(exitCode: Int32?, stdout: String, stderr: String)
   case cancelled
-  case outputLimitExceeded(limit: Int, bytesRead: Int)
+  case outputLimitExceeded(limit: Int)
   case outputReadFailed(message: String)
   case invalidOutputLimit(Int)
 }
@@ -93,7 +93,8 @@ public struct FoundationProcessRunner: ProcessRunning, Sendable {
 private actor ProcessExecution {
   // SIGTERM の後始末機会と1秒未満の停止上界を両立する暫定値。CLI 別の猶予は未実測。
   private static let terminationGracePeriod = Duration.milliseconds(100)
-  // DispatchIO の完了と actor への通知順の揺れを吸収し、timeout への追加を50msに限定する。
+  // 期限時点で子が終了済みなら、出力の配達が着地する猶予を与えてから .timedOut を確定する。
+  // 配達の遅延は制御できず、この猶予が効いていることを固定するテストは無い (0 でも既存テストは通る)。
   private static let endOfFileGracePeriod = Duration.milliseconds(50)
 
   private struct OutputPipe {
@@ -329,10 +330,7 @@ private actor ProcessExecution {
     guard terminalError == nil else { return }
     let completions = [stdoutSnapshot.completion, stderrSnapshot.completion]
     if completions.contains(.limitExceeded) {
-      terminalError = .outputLimitExceeded(
-        limit: outputLimit,
-        bytesRead: outputBudget.bytesRead
-      )
+      terminalError = .outputLimitExceeded(limit: outputLimit)
     } else if let errorCode = completions.compactMap({ $0?.errorCode }).first {
       terminalError = .outputReadFailed(
         message: String(cString: Darwin.strerror(errorCode)))

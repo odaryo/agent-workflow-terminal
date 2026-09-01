@@ -22,10 +22,6 @@ struct OutputBudget: Sendable {
     self.limit = limit
   }
 
-  var bytesRead: Int {
-    state.withLock { $0.bytesRead }
-  }
-
   func reserve(_ requestedBytes: Int) -> Reservation {
     state.withLock { state in
       let remainingBytes = max(0, limit - state.bytesRead)

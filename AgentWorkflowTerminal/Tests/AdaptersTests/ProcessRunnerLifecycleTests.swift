@@ -238,9 +238,29 @@ struct ProcessRunnerLifecycleTests {
     let error = await processError(from: task)
     let elapsed = start.duration(to: clock.now)
 
-    #expect(error == .outputLimitExceeded(limit: outputLimit, bytesRead: outputLimit))
+    #expect(error == .outputLimitExceeded(limit: outputLimit))
     #expect(elapsed < .seconds(1))
     try expectProcessIsGone(processID)
+  }
+
+  @Test("出力上限を指定しない実行も既定の8 MiB で暴走を止める")
+  func stopsProcessAtDefaultOutputLimit() async throws {
+    #expect(ProcessRunLimits.defaultOutputBytes == 8_388_608)
+    let start = ContinuousClock().now
+
+    do {
+      _ = try await runner.run(
+        executableURL: URL(fileURLWithPath: "/usr/bin/yes"),
+        arguments: [],
+        environment: [:],
+        timeout: .seconds(1)
+      )
+      Issue.record("既定の上限を超えた実行が成功した")
+    } catch {
+      #expect(error == .outputLimitExceeded(limit: ProcessRunLimits.defaultOutputBytes))
+    }
+    // 既定値が実質無制限へ変わると期限まで蓄積が続くため、期限より十分短いことも確かめる。
+    #expect(start.duration(to: ContinuousClock().now) < .milliseconds(500))
   }
 
   @Test("直接の子だけを停止するため孫は残り得る")

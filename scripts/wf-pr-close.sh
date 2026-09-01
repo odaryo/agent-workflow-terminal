@@ -77,8 +77,9 @@ fi
 gh "${args[@]}" || die "PR #$pr_number のクローズに失敗しました"
 info "PR #$pr_number をクローズしました (head=$pr_head)"
 
-# --delete-branch はリモートのみを消す。ローカルに追跡ブランチが残ると
-# wf-cleanup-branches.sh (マージ済み PR が対象) では回収されないため知らせる。
+# gh の --delete-branch はリモートとローカルの両方を消すが、対象がカレント
+# ブランチだったり未 push コミットがあると黙ってローカルだけ残ることがある。
+# wf-cleanup-branches.sh はマージ済み PR しか見ないので、残骸は回収されない。
 if [[ "$delete_branch" -eq 1 ]] && git show-ref --verify --quiet "refs/heads/$pr_head"; then
   info "ローカルブランチ '$pr_head' は残っています (削除するなら git branch -D '$pr_head')"
 fi

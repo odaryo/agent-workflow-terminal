@@ -92,7 +92,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **Roles**
 - **Director** (the main Claude session): research, decisions, task decomposition, spec writing, progress judgment, reporting. Does not implement.
-- **Implementer** (Codex): `codex exec` non-interactively with the workspace-write sandbox; follow-ups via `codex exec resume --last` (no sandbox flags — the session's settings carry over). Codex reads `AGENTS.md`, not this file; `AGENTS.md` is a thin bridge that points here and to `docs/coding-guidelines.md` — keep it a pointer, never a second copy of the rules.
+- **Implementer** (Codex): `codex exec` non-interactively with the workspace-write sandbox; follow-ups via `codex exec resume --last` (no sandbox flags — the session's settings carry over). Codex reads `AGENTS.md`, not this file; `AGENTS.md` is a thin bridge that points here and to `docs/coding-guidelines.md` — keep it a pointer, never a second copy of the rules. When Codex is unavailable, fall back to the implementer subagent defined in `.claude/agents/implementer.md`.
 - **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
 
 **The loop**

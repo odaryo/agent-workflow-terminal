@@ -11,7 +11,8 @@ usage() {
 
 前提条件 (OPEN かつ non-draft / base=main / mergeable が CONFLICTING でない /
 checks が完了かつ成功) を検証したうえで squash マージする。
-  --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ
+  --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ。
+                     checks ゼロ件の場合も check run 未登録ウィンドウを考慮して最大60秒待つ
   --delete-local     マージ後、ローカルの head ブランチを削除する
   --no-wait-main-ci  マージ後の main CI 完了待ちを省略する
   --dry-run          実行せず、実行するはずの内容を表示する
@@ -76,10 +77,12 @@ require_conventional_title "$pr_title" "PR #$pr_number のタイトル (gh pr ed
 
 has_fail=0
 has_pending=0
+checks_reported=0
 refresh_checks() {
   local buckets b
   has_fail=0
   has_pending=0
+  checks_reported=0
   # --json 指定時の gh pr checks は checks を取得できた限り合否に関わらず exit 0
   # (fail/pending 用の特殊 exit code は JSON 出力時には返らない。gh の checks.go で確認)。
   # 非ゼロは「checks ゼロ件 (no checks reported)」か実エラーのどちらかで、前者だけを
@@ -87,11 +90,9 @@ refresh_checks() {
   if ! buckets=$(gh pr checks "$pr_number" --json bucket --jq '.[].bucket' 2>&1); then
     grep -qF "no checks reported" <<<"$buckets" \
       || die "PR #$pr_number の checks 取得に失敗しました: $buckets"
-    # ゼロ件は「paths-ignore で CI が起動しない (Spikes のみ等)」と「push 直後で
-    # check run 未登録」を API 上区別できない (Issue #46)。せめて無言にはしない。
-    info "PR #$pr_number に checks がありません。checks 検証をスキップします"
     return 0
   fi
+  checks_reported=1
   if [[ -n "$buckets" ]]; then
     while IFS= read -r b; do
       case "$b" in
@@ -103,6 +104,22 @@ refresh_checks() {
 }
 
 refresh_checks
+# ゼロ件は「paths-ignore で CI が起動しない (Spikes のみ等)」と「push 直後で check run
+# 未登録」を API 上区別できない (Issue #46)。実測では未登録ウィンドウが PR 作成後
+# 約3秒・既存 PR への push 後 約21秒続いたため、--wait-checks 時はゼロ件を即受理せず
+# 実測値の約3倍の猶予でリトライしてから受理する。
+if [[ "$checks_reported" -eq 0 && "$wait_checks" -eq 1 ]]; then
+  info "checks がゼロ件です。check run 未登録ウィンドウの可能性があるため最大60秒待ちます (5秒間隔)"
+  grace_waited=0
+  while [[ "$checks_reported" -eq 0 && "$grace_waited" -lt 60 ]]; do
+    sleep 5
+    grace_waited=$((grace_waited + 5))
+    refresh_checks
+  done
+fi
+if [[ "$checks_reported" -eq 0 ]]; then
+  info "PR #$pr_number に checks がありません。checks 検証をスキップします"
+fi
 [[ "$has_fail" -eq 0 ]] || die "PR #$pr_number の checks に失敗があります"
 
 if [[ "$has_pending" -eq 1 ]]; then

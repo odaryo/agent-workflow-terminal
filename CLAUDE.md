@@ -111,12 +111,12 @@ Issues are the single source of truth (see Repository state); [Project #6](https
 
 | Status | Meaning | Transition |
 | --- | --- | --- |
-| `Todo` | 未着手 | Issue 作成時 — 自動 (`Item added to project`) |
+| `Todo` | 未着手 | Issue 作成時 — 手動 (`wf-project-status.sh`。CI 化は #49) |
 | `In Progress` | 実装中 | **worktree を作った時** — 手動 |
-| `In Review` | マージ判断待ち | PR を Issue にリンクした時 — 自動 (`Pull request linked to issue`) |
-| `Done` | マージ済み | マージで Issue が close — 自動 (`Item closed` / `Pull request merged`) |
+| `In Review` | マージ判断待ち | PR Open 時 — 自動 (CI `project-status.yml`。draft は除外) |
+| `Done` | マージ済み | PR マージ時 — 自動 (CI `project-status.yml`) |
 
-Only `Todo → In Progress` is manual. Automation depends on the PR body carrying `Closes #N`; without it nothing advances past `In Progress`.
+Automation depends on the PR body carrying `Closes #N`; without it nothing advances past `In Progress`. **ProjectV2 の built-in automation は使わない** — Status option ID の再生成で全て無効化されており (下記 `updateProjectV2Field` 警告の事故と整合)、ProjectV2 workflow には公開 API が無く再有効化・変更が Web UI でしかできないため、リポジトリ内で管理できる CI (`.github/workflows/project-status.yml`) に置き換えた。CI からの Status 更新には `secrets.PROJECT_TOKEN` (classic PAT / `project` スコープ) が必要で、未設定の間は warning のみ出して成功する。
 
 `In Review` exists so that **"手が動いているタスク"と"ユーザーのマージ判断で止まっているタスク"が混ざらない** — agents run in parallel, so several tasks sit waiting on the user at once.
 

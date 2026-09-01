@@ -1,0 +1,116 @@
+name: Project Status
+
+# ProjectV2 の built-in automation (Item closed / Pull request linked 等) は
+# Status option ID の再生成で全て無効化されていた (Issue #48)。ProjectV2 workflow
+# には公開 API の mutation が無く再有効化は Web UI 限定のため、リポジトリ内で
+# 管理できるこの workflow に置き換える。field/option ID は名前から毎回解決する —
+# ID を焼き込むと option 再生成事故 (CLAUDE.md の updateProjectV2Field 警告) で
+# 再び静かに壊れるため。
+#
+# GITHUB_TOKEN は user-owned ProjectV2 へ届かないため、classic PAT (project
+# スコープ) を secrets.PROJECT_TOKEN へ登録して使う。未設定は warning のみで
+# 成功させる (登録前の PR が wf-pr-merge.sh の checks-GREEN 条件でマージ不能に
+# なるため)。API 失敗は fail させ、Status 未更新を checks の赤で可視化する。
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, closed]
+
+permissions: {}
+
+concurrency:
+  group: project-status-${{ github.event.pull_request.number }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  sync:
+    name: Sync linked issue status
+    # merge を伴わない close は「タスク完了」ではないため Status を動かさない
+    if: github.event.action != 'closed' || github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      IS_DRAFT: ${{ github.event.pull_request.draft }}
+      IS_MERGED: ${{ github.event.pull_request.merged }}
+      PROJECT_OWNER: odaryo
+      PROJECT_NUMBER: 6
+    steps:
+      - name: Update Status of linked issues
+        run: |
+          set -u
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::secrets.PROJECT_TOKEN が未設定のため Status 更新をスキップしました (classic PAT の project スコープで登録してください)"
+            exit 0
+          fi
+
+          if [[ "$IS_MERGED" == "true" ]]; then
+            status="Done"
+          elif [[ "$IS_DRAFT" == "true" ]]; then
+            echo "draft PR のため Status を更新しません"
+            exit 0
+          else
+            status="In Review"
+          fi
+
+          owner="${GITHUB_REPOSITORY%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+
+          # PR 本文の Closes #N でリンクされた Issue の project item を引く。
+          # リンクが無い場合に何もしないのは仕様 (CLAUDE.md: Closes #N が無ければ
+          # In Progress から先へ進まない)。
+          items=$(gh api graphql -f query='
+            query($owner:String!,$repo:String!,$pr:Int!){
+              repository(owner:$owner,name:$repo){
+                pullRequest(number:$pr){
+                  closingIssuesReferences(first:20){
+                    nodes{ number projectItems(first:10){ nodes{ id project{ number } } } }
+                  }
+                }
+              }
+            }' -f owner="$owner" -f repo="$repo" -F pr="$PR_NUMBER" \
+            | jq -r --argjson p "$PROJECT_NUMBER" '
+                .data.repository.pullRequest.closingIssuesReferences.nodes[]
+                | .number as $n
+                | .projectItems.nodes[]
+                | select(.project.number == $p)
+                | "\($n)\t\(.id)"')
+          if [[ -z "$items" ]]; then
+            echo "リンクされた Issue が Project #$PROJECT_NUMBER にありません。何もしません"
+            exit 0
+          fi
+
+          field_json=$(gh api graphql -f query='
+            query($owner:String!,$number:Int!){
+              user(login:$owner){
+                projectV2(number:$number){
+                  id
+                  field(name:"Status"){
+                    ... on ProjectV2SingleSelectField{ id options{ id name } }
+                  }
+                }
+              }
+            }' -f owner="$PROJECT_OWNER" -F number="$PROJECT_NUMBER")
+          project_id=$(jq -re '.data.user.projectV2.id' <<<"$field_json")
+          field_id=$(jq -re '.data.user.projectV2.field.id' <<<"$field_json")
+          if ! option_id=$(jq -re --arg s "$status" \
+            '.data.user.projectV2.field.options[] | select(.name == $s) | .id' <<<"$field_json"); then
+            echo "::error::Status option '$status' が見つかりません: $(jq -c '.data.user.projectV2.field.options' <<<"$field_json")"
+            exit 1
+          fi
+
+          while IFS=$'\t' read -r issue_number item_id; do
+            gh api graphql -f query='
+              mutation($project:ID!,$item:ID!,$field:ID!,$option:String!){
+                updateProjectV2ItemFieldValue(input:{
+                  projectId:$project, itemId:$item, fieldId:$field,
+                  value:{singleSelectOptionId:$option}
+                }){ projectV2Item{ id } }
+              }' -f project="$project_id" -f item="$item_id" \
+                 -f field="$field_id" -f option="$option_id" >/dev/null
+            echo "Issue #$issue_number の Status を '$status' に更新しました"
+          done <<<"$items"

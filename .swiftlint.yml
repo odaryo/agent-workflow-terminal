@@ -1,0 +1,79 @@
+# SwiftLint 設定
+#
+# 方針: 既定ルール + 軽い調整のみ。書式(インデント・改行・空白)は swift-format が担当し、
+# SwiftLint は「設計上まずい書き方」の検出に寄せる。
+# 詳細は docs/coding-guidelines.md を参照。
+
+included:
+  - AgentWorkflowTerminal/Sources
+  - AgentWorkflowTerminal/Tests
+
+excluded:
+  # スパイクは使い捨てコードであり、規約の対象外 (docs/coding-guidelines.md)。
+  - Spikes
+  - AgentWorkflowTerminal/.build
+  - .build
+
+# 書式系は swift-format と責務が重なるため無効化する。
+disabled_rules:
+  - trailing_comma
+  - opening_brace
+  - todo
+
+opt_in_rules:
+  - array_init
+  - closure_spacing
+  - collection_alignment
+  - empty_count
+  - empty_string
+  - fatal_error_message
+  - first_where
+  - implicitly_unwrapped_optional
+  - last_where
+  - literal_expression_end_indentation
+  - modifier_order
+  - overridden_super_call
+  - prefer_self_in_static_references
+  - redundant_nil_coalescing
+  - sorted_first_last
+  - unneeded_parentheses_in_closure_argument
+  - unowned_variable_capture
+  - yoda_condition
+
+# 日本語のドキュメンテーションコメントを書くため、行長は緩めに取る。
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+  ignores_urls: true
+
+# 設計書由来の名前(§12 の状態名など)を短縮しないため、識別子長は緩める。
+identifier_name:
+  min_length:
+    warning: 2
+  excluded:
+    - id
+    - x
+    - y
+
+type_name:
+  min_length:
+    warning: 3
+
+# ファイル分割の強制はしない。長くなったら設計で割る。
+file_length:
+  warning: 500
+  error: 1000
+
+function_body_length:
+  warning: 60
+  error: 120
+
+type_body_length:
+  warning: 400
+  error: 600
+
+nesting:
+  type_level: 2
+
+reporter: xcode

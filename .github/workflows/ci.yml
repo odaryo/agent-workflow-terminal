@@ -1,0 +1,76 @@
+name: CI
+
+# Spikes/ は使い捨てコードであり CI 対象外 (docs/coding-guidelines.md §6)。
+# ビルド対象にも lint 対象にも含めず、Spikes/ だけの変更ではジョブを起動しない。
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["Spikes/**"]
+  pull_request:
+    paths-ignore: ["Spikes/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-and-test:
+    name: Build & Test (SwiftPM)
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: AgentWorkflowTerminal
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      - name: Test
+        run: swift test
+
+  format:
+    name: swift-format
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # swift-format は Swift 6 toolchain 同梱のため追加インストール不要
+      # (docs/coding-guidelines.md §7)。
+      - name: Lint formatting
+        run: |
+          swift format lint \
+            --configuration .swift-format \
+            --recursive --strict \
+            AgentWorkflowTerminal/Sources \
+            AgentWorkflowTerminal/Tests \
+            AgentWorkflowTerminal/Package.swift
+
+  # SwiftLint はランナーへの導入コストを避けるため、既定では実行しない。
+  # GitHub の macOS ランナーイメージに swiftlint が同梱されている場合は
+  # 下記のコメントを外して有効化する (同梱が外れた場合は `brew install swiftlint`
+  # が必要になり、1 ジョブあたり数分かかる)。
+  #
+  # lint:
+  #   name: SwiftLint
+  #   runs-on: macos-15
+  #   timeout-minutes: 10
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Lint
+  #       run: |
+  #         if ! command -v swiftlint >/dev/null 2>&1; then
+  #           brew install swiftlint
+  #         fi
+  #         swiftlint lint --config .swiftlint.yml --strict

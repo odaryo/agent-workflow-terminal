@@ -4,11 +4,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-`agent_workflow_terminal` is pre-alpha and currently **documentation-only**: there is no source code, no build system, and no test harness. The repository contains `README.md`, `docs/architecture.md`, `LICENSE` (MIT), `.editorconfig`, and a Swift/Xcode `.gitignore`.
+`agent_workflow_terminal` is pre-alpha. It holds the design documents, one throwaway PoC spike, and a scaffolding-only Swift package — **no product feature is implemented yet**.
 
-There are therefore no build/lint/test commands yet. When the first Swift package or Xcode project lands, add its commands to this file.
+- `docs/architecture.md` — the specification (Japanese). `docs/coding-guidelines.md` — the coding rules; read it before writing Swift.
+- `Spikes/gate1/` — the PoC Gate 1 spike (SwiftUI + libghostty + PTY + tmux). Throwaway code: excluded from lint, format, tests, and CI. Read it as a reference implementation; never copy code out of it.
+- `AgentWorkflowTerminal/` — the SwiftPM package. Targets: `TerminalCore` (domain model, no UI/process deps) ← `Adapters` (external-world boundary, placeholder only). Each has a Swift Testing test target. Swift 6 language mode, strict concurrency.
+- There is deliberately **no app target / Xcode project yet** — the Gate 1 spike already serves as the running macOS reference, and Gate 2+ is unfinished. See `AgentWorkflowTerminal/README.md`.
 
-Documentation is written in Japanese; keep that language when editing docs. Commits follow Conventional Commits (`docs: ...`).
+### Build / test / lint
+
+```shell
+cd AgentWorkflowTerminal && swift build && swift test     # SwiftPM package
+```
+
+```shell
+# from the repository root
+swift format lint --configuration .swift-format --recursive --strict \
+  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift
+swift format format --configuration .swift-format --recursive --in-place \
+  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift
+swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
+```
+
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` + `swift format lint` on a macOS runner; the SwiftLint job is present but commented out.
+
+Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
+
+**Code = How / tests = What / commit log = Why / code comments = Why not.** Comments — `///` doc comments included — carry only what the code cannot: constraints, pitfalls, units, and design-doc section references. Never restate a name or a signature. See `docs/coding-guidelines.md` §8.
+
+Documentation is written in Japanese; keep that language when editing docs. Commits follow Conventional Commits (`docs: ...`), with the *why* in the body.
 
 ## The product in one line
 
@@ -38,7 +62,7 @@ These are recorded as **確定** (decided) in `docs/architecture.md` and should 
 
 Swift 6 + SwiftUI, libghostty behind a `TerminalRenderer` protocol, tmux CLI, git CLI, SwiftNIO SSH for iOS, SQLite + GRDB (metadata only; large blobs on the filesystem), ripgrep CLI, and a small `hostctl` JSON-Lines CLI over separate SSH channels for structured data.
 
-Everything in `docs/architecture.md` §21–22 is **現在の推奨** (leading candidate), not adopted. PoC gates 1–5 in §24 must pass first; Gate 1 (macOS libghostty + PTY + tmux quality) blocks broader UI work.
+Everything in `docs/architecture.md` §21–22 is **現在の推奨** (leading candidate), not adopted — including Swift 6 / SwiftUI, so the SwiftPM scaffolding under `AgentWorkflowTerminal/` follows the recommendation and does not by itself make it 確定. The one exception is §21.5: Gate 1 passed on 2026-08-31 and libghostty for the **macOS** `TerminalRenderer` is now 確定 (the iOS renderer is not). Gates 2–5 in §24 are still unrun.
 
 ## License policy
 

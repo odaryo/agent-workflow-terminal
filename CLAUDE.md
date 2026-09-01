@@ -46,6 +46,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Update Issue Project status | `scripts/wf-project-status.sh` |
 | Create a PR | `scripts/wf-pr-create.sh` |
 | Merge a PR | `scripts/wf-pr-merge.sh` |
+| Close a PR without merging | `scripts/wf-pr-close.sh` |
 | Read / reply to PR comments | `scripts/wf-pr-comments.sh` / `scripts/wf-pr-reply.sh` |
 | Clean up merged branches | `scripts/wf-cleanup-branches.sh` |
 

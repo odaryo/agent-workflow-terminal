@@ -11,8 +11,9 @@ usage() {
 
 前提条件 (OPEN かつ non-draft / base=main / mergeable が CONFLICTING でない /
 checks が完了かつ成功) を検証したうえで squash マージする。
-  --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ。
-                     checks ゼロ件の場合も check run 未登録ウィンドウを考慮して最大60秒待つ
+checks がゼロ件の場合は check run 未登録ウィンドウを考慮して最大60秒待ってから受理する
+(このフラグの有無によらない)。
+  --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ
   --delete-local     マージ後、ローカルの head ブランチを削除する
   --no-wait-main-ci  マージ後の main CI 完了待ちを省略する
   --dry-run          実行せず、実行するはずの内容を表示する
@@ -103,37 +104,51 @@ refresh_checks() {
   fi
 }
 
-refresh_checks
 # ゼロ件は「paths-ignore で CI が起動しない (Spikes のみ等)」と「push 直後で check run
 # 未登録」を API 上区別できない (Issue #46)。実測では未登録ウィンドウが PR 作成後
-# 約3秒・既存 PR への push 後 約21秒続いたため、--wait-checks 時はゼロ件を即受理せず
-# 実測値の約3倍の猶予でリトライしてから受理する。
-if [[ "$checks_reported" -eq 0 && "$wait_checks" -eq 1 ]]; then
-  info "checks がゼロ件です。check run 未登録ウィンドウの可能性があるため最大60秒待ちます (5秒間隔)"
-  grace_waited=0
-  while [[ "$checks_reported" -eq 0 && "$grace_waited" -lt 60 ]]; do
-    sleep 5
-    grace_waited=$((grace_waited + 5))
-    refresh_checks
-  done
-fi
-if [[ "$checks_reported" -eq 0 ]]; then
-  info "PR #$pr_number に checks がありません。checks 検証をスキップします"
-fi
-[[ "$has_fail" -eq 0 ]] || die "PR #$pr_number の checks に失敗があります"
+# 約3秒・既存 PR への push 後 約21秒あったため、ゼロ件は即受理せず実測値の約3倍を
+# 上限に猶予リトライしてから受理する。
+#
+# 猶予は pending 待機中にも要る。待機中に head へ push されると rollup が新 head へ
+# 切り替わって一度ゼロ件へ落ちるため、初回だけ猶予を入れる作りだと「pending を待って
+# いたら CI 未検証の新しい head をそのままマージする」経路が残る。判定を1つのループに
+# まとめて、どの時点のゼロ件にも同じ猶予が掛かるようにする。
+#
+# 猶予は累積で数える (ゼロ件へ戻るたびにリセットしない) — push を繰り返されたときに
+# 待ち続けないための上限として機能させるため。
+GRACE_LIMIT_SECONDS=60
+PENDING_LIMIT_SECONDS=900
+verify_checks() {
+  local grace=0 waited=0
+  refresh_checks
+  while :; do
+    [[ "$has_fail" -eq 0 ]] || die "PR #$pr_number の checks に失敗があります"
 
-if [[ "$has_pending" -eq 1 ]]; then
-  [[ "$wait_checks" -eq 1 ]] || die "PR #$pr_number の checks が pending です (--wait-checks で待機できます)"
-  info "checks の完了を待機します (最大15分, 15秒間隔)"
-  waited=0
-  while [[ "$has_pending" -eq 1 && "$waited" -lt 900 ]]; do
+    if [[ "$checks_reported" -eq 0 ]]; then
+      if [[ "$grace" -ge "$GRACE_LIMIT_SECONDS" ]]; then
+        info "PR #$pr_number に checks がありません。CI が起動しない変更 (Spikes のみ等) とみなして checks 検証をスキップします"
+        return 0
+      fi
+      [[ "$grace" -gt 0 ]] \
+        || info "checks がゼロ件です。check run 未登録ウィンドウの可能性があるため最大${GRACE_LIMIT_SECONDS}秒待ちます (5秒間隔)"
+      sleep 5
+      grace=$((grace + 5))
+      refresh_checks
+      continue
+    fi
+
+    [[ "$has_pending" -eq 1 ]] || return 0
+    [[ "$wait_checks" -eq 1 ]] || die "PR #$pr_number の checks が pending です (--wait-checks で待機できます)"
+    [[ "$waited" -lt "$PENDING_LIMIT_SECONDS" ]] \
+      || die "PR #$pr_number の checks が15分待っても完了しませんでした"
+    [[ "$waited" -gt 0 ]] || info "checks の完了を待機します (最大15分, 15秒間隔)"
     sleep 15
     waited=$((waited + 15))
     refresh_checks
-    [[ "$has_fail" -eq 0 ]] || die "PR #$pr_number の checks に失敗があります"
   done
-  [[ "$has_pending" -eq 0 ]] || die "PR #$pr_number の checks が15分待っても完了しませんでした"
-fi
+}
+
+verify_checks
 
 repo_nwo=$(nwo)
 commit_title="${pr_title} (#${pr_number})"

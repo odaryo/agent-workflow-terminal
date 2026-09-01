@@ -58,12 +58,14 @@ swift test
 
 ```shell
 cd AgentWorkflowTerminal
-AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
+AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegration
 ```
 
-統合テストは `-L awt-integration` の専用 socket だけを使い、開始前と終了時に `kill-server` を
-実行します。途中でテストが失敗した場合も終了処理を行います。2026-09-02 に tmux 3.4 で成功を
-確認しています。
+統合テストは process ID を含む `-L awt-integration-<pid>` の専用 socket だけを使います。
+tmux 3.4 では正常な `kill-server` 後も socket ファイルが残るため、テストは `defer` で server を
+停止する fallback を確保し、`kill-server` の完了後に専用 socket ファイルも削除します。途中で
+テストが失敗した場合も同じ後始末を行います。
+2026-09-02 に tmux 3.4 で成功を確認しています。
 
 ## Lint / Format
 

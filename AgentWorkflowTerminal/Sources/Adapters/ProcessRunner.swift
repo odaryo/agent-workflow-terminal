@@ -1,4 +1,5 @@
 import Darwin
+import Dispatch
 import Foundation
 
 public struct ProcessRunResult: Sendable, Equatable {
@@ -45,35 +46,39 @@ public struct FoundationProcessRunner: ProcessRunning, Sendable {
       timeout: timeout
     )
 
-    do {
-      return try await withTaskCancellationHandler {
-        try await execution.run()
-      } onCancel: {
-        Task {
-          await execution.cancel()
-        }
+    let result = await withTaskCancellationHandler {
+      await execution.run()
+    } onCancel: {
+      Task {
+        await execution.cancel()
       }
-    } catch let error as ProcessRunnerError {
-      throw error
-    } catch {
-      throw .outputReadFailed(message: String(describing: error))
     }
+    if Task.isCancelled {
+      await execution.cancel()
+      throw .cancelled
+    }
+    return try result.get()
   }
 }
 
 private actor ProcessExecution {
-  // SIGTERM で通常の後始末を促しつつ、テストを秒単位で遅らせない猶予。
+  // SIGTERM の後始末機会と1秒未満の停止上界を両立する暫定値。CLI 別の猶予は未実測。
   private static let terminationGracePeriod = Duration.milliseconds(100)
 
-  private enum StopReason {
-    case timedOut
-    case cancelled
+  private enum OutputKind {
+    case stdout
+    case stderr
+  }
+
+  private struct OutputPipe {
+    let reader: AsyncPipeReader
+    let writeHandle: FileHandle
   }
 
   private struct ProcessResources {
     let process: Process
-    let stdoutPipe: Pipe
-    let stderrPipe: Pipe
+    let stdout: OutputPipe
+    let stderr: OutputPipe
   }
 
   private let executableURL: URL
@@ -82,10 +87,18 @@ private actor ProcessExecution {
   private let timeout: Duration
 
   private var process: Process?
-  private var terminationContinuation: CheckedContinuation<Void, Never>?
-  private var didTerminate = false
-  private var stopReason: StopReason?
-  private var isStopping = false
+  private var processWasLaunched = false
+  private var stdoutReader: AsyncPipeReader?
+  private var stderrReader: AsyncPipeReader?
+  private var terminationStatus: Int32?
+  private var stdoutData: Data?
+  private var stderrData: Data?
+  private var terminalError: ProcessRunnerError?
+  private var finalResult: Result<ProcessRunResult, ProcessRunnerError>?
+  private var resultContinuation:
+    CheckedContinuation<Result<ProcessRunResult, ProcessRunnerError>, Never>?
+  private var timeoutTask: Task<Void, Never>?
+  private var escalationTask: Task<Void, Never>?
 
   init(
     executableURL: URL,
@@ -99,135 +112,306 @@ private actor ProcessExecution {
     self.timeout = timeout
   }
 
-  func run() async throws(ProcessRunnerError) -> ProcessRunResult {
+  func run() async -> Result<ProcessRunResult, ProcessRunnerError> {
     guard !Task.isCancelled else {
-      throw .cancelled
+      return .failure(.cancelled)
     }
 
-    let resources = makeProcess()
-    let process = resources.process
+    let resources: ProcessResources
+    do {
+      resources = try makeProcessResources()
+    } catch {
+      return .failure(error)
+    }
+    install(resources)
+    observe(resources.stdout.reader, as: .stdout)
+    observe(resources.stderr.reader, as: .stderr)
 
     do {
-      try process.run()
+      try resources.process.run()
     } catch {
-      self.process = nil
-      throw .launchFailed(executableURL: executableURL, message: String(describing: error))
+      closeParentWriteHandles(resources)
+      let result = Result<ProcessRunResult, ProcessRunnerError>.failure(
+        .launchFailed(executableURL: executableURL, message: String(describing: error)))
+      complete(result)
+      stopReading()
+      return result
+    }
+    processWasLaunched = true
+    closeParentWriteHandles(resources)
+    startTimeout()
+    if Task.isCancelled {
+      cancel()
     }
 
-    // 子が一方のパイプを埋めても他方の読み取りを妨げないよう、独立した Task で drain する。
-    let stdoutTask = Task.detached {
-      try resources.stdoutPipe.fileHandleForReading.readToEnd() ?? Data()
+    return await waitForResult()
+  }
+
+  func cancel() {
+    guard finalResult == nil else { return }
+    // 明示的な呼び出し元の中止要求は、内部で推定したタイムアウトより優先する (§1.4)。
+    terminalError = .cancelled
+    stopReading()
+    stopDirectProcessIfNeeded()
+  }
+
+  private func makeProcessResources() throws(ProcessRunnerError) -> ProcessResources {
+    let stdout = try makeOutputPipe(label: "awt.process.stdout")
+    let stderr: OutputPipe
+    do {
+      stderr = try makeOutputPipe(label: "awt.process.stderr")
+    } catch {
+      stdout.reader.stop()
+      try? stdout.writeHandle.close()
+      throw error
     }
-    let stderrTask = Task.detached {
-      try resources.stderrPipe.fileHandleForReading.readToEnd() ?? Data()
+
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = arguments
+    process.environment = environment
+    process.standardOutput = stdout.writeHandle
+    process.standardError = stderr.writeHandle
+    process.terminationHandler = { [weak self] process in
+      guard let self else { return }
+      let status = process.terminationStatus
+      Task {
+        await self.processDidTerminate(status: status)
+      }
     }
-    let timeoutTask = Task {
+    return ProcessResources(process: process, stdout: stdout, stderr: stderr)
+  }
+
+  private func makeOutputPipe(label: String) throws(ProcessRunnerError) -> OutputPipe {
+    var descriptors: [Int32] = [0, 0]
+    guard Darwin.pipe(&descriptors) == 0 else {
+      throw .launchFailed(
+        executableURL: executableURL,
+        message: "pipe: \(String(cString: Darwin.strerror(errno)))"
+      )
+    }
+    return OutputPipe(
+      reader: AsyncPipeReader(fileDescriptor: descriptors[0], queueLabel: label),
+      writeHandle: FileHandle(fileDescriptor: descriptors[1], closeOnDealloc: true)
+    )
+  }
+
+  private func install(_ resources: ProcessResources) {
+    process = resources.process
+    stdoutReader = resources.stdout.reader
+    stderrReader = resources.stderr.reader
+  }
+
+  private func observe(_ reader: AsyncPipeReader, as kind: OutputKind) {
+    Task { [weak self] in
+      let result = await reader.readAll()
+      await self?.outputDidComplete(result, as: kind)
+    }
+  }
+
+  private func closeParentWriteHandles(_ resources: ProcessResources) {
+    try? resources.stdout.writeHandle.close()
+    try? resources.stderr.writeHandle.close()
+  }
+
+  private func startTimeout() {
+    timeoutTask = Task { [timeout] in
       do {
         try await Task.sleep(for: timeout)
       } catch {
         return
       }
       guard !Task.isCancelled else { return }
-      await stop(for: .timedOut)
+      timeoutReached()
     }
+  }
 
-    await waitForTermination()
-    timeoutTask.cancel()
-    reap(process)
+  private func timeoutReached() {
+    guard finalResult == nil, terminalError == nil else { return }
+    refreshTerminationStatusIfNeeded()
+    resolveSuccessIfPossible()
+    guard finalResult == nil else { return }
 
-    let stdoutData: Data
-    let stderrData: Data
-    do {
-      stdoutData = try await stdoutTask.value
-      stderrData = try await stderrTask.value
-    } catch {
-      self.process = nil
-      if Task.isCancelled || stopReason == .cancelled {
-        throw .cancelled
+    terminalError = .timedOut
+    stopReading()
+    stopDirectProcessIfNeeded()
+  }
+
+  private func outputDidComplete(
+    _ result: Result<Data, ProcessRunnerError>,
+    as kind: OutputKind
+  ) {
+    guard finalResult == nil else { return }
+    switch result {
+    case .success(let data):
+      switch kind {
+      case .stdout: stdoutData = data
+      case .stderr: stderrData = data
       }
-      if stopReason == .timedOut {
-        throw .timedOut
-      }
-      throw .outputReadFailed(message: String(describing: error))
+      resolveSuccessIfPossible()
+    case .failure(let error):
+      guard terminalError == nil else { return }
+      terminalError = error
+      stopReading()
+      stopDirectProcessIfNeeded()
     }
-    self.process = nil
-
-    if Task.isCancelled || stopReason == .cancelled {
-      throw .cancelled
-    }
-    if stopReason == .timedOut {
-      throw .timedOut
-    }
-
-    return ProcessRunResult(
-      exitCode: process.terminationStatus,
-      stdout: String(decoding: stdoutData, as: UTF8.self),
-      stderr: String(decoding: stderrData, as: UTF8.self)
-    )
   }
 
-  func cancel() async {
-    await stop(for: .cancelled)
+  private func processDidTerminate(status: Int32) {
+    terminationStatus = status
+    escalationTask?.cancel()
+    escalationTask = nil
+
+    if let terminalError {
+      complete(.failure(terminalError))
+    } else {
+      resolveSuccessIfPossible()
+    }
   }
 
-  private func makeProcess() -> ProcessResources {
-    let process = Process()
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
-    process.executableURL = executableURL
-    process.arguments = arguments
-    process.environment = environment
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-    process.terminationHandler = { [weak self] _ in
-      guard let self else { return }
-      Task {
-        await self.processDidTerminate()
-      }
-    }
-    self.process = process
-    return ProcessResources(process: process, stdoutPipe: stdoutPipe, stderrPipe: stderrPipe)
+  private func resolveSuccessIfPossible() {
+    guard terminalError == nil,
+      let terminationStatus,
+      let stdoutData,
+      let stderrData
+    else { return }
+
+    complete(
+      .success(
+        ProcessRunResult(
+          exitCode: terminationStatus,
+          stdout: String(decoding: stdoutData, as: UTF8.self),
+          stderr: String(decoding: stderrData, as: UTF8.self)
+        )))
   }
 
-  private func stop(for reason: StopReason) async {
-    if reason == .cancelled || stopReason == nil {
-      stopReason = reason
-    }
-    guard let process, process.isRunning, !isStopping else { return }
-    isStopping = true
-
-    process.terminate()
-    do {
-      try await Task.sleep(for: Self.terminationGracePeriod)
-    } catch {
-      // 終了手順そのものは呼び出し元 Task のキャンセルに左右されない。
-    }
-    if process.isRunning {
-      _ = Darwin.kill(process.processIdentifier, SIGKILL)
-    }
-    reap(process)
+  private func stopReading() {
+    stdoutReader?.stop()
+    stderrReader?.stop()
   }
 
-  private func waitForTermination() async {
-    if didTerminate {
+  private func stopDirectProcessIfNeeded() {
+    guard let terminalError else { return }
+    guard let process else {
+      complete(.failure(terminalError))
       return
     }
-    await withCheckedContinuation { continuation in
-      if didTerminate {
-        continuation.resume()
+    guard processWasLaunched else {
+      complete(.failure(terminalError))
+      return
+    }
+    guard process.isRunning else {
+      refreshTerminationStatusIfNeeded()
+      complete(.failure(terminalError))
+      return
+    }
+
+    // Foundation.Process が終了・回収できるのは直接起動した PID だけで、孫は残り得る。
+    process.terminate()
+    guard escalationTask == nil else { return }
+    escalationTask = Task {
+      do {
+        try await Task.sleep(for: Self.terminationGracePeriod)
+      } catch {
+        return
+      }
+      guard !Task.isCancelled else { return }
+      escalateTerminationIfNeeded()
+    }
+  }
+
+  private func escalateTerminationIfNeeded() {
+    guard finalResult == nil, terminalError != nil, let process, process.isRunning else { return }
+    _ = Darwin.kill(process.processIdentifier, SIGKILL)
+  }
+
+  private func refreshTerminationStatusIfNeeded() {
+    guard terminationStatus == nil, processWasLaunched, let process, !process.isRunning else {
+      return
+    }
+    terminationStatus = process.terminationStatus
+  }
+
+  private func waitForResult() async -> Result<ProcessRunResult, ProcessRunnerError> {
+    if let finalResult {
+      return finalResult
+    }
+    return await withCheckedContinuation { continuation in
+      if let finalResult {
+        continuation.resume(returning: finalResult)
       } else {
-        terminationContinuation = continuation
+        resultContinuation = continuation
       }
     }
   }
 
-  private func processDidTerminate() {
-    didTerminate = true
-    terminationContinuation?.resume()
-    terminationContinuation = nil
+  private func complete(_ result: Result<ProcessRunResult, ProcessRunnerError>) {
+    guard finalResult == nil else { return }
+    finalResult = result
+    timeoutTask?.cancel()
+    timeoutTask = nil
+    escalationTask?.cancel()
+    escalationTask = nil
+    resultContinuation?.resume(returning: result)
+    resultContinuation = nil
+  }
+}
+
+private struct AsyncPipeReader: Sendable {
+  private struct Event: Sendable {
+    let data: Data
+    let isDone: Bool
+    let errorCode: Int32
   }
 
-  private func reap(_ process: Process) {
-    process.waitUntilExit()
+  private let channel: DispatchIO
+  private let events: AsyncStream<Event>
+
+  init(fileDescriptor: Int32, queueLabel: String) {
+    let (events, continuation) = AsyncStream.makeStream(of: Event.self)
+    let queue = DispatchQueue(label: queueLabel)
+    let channel = DispatchIO(
+      type: .stream,
+      fileDescriptor: fileDescriptor,
+      queue: queue
+    ) { errorCode in
+      if errorCode != 0 {
+        continuation.yield(Event(data: Data(), isDone: true, errorCode: errorCode))
+      }
+      continuation.finish()
+      _ = Darwin.close(fileDescriptor)
+    }
+    channel.read(offset: 0, length: Int.max, queue: queue) { isDone, data, errorCode in
+      continuation.yield(
+        Event(
+          data: data.map { Data($0) } ?? Data(),
+          isDone: isDone,
+          errorCode: errorCode
+        ))
+      if isDone {
+        continuation.finish()
+      }
+    }
+    self.channel = channel
+    self.events = events
+  }
+
+  func readAll() async -> Result<Data, ProcessRunnerError> {
+    var output = Data()
+    for await event in events {
+      output.append(event.data)
+      if event.errorCode != 0 {
+        return .failure(
+          .outputReadFailed(message: String(cString: Darwin.strerror(event.errorCode))))
+      }
+      if event.isDone {
+        return .success(output)
+      }
+    }
+    return .success(output)
+  }
+
+  func stop() {
+    channel.close(flags: .stop)
   }
 }

@@ -1,4 +1,5 @@
 import Adapters
+import Darwin
 import Foundation
 import Testing
 
@@ -10,20 +11,43 @@ private let isTmuxIntegrationEnabled =
   .enabled(if: isTmuxIntegrationEnabled)
 )
 struct TmuxRunnerIntegrationTests {
-  private let socketName = "awt-integration"
   private let sessionName = "awt-integration-session"
 
   @Test("専用 server で session 作成・pane 取得・非ゼロ終了を確認する")
   func runsAgainstIsolatedServer() async throws {
+    let socketName = "awt-integration-\(ProcessInfo.processInfo.processIdentifier)"
+    let socketURL = integrationSocketURL(socketName: socketName)
+    var serverPID: pid_t?
+    let executableURL = try #require(
+      TmuxRunner.defaultExecutableCandidates.first {
+        FileManager.default.isExecutableFile(atPath: $0.path)
+      })
+    defer {
+      if let serverPID {
+        _ = Darwin.kill(serverPID, SIGTERM)
+      }
+      try? FileManager.default.removeItem(at: socketURL)
+    }
     let runner = try TmuxRunner(
       socketName: socketName,
-      processRunner: FoundationProcessRunner()
+      processRunner: FoundationProcessRunner(),
+      executableCandidates: [executableURL]
     )
-    await killServer(using: runner)
 
     var testError: (any Error)?
     do {
       _ = try await runner.run(arguments: ["new-session", "-d", "-s", sessionName])
+      let server = try await runner.run(arguments: ["display-message", "-p", "#{pid}"])
+      serverPID = pid_t(server.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+      #expect(serverPID != nil)
+
+      let socketPath = try await runner.run(
+        arguments: ["display-message", "-p", "#{socket_path}"])
+      #expect(
+        socketPath.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+          == socketURL.path
+      )
+
       let panes = try await runner.run(
         arguments: ["list-panes", "-t", sessionName, "-F", "#{pane_id}"])
       #expect(panes.stdout.hasPrefix("%"))
@@ -32,24 +56,30 @@ struct TmuxRunnerIntegrationTests {
         _ = try await runner.run(arguments: ["awt-command-that-does-not-exist"])
         Issue.record("存在しない tmux サブコマンドが成功した")
       } catch let error {
-        guard case .commandFailed(let exitCode, let stderr) = error else {
+        guard case .commandFailed(let exitCode, let stdout, let stderr) = error else {
           Issue.record("tmux の非ゼロ終了以外のエラー: \(error)")
           throw error
         }
         #expect(exitCode != 0)
+        #expect(stdout.isEmpty)
         #expect(!stderr.isEmpty)
       }
     } catch {
       testError = error
     }
 
-    await killServer(using: runner)
+    if (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil {
+      serverPID = nil
+    }
     if let testError {
       throw testError
     }
   }
 
-  private func killServer(using runner: TmuxRunner) async {
-    _ = try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))
+  private func integrationSocketURL(socketName: String) -> URL {
+    let socketParent = ProcessInfo.processInfo.environment["TMUX_TMPDIR"] ?? "/private/tmp"
+    return URL(fileURLWithPath: socketParent)
+      .appending(path: "tmux-\(getuid())")
+      .appending(path: socketName)
   }
 }

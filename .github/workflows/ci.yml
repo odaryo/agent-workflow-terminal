@@ -57,20 +57,18 @@ jobs:
             AgentWorkflowTerminal/Tests \
             AgentWorkflowTerminal/Package.swift
 
-  # SwiftLint はランナーへの導入コストを避けるため、既定では実行しない。
-  # GitHub の macOS ランナーイメージに swiftlint が同梱されている場合は
-  # 下記のコメントを外して有効化する (同梱が外れた場合は `brew install swiftlint`
-  # が必要になり、1 ジョブあたり数分かかる)。
-  #
-  # lint:
-  #   name: SwiftLint
-  #   runs-on: macos-15
-  #   timeout-minutes: 10
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Lint
-  #       run: |
-  #         if ! command -v swiftlint >/dev/null 2>&1; then
-  #           brew install swiftlint
-  #         fi
-  #         swiftlint lint --config .swiftlint.yml --strict
+  # SwiftLint はランナーイメージに同梱されていればそれを使い、
+  # 同梱が外れた場合だけ brew で導入する (数分かかる)。
+  lint:
+    name: SwiftLint
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint
+        run: |
+          if ! command -v swiftlint >/dev/null 2>&1; then
+            brew install swiftlint
+          fi
+          swiftlint lint --config .swiftlint.yml --strict

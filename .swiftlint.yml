@@ -14,11 +14,15 @@ excluded:
   - AgentWorkflowTerminal/.build
   - .build
 
-# 書式系は swift-format と責務が重なるため無効化する。
+# 書式系 (trailing_comma / opening_brace) は swift-format と責務が重なるため無効化する。
 disabled_rules:
   - trailing_comma
   - opening_brace
-  - todo
+  # CLI 出力のパーサでは非失敗デコード (`String(decoding:_:as:)`) が意図的な方針
+  # (docs/coding-guidelines.md §2.3)。また `TmuxListPanes.splitEncodedFields` の入力は
+  # Data ではなく String 由来の `[UInt8]` で不正 UTF-8 になり得ず、失敗し得る
+  # `String(bytes:encoding:)` へ置き換えると到達不能なエラー経路が増えるだけ (誤検知)。
+  - optional_data_string_conversion
 
 opt_in_rules:
   - array_init
@@ -26,7 +30,6 @@ opt_in_rules:
   - collection_alignment
   - empty_count
   - empty_string
-  - fatal_error_message
   - first_where
   - implicitly_unwrapped_optional
   - last_where
@@ -40,7 +43,14 @@ opt_in_rules:
   - unowned_variable_capture
   - yoda_condition
 
-# 日本語のドキュメンテーションコメントを書くため、行長は緩めに取る。
+# タスクは GitHub Issues が single source of truth (CLAUDE.md)。
+# TODO/FIXME コメントはコードに置かず、Issue にしてから消す。
+todo:
+  severity: error
+
+# コード行の 100 桁上限は swift-format (`lineLength: 100`) が CI で担保する
+# (コメント行は swift-format の行長検査の対象外)。
+# ここは保険の上限だけ置き、コメントと URL は対象外にする。
 line_length:
   warning: 120
   error: 160
@@ -75,5 +85,25 @@ type_body_length:
 
 nesting:
   type_level: 2
+
+# docs/coding-guidelines.md §1.1 / §2.3 の禁止事項のうち swift-format で担保できないもの。
+# 例外 (C API 境界) は理由コメント + `swiftlint:disable:next` で行単位に局所化する。
+# 注意: custom_rules はコメント中の文字列にも一致する。誤検知はその行だけ disable する。
+custom_rules:
+  no_fatal_error:
+    name: "fatalError"
+    regex: '\bfatalError\s*\('
+    message: "fatalError は使わない (docs/coding-guidelines.md §2.3)"
+    severity: error
+  no_unchecked_sendable:
+    name: "unchecked Sendable"
+    regex: '@unchecked\s+Sendable'
+    message: "@unchecked Sendable は原則禁止 (docs/coding-guidelines.md §1.1)"
+    severity: error
+  no_nonisolated_unsafe:
+    name: "nonisolated(unsafe)"
+    regex: 'nonisolated\(unsafe\)'
+    message: "nonisolated(unsafe) は原則禁止 (docs/coding-guidelines.md §1.1)"
+    severity: error
 
 reporter: xcode

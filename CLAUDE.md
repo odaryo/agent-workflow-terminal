@@ -27,7 +27,7 @@ swift format format --configuration .swift-format --recursive --in-place \
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 
-`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` + `swift format lint` on a macOS runner; the SwiftLint job is present but commented out.
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` + `swift format lint` + `swiftlint lint --strict` on a macOS runner (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 

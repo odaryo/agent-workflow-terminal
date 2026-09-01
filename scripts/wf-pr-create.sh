@@ -65,6 +65,8 @@ repo_root_cd
 require_cmd git gh
 
 [[ -n "$title" ]] || die "タイトル (-t) を指定してください"
+# squash マージ時にこのタイトルがそのまま main のコミットログになる (Issue #43)。
+require_conventional_title "$title" "PR タイトル"
 if [[ -n "$body" && -n "$body_file" ]]; then
   die "-b と -F は同時に指定できません"
 fi

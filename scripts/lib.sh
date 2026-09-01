@@ -46,3 +46,11 @@ nwo() {
   fi
   echo "$WF_NWO"
 }
+
+# squash マージは PR タイトルがそのまま main のコミットログになるため、
+# commit と PR の両方に同じ形式を課す (Issue #43)。
+WF_CONVENTIONAL_PATTERN='^(feat|fix|docs|refactor|test|chore|ci|build|perf|style)(\([^)]+\))?!?: .+'
+require_conventional_title() {
+  [[ "$1" =~ $WF_CONVENTIONAL_PATTERN ]] \
+    || die "$2が Conventional Commits 形式ではありません: $1"
+}

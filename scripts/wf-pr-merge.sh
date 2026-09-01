@@ -78,9 +78,20 @@ has_fail=0
 has_pending=0
 refresh_checks() {
   local buckets b
-  buckets=$(gh pr checks "$pr_number" --json bucket --jq '.[].bucket' 2>/dev/null || true)
   has_fail=0
   has_pending=0
+  # --json 指定時の gh pr checks は checks を取得できた限り合否に関わらず exit 0
+  # (fail/pending 用の特殊 exit code は JSON 出力時には返らない。gh の checks.go で確認)。
+  # 非ゼロは「checks ゼロ件 (no checks reported)」か実エラーのどちらかで、前者だけを
+  # 正常系として扱う。実エラーまで握り潰すと checks 未検証のままマージへ進んでしまう。
+  if ! buckets=$(gh pr checks "$pr_number" --json bucket --jq '.[].bucket' 2>&1); then
+    grep -qF "no checks reported" <<<"$buckets" \
+      || die "PR #$pr_number の checks 取得に失敗しました: $buckets"
+    # ゼロ件は「paths-ignore で CI が起動しない (Spikes のみ等)」と「push 直後で
+    # check run 未登録」を API 上区別できない (Issue #46)。せめて無言にはしない。
+    info "PR #$pr_number に checks がありません。checks 検証をスキップします"
+    return 0
+  fi
   if [[ -n "$buckets" ]]; then
     while IFS= read -r b; do
       case "$b" in

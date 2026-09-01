@@ -74,7 +74,7 @@ if [[ -z "$body" && -z "$body_file" ]]; then
   die "-b または -F で本文を指定してください"
 fi
 
-current_branch=$(git rev-parse --abbrev-ref HEAD)
+current_branch=$(current_branch_or_die)
 [[ "$current_branch" != "main" ]] || die "main ブランチから PR は作成できません"
 
 has_upstream=1

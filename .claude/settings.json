@@ -13,7 +13,18 @@
       "Bash(git worktree list:*)",
       "Bash(tmux list-sessions:*)",
       "Bash(tmux list-panes:*)",
-      "Bash(rg:*)"
+      "Bash(rg:*)",
+      "Bash(scripts/wf-commit.sh:*)",
+      "Bash(scripts/wf-push.sh:*)",
+      "Bash(scripts/wf-review-diff.sh:*)",
+      "Bash(scripts/wf-issue-create.sh:*)",
+      "Bash(scripts/wf-project-status.sh:*)",
+      "Bash(scripts/wf-pr-create.sh:*)",
+      "Bash(scripts/wf-pr-merge.sh:*)",
+      "Bash(scripts/wf-pr-comments.sh:*)",
+      "Bash(scripts/wf-pr-reply.sh:*)",
+      "Bash(scripts/wf-cleanup-branches.sh:*)",
+      "Bash(shellcheck:*)"
     ],
     "deny": []
   }

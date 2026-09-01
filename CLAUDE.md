@@ -35,6 +35,26 @@ Domain logic and CLI-output parsers are written test-first with Swift Testing; U
 
 Documentation is written in Japanese; keep that language when editing docs. Commits follow Conventional Commits (`docs: ...`), with the *why* in the body.
 
+### Repo operations (use scripts/)
+
+| Operation | Script |
+| --- | --- |
+| Commit | `scripts/wf-commit.sh` |
+| Push | `scripts/wf-push.sh` |
+| Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
+| Create an Issue | `scripts/wf-issue-create.sh` |
+| Update Issue Project status | `scripts/wf-project-status.sh` |
+| Create a PR | `scripts/wf-pr-create.sh` |
+| Merge a PR | `scripts/wf-pr-merge.sh` |
+| Read / reply to PR comments | `scripts/wf-pr-comments.sh` / `scripts/wf-pr-reply.sh` |
+| Clean up merged branches | `scripts/wf-cleanup-branches.sh` |
+
+Both agents and humans perform these operations through the scripts, never through raw `git`/`gh` write commands. If a request can't be expressed through a script, fix the script — don't route around it with a raw command.
+
+Always invoke these from the repository root as `scripts/wf-*.sh <args>` — the `.claude/settings.json` allow rules are defined against that exact string form.
+
+Merging is squash-only, with commit title `<PR title> (#N)`; `scripts/wf-pr-merge.sh` enforces checks-GREEN before it will merge.
+
 ## The product in one line
 
 A macOS terminal app that runs multiple AI agents in parallel, one per Git worktree, each backed by its own persistent tmux session, with iPhone/iPad acting as thin remote clients to the same Mac host.

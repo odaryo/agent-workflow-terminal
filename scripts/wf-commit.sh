@@ -58,8 +58,7 @@ if git diff --cached --quiet; then
   die "ステージ済みの変更がありません (git add で対象ファイルを追加してください)"
 fi
 
-conventional_pattern='^(feat|fix|docs|refactor|test|chore|ci|build|perf|style)(\([^)]+\))?!?: .+'
-[[ "$title" =~ $conventional_pattern ]] || die "タイトルが Conventional Commits 形式ではありません: $title"
+require_conventional_title "$title" "タイトル"
 
 current_branch=$(current_branch_or_die)
 if [[ "$current_branch" == "main" && "$allow_main" -ne 1 ]]; then

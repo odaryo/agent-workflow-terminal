@@ -53,7 +53,7 @@ Both agents and humans perform these operations through the scripts, never throu
 
 Always invoke these from the repository root as `scripts/wf-*.sh <args>` — the `.claude/settings.json` allow rules are defined against that exact string form.
 
-Merging is squash-only, with commit title `<PR title> (#N)`; `scripts/wf-pr-merge.sh` enforces checks-GREEN before it will merge.
+Merging is squash-only, with commit title `<PR title> (#N)` — so PR titles follow Conventional Commits too (`wf-pr-create.sh` and `wf-pr-merge.sh` both enforce this); `scripts/wf-pr-merge.sh` enforces checks-GREEN before it will merge.
 
 ## The product in one line
 

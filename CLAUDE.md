@@ -64,6 +64,26 @@ Swift 6 + SwiftUI, libghostty behind a `TerminalRenderer` protocol, tmux CLI, gi
 
 Everything in `docs/architecture.md` §21–22 is **現在の推奨** (leading candidate), not adopted — including Swift 6 / SwiftUI, so the SwiftPM scaffolding under `AgentWorkflowTerminal/` follows the recommendation and does not by itself make it 確定. The one exception is §21.5: Gate 1 passed on 2026-08-31 and libghostty for the **macOS** `TerminalRenderer` is now 確定 (the iOS renderer is not). Gates 2–5 in §24 are still unrun.
 
+## Agent workflow (validated 2026-09-01)
+
+Implementation tasks use a three-role pipeline, validated end-to-end on the tmux `list-panes` parser (3 rounds to converge; the pilot caught 2 Critical bugs in code that was fully GREEN).
+
+**Roles**
+- **Director** (the main Claude session): research, decisions, task decomposition, spec writing, progress judgment, reporting. Does not implement.
+- **Implementer** (Codex): `codex exec` non-interactively with the workspace-write sandbox; follow-ups via `codex exec resume --last` (no sandbox flags — the session's settings carry over). Codex reads `AGENTS.md`, not this file; `AGENTS.md` is a thin bridge that points here and to `docs/coding-guidelines.md` — keep it a pointer, never a second copy of the rules.
+- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. Critical findings block completion.
+
+**The loop**
+1. Director writes an Issue-style spec: 背景 / 要求 / スコープ (files allowed to change) / 完了条件 (the exact GREEN commands) / "on ambiguity or contradiction, stop and ask". Known limitation: in exec mode Codex tends to work around contradictions and report them instead of stopping — treat a reported workaround as a spec defect and widen the scope explicitly in the next round rather than blaming the implementer.
+2. Implementer delivers; Director independently re-runs the GREEN commands (cheap; trust but verify).
+3. Reviewer reviews adversarially, classifying Critical / Major / Minor and separating code defects from **spec defects** (the pilot found both).
+4. Critical findings go back to the implementer via `codex exec resume` as a fix spec. **Review findings are hypotheses**: any claim in a fix spec about external behavior must be re-verified by the implementer with a measurement before coding — the pilot's only regression came from implementing a reviewer's unverified premise. Continue looping while each round is backed by fresh measurement; escalate to the user when a round fails without new evidence or a design question emerges.
+5. Completion is reported only with GREEN + no Critical remaining.
+
+**When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop.
+
+**Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
+
 ## License policy
 
 The app itself is MIT (decided; matches `LICENSE`). Dependencies: permissive only (MIT/BSD/ISC/Apache-2.0). GPL/LGPL/AGPL and unknown licenses are rejected by default — this is why Mosh is not embedded and tmux/ripgrep are used as external CLIs rather than vendored source. Do not copy code from other projects "for reference"; depend on it properly or implement clean-room. Avoid branding that implies an official Ghostty derivative.

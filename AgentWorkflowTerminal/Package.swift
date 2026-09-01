@@ -39,6 +39,7 @@ let package = Package(
     .testTarget(
       name: "AdaptersTests",
       dependencies: ["Adapters"],
+      resources: [.copy("Fixtures")],
       swiftSettings: commonSwiftSettings
     ),
   ],

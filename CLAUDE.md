@@ -113,11 +113,11 @@ Issues are the single source of truth (see Repository state); [Project #6](https
 | Status | Meaning | Transition |
 | --- | --- | --- |
 | `Todo` | 未着手 | Issue Open 時 — 自動 (CI `project-status.yml`。Project 未追加の Issue は対象外) |
-| `In Progress` | 実装中 | **worktree を作った時** — 手動 |
+| `In Progress` | 実装中 | **worktree を作った時** — 手動 (`wf-project-status.sh`) |
 | `In Review` | マージ判断待ち | PR Open 時 — 自動 (CI `project-status.yml`。draft は除外) |
 | `Done` | マージ済み | PR マージ時 — 自動 (CI `project-status.yml`) |
 
-`In Review` / `Done` は PR 本文の `Closes #N` に依存する。無ければ `In Progress` から先へ進まない。`Todo` は `wf-issue-create.sh` が Project へ追加した Issue だけが対象で、`--no-project` で外したものは board に載せない (CI は item が現れるまで短くリトライし、現れなければ何もしない)。 **ProjectV2 の built-in automation は使わない** — Status option ID の再生成で全て無効化されており (下記 `updateProjectV2Field` 警告の事故と整合)、ProjectV2 workflow には公開 API が無く再有効化・変更が Web UI でしかできないため、リポジトリ内で管理できる CI (`.github/workflows/project-status.yml`) に置き換えた。CI からの Status 更新には `secrets.PROJECT_TOKEN` (classic PAT / `project` スコープ) が必要で、未設定の間は warning のみ出して成功する。
+`In Review` / `Done` は PR 本文の `Closes #N` に依存する。無ければ `In Progress` から先へ進まない。`Todo` の対象は「Open から30秒以内に Project #6 に載っている Issue」で、`wf-issue-create.sh` の `--project` (既定) はこれを満たす。`--no-project` で外したものは CI も board に載せない (item が現れるまで短くリトライし、現れなければ warning を出して何もしない)。既に Status が入っている item は上書きしない — Issue 作成直後に `In Progress` へ動かす通常フローと、遅れて届いた CI が競合して巻き戻るのを防ぐため。 **ProjectV2 の built-in automation は使わない** — Status option ID の再生成で全て無効化されており (下記 `updateProjectV2Field` 警告の事故と整合)、ProjectV2 workflow には公開 API が無く再有効化・変更が Web UI でしかできないため、リポジトリ内で管理できる CI (`.github/workflows/project-status.yml`) に置き換えた。CI からの Status 更新には `secrets.PROJECT_TOKEN` (classic PAT / `project` スコープ) が必要で、未設定の間は warning のみ出して成功する。
 
 `In Review` exists so that **"手が動いているタスク"と"ユーザーのマージ判断で止まっているタスク"が混ざらない** — agents run in parallel, so several tasks sit waiting on the user at once.
 

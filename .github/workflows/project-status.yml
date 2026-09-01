@@ -10,7 +10,8 @@ name: Project Status
 # GITHUB_TOKEN は user-owned ProjectV2 へ届かないため、classic PAT (project
 # スコープ) を secrets.PROJECT_TOKEN へ登録して使う。未設定は warning のみで
 # 成功させる (登録前の PR が wf-pr-merge.sh の checks-GREEN 条件でマージ不能に
-# なるため)。API 失敗は fail させ、Status 未更新を checks の赤で可視化する。
+# なるため)。API 失敗は fail させ、Status 未更新を可視化する — ただし赤が checks に
+# 出るのは pull_request 経路だけで、issues 経路の失敗は Actions タブにしか出ない。
 
 on:
   pull_request:
@@ -33,7 +34,7 @@ jobs:
   sync:
     name: Sync linked issue status
     # merge を伴わない close は「タスク完了」ではないため Status を動かさない
-    if: github.event_name == 'issues' || github.event.action != 'closed' || github.event.pull_request.merged
+    if: github.event_name != 'pull_request' || github.event.action != 'closed' || github.event.pull_request.merged
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -62,14 +63,22 @@ jobs:
               query($owner:String!,$repo:String!,$issue:Int!){
                 repository(owner:$owner,name:$repo){
                   issue(number:$issue){
-                    projectItems(first:10){ nodes{ id project{ number } } }
+                    projectItems(first:10){
+                      nodes{
+                        id
+                        project{ number }
+                        fieldValueByName(name:"Status"){
+                          ... on ProjectV2ItemFieldSingleSelectValue{ name }
+                        }
+                      }
+                    }
                   }
                 }
               }' -f owner="$owner" -f repo="$repo" -F issue="$1" \
               | jq -r --argjson p "$PROJECT_NUMBER" --arg n "$1" '
                   .data.repository.issue.projectItems.nodes[]
                   | select(.project.number == $p)
-                  | "\($n)\t\(.id)"'
+                  | "\($n)\t\(.id)\t\(.fieldValueByName.name // "")"'
           }
 
           if [[ "$GITHUB_EVENT_NAME" == "issues" ]]; then
@@ -78,14 +87,23 @@ jobs:
             # ため、item が見えるまで短くリトライする (Issue #49)。項目を自分で
             # 追加してしまうと --no-project で意図的に board から外した Issue まで
             # 載せることになるので、追加はせず待つだけにする。
-            items=""
-            for _ in 1 2 3 4 5 6; do
-              items=$(issue_items "$ISSUE_NUMBER")
-              [[ -z "$items" ]] || break
-              sleep 5
+            found=""
+            for i in 1 2 3 4 5 6; do
+              found=$(issue_items "$ISSUE_NUMBER")
+              [[ -z "$found" ]] || break
+              [[ "$i" -eq 6 ]] || sleep 5
             done
+            if [[ -z "$found" ]]; then
+              # issues 経路の結果は checks に出ないので、無言の緑にはしない。
+              echo "::warning::Issue #$ISSUE_NUMBER は Project #$PROJECT_NUMBER にありません (--no-project 等)。Status を設定しませんでした"
+              exit 0
+            fi
+            # 既に Status が入っている item は触らない。Issue 作成直後に
+            # wf-project-status.sh で In Progress にする通常フローと、Actions の
+            # キュー待ちで遅れて届いた本 job が競合すると、Todo へ巻き戻るため。
+            items=$(awk -F'\t' '$3 == ""' <<<"$found")
             if [[ -z "$items" ]]; then
-              echo "Issue #$ISSUE_NUMBER は Project #$PROJECT_NUMBER にありません (--no-project 等)。何もしません"
+              echo "Issue #$ISSUE_NUMBER は既に Status が設定済みのため変更しません: $(cut -f3 <<<"$found" | paste -sd, -)"
               exit 0
             fi
           else
@@ -142,7 +160,7 @@ jobs:
             exit 1
           fi
 
-          while IFS=$'\t' read -r issue_number item_id; do
+          while IFS=$'\t' read -r issue_number item_id _; do
             gh api graphql -f query='
               mutation($project:ID!,$item:ID!,$field:ID!,$option:String!){
                 updateProjectV2ItemFieldValue(input:{

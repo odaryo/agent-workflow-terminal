@@ -105,6 +105,27 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
 
+## Task tracking (GitHub Projects)
+
+Issues are the single source of truth (see Repository state); [Project #6](https://github.com/users/odaryo/projects/6) is the board over them. One Issue = one worktree = one PR = one task tab.
+
+| Status | Meaning | Transition |
+| --- | --- | --- |
+| `Todo` | 未着手 | Issue 作成時 — 自動 (`Item added to project`) |
+| `In Progress` | 実装中 | **worktree を作った時** — 手動 |
+| `In Review` | マージ判断待ち | PR を Issue にリンクした時 — 自動 (`Pull request linked to issue`) |
+| `Done` | マージ済み | マージで Issue が close — 自動 (`Item closed` / `Pull request merged`) |
+
+Only `Todo → In Progress` is manual. Automation depends on the PR body carrying `Closes #N`; without it nothing advances past `In Progress`.
+
+`In Review` exists so that **"手が動いているタスク"と"ユーザーのマージ判断で止まっているタスク"が混ざらない** — agents run in parallel, so several tasks sit waiting on the user at once.
+
+**「ユーザー確認待ち」には2種類ある。** `In Review` が拾うのはマージ判断待ちだけ。実装前にユーザーの決定が要るものは `設計判断` ラベルを付け、`Todo` に置いたまま **決定待ち** ビューで分離する — ラベル付きの Issue は着手不可なので、`Todo` を「着手可能」の意味に保つための区別。決定して `/decide` で設計書に反映したらラベルを外す。ステータスは増やさない。
+
+Views: `Board` (Status グループ) / `決定待ち` (`label:"設計判断" -status:Done`) / `View 1` (全件テーブル)。
+
+**Never edit the `Status` field's options via `updateProjectV2Field`** — the mutation replaces the whole option list, regenerating every option ID and clearing the Status of every existing item. Add options in the web UI, or back up `gh project item-list --format json` first and restore afterwards.
+
 ## License policy
 
 The app itself is MIT (decided; matches `LICENSE`). Dependencies: permissive only (MIT/BSD/ISC/Apache-2.0). GPL/LGPL/AGPL and unknown licenses are rejected by default — this is why Mosh is not embedded and tmux/ripgrep are used as external CLIs rather than vendored source. Do not copy code from other projects "for reference"; depend on it properly or implement clean-room. Avoid branding that implies an official Ghostty derivative.

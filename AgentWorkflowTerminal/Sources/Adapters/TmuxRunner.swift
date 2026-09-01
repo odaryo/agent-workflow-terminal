@@ -16,6 +16,7 @@ public struct TmuxRunner: Sendable {
 
   // ローカル socket への通常操作は即時に終わるため、異常な server 停止を10秒で打ち切る。
   public static let defaultTimeout = Duration.seconds(10)
+  public static let defaultOutputLimit = ProcessRunLimits.defaultOutputBytes
 
   private static let inheritedEnvironmentKeys = ["HOME", "PATH", "TMUX_TMPDIR"]
 
@@ -63,14 +64,15 @@ public struct TmuxRunner: Sendable {
         environment[key] = value
       }
     }
-    // これは出力解析クライアント用。new-session に流用すると、この限定環境が全 pane へ継承される
-    // ことを tmux 3.4 の隔離 server で実測しているため、server 起動時の環境は別途設計が必要。
+    // この入口は出力解析クライアント用だが、new-session も通せるため限定環境が server に
+    // 保持され全 pane へ継承され得る。現状 API では防がず、分離は Issue #61 で設計する。
     self.environment = environment
   }
 
   public func run(
     arguments: [String],
-    timeout: Duration? = nil
+    timeout: Duration? = nil,
+    outputLimit: Int = Self.defaultOutputLimit
   ) async throws(TmuxRunnerError) -> ProcessRunResult {
     let result: ProcessRunResult
     do {
@@ -78,7 +80,8 @@ public struct TmuxRunner: Sendable {
         executableURL: executableURL,
         arguments: ["-u", "-L", socketName] + arguments,
         environment: environment,
-        timeout: timeout ?? Self.defaultTimeout
+        timeout: timeout ?? Self.defaultTimeout,
+        outputLimit: outputLimit
       )
     } catch {
       throw .process(error)

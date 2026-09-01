@@ -58,7 +58,7 @@ swift test
 
 ```shell
 cd AgentWorkflowTerminal
-AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegration
+AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
 ```
 
 統合テストは process ID を含む `-L awt-integration-<pid>` の専用 socket だけを使います。

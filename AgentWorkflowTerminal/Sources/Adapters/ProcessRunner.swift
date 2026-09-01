@@ -1,5 +1,4 @@
 import Darwin
-import Dispatch
 import Foundation
 
 public struct ProcessRunResult: Sendable, Equatable {
@@ -14,11 +13,18 @@ public struct ProcessRunResult: Sendable, Equatable {
   }
 }
 
+public enum ProcessRunLimits {
+  // tmux の pane 一覧には十分な余裕を持たせつつ、暴走時の保持量を1実行8 MiBに制限する。
+  public static let defaultOutputBytes = 8 * 1_024 * 1_024
+}
+
 public enum ProcessRunnerError: Error, Sendable, Equatable {
   case launchFailed(executableURL: URL, message: String)
-  case timedOut
+  case timedOut(exitCode: Int32?, stdout: String, stderr: String)
   case cancelled
+  case outputLimitExceeded(limit: Int, bytesRead: Int)
   case outputReadFailed(message: String)
+  case invalidOutputLimit(Int)
 }
 
 public protocol ProcessRunning: Sendable {
@@ -26,8 +32,26 @@ public protocol ProcessRunning: Sendable {
     executableURL: URL,
     arguments: [String],
     environment: [String: String],
-    timeout: Duration
+    timeout: Duration,
+    outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult
+}
+
+extension ProcessRunning {
+  public func run(
+    executableURL: URL,
+    arguments: [String],
+    environment: [String: String],
+    timeout: Duration
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    try await run(
+      executableURL: executableURL,
+      arguments: arguments,
+      environment: environment,
+      timeout: timeout,
+      outputLimit: ProcessRunLimits.defaultOutputBytes
+    )
+  }
 }
 
 public struct FoundationProcessRunner: ProcessRunning, Sendable {
@@ -37,13 +61,18 @@ public struct FoundationProcessRunner: ProcessRunning, Sendable {
     executableURL: URL,
     arguments: [String],
     environment: [String: String],
-    timeout: Duration
+    timeout: Duration,
+    outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    guard outputLimit >= 0 else {
+      throw .invalidOutputLimit(outputLimit)
+    }
     let execution = ProcessExecution(
       executableURL: executableURL,
       arguments: arguments,
       environment: environment,
-      timeout: timeout
+      timeout: timeout,
+      outputLimit: outputLimit
     )
 
     let result = await withTaskCancellationHandler {
@@ -64,11 +93,8 @@ public struct FoundationProcessRunner: ProcessRunning, Sendable {
 private actor ProcessExecution {
   // SIGTERM の後始末機会と1秒未満の停止上界を両立する暫定値。CLI 別の猶予は未実測。
   private static let terminationGracePeriod = Duration.milliseconds(100)
-
-  private enum OutputKind {
-    case stdout
-    case stderr
-  }
+  // DispatchIO の完了と actor への通知順の揺れを吸収し、timeout への追加を50msに限定する。
+  private static let endOfFileGracePeriod = Duration.milliseconds(50)
 
   private struct OutputPipe {
     let reader: AsyncPipeReader
@@ -85,31 +111,37 @@ private actor ProcessExecution {
   private let arguments: [String]
   private let environment: [String: String]
   private let timeout: Duration
+  private let outputLimit: Int
+  private let outputBudget: OutputBudget
 
   private var process: Process?
   private var processWasLaunched = false
   private var stdoutReader: AsyncPipeReader?
   private var stderrReader: AsyncPipeReader?
   private var terminationStatus: Int32?
-  private var stdoutData: Data?
-  private var stderrData: Data?
+  private var stdoutSnapshot = AsyncPipeReader.Snapshot.empty
+  private var stderrSnapshot = AsyncPipeReader.Snapshot.empty
   private var terminalError: ProcessRunnerError?
   private var finalResult: Result<ProcessRunResult, ProcessRunnerError>?
   private var resultContinuation:
     CheckedContinuation<Result<ProcessRunResult, ProcessRunnerError>, Never>?
   private var timeoutTask: Task<Void, Never>?
+  private var endOfFileGraceTask: Task<Void, Never>?
   private var escalationTask: Task<Void, Never>?
 
   init(
     executableURL: URL,
     arguments: [String],
     environment: [String: String],
-    timeout: Duration
+    timeout: Duration,
+    outputLimit: Int
   ) {
     self.executableURL = executableURL
     self.arguments = arguments
     self.environment = environment
     self.timeout = timeout
+    self.outputLimit = outputLimit
+    self.outputBudget = OutputBudget(limit: outputLimit)
   }
 
   func run() async -> Result<ProcessRunResult, ProcessRunnerError> {
@@ -124,8 +156,6 @@ private actor ProcessExecution {
       return .failure(error)
     }
     install(resources)
-    observe(resources.stdout.reader, as: .stdout)
-    observe(resources.stderr.reader, as: .stderr)
 
     do {
       try resources.process.run()
@@ -151,6 +181,8 @@ private actor ProcessExecution {
     guard finalResult == nil else { return }
     // 明示的な呼び出し元の中止要求は、内部で推定したタイムアウトより優先する (§1.4)。
     terminalError = .cancelled
+    endOfFileGraceTask?.cancel()
+    endOfFileGraceTask = nil
     stopReading()
     stopDirectProcessIfNeeded()
   }
@@ -191,7 +223,16 @@ private actor ProcessExecution {
       )
     }
     return OutputPipe(
-      reader: AsyncPipeReader(fileDescriptor: descriptors[0], queueLabel: label),
+      reader: AsyncPipeReader(
+        fileDescriptor: descriptors[0],
+        queueLabel: label,
+        budget: outputBudget
+      ) { [weak self] in
+        guard let self else { return }
+        Task {
+          await self.outputStateChanged()
+        }
+      },
       writeHandle: FileHandle(fileDescriptor: descriptors[1], closeOnDealloc: true)
     )
   }
@@ -200,13 +241,6 @@ private actor ProcessExecution {
     process = resources.process
     stdoutReader = resources.stdout.reader
     stderrReader = resources.stderr.reader
-  }
-
-  private func observe(_ reader: AsyncPipeReader, as kind: OutputKind) {
-    Task { [weak self] in
-      let result = await reader.readAll()
-      await self?.outputDidComplete(result, as: kind)
-    }
   }
 
   private func closeParentWriteHandles(_ resources: ProcessResources) {
@@ -229,42 +263,95 @@ private actor ProcessExecution {
   private func timeoutReached() {
     guard finalResult == nil, terminalError == nil else { return }
     refreshTerminationStatusIfNeeded()
+    refreshOutputState()
+    handleOutputFailureIfNeeded()
+    guard finalResult == nil, terminalError == nil else { return }
     resolveSuccessIfPossible()
     guard finalResult == nil else { return }
 
-    terminalError = .timedOut
+    if terminationStatus != nil {
+      startEndOfFileGrace()
+    } else {
+      recordTimeoutAndStop()
+    }
+  }
+
+  private func startEndOfFileGrace() {
+    guard endOfFileGraceTask == nil else { return }
+    endOfFileGraceTask = Task {
+      do {
+        try await Task.sleep(for: Self.endOfFileGracePeriod)
+      } catch {
+        return
+      }
+      guard !Task.isCancelled else { return }
+      endOfFileGraceReached()
+    }
+  }
+
+  private func endOfFileGraceReached() {
+    guard finalResult == nil, terminalError == nil else { return }
+    refreshTerminationStatusIfNeeded()
+    refreshOutputState()
+    handleOutputFailureIfNeeded()
+    guard finalResult == nil, terminalError == nil else { return }
+    resolveSuccessIfPossible()
+    guard finalResult == nil else { return }
+    recordTimeoutAndStop()
+  }
+
+  private func recordTimeoutAndStop() {
+    refreshTerminationStatusIfNeeded()
+    refreshOutputState()
+    terminalError = .timedOut(
+      exitCode: terminationStatus,
+      stdout: String(decoding: stdoutSnapshot.data, as: UTF8.self),
+      stderr: String(decoding: stderrSnapshot.data, as: UTF8.self)
+    )
     stopReading()
     stopDirectProcessIfNeeded()
   }
 
-  private func outputDidComplete(
-    _ result: Result<Data, ProcessRunnerError>,
-    as kind: OutputKind
-  ) {
+  private func outputStateChanged() {
     guard finalResult == nil else { return }
-    switch result {
-    case .success(let data):
-      switch kind {
-      case .stdout: stdoutData = data
-      case .stderr: stderrData = data
-      }
-      resolveSuccessIfPossible()
-    case .failure(let error):
-      guard terminalError == nil else { return }
-      terminalError = error
-      stopReading()
-      stopDirectProcessIfNeeded()
+    refreshOutputState()
+    handleOutputFailureIfNeeded()
+    guard terminalError == nil else { return }
+    resolveSuccessIfPossible()
+  }
+
+  private func refreshOutputState() {
+    stdoutSnapshot = stdoutReader?.snapshot() ?? .empty
+    stderrSnapshot = stderrReader?.snapshot() ?? .empty
+  }
+
+  private func handleOutputFailureIfNeeded() {
+    guard terminalError == nil else { return }
+    let completions = [stdoutSnapshot.completion, stderrSnapshot.completion]
+    if completions.contains(.limitExceeded) {
+      terminalError = .outputLimitExceeded(
+        limit: outputLimit,
+        bytesRead: outputBudget.bytesRead
+      )
+    } else if let errorCode = completions.compactMap({ $0?.errorCode }).first {
+      terminalError = .outputReadFailed(
+        message: String(cString: Darwin.strerror(errorCode)))
     }
+    guard terminalError != nil else { return }
+    stopReading()
+    stopDirectProcessIfNeeded()
   }
 
   private func processDidTerminate(status: Int32) {
     terminationStatus = status
     escalationTask?.cancel()
     escalationTask = nil
+    refreshOutputState()
 
     if let terminalError {
       complete(.failure(terminalError))
     } else {
+      handleOutputFailureIfNeeded()
       resolveSuccessIfPossible()
     }
   }
@@ -272,16 +359,16 @@ private actor ProcessExecution {
   private func resolveSuccessIfPossible() {
     guard terminalError == nil,
       let terminationStatus,
-      let stdoutData,
-      let stderrData
+      stdoutSnapshot.completion == .endOfFile,
+      stderrSnapshot.completion == .endOfFile
     else { return }
 
     complete(
       .success(
         ProcessRunResult(
           exitCode: terminationStatus,
-          stdout: String(decoding: stdoutData, as: UTF8.self),
-          stderr: String(decoding: stderrData, as: UTF8.self)
+          stdout: String(decoding: stdoutSnapshot.data, as: UTF8.self),
+          stderr: String(decoding: stderrSnapshot.data, as: UTF8.self)
         )))
   }
 
@@ -350,68 +437,11 @@ private actor ProcessExecution {
     finalResult = result
     timeoutTask?.cancel()
     timeoutTask = nil
+    endOfFileGraceTask?.cancel()
+    endOfFileGraceTask = nil
     escalationTask?.cancel()
     escalationTask = nil
     resultContinuation?.resume(returning: result)
     resultContinuation = nil
-  }
-}
-
-private struct AsyncPipeReader: Sendable {
-  private struct Event: Sendable {
-    let data: Data
-    let isDone: Bool
-    let errorCode: Int32
-  }
-
-  private let channel: DispatchIO
-  private let events: AsyncStream<Event>
-
-  init(fileDescriptor: Int32, queueLabel: String) {
-    let (events, continuation) = AsyncStream.makeStream(of: Event.self)
-    let queue = DispatchQueue(label: queueLabel)
-    let channel = DispatchIO(
-      type: .stream,
-      fileDescriptor: fileDescriptor,
-      queue: queue
-    ) { errorCode in
-      if errorCode != 0 {
-        continuation.yield(Event(data: Data(), isDone: true, errorCode: errorCode))
-      }
-      continuation.finish()
-      _ = Darwin.close(fileDescriptor)
-    }
-    channel.read(offset: 0, length: Int.max, queue: queue) { isDone, data, errorCode in
-      continuation.yield(
-        Event(
-          data: data.map { Data($0) } ?? Data(),
-          isDone: isDone,
-          errorCode: errorCode
-        ))
-      if isDone {
-        continuation.finish()
-      }
-    }
-    self.channel = channel
-    self.events = events
-  }
-
-  func readAll() async -> Result<Data, ProcessRunnerError> {
-    var output = Data()
-    for await event in events {
-      output.append(event.data)
-      if event.errorCode != 0 {
-        return .failure(
-          .outputReadFailed(message: String(cString: Darwin.strerror(event.errorCode))))
-      }
-      if event.isDone {
-        return .success(output)
-      }
-    }
-    return .success(output)
-  }
-
-  func stop() {
-    channel.close(flags: .stop)
   }
 }

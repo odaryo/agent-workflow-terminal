@@ -69,6 +69,19 @@ struct TmuxRunnerTests {
     #expect(await spy.invocations.first?.timeout == timeout)
   }
 
+  @Test("既定と明示した出力上限を実行層へ渡す")
+  func passesOutputLimit() async throws {
+    let explicitLimit = 12_345
+    let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+    let runner = try makeRunner(processRunner: spy)
+
+    _ = try await runner.run(arguments: ["display-message"])
+    _ = try await runner.run(arguments: ["list-panes"], outputLimit: explicitLimit)
+
+    #expect(await spy.invocations.first?.outputLimit == TmuxRunner.defaultOutputLimit)
+    #expect(await spy.invocations.last?.outputLimit == explicitLimit)
+  }
+
   @Test("非ゼロ終了を終了コード・stdout・stderr を持つ tmux エラーにする")
   func convertsNonzeroExitToTmuxError() async throws {
     let spy = ProcessRunnerSpy(
@@ -149,6 +162,7 @@ private struct ProcessInvocation: Sendable, Equatable {
   let arguments: [String]
   let environment: [String: String]
   let timeout: Duration
+  let outputLimit: Int
 }
 
 private actor ProcessRunnerSpy: ProcessRunning {
@@ -163,14 +177,16 @@ private actor ProcessRunnerSpy: ProcessRunning {
     executableURL: URL,
     arguments: [String],
     environment: [String: String],
-    timeout: Duration
+    timeout: Duration,
+    outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     invocations.append(
       ProcessInvocation(
         executableURL: executableURL,
         arguments: arguments,
         environment: environment,
-        timeout: timeout
+        timeout: timeout,
+        outputLimit: outputLimit
       ))
     return try result.get()
   }

@@ -44,8 +44,8 @@ struct TmuxRunnerIntegrationTests {
       let socketPath = try await runner.run(
         arguments: ["display-message", "-p", "#{socket_path}"])
       #expect(
-        socketPath.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-          == socketURL.path
+        canonicalPath(socketPath.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+          == canonicalPath(socketURL.path)
       )
 
       let panes = try await runner.run(
@@ -81,5 +81,12 @@ struct TmuxRunnerIntegrationTests {
     return URL(fileURLWithPath: socketParent)
       .appending(path: "tmux-\(getuid())")
       .appending(path: socketName)
+  }
+
+  private func canonicalPath(_ path: String) -> String {
+    URL(fileURLWithPath: path)
+      .standardizedFileURL
+      .resolvingSymlinksInPath()
+      .path
   }
 }

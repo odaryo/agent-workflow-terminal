@@ -98,3 +98,14 @@ public struct TmuxRunner: Sendable {
     return result
   }
 }
+
+extension TmuxRunner {
+  public func version(
+    timeout: Duration? = nil
+  ) async throws(TmuxRunnerError)
+    -> TmuxVersionSupport
+  {
+    let result = try await run(arguments: ["-V"], timeout: timeout)
+    return TmuxVersion.support(for: TmuxVersion.parse(versionOutput: result.stdout))
+  }
+}

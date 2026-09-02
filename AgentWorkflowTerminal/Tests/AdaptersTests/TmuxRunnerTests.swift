@@ -98,6 +98,48 @@ struct TmuxRunnerTests {
     }
   }
 
+  @Test("版数取得を専用 socket 経由で実行して制限事項を返す")
+  func getsVersionWithLimitations() async throws {
+    let spy = ProcessRunnerSpy(
+      result: .success(.init(exitCode: 0, stdout: "tmux 3.4\n", stderr: "")))
+    let runner = try makeRunner(processRunner: spy)
+
+    let support = try await runner.version()
+
+    #expect(await spy.invocations.first?.arguments == ["-u", "-L", "awt-test", "-V"])
+    #expect(
+      support
+        == .supportedWithLimitations(
+          .init(major: 3, minor: 4),
+          [.zeroWidthJoinerGraphemeWidth]
+        ))
+  }
+
+  @Test("解釈できない版数出力を unknown のまま返す")
+  func getsUnknownVersion() async throws {
+    let spy = ProcessRunnerSpy(
+      result: .success(.init(exitCode: 0, stdout: "tmux master\n", stderr: "")))
+    let runner = try makeRunner(processRunner: spy)
+
+    let support = try await runner.version()
+
+    #expect(support == .unknown(rawOutput: "tmux master\n"))
+  }
+
+  @Test("版数取得の非ゼロ終了を tmux エラーにする")
+  func rejectsFailedVersionCommand() async throws {
+    let spy = ProcessRunnerSpy(
+      result: .success(.init(exitCode: 1, stdout: "partial", stderr: "failed\n")))
+    let runner = try makeRunner(processRunner: spy)
+
+    do {
+      _ = try await runner.version()
+      Issue.record("非ゼロ終了が成功として返された")
+    } catch {
+      #expect(error == .commandFailed(exitCode: 1, stdout: "partial", stderr: "failed\n"))
+    }
+  }
+
   @Test("候補順で最初の実行可能なバイナリを選ぶ")
   func resolvesFirstExecutableCandidateInOrder() async throws {
     let first = URL(fileURLWithPath: "/test/first/tmux")

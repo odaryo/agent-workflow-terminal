@@ -198,8 +198,8 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 ### 5.2 外部 CLI との付き合い方
 
 - tmux / git / ripgrep は外部 CLI として呼ぶ。version 差は Adapter 境界で吸収する。
-- サポートする下限 version を決め、`Adapters` 側で検出する (tmux の下限は未決定、
-  Gate 1 申し送り #8)。
+- サポートする下限 version を決め、`Adapters` 側で検出する。tmux の下限は 3.4
+  (設計書 §4.3)。git の下限は未決定 (Issue #83)。
 - CLI は shell を経由せず argv 配列で起動し、パイプ・リダイレクトに依存しない
   (`TerminalRendererConfiguration.command` と同じ方針)。
 - 出力をパースする CLI は `LC_ALL=C` を明示して起動し、ロケール依存の出力
@@ -249,7 +249,7 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 | 5 | pane へのテキスト注入 | **`tmux load-buffer` + `paste-buffer -p` を使う。** `send-keys -l` は改行がそのまま実行になるため、1行テキスト以外に使わない | §8.8 |
 | 6 | detach すると surface のプロセスが死ぬ | 同一 surface でのコマンド再実行 API が無い。タブのライフサイクル設計で吸収する | §8.2 |
 | 7 | ディスプレイスリープ中は surface を生成できない | 生成失敗を正常系として扱い、遅延生成・リトライを用意する | §9.3 |
-| 8 | tmux の版数が grapheme 表示に効く (3.4 は ZWJ を壊す) | サポート下限版数を決め、fixture に版数を記録する (§3.2) | §10.3 |
+| 8 | tmux の版数が grapheme 表示に効く (3.4 は ZWJ を壊す) | サポート下限を 3.4 として検出し、fixture に版数を記録する (§3.2) | 設計書 §4.3 / Spikes/gate1/README.md §10.3 |
 | 9 | `ime_point` の width に content scale が未適用 | **吸収する責務は `TerminalRenderer` 実装体**。上位へはスケール適用済みの値だけ渡す | §10.6 |
 | 10 | East Asian Ambiguous は幅 1 として扱われる | 幅計算を自前で持たず、renderer / tmux の挙動に合わせる | §10.1 #9 |
 | 11 | `window-size` の選択が複数クライアント体験を決める | マルチデバイス接続 (§4.2) の設計時に明示的に決める | §8.7 |

@@ -10,10 +10,26 @@ struct GitWorktreeListTests {
   func parsesFixture() throws {
     let result = GitWorktreeList.parse(
       output: try fixture(named: "git-2.50.1-worktree-list-porcelain-z.txt"))
-    #expect(result.failures.isEmpty); #expect(result.entries.count == 4)
+    #expect(result.failures.isEmpty)
+    #expect(result.entries.count == 4)
+    #expect(result.entries[0].path.hasSuffix("/repo"))
+    #expect(result.entries[0].head == "39362183c3727928329411f35d346ec9fcbf5bd2")
+    #expect(!result.entries[0].isBare)
     #expect(result.entries[1].lockedReason == "手動で保護中")
     #expect(result.entries[2].isDetached)
     #expect(result.entries[3].branch == "refs/heads/feat/日本語🚀")
+    #expect(result.entries.allSatisfy { $0.prunableReason == nil })
+  }
+  @Test("bare fixture は HEAD と branch を持たない")
+  func parsesBareFixture() throws {
+    let result = GitWorktreeList.parse(
+      output: try fixture(named: "git-2.50.1-worktree-list-porcelain-z-bare.txt"))
+    let entry = try #require(result.entries.first)
+    #expect(result.failures.isEmpty)
+    #expect(entry.isBare)
+    #expect(entry.head == nil)
+    #expect(entry.branch == nil)
+    #expect(entry.path.hasSuffix("/origin.git"))
   }
   @Test("理由なし locked と属性なしを区別する")
   func distinguishesLockPresence() {

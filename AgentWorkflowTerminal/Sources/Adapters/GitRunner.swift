@@ -75,7 +75,10 @@ public struct GitReadCommand: Sendable, Equatable {
   }
 
   public static func status(includeIgnored: Bool = false) -> Self {
-    var arguments = ["status", "--porcelain=v2", "--branch", "-z"]
+    // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
+    var arguments = [
+      "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=normal", "-z",
+    ]
     if includeIgnored { arguments.append("--ignored=matching") }
     return Self(arguments: arguments)
   }
@@ -89,7 +92,8 @@ public struct GitReadCommand: Sendable, Equatable {
     maxCount: Int? = nil,
     pathspec: [GitPathspec] = []
   ) -> Self {
-    var arguments = ["log", "-z", "--format=" + GitLog.format]
+    // 0 以下は option を付けず、件数を制限しない。
+    var arguments = ["log", "-z", "--no-show-signature", "--format=" + GitLog.format]
     if let maxCount, maxCount > 0 { arguments.append("--max-count=\(maxCount)") }
     arguments += range?.arguments ?? []
     arguments.append("--")
@@ -100,11 +104,20 @@ public struct GitReadCommand: Sendable, Equatable {
   public static func diffFileSummaries(
     _ target: GitDiffTarget, pathspec: [GitPathspec] = []
   ) -> Self {
-    diff(["--find-renames", "--raw", "--numstat", "-z"], target, pathspec)
+    diff(
+      [
+        "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat", "--no-abbrev",
+        "-z",
+      ],
+      target,
+      pathspec)
   }
 
   public static func diffPatch(_ target: GitDiffTarget, pathspec: [GitPathspec] = []) -> Self {
-    diff(["--find-renames", "--patch", "--no-color"], target, pathspec)
+    diff(
+      ["--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color"],
+      target,
+      pathspec)
   }
 
   private static func diff(
@@ -116,9 +129,10 @@ public struct GitReadCommand: Sendable, Equatable {
 
 public struct GitRunner: Sendable {
   public static let defaultExecutableCandidates = [
-    URL(fileURLWithPath: "/usr/bin/git"), URL(fileURLWithPath: "/opt/homebrew/bin/git"),
-    URL(fileURLWithPath: "/usr/local/bin/git"),
+    URL(fileURLWithPath: "/opt/homebrew/bin/git"), URL(fileURLWithPath: "/usr/local/bin/git"),
+    URL(fileURLWithPath: "/usr/bin/git"),
   ]
+  // MacPorts / Nix の設置場所は推測せず、非標準配置は initializer の注入で扱う。
   // 大規模 repository の log / diff は I/O 律速で秒単位になり得るため tmux より長く待つ。
   public static let defaultTimeout = Duration.seconds(30)
   public static let defaultOutputLimit = ProcessRunLimits.defaultOutputBytes
@@ -162,7 +176,8 @@ public struct GitRunner: Sendable {
     for key in ["HOME", "PATH"] where parentEnvironment[key] != nil {
       environment[key] = parentEnvironment[key]
     }
-    // global/system config を無効化すると include.path 等も壊す一方、-z は quotePath 非依存。
+    // global/system config は include.path 等を保つ。出力形式に効く config は各 command の
+    // 明示 option で固定し、意味を選ぶ range 等とは区別する。
     self.environment = environment
   }
 

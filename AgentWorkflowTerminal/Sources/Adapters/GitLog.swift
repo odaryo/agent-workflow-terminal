@@ -56,12 +56,12 @@ public enum GitLog {
     let fields = record.components(separatedBy: "\u{1F}")
     // US は ident/message にも入り得るため、ずれたフィールドを値として返さない。
     guard fields.count == 11 else { throw .invalidFieldCount(actual: fields.count) }
-    guard isHex(fields[0], count: 40) else { throw .invalidHash(fields[0]) }
-    guard (1...40).contains(fields[1].count), isHex(fields[1], count: fields[1].count) else {
+    guard isObjectID(fields[0]) else { throw .invalidHash(fields[0]) }
+    guard (1...64).contains(fields[1].count), isHex(fields[1], count: fields[1].count) else {
       throw .invalidAbbreviatedHash(fields[1])
     }
     let parents = fields[2].isEmpty ? [] : fields[2].split(separator: " ").map(String.init)
-    guard parents.allSatisfy({ isHex($0, count: 40) }) else {
+    guard parents.allSatisfy(isObjectID) else {
       throw .invalidParentHashes(fields[2])
     }
     let style = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
@@ -79,5 +79,9 @@ public enum GitLog {
   private static func isHex(_ value: String, count: Int) -> Bool {
     value.count == count
       && value.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+  }
+
+  private static func isObjectID(_ value: String) -> Bool {
+    (value.count == 40 || value.count == 64) && isHex(value, count: value.count)
   }
 }

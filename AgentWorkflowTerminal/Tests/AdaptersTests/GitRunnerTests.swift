@@ -9,37 +9,43 @@ import Testing
 struct GitRunnerTests {
   @Test("revision と pathspec を無害化する")
   func validatesInputs() {
-    #expect(GitRevision("") == nil); #expect(GitRevision("-n") == nil)
+    #expect(GitRevision("") == nil)
+    #expect(GitRevision("-n") == nil)
     #expect(GitRevision(".bad") == nil)
-    #expect(GitRevision("a\nb") == nil); #expect(GitPathspec("-x") == nil)
+    #expect(GitRevision("a\nb") == nil)
+    #expect(GitPathspec("-x") == nil)
     #expect(GitPathspec("a\0b") == nil)
-    #expect(GitRevision("HEAD") == .head); #expect(GitPathspec(":(glob)**/*.swift") != nil)
+    #expect(GitRevision("HEAD") == .head)
+    #expect(GitPathspec(":(glob)**/*.swift") != nil)
   }
 
   @Test("factory が range と pathspec を -- の後ろへ置く")
   func buildsCommands() throws {
-    let main = try #require(GitRevision("main")); let topic = try #require(GitRevision("topic"))
+    let main = try #require(GitRevision("main"))
+    let topic = try #require(GitRevision("topic"))
     let path = try #require(GitPathspec("Sources/a.swift"))
     let range = GitRevisionRange.threeDot(from: main, to: topic)
     #expect(
       GitReadCommand.status(includeIgnored: true).arguments == [
-        "status", "--porcelain=v2", "--branch", "-z", "--ignored=matching",
+        "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=normal", "-z",
+        "--ignored=matching",
       ])
     #expect(GitReadCommand.worktreeList().arguments == ["worktree", "list", "--porcelain", "-z"])
     #expect(
       GitReadCommand.log(range: range, maxCount: 2, pathspec: [path]).arguments == [
-        "log", "-z", "--format=" + GitLog.format, "--max-count=2", "main...topic", "--",
-        "Sources/a.swift",
+        "log", "-z", "--no-show-signature", "--format=" + GitLog.format, "--max-count=2",
+        "main...topic", "--", "Sources/a.swift",
       ])
     #expect(GitReadCommand.log(maxCount: 0).arguments.suffix(1) == ["--"])
     #expect(
       GitReadCommand.diffFileSummaries(.index(against: .head), pathspec: [path]).arguments == [
-        "diff", "--find-renames", "--raw", "--numstat", "-z", "--cached", "HEAD", "--",
-        "Sources/a.swift",
+        "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat",
+        "--no-abbrev", "-z", "--cached", "HEAD", "--", "Sources/a.swift",
       ])
     #expect(
       GitReadCommand.diffPatch(.workingTree(against: .head)).arguments == [
-        "diff", "--find-renames", "--patch", "--no-color", "HEAD", "--",
+        "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color",
+        "HEAD", "--",
       ])
   }
 
@@ -52,10 +58,11 @@ struct GitRunnerTests {
     #expect(
       call.arguments == [
         "--no-optional-locks", "-C", "/repo", "--no-pager", "status", "--porcelain=v2", "--branch",
-        "-z",
+        "--renames", "--untracked-files=normal", "-z",
       ])
     #expect(call.environment == ["LC_ALL": "C", "HOME": "/home", "PATH": "/bin"])
-    #expect(call.timeout == .seconds(30)); #expect(call.outputLimit == GitRunner.defaultOutputLimit)
+    #expect(call.timeout == .seconds(30))
+    #expect(call.outputLimit == GitRunner.defaultOutputLimit)
   }
 
   @Test("非ゼロ終了と実行層エラーを変換する")
@@ -79,6 +86,14 @@ struct GitRunnerTests {
     }
   }
 
+  @Test("標準候補は端末で優先される配置順にする")
+  func ordersDefaultCandidates() {
+    #expect(
+      GitRunner.defaultExecutableCandidates.map(\.path) == [
+        "/opt/homebrew/bin/git", "/usr/local/bin/git", "/usr/bin/git",
+      ])
+  }
+
   private func makeRunner(
     spy: GitProcessSpy, repository: URL = URL(fileURLWithPath: "/repo"), executable: Bool = true
   ) throws -> GitRunner {
@@ -94,12 +109,16 @@ struct GitRunnerTests {
 
 private actor GitProcessSpy: ProcessRunning {
   struct Call: Sendable {
-    let arguments: [String]; let environment: [String: String]; let timeout: Duration
+    let arguments: [String]
+    let environment: [String: String]
+    let timeout: Duration
     let outputLimit: Int
   }
   private(set) var calls: [Call] = []
   let result: Result<ProcessRunResult, ProcessRunnerError>
-  init(result: Result<ProcessRunResult, ProcessRunnerError>) { self.result = result }
+  init(result: Result<ProcessRunResult, ProcessRunnerError>) {
+    self.result = result
+  }
   func run(
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
     outputLimit: Int

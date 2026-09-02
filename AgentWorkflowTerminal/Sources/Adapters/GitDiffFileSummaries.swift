@@ -5,62 +5,94 @@ public enum GitDiffChangeKind: Sendable, Equatable {
     unknown(String)
 }
 public enum GitDiffLineCounts: Sendable, Equatable {
-  case text(insertions: Int, deletions: Int); case binary
+  case text(insertions: Int, deletions: Int)
+  case binary
 }
 public struct GitDiffFileSummary: Sendable, Equatable {
-  public let sourceMode: String; public let destinationMode: String
-  public let sourceObject: String; public let destinationObject: String
-  public let kind: GitDiffChangeKind; public let path: String; public let originalPath: String?
+  public let sourceMode: String
+  public let destinationMode: String
+  public let sourceObject: String
+  /// working tree との比較では、未知の object を全桁 0 の OID として git から受け取る。
+  public let destinationObject: String
+  public let kind: GitDiffChangeKind
+  public let path: String
+  public let originalPath: String?
   public let lineCounts: GitDiffLineCounts
 }
 public enum GitDiffParseError: Error, Sendable, Equatable {
-  case invalidRawRecord(String); case missingRawPath; case invalidNumstat(String)
-  case missingRenamePaths; case duplicatePath(String); case missingNumstat(String)
+  case invalidRawRecord(String)
+  case missingRawPath
+  case invalidNumstat(String)
+  case missingRenamePaths
+  case duplicatePath(String)
+  case missingNumstat(String)
   case missingRaw(String)
 }
 public struct GitDiffParseFailure: Error, Sendable, Equatable {
-  public let recordNumber: Int; public let record: String; public let error: GitDiffParseError
+  public let recordNumber: Int
+  public let record: String
+  public let error: GitDiffParseError
 }
 public struct GitDiffFileSummariesParseResult: Sendable, Equatable {
-  public let summaries: [GitDiffFileSummary]; public let failures: [GitDiffParseFailure]
+  public let summaries: [GitDiffFileSummary]
+  public let failures: [GitDiffParseFailure]
 }
 
 public enum GitDiffFileSummaries {
   private struct Raw {
-    let sourceMode: String; let destinationMode: String; let sourceObject: String
-    let destinationObject: String; let kind: GitDiffChangeKind; let path: String
-    let originalPath: String?; let number: Int; let record: String
+    let sourceMode: String
+    let destinationMode: String
+    let sourceObject: String
+    let destinationObject: String
+    let kind: GitDiffChangeKind
+    let path: String
+    let originalPath: String?
+    let number: Int
+    let record: String
   }
   private struct Stat {
-    let path: String; let counts: GitDiffLineCounts; let number: Int; let record: String
+    let path: String
+    let counts: GitDiffLineCounts
+    let number: Int
+    let record: String
   }
 
   public static func parse(output: String) -> GitDiffFileSummariesParseResult {
     var records = output.components(separatedBy: "\0")
     if records.last?.isEmpty == true { records.removeLast() }
-    var raws: [Raw] = []; var stats: [Stat] = []; var failures: [GitDiffParseFailure] = []
+    var raws: [Raw] = []
+    var stats: [Stat] = []
+    var failures: [GitDiffParseFailure] = []
     var index = 0
     // raw の mode 行に必要な path レコードを先に消費するため、':' path と境界を混同しない。
     while index < records.count, records[index].hasPrefix(":") {
-      let number = index + 1; let record = records[index]
+      let number = index + 1
+      let record = records[index]
       do {
-        let parsed = try parseRaw(record, records: records, index: index); raws.append(parsed.raw)
+        let parsed = try parseRaw(record, records: records, index: index)
+        raws.append(parsed.raw)
         index += parsed.extra + 1
       } catch {
-        failures.append(.init(recordNumber: number, record: record, error: error)); index += 1
+        failures.append(.init(recordNumber: number, record: record, error: error))
+        index += recordsToSkipAfterInvalidRaw(record, records: records, index: index) + 1
       }
     }
     while index < records.count {
-      let number = index + 1; let record = records[index]
+      let number = index + 1
+      let record = records[index]
       do {
         let parsed = try parseStat(record, records: records, index: index)
-        stats.append(parsed.stat); index += parsed.extra + 1
+        stats.append(parsed.stat)
+        index += parsed.extra + 1
       } catch {
-        failures.append(.init(recordNumber: number, record: record, error: error)); index += 1
+        failures.append(.init(recordNumber: number, record: record, error: error))
+        index += 1
       }
     }
     var statsByPath: [String: Stat] = [:]
-    for stat in stats where statsByPath.updateValue(stat, forKey: stat.path) != nil {
+    for stat in stats {
+      let previous = statsByPath.updateValue(stat, forKey: stat.path)
+      guard previous != nil else { continue }
       failures.append(
         .init(recordNumber: stat.number, record: stat.record, error: .duplicatePath(stat.path)))
     }
@@ -92,10 +124,13 @@ public enum GitDiffFileSummaries {
   ) throws(GitDiffParseError) -> (raw: Raw, extra: Int) {
     let parts = record.dropFirst().split(separator: " ").map(String.init)
     guard parts.count == 5 else { throw .invalidRawRecord(record) }
-    let status = parts[4]; guard let letter = status.first else { throw .invalidRawRecord(record) }
-    let rename = letter == "R" || letter == "C"; let needed = rename ? 2 : 1
+    let status = parts[4]
+    guard let letter = status.first else { throw .invalidRawRecord(record) }
+    let rename = letter == "R" || letter == "C"
+    let needed = rename ? 2 : 1
     guard index + needed < records.count else { throw .missingRawPath }
-    let old = rename ? records[index + 1] : nil; let path = records[index + needed]
+    let old = rename ? records[index + 1] : nil
+    let path = records[index + needed]
     let score = Int(status.dropFirst()) ?? 0
     let kind: GitDiffChangeKind =
       switch letter {
@@ -118,7 +153,7 @@ public enum GitDiffFileSummaries {
   private static func parseStat(
     _ record: String, records: [String], index: Int
   ) throws(GitDiffParseError) -> (stat: Stat, extra: Int) {
-    let parts = record.components(separatedBy: "\t")
+    let parts = record.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
     guard parts.count == 3 else { throw .invalidNumstat(record) }
     let counts: GitDiffLineCounts
     if parts[0] == "-", parts[1] == "-" {
@@ -130,8 +165,18 @@ public enum GitDiffFileSummaries {
     }
     if parts[2].isEmpty {
       guard index + 2 < records.count else { throw .missingRenamePaths }
-      return (.init(path: records[index + 2], counts: counts, number: index + 1, record: record), 2)
+      return (
+        .init(path: records[index + 2], counts: counts, number: index + 1, record: record), 2
+      )
     }
-    return (.init(path: parts[2], counts: counts, number: index + 1, record: record), 0)
+    return (.init(path: String(parts[2]), counts: counts, number: index + 1, record: record), 0)
+  }
+
+  private static func recordsToSkipAfterInvalidRaw(
+    _ record: String, records: [String], index: Int
+  ) -> Int {
+    let status = record.split(separator: " ").last
+    let expectedPaths = status?.first == "R" || status?.first == "C" ? 2 : 1
+    return min(expectedPaths, records.count - index - 1)
   }
 }

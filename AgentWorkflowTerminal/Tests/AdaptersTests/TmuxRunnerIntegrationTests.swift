@@ -25,8 +25,7 @@ struct TmuxRunnerIntegrationTests {
       })
     defer {
       if let serverPID {
-        let signalResult = Darwin.kill(serverPID, SIGTERM)
-        serverWasStopped = signalResult == 0 || errno == ESRCH
+        serverWasStopped = terminateServer(serverPID)
       }
       if serverWasStopped {
         try? FileManager.default.removeItem(at: socketURL)
@@ -43,7 +42,8 @@ struct TmuxRunnerIntegrationTests {
       let server = try await runner.run(
         arguments: ["new-session", "-d", "-s", sessionName, "-P", "-F", "#{pid}"])
       serverPID = pid_t(server.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-      try #require(serverPID != nil, "不正な PID stdout: \(String(reflecting: server.stdout))")
+      try #require(
+        serverPID.map { $0 > 0 } == true, "PID stdout: \(String(reflecting: server.stdout))")
 
       let socketPath = try await runner.run(
         arguments: ["display-message", "-p", "#{socket_path}"])
@@ -86,6 +86,19 @@ struct TmuxRunnerIntegrationTests {
     return URL(fileURLWithPath: socketParent)
       .appending(path: "tmux-\(getuid())")
       .appending(path: socketName)
+  }
+
+  private func terminateServer(_ serverPID: pid_t) -> Bool {
+    guard serverPID > 0 else { return false }
+    guard Darwin.kill(serverPID, SIGTERM) == 0 else { return errno == ESRCH }
+
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .milliseconds(500))
+    while clock.now < deadline {
+      guard Darwin.kill(serverPID, 0) == 0 else { return errno == ESRCH }
+      Darwin.usleep(10_000)
+    }
+    return Darwin.kill(serverPID, 0) != 0 && errno == ESRCH
   }
 
   private func canonicalPath(_ path: String) -> String {

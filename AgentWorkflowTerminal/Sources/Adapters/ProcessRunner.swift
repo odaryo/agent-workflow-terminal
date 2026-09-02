@@ -1,8 +1,5 @@
-import Foundation
-
-#if os(macOS)
 import Darwin
-#endif
+import Foundation
 
 public struct ProcessRunResult: Sendable, Equatable {
   public let exitCode: Int32

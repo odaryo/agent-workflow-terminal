@@ -1,10 +1,11 @@
-// pipe(2) と DispatchIO を使うこの配管は、ローカル実行ホストの Mac に限定する (設計書 §20.1)。
-#if os(macOS)
 import Darwin
 import Dispatch
 import Foundation
 import os
 
+// iOS でも API は利用できるが、ローカル実行ホストを Mac に限定し、呼び出し元のない配管を載せない
+// (設計書 §20.1)。
+#if os(macOS)
 // §1.2 の例外: stdout/stderr 双方の DispatchIO ハンドラから同期的に呼ばれ、残量の確認と
 // 加算を1つの不可分操作にしないと上限を超えて受理してしまうため、actor へ hop できない。
 struct OutputBudget: Sendable {

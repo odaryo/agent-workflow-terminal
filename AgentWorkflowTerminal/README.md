@@ -65,20 +65,18 @@ swift test
 ### iOS 向けビルド
 
 `TerminalCore` と、macOS 専用実装を除く `Adapters` が iOS 向けにコンパイルできることは、
-次の package 全体のビルドで確認します。テストは iOS 向けにビルドせず、macOS でのみ実行します。
+次の product ターゲットのビルドで確認します。テストターゲットは iOS 向けにビルドせず、
+macOS でのみ実行します。
 
 ```shell
 cd AgentWorkflowTerminal
 swift build --triple arm64-apple-ios17.0-simulator \
-  -Xswiftc -sdk \
-  -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
-  -Xcc -isysroot \
-  -Xcc "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+  --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 ```
 
 CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、arm64 iOS 17 simulator triple と
-iOS Simulator SDK を使って package 全体がコンパイルできることを検証します。実機向け triple の
-コンパイルと、simulator・実機での実行時動作はこのジョブの検証範囲外です。
+iOS Simulator SDK を使って product ターゲットがコンパイルできることを検証します。テストターゲット、
+実機向け triple のコンパイル、simulator・実機での実行時動作は検証範囲外です。
 
 ### tmux 統合テスト
 

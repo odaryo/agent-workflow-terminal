@@ -58,10 +58,7 @@ jobs:
         run: |
           swift build \
             --triple arm64-apple-ios17.0-simulator \
-            -Xswiftc -sdk \
-            -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
-            -Xcc -isysroot \
-            -Xcc "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
   format:
     name: swift-format

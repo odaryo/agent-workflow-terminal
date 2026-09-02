@@ -77,6 +77,8 @@ public enum TmuxListPanesParseError: Error, Sendable, Equatable {
   case invalidPaneDead(String)
   case invalidPaneDeadStatus(String)
   case invalidPaneTermination(status: String, signal: String)
+  case invalidSessionNameEscape(String)
+  case invalidRawFieldEscape(String)
 }
 
 public struct TmuxListPanesParseFailure: Error, Sendable, Equatable {
@@ -108,10 +110,9 @@ public enum TmuxListPanes {
   private static let dollar: UInt8 = 0x24
 
   /// tmux 3.4 の非 control-mode 出力では、format に埋めた Unit Separator は `\037` になる。
-  /// command / path / title はユーザー由来の `\037` と区切りを分けるため、tty は生文字列の
-  /// 復号規則を統一するため、置換でバックスラッシュを二重化する。名前系は生成時符号化を維持する。
-  /// 実測では出力段が `$` の次に ASCII 英字 / `_` / `{` または有効な非 ASCII 文字がある場合だけ
-  /// `\` を挿入した。ASCII 0x20...0x7E の全組合せ、末尾・連続 `$`、日本語と絵文字で確認した。
+  /// slash を持ち得る全フィールドを置換で二重化し、出力段が足す escape だけを奇数列にする。
+  /// session の保存段で `\t` / `\n` / `\ooo` となったテキストも、その `\` バイトを二重化するため
+  /// 正式名の一部として偶数列に残る。これにより `$` の後続文字やホストの locale に依存しない。
   /// 制御バイトは 0x01...0x06 / 0x0E...0x1F / 0x7F が八進、BEL / BS / VT / FF / CR が
   /// named escape、TAB / LF が生出力だった。単独 0x80...0x9F と不正 UTF-8 は macOS の path と
   /// tmux title が受け付けず、有効な UTF-8 の C1 制御文字は変更されなかった。
@@ -121,7 +122,7 @@ public enum TmuxListPanes {
   /// signal token のため、ユーザー由来の生フィールドと異なり置換を重ねない。
   public static let format = [
     "#{pane_id}",
-    "#{session_name}",
+    #"#{s/\\/\\\\/:session_name}"#,
     "#{window_index}",
     "#{window_id}",
     "#{pane_index}",
@@ -141,50 +142,53 @@ public enum TmuxListPanes {
     guard encodedFields.count == 14 else {
       throw .invalidFieldCount(actual: encodedFields.count)
     }
-    let fields = encodedFields
 
     guard
-      fields[0].first == "%", let paneNumber = Int(fields[0].dropFirst()), paneNumber >= 0
+      encodedFields[0].first == "%",
+      let paneNumber = Int(encodedFields[0].dropFirst()),
+      paneNumber >= 0
     else {
-      throw .invalidPaneID(fields[0])
+      throw .invalidPaneID(encodedFields[0])
     }
-    guard let windowIndex = Int(fields[2]), windowIndex >= 0 else {
-      throw .invalidWindowIndex(fields[2])
+    guard let windowIndex = Int(encodedFields[2]), windowIndex >= 0 else {
+      throw .invalidWindowIndex(encodedFields[2])
     }
     guard
-      fields[3].first == "@", let windowNumber = Int(fields[3].dropFirst()), windowNumber >= 0
+      encodedFields[3].first == "@",
+      let windowNumber = Int(encodedFields[3].dropFirst()),
+      windowNumber >= 0
     else {
-      throw .invalidWindowID(fields[3])
+      throw .invalidWindowID(encodedFields[3])
     }
-    guard let paneIndex = Int(fields[4]), paneIndex >= 0 else {
-      throw .invalidPaneIndex(fields[4])
+    guard let paneIndex = Int(encodedFields[4]), paneIndex >= 0 else {
+      throw .invalidPaneIndex(encodedFields[4])
     }
     // tmux 3.4 は dead pane にも終了済みプロセスの PID を残すため、live と同じ値域で受け入れる。
-    guard let panePID = Int32(fields[5]), panePID > 0 else {
-      throw .invalidPanePID(fields[5])
+    guard let panePID = Int32(encodedFields[5]), panePID > 0 else {
+      throw .invalidPanePID(encodedFields[5])
     }
 
-    let isActive = try parsePaneActive(fields[6])
-    let isDead = try parsePaneDead(fields[8])
+    let isActive = try parsePaneActive(encodedFields[6])
+    let isDead = try parsePaneDead(encodedFields[8])
     let termination = try parseTermination(
       isDead: isDead,
-      status: fields[9],
-      signal: fields[10]
+      status: encodedFields[9],
+      signal: encodedFields[10]
     )
 
     return TmuxPane(
-      paneID: PaneID(rawValue: decodeInsertedDollarEscapes(fields[0])),
-      sessionName: decodeInsertedDollarEscapes(fields[1]),
+      paneID: PaneID(rawValue: encodedFields[0]),
+      sessionName: try decodeSessionName(encodedFields[1]),
       windowIndex: windowIndex,
-      windowID: fields[3],
+      windowID: encodedFields[3],
       paneIndex: paneIndex,
       panePID: panePID,
       isActive: isActive,
-      currentCommand: decodeRawField(fields[7]),
+      currentCommand: try decodeRawField(encodedFields[7]),
       termination: termination,
-      tty: decodeRawField(fields[11]),
-      currentPath: decodeRawField(fields[12]),
-      title: decodeRawField(fields[13])
+      tty: try decodeRawField(encodedFields[11]),
+      currentPath: try decodeRawField(encodedFields[12]),
+      title: try decodeRawField(encodedFields[13])
     )
   }
 
@@ -229,7 +233,8 @@ public enum TmuxListPanes {
 
     switch (status.isEmpty, signal.isEmpty) {
     case (false, true):
-      guard let exitStatus = Int32(status), exitStatus >= 0 else {
+      // tmux 3.4 は `exit 256` を0、`exit 511` を255として保持したため POSIX 範囲外は拒否する。
+      guard let exitStatus = Int32(status), (0...255).contains(exitStatus) else {
         throw .invalidPaneDeadStatus(status)
       }
       return .exited(status: exitStatus)
@@ -293,7 +298,9 @@ public enum TmuxListPanes {
     return fields
   }
 
-  private static func decodeInsertedDollarEscapes(_ field: String) -> String {
+  private static func decodeSessionName(
+    _ field: String
+  ) throws(TmuxListPanesParseError) -> String {
     let bytes = Array(field.utf8)
     var decoded: [UInt8] = []
     decoded.reserveCapacity(bytes.count)
@@ -310,74 +317,86 @@ public enum TmuxListPanes {
       while slashEnd < bytes.count, bytes[slashEnd] == backslash {
         slashEnd += 1
       }
-      if slashEnd < bytes.count,
-        bytes[slashEnd] == dollar,
-        shouldDecodeDollarEscape(bytes: bytes, dollarIndex: slashEnd)
-      {
-        // 連続列をまとめて扱わないと、リテラル `\\` と `$` 用の追加分が並ぶ `\\\$` を壊す。
-        decoded.append(contentsOf: bytes[index..<(slashEnd - 1)])
+      let slashCount = slashEnd - index
+      decoded.append(contentsOf: repeatElement(backslash, count: slashCount / 2))
+      guard slashCount.isMultiple(of: 2) else {
+        // session_name を置換で包んだ実測では保存済み escape は偶数列になり、
+        // 出力段が作る奇数列は `$` の直前にしか現れなかった。
+        guard slashEnd < bytes.count, bytes[slashEnd] == dollar else {
+          throw .invalidSessionNameEscape(field)
+        }
         decoded.append(dollar)
         index = slashEnd + 1
-      } else {
-        decoded.append(contentsOf: bytes[index..<slashEnd])
-        index = slashEnd
+        continue
       }
+
+      index = slashEnd
     }
 
     return String(decoding: decoded, as: UTF8.self)
   }
 
-  private static func decodeRawField(_ field: String) -> String {
+  private static func decodeRawField(
+    _ field: String
+  ) throws(TmuxListPanesParseError) -> String {
     let bytes = Array(field.utf8)
     var decoded: [UInt8] = []
     decoded.reserveCapacity(bytes.count)
     var index = 0
 
     while index < bytes.count {
-      guard bytes[index] == backslash, index + 1 < bytes.count else {
+      guard bytes[index] == backslash else {
         decoded.append(bytes[index])
         index += 1
         continue
       }
 
-      if bytes[index + 1] == backslash {
-        decoded.append(backslash)
-        index += 2
-        continue
+      var slashEnd = index + 1
+      while slashEnd < bytes.count, bytes[slashEnd] == backslash {
+        slashEnd += 1
       }
-      if bytes[index + 1] == dollar,
-        shouldDecodeDollarEscape(bytes: bytes, dollarIndex: index + 1)
-      {
-        index += 1
-        continue
-      }
-      if index + 3 < bytes.count,
-        let first = octalDigit(bytes[index + 1]),
-        let second = octalDigit(bytes[index + 2]),
-        let third = octalDigit(bytes[index + 3])
-      {
-        decoded.append(first * 64 + second * 8 + third)
-        index += 4
-        continue
-      }
-      if let controlByte = namedControlByte(bytes[index + 1]) {
-        decoded.append(controlByte)
-        index += 2
+      let slashCount = slashEnd - index
+      decoded.append(contentsOf: repeatElement(backslash, count: slashCount / 2))
+      if slashCount.isMultiple(of: 2) {
+        index = slashEnd
         continue
       }
 
-      decoded.append(backslash)
-      index += 1
+      guard slashEnd < bytes.count else {
+        throw .invalidRawFieldEscape(field)
+      }
+      if bytes[slashEnd] == dollar {
+        decoded.append(dollar)
+        index = slashEnd + 1
+        continue
+      }
+      if let controlByte = namedControlByte(bytes[slashEnd]) {
+        decoded.append(controlByte)
+        index = slashEnd + 1
+        continue
+      }
+      if let first = octalDigit(bytes[slashEnd]) {
+        guard
+          slashEnd + 2 < bytes.count,
+          let second = octalDigit(bytes[slashEnd + 1]),
+          let third = octalDigit(bytes[slashEnd + 2])
+        else {
+          throw .invalidRawFieldEscape(field)
+        }
+        let value = Int(first) * 64 + Int(second) * 8 + Int(third)
+        // 出力 escape は1バイト由来なので実測上限は `\377`。範囲外は tmux 出力ではない。
+        guard let byte = UInt8(exactly: value) else {
+          throw .invalidRawFieldEscape(field)
+        }
+        decoded.append(byte)
+        index = slashEnd + 3
+        continue
+      }
+
+      throw .invalidRawFieldEscape(field)
     }
 
     return String(decoding: decoded, as: UTF8.self)
-  }
-
-  private static func shouldDecodeDollarEscape(bytes: [UInt8], dollarIndex: Int) -> Bool {
-    guard dollarIndex + 1 < bytes.count else { return false }
-    let next = bytes[dollarIndex + 1]
-    return next >= 0x80 || next == 0x5F || next == 0x7B
-      || (0x41...0x5A).contains(next) || (0x61...0x7A).contains(next)
   }
 
   private static func octalDigit(_ byte: UInt8) -> UInt8? {

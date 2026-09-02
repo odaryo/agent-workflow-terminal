@@ -10,13 +10,6 @@ public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
   }
 }
 
-public enum ProcessTermination: Sendable, Hashable, Codable {
-  case exited(status: Int32)
-  case signaled(String)
-  /// プロセス終了と理由の回収には時間差があり、理由が未観測でも終了済みという情報を失わない。
-  case unknown
-}
-
 /// フィールドは Spikes/gate1/README.md §8.10 で実測した
 /// `#{pane_id}` / `#{pane_pid}` / `#{pane_tty}` / `#{pane_current_command}` /
 /// `#{pane_current_path}` / `#{pane_title}` / pane の終了情報に一対一で対応する。

@@ -1,1 +1,1 @@
-%0\037path-fixture\0370\037@0\0370\03728027\0371\037sleep\0370\037\037\037/dev/ttys018\037/private/tmp/awt-issue12-fixtures-pGiL0f/dir\\037x-日本語🚀\037題名🚀
+%10\037escaped-r3\0370\037@10\0370\03723946\0371\037sleep\0370\037\037\037/dev/ttys028\037/private/tmp/awt-issue12-r3-fixtures-FXom13/dir\\037x-日本語🚀\037題名🚀

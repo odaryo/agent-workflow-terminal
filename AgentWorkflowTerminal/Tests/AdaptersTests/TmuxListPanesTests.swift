@@ -11,20 +11,19 @@ struct TmuxListPanesTests {
   func formatContainsRequiredFields() {
     #expect(
       TmuxListPanes.format
-        // tmux へ渡す format と1文字も違わないことの検証。分割・連結で組み立てると
         // フォーマットの再実装になり検証の意味が消えるため、原文のまま1行で置く。
         // swiftlint:disable:next line_length
-        == "#{pane_id}\u{1F}#{session_name}\u{1F}#{window_index}\u{1F}#{window_id}\u{1F}#{pane_index}\u{1F}#{pane_pid}\u{1F}#{pane_active}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_command}\u{1F}#{pane_dead}\u{1F}#{pane_dead_status}\u{1F}#{pane_dead_signal}\u{1F}#{s/\\\\/\\\\\\\\/:pane_tty}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_path}\u{1F}#{s/\\\\/\\\\\\\\/:pane_title}"
+        == "#{pane_id}\u{1F}#{s/\\\\/\\\\\\\\/:session_name}\u{1F}#{window_index}\u{1F}#{window_id}\u{1F}#{pane_index}\u{1F}#{pane_pid}\u{1F}#{pane_active}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_command}\u{1F}#{pane_dead}\u{1F}#{pane_dead_status}\u{1F}#{pane_dead_signal}\u{1F}#{s/\\\\/\\\\\\\\/:pane_tty}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_path}\u{1F}#{s/\\\\/\\\\\\\\/:pane_title}"
     )
   }
 
   @Test("区切り表現と日本語・絵文字を含む path と title を真の値へ戻す")
   func parsesEscapedPathFixture() throws {
-    // 採取: tmux 3.4 / socket `awt-issue12-fixtures-28020`。
-    // `mkdir '/private/tmp/awt-issue12-fixtures-pGiL0f/dir\037x-日本語🚀'`
-    // `tmux -u -L awt-issue12-fixtures-28020 new-session -d -s path-fixture -c <上記path>
+    // 採取: tmux 3.4 / `TMUX_TMPDIR=$root`, socket `awt-issue12-r3-fixtures-$$`。
+    // `mkdir "$root/dir\037x-日本語🚀"`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ new-session -d -s escaped-r3 -c <上記path>
     //   "printf '\033]2;題名🚀\007'; exec sleep 120"`
-    // `tmux -u -L awt-issue12-fixtures-28020 list-panes -t %0 -F "$format"`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t %10 -F "$format"`
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-escaped-path.txt")
     )
@@ -32,30 +31,31 @@ struct TmuxListPanesTests {
 
     #expect(result.failures.isEmpty)
     #expect(result.panes.count == 1)
-    #expect(pane.paneID == PaneID(rawValue: "%0"))
-    #expect(pane.sessionName == "path-fixture")
+    #expect(pane.paneID == PaneID(rawValue: "%10"))
+    #expect(pane.sessionName == "escaped-r3")
     #expect(pane.windowIndex == 0)
-    #expect(pane.windowID == "@0")
+    #expect(pane.windowID == "@10")
     #expect(pane.paneIndex == 0)
-    #expect(pane.panePID == 28_027)
+    #expect(pane.panePID == 23_946)
     #expect(pane.isActive)
     #expect(pane.currentCommand == "sleep")
     #expect(pane.termination == nil)
-    #expect(pane.tty == "/dev/ttys018")
+    #expect(pane.tty == "/dev/ttys028")
     #expect(
       pane.currentPath
-        == "/private/tmp/awt-issue12-fixtures-pGiL0f/dir\\037x-日本語🚀"
+        == "/private/tmp/awt-issue12-r3-fixtures-FXom13/dir\\037x-日本語🚀"
     )
     #expect(pane.title == "題名🚀")
   }
 
-  @Test("$ の次の文字に応じて session 名の追加 escape だけを除く")
-  func decodesConditionalDollarEscapesInSessionNames() throws {
-    // 採取: tmux 3.4 / socket `awt-issue12-r2-sessions-20260902`。
+  @Test("session 名をパリティで復号し非 ASCII を文字クラスで推測しない")
+  func decodesDollarEscapesInSessionNamesByParity() throws {
+    // 採取: tmux 3.4 / `TMUX_TMPDIR=$root`, socket `awt-issue12-r3-fixtures-$$`。
     // `for name in 'letter$a' 'under$_' 'brace${x}' 'digit\$1' 'double$$'
-    //   'terminal$' 'symbol$-'; do tmux -u -L awt-issue12-r2-sessions-20260902
+    //   'terminal$' 'symbol$-' 'hebrew$א' 'japanese$日' 'emoji$😀'; do tmux -u -L
+    //   awt-issue12-r3-fixtures-$$
     //   new-session -d -s "$name" 'sleep 120'; done`
-    // `tmux -u -L awt-issue12-r2-sessions-20260902 list-panes -a -F "$format"`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -a -F "$format"`
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-dollar-pattern-sessions.txt")
     )
@@ -67,6 +67,9 @@ struct TmuxListPanesTests {
           #"brace\${x}"#,
           #"digit\\$1"#,
           "double$$",
+          #"emoji\$😀"#,
+          "hebrew$א",
+          #"japanese\$日"#,
           #"letter\$a"#,
           "symbol$-",
           "terminal$",
@@ -75,14 +78,14 @@ struct TmuxListPanesTests {
     )
   }
 
-  @Test("$ の次の文字に応じて path の追加 escape だけを除く")
-  func decodesConditionalDollarEscapesInRawFields() throws {
-    // 採取: tmux 3.4 / socket `awt-issue12-r2-paths-20260902`。
+  @Test("生フィールドをパリティで復号し非 ASCII を文字クラスで推測しない")
+  func decodesDollarEscapesInRawFieldsByParity() throws {
+    // 採取: tmux 3.4 / `TMUX_TMPDIR=$root`, socket `awt-issue12-r3-fixtures-$$`。
     // `for path in 'letter$a' 'under$_' 'brace${x}' 'digit$1' 'double$$'
-    //   'terminal$' 'symbol$-'; do mkdir -p "$root/$path"; tmux -u -L
-    //   awt-issue12-r2-paths-20260902 new-session -d -s "path-$index" -c "$root/$path"
-    //   'sleep 120'; done`
-    // `tmux -u -L awt-issue12-r2-paths-20260902 list-panes -a -F "$format"`
+    //   'terminal$' 'symbol$-' 'hebrew$א' 'japanese$日' 'emoji$😀'; do mkdir -p
+    //   "$root/$path"; pane=$(tmux -u -L awt-issue12-r3-fixtures-$$ new-session -d
+    //   -s "path-$index" -c "$root/$path" -P -F '#{pane_id}' 'sleep 120')`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t "$pane" -F "$format"; done`
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-dollar-pattern-paths.txt")
     )
@@ -90,24 +93,26 @@ struct TmuxListPanesTests {
     #expect(result.failures.isEmpty)
     #expect(
       result.panes.map { URL(fileURLWithPath: $0.currentPath).lastPathComponent }
-        == ["letter$a", "under$_", "brace${x}", "digit$1", "double$$", "terminal$", "symbol$-"]
+        == [
+          "letter$a", "under$_", "brace${x}", "digit$1", "double$$", "terminal$", "symbol$-",
+          "hebrew$א", "japanese$日", "emoji$😀",
+        ]
     )
   }
 
   @Test("tmux の named escape と八進 escape を1パスで真の制御バイトへ戻す")
   func decodesControlBytesInRawField() throws {
-    // `name=$(printf 'p\001\002\003\004\005\006\007\010\011\013\014\015')`
+    // `name=$(printf 'p\\\001\002\003\004\005\006\007\010\011\013\014\015')`
     // `name+=$(printf '\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\177q')`
-    // `mkdir "/private/tmp/awt-issue12-r2-fixtures-oGQpJI/control/$name"`
-    // `tmux -u -L awt-issue12-r2-fixtures-87037 new-session -d -s control-path
-    //   -c <上記path> 'sleep 120'; tmux -u -L awt-issue12-r2-fixtures-87037 list-panes
-    //   -t control-path -F "$format"`
+    // `mkdir "$root/control/$name"; tmux -u -L awt-issue12-r3-fixtures-$$ new-session
+    //   -d -s control-r3 -c <上記path> 'sleep 120'`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t control-r3 -F "$format"`
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-control-path.txt")
     )
     let pane = try #require(result.panes.first)
     let controlBytes = Array(UInt8(1)...UInt8(9)) + Array(UInt8(11)...UInt8(30)) + [127]
-    let expectedSuffix = "p" + String(decoding: controlBytes, as: UTF8.self) + "q"
+    let expectedSuffix = "p\\" + String(decoding: controlBytes, as: UTF8.self) + "q"
 
     #expect(result.failures.isEmpty)
     #expect(pane.currentPath.hasSuffix(expectedSuffix))
@@ -139,30 +144,30 @@ struct TmuxListPanesTests {
 
   @Test("hostile な session 名を新 format の実出力から保持する")
   func parsesHostileSessionFixture() throws {
-    // 採取: `tmux -u -L awt-issue12-r2-fixtures-87037 new-session -d
-    //   -s 'host\$1\\name \037 literal\ttab\nline' 'sleep 120'`
-    // `tmux -u -L awt-issue12-r2-fixtures-87037 list-panes -t %10 -F "$format"`
+    // 採取: `name=$'host\\$1\\name \x1f literal\ttab\nline'`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ new-session -d -s "$name" 'sleep 120'`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t %15 -F "$format"`
     let result = TmuxListPanes.parse(
-      output: try fixture(named: "tmux-3.4-list-panes-hostile-session-r2.txt")
+      output: try fixture(named: "tmux-3.4-list-panes-hostile-session-r3.txt")
     )
 
     #expect(result.failures.isEmpty)
-    #expect(result.panes.first?.sessionName == #"host\\$1\\name \\037 literal\ttab\nline"#)
+    #expect(result.panes.first?.sessionName == #"host\\$1\\name \037 literal\ttab\nline"#)
   }
 
   @Test("非ゼロ終了した dead pane の終了コードと空の current path を保持する")
   func parsesExitedPaneFixture() throws {
-    // 採取: `tmux -u -L awt-issue12-fixtures-28020 new-session -d -s dead-fixture
-    //   'sh -c "sleep 1; exit 23"'`
-    // `tmux -u -L awt-issue12-fixtures-28020 set-option -w -t %2 remain-on-exit on`
-    // `tmux -u -L awt-issue12-fixtures-28020 list-panes -t %2 -F "$format"`
+    // 採取: `tmux -u -L awt-issue12-r3-fixtures-$$ new-session -d -s dead-r3 'sleep 120'`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ set-option -w -t dead-r3 remain-on-exit on`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ respawn-pane -k -t dead-r3 "sh -c 'exit 23'"`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t dead-r3 -F "$format"`
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-dead.txt")
     )
     let pane = try #require(result.panes.first)
 
     #expect(result.failures.isEmpty)
-    #expect(pane.panePID == 28_032)
+    #expect(pane.panePID == 23_953)
     #expect(pane.termination == .exited(status: 23))
     #expect(pane.currentPath.isEmpty)
     #expect(pane.snapshot.termination == .exited(status: 23))
@@ -170,10 +175,10 @@ struct TmuxListPanesTests {
 
   @Test("シグナル終了した dead pane を終了コードと混同しない")
   func parsesSignaledPaneFixture() throws {
-    // 採取: `tmux -u -L awt-issue12-fixtures-28020 new-session -d -s signal-fixture
-    //   'sh -c "sleep 1; kill -TERM $$"'`
-    // `tmux -u -L awt-issue12-fixtures-28020 set-option -w -t %3 remain-on-exit on`
-    // `tmux -u -L awt-issue12-fixtures-28020 list-panes -t %3 -F "$format"`
+    // 採取: `tmux -u -L awt-issue12-r3-fixtures-$$ new-session -d -s signal-r3 'sleep 120'`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ set-option -w -t signal-r3 remain-on-exit on`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ respawn-pane -k -t signal-r3 'kill -TERM $$'`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t signal-r3 -F "$format"`
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-dead-signal.txt")
     )
@@ -183,55 +188,14 @@ struct TmuxListPanesTests {
     #expect(result.panes.first?.snapshot.termination == .signaled("term"))
   }
 
-  @Test("生フィールドはバックスラッシュと $ の符号化を順序を問わず復号する")
-  func decodesRawFieldsRegardlessOfOrder() throws {
-    let pane = try TmuxListPanes.parse(
-      line: encodedLine(
-        sessionName: #"ses\\$dol\\bs"#,
-        currentCommand: #"cmd\\037x\$cash"#,
-        tty: #"/dev/tty\\037x"#,
-        currentPath: #"/tmp/dir\\037x"#,
-        title: #"before\\037after"#
-      )
-    )
-
-    #expect(pane.sessionName == #"ses\$dol\\bs"#)
-    #expect(pane.currentCommand == #"cmd\037x$cash"#)
-    #expect(pane.tty == #"/dev/tty\037x"#)
-    #expect(pane.currentPath == #"/tmp/dir\037x"#)
-    #expect(pane.title == #"before\037after"#)
-  }
-
-  @Test("条件を満たす $ の直前だけから tmux の挿入分を除く")
-  func decodesInsertedDollarEscapeWithoutDamagingBackslashes() throws {
-    let pane = try TmuxListPanes.parse(
-      line: encodedLine(currentCommand: #"\\\$a"#)
-    )
-
-    #expect(pane.currentCommand == #"\$a"#)
-  }
-
-  @Test("空白と一般的な記号をフィールド内に保持する")
-  func preservesSpacesAndSymbols() throws {
-    let pane = try TmuxListPanes.parse(
-      line: encodedLine(
-        sessionName: "session alpha [&]",
-        currentCommand: "agent worker [&]"
-      )
-    )
-
-    #expect(pane.sessionName == "session alpha [&]")
-    #expect(pane.currentCommand == "agent worker [&]")
-  }
-
   @Test("生 TAB と LF を含む command は line 単位なら保持し output では failure にする")
   func handlesTabAndLineFeedInRawFieldFixture() throws {
-    // 採取: tmux 3.4 / socket `awt-issue12-r2-fixtures-87037`。
+    // 採取: tmux 3.4 / socket `awt-issue12-r3-fixtures-$$`。
     // `command=$(printf 'cmd\\sl\nash\tz'); printf '#include <unistd.h>\nint main(void)
     //   {sleep(120);return 0;}\n' | cc -x c -o "$root/$command" -`
-    // `tmux -u -L awt-issue12-r2-fixtures-87037 new-session -d -s command-lf "$root/$command"`
-    // `tmux -u -L awt-issue12-r2-fixtures-87037 list-panes -t command-lf -F "$format"`
-    let output = try fixture(named: "tmux-3.4-list-panes-raw-current-command-r2.txt")
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ new-session -d -s command-r3 "$root/$command"`
+    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -t command-r3 -F "$format"`
+    let output = try fixture(named: "tmux-3.4-list-panes-raw-current-command-r3.txt")
     let pane = try TmuxListPanes.parse(line: String(output.dropLast()))
     let result = TmuxListPanes.parse(output: output)
 
@@ -336,6 +300,39 @@ struct TmuxListPanesTests {
     #expect(throws: TmuxListPanesParseError.invalidPaneDeadStatus("signal")) {
       try TmuxListPanes.parse(line: encodedLine(paneDead: "1", deadStatus: "signal"))
     }
+    #expect(throws: TmuxListPanesParseError.invalidPaneDeadStatus("256")) {
+      try TmuxListPanes.parse(line: encodedLine(paneDead: "1", deadStatus: "256"))
+    }
+  }
+
+  @Test("範囲外・不完全な八進 escape を trap せず parse error にする", arguments: [#"\400"#, #"\777"#, #"\03"#])
+  func rejectsInvalidRawEscapes(field: String) {
+    #expect(throws: TmuxListPanesParseError.invalidRawFieldEscape(field)) {
+      try TmuxListPanes.parse(line: encodedLine(currentCommand: field))
+    }
+  }
+
+  @Test("範囲外の八進 escape を output 全体の failure として返す")
+  func reportsInvalidRawEscapeAsFailure() {
+    let line = encodedLine(currentCommand: #"\400"#)
+    let result = TmuxListPanes.parse(output: line)
+
+    #expect(result.panes.isEmpty)
+    #expect(result.failures.map(\.error) == [.invalidRawFieldEscape(#"\400"#)])
+  }
+
+  @Test("値末尾の単独バックスラッシュを trap せず parse error にする")
+  func rejectsTrailingBackslash() {
+    #expect(throws: TmuxListPanesParseError.self) {
+      try TmuxListPanes.parse(line: encodedLine(currentCommand: #"\"#))
+    }
+  }
+
+  @Test("session 名の奇数バックスラッシュ列は $ 以外を許可しない")
+  func rejectsUnexpectedSessionNameEscape() {
+    #expect(throws: TmuxListPanesParseError.invalidSessionNameEscape(#"\t"#)) {
+      try TmuxListPanes.parse(line: encodedLine(sessionName: #"\t"#))
+    }
   }
 
   @Test("フィールド数が14でなければ拒否する")
@@ -415,6 +412,9 @@ struct TmuxListPanesIntegrationTests {
       prefix + "double$$",
       prefix + "terminal$",
       prefix + "symbol$-",
+      prefix + "hebrew$א",
+      prefix + "japanese$日",
+      prefix + "emoji$😀",
     ]
     var serverPID: pid_t?
     var serverWasStopped = false

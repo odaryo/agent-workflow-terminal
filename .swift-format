@@ -10,7 +10,7 @@
   "lineBreakBeforeControlFlowKeywords": false,
   "lineBreakBeforeEachArgument": false,
   "prioritizeKeepingFunctionOutputTogether": true,
-  "indentConditionalCompilationBlocks": true,
+  "indentConditionalCompilationBlocks": false,
   "indentSwitchCaseLabels": false,
   "fileScopedDeclarationPrivacy": {
     "accessLevel": "private"

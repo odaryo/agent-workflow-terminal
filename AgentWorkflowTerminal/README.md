@@ -1,7 +1,7 @@
 # AgentWorkflowTerminal (Swift Package)
 
-`agent_workflow_terminal` の Swift Package です。Phase 1 (足場づくり) の成果物であり、
-**機能実装は入っていません**。
+`agent_workflow_terminal` の Swift Package です。Phase 1 の足場と、外部 CLI に接続する
+Adapter 境界の基礎実装を収めています。製品アプリの UI はまだありません。
 
 コーディング規約は [`docs/coding-guidelines.md`](../docs/coding-guidelines.md)、
 仕様は [`docs/architecture.md`](../docs/architecture.md) を参照してください。
@@ -29,7 +29,7 @@ TerminalCoreTests  AdaptersTests
 | ターゲット | 役割 | 依存 |
 |---|---|---|
 | `TerminalCore` | ドメインモデル。状態の正規化、代表状態の決定、境界 protocol の宣言。UI・外部プロセスへの依存を持たない | なし |
-| `Adapters` | tmux / git CLI 等、外部世界との境界の実装。Phase 1 ではプレースホルダのみ | `TerminalCore` |
+| `Adapters` | tmux / git CLI 等、外部世界との境界。共有境界型と parser は全 platform、ローカルプロセス実行配管は macOS のみ | `TerminalCore` |
 | `TerminalCoreTests` | `TerminalCore` のテスト (Swift Testing) | `TerminalCore` |
 | `AdaptersTests` | `Adapters` のテスト (Swift Testing) | `Adapters` |
 
@@ -42,6 +42,18 @@ TerminalCoreTests  AdaptersTests
 | `AgentAdapter.swift` | Agent 状態正規化の境界 protocol。**宣言のみ** | 設計書 §12.1 |
 | `TerminalRenderer.swift` | Terminal 描画の境界 protocol。**宣言のみ** | 設計書 §21.5 / Gate 1 スパイク申し送り |
 
+### `Adapters` の platform 境界
+
+`ProcessRunResult` / `ProcessRunLimits` / `ProcessRunnerError` / `ProcessRunning` と
+`TmuxListPanes` parser は、iOS の SSH クライアントからも使えるよう全 platform で提供します。
+一方、`FoundationProcessRunner` / `ProcessExecution` / `AsyncPipeReader` / `OutputBudget` は
+ローカルプロセス実行の配管であり、macOS 専用です。設計書 §20.1 のとおり実行ホストは Mac に
+限定し、platform 差は同じターゲット内の条件付きコンパイルで表現しています。
+
+`TmuxRunner` は iOS 向けにもコンパイルされますが、public initializer は端末上の既定パスから
+tmux executable を探すため、iOS では `.binaryNotFound` になります。SSH 越しの実行をどう注入するかは
+Gate 2 の設計対象であり、現時点では iOS から利用できる public API ではありません。
+
 ## ビルドとテスト
 
 ```shell
@@ -49,6 +61,24 @@ cd AgentWorkflowTerminal
 swift build
 swift test
 ```
+
+### iOS 向けビルド
+
+`TerminalCore` と、macOS 専用実装を除く `Adapters` が iOS 向けにコンパイルできることは、
+次のビルドで確認します。`swift build` はテストターゲットを除く全ターゲットを対象にします。
+テストターゲットは iOS 向けにビルドせず、
+macOS でのみ実行します。
+
+```shell
+cd AgentWorkflowTerminal
+swift build --triple arm64-apple-ios17.0-simulator \
+  --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+```
+
+CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、arm64 iOS 17 simulator triple と
+iOS Simulator SDK を使って、テストターゲットを除く全ターゲットがコンパイルできることを検証します。
+テストターゲット、
+実機向け triple のコンパイル、simulator・実機での実行時動作は検証範囲外です。
 
 ### tmux 統合テスト
 
@@ -62,9 +92,15 @@ AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
 ```
 
 統合テストは process ID を含む `-L awt-integration-<pid>` の専用 socket だけを使います。
-tmux 3.4 では正常な `kill-server` 後も socket ファイルが残るため、テストは `defer` で server を
-停止する fallback を確保し、`kill-server` の完了後に専用 socket ファイルも削除します。途中で
-テストが失敗した場合も同じ後始末を行います。
+`new-session -P -F '#{pid}'` で server 作成と同時に PID を取得します。tmux 3.4 では正常な
+`kill-server` 後も socket ファイルが残るため、テストは `defer` で PID による停止 fallback を確保し、
+専用 socket ファイルも削除します。途中でテストが失敗した場合も同じ後始末を行います。
+
+**socket の削除は無条件ではありません。** `defer` は SIGTERM 後に最大 500ms かけて server の
+消滅を確認し、確認できたときだけ socket を消します。停止できなかった場合は socket を**意図的に
+残し**、標準エラーへ警告を出します。生きている server の socket を消すと `-L` から到達できない
+orphan になり、手で片付けることもできなくなるためです。残った socket は後始末漏れではなく、
+この判断の結果です。
 2026-09-02 に tmux 3.4 で成功を確認しています。
 
 ## Lint / Format

@@ -3,6 +3,10 @@ import Dispatch
 import Foundation
 import os
 
+// iOS でも API は利用できるが、ローカル実行ホストを Mac に限定し、呼び出し元のない配管を載せない
+// (設計書 §20.1)。import をこのガードの内側へ入れると swift-format の OrderedImports が
+// エラーを出さずに無効化されるため、import はガードの外に置く。
+#if os(macOS)
 // §1.2 の例外: stdout/stderr 双方の DispatchIO ハンドラから同期的に呼ばれ、残量の確認と
 // 加算を1つの不可分操作にしないと上限を超えて受理してしまうため、actor へ hop できない。
 struct OutputBudget: Sendable {
@@ -130,3 +134,4 @@ struct AsyncPipeReader: Sendable {
     channel.close(flags: .stop)
   }
 }
+#endif

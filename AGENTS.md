@@ -12,5 +12,5 @@ Codex など Claude Code 以外のエージェント向けのプロジェクト�
 - `Unknown` 状態を `Working` / `Idle` に丸めない。Claude Code 専用機能を作らない。tmux / git は外部 CLI プロセスとして扱う。
 - 依頼されたスコープを超える変更（ついでのリファクタ・周辺整理）はしない。
 - 完了条件: `swift build` / `swift test` / `swift format lint --strict --recursive Sources Tests`（`AgentWorkflowTerminal/` 内で実行）がすべて GREEN。
-- コミットは Conventional Commits、本文に Why を書く。
+- コミットは Conventional Commits、本文に Why を書く。**タイトル・本文とも日本語**（履歴が日本語で統一されており、squash マージでそのまま main のログになる）。
 - ドキュメントは日本語。`docs/architecture.md` の 確定/現在の推奨/未確定/対象外 の4状態区分を勝手に変えない。

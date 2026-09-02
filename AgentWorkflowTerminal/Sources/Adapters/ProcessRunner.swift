@@ -27,6 +27,7 @@ public enum ProcessRunnerError: Error, Sendable, Equatable {
   case invalidOutputLimit(Int)
 }
 
+/// 実装は子プロセスへ stdin を渡さない。対話的プロセスは別の境界で駆動する。
 public protocol ProcessRunning: Sendable {
   func run(
     executableURL: URL,
@@ -54,6 +55,8 @@ extension ProcessRunning {
   }
 }
 
+// Foundation.Process は macOS でのみ利用でき、実行ホストも Mac に限定する (設計書 §20.1)。
+#if os(macOS)
 public struct FoundationProcessRunner: ProcessRunning, Sendable {
   public init() {}
 
@@ -203,6 +206,7 @@ private actor ProcessExecution {
     process.executableURL = executableURL
     process.arguments = arguments
     process.environment = environment
+    process.standardInput = FileHandle.nullDevice
     process.standardOutput = stdout.writeHandle
     process.standardError = stderr.writeHandle
     process.terminationHandler = { [weak self] process in
@@ -443,3 +447,4 @@ private actor ProcessExecution {
     resultContinuation = nil
   }
 }
+#endif

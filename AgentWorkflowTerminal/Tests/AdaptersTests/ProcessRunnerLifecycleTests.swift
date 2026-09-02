@@ -92,7 +92,9 @@ struct ProcessRunnerLifecycleTests {
       try await runLongProcess(pidFileURL: pidFileURL, timeout: .seconds(2))
     }
 
-    try await Task.sleep(for: .milliseconds(80))
+    // 固定時間待つと、遅いホストでは子が PID を書く前にキャンセルが走り、
+    // 後段の expectProcessIsGone が読む PID ファイルが存在しない (CI で実際に発生)。
+    _ = try await waitForProcessID(from: pidFileURL)
     task.cancel()
 
     await expectTaskCancellation(task)

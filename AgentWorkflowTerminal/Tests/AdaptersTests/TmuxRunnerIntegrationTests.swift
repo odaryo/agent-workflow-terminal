@@ -18,15 +18,16 @@ struct TmuxRunnerIntegrationTests {
     let socketName = "awt-integration-\(ProcessInfo.processInfo.processIdentifier)"
     let socketURL = integrationSocketURL(socketName: socketName)
     var serverPID: pid_t?
+    var serverWasStopped = false
     let executableURL = try #require(
       TmuxRunner.defaultExecutableCandidates.first {
         FileManager.default.isExecutableFile(atPath: $0.path)
       })
     defer {
       if let serverPID {
-        _ = Darwin.kill(serverPID, SIGTERM)
+        serverWasStopped = terminateServer(serverPID)
       }
-      try? FileManager.default.removeItem(at: socketURL)
+      removeSocketIfStopped(serverWasStopped, socketURL: socketURL)
     }
     let runner = try TmuxRunner(
       socketName: socketName,
@@ -36,10 +37,11 @@ struct TmuxRunnerIntegrationTests {
 
     var testError: (any Error)?
     do {
-      _ = try await runner.run(arguments: ["new-session", "-d", "-s", sessionName])
-      let server = try await runner.run(arguments: ["display-message", "-p", "#{pid}"])
+      let server = try await runner.run(
+        arguments: ["new-session", "-d", "-s", sessionName, "-P", "-F", "#{pid}"])
       serverPID = pid_t(server.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-      #expect(serverPID != nil)
+      try #require(
+        (serverPID ?? 0) > 0, "PID が正数でない stdout: \(String(reflecting: server.stdout))")
 
       let socketPath = try await runner.run(
         arguments: ["display-message", "-p", "#{socket_path}"])
@@ -69,6 +71,7 @@ struct TmuxRunnerIntegrationTests {
     }
 
     if (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil {
+      serverWasStopped = true
       serverPID = nil
     }
     if let testError {
@@ -81,6 +84,40 @@ struct TmuxRunnerIntegrationTests {
     return URL(fileURLWithPath: socketParent)
       .appending(path: "tmux-\(getuid())")
       .appending(path: socketName)
+  }
+
+  private func removeSocketIfStopped(_ serverWasStopped: Bool, socketURL: URL) {
+    guard serverWasStopped else {
+      // テストの成否は変えない。残置は設計どおりだが、手で片付ける必要があることは伝える。
+      FileHandle.standardError.write(
+        Data(
+          "警告: tmux server の停止を確認できませんでした。socket を残します: \(socketURL.path)\n"
+            .utf8))
+      return
+    }
+    try? FileManager.default.removeItem(at: socketURL)
+  }
+
+  /// 戻り値は「停止を確認できたか」であり、呼び出し側はこれが false のとき socket を残す。
+  /// 生きている server の socket を消すと `-L` から到達できない orphan になり、
+  /// 手で片付けることすらできなくなるため、stale な socket が残る方を選ぶ。
+  private func terminateServer(_ serverPID: pid_t) -> Bool {
+    // 0 や負値は kill(2) では「プロセスグループ」「全プロセス」の意味になり、
+    // テストランナー自身を撃つ。外部 CLI 由来の値なので syscall へ渡す前に弾く。
+    guard serverPID > 0 else { return false }
+    guard Darwin.kill(serverPID, SIGTERM) == 0 else { return errno == ESRCH }
+
+    let clock = ContinuousClock()
+    // SIGTERM から終了までは実測で約 13ms。無反応な server を待ち続けないための上界として
+    // その約40倍を取る。errno は必ず「失敗した syscall の直後」だけを読む (短絡に依存)。
+    let deadline = clock.now.advanced(by: .milliseconds(500))
+    while clock.now < deadline {
+      guard Darwin.kill(serverPID, 0) == 0 else { return errno == ESRCH }
+      // defer からは await できないため Task.sleep を使えない (§5.3 の非同期 I/O 方針の例外)。
+      // 塞ぐのは kill-server が失敗した異常系のみ。
+      Darwin.usleep(10_000)
+    }
+    return Darwin.kill(serverPID, 0) != 0 && errno == ESRCH
   }
 
   private func canonicalPath(_ path: String) -> String {

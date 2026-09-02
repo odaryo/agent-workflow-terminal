@@ -215,6 +215,16 @@ window/sessionの高度な管理、名前変更、並べ替え、swap-paneなど
 
 複数クライアントからの同時入力が起こり得ることを前提とし、誤操作防止は将来のUX課題として扱う。
 
+### 4.3 サポートするtmux版数
+
+サポート下限は**tmux 3.4**とする。3.4以上であれば機能制限を設けない。
+
+3.5未満ではZWJを含むgrapheme(`👨‍👩‍👧‍👦`など)の表示幅をtmuxが誤る。Gate 1の実測では14ケース中1件のみで、tmuxを介さないlibghostty単体は14/14正解であり、原因はtmux側にある。実害は「該当絵文字が2セル余分に見える」「ZWJを`status-right`へ置くと右端に消し残しが出る」という表示上のものに限られ、機能欠損は無い。tmuxは3.5以降でgrapheme対応が改善している。
+
+したがって3.5未満は**警告を出すのみ**とし、動作の制限や接続の拒否は行わない。3.4を切り捨てないのは、既存のCLI出力パーサの挙動根拠がすべて3.4の実測であり、Ubuntu 24.04 LTSの標準パッケージも3.4であるためである。
+
+Adapterは版数を検出する。版数を解釈できなかった場合は`Unknown`として保持し、**「サポート対象」にも「対象外」にも丸めない**(§12.3と同じ方針)。
+
 ## 5. Agent Terminal中心UI
 
 ### 5.1 通常状態
@@ -1159,7 +1169,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - 新規検出worktreeのActive化確認
 - session命名とcollision回避
 - tmux未導入時のセットアップ
-- tmux version support matrix(Gate 1でtmux 3.4がZWJ絵文字の表示を壊すことを確認。サポート下限版数の決定が必要)
 - Close時の安全確認
 - session消失時の再作成方針
 - detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、タブとsurfaceのライフサイクル設計(Gate 1)
@@ -1438,6 +1447,7 @@ PR_READY
 - [x] Unknownを正式状態として扱う
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
+- [x] tmuxのサポート下限は3.4、3.5未満はZWJ表示の警告のみで機能制限なし
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
 - [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用

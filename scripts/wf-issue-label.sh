@@ -45,6 +45,9 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
+    -*)
+      die "不明な引数です: $1"
+      ;;
     *)
       [[ -z "$issue_number" ]] || die "引数が多すぎます: $1"
       issue_number="$1"
@@ -61,15 +64,22 @@ require_cmd git gh
 [[ ${#add_labels[@]} -gt 0 || ${#remove_labels[@]} -gt 0 ]] \
   || die "--add か --remove を少なくとも1つ指定してください"
 
+# gh は --add-label "a,b" をラベル2件として解釈するため、1フラグ1ラベルの前提が崩れ、
+# --dry-run の表示とも食い違う。複数指定はフラグの繰り返しで表現させる。
+for label in ${add_labels[@]+"${add_labels[@]}"} ${remove_labels[@]+"${remove_labels[@]}"}; do
+  [[ "$label" != *,* ]] \
+    || die "ラベル名にカンマは使えません (複数指定は --add/--remove を繰り返してください): $label"
+done
+
 args=(issue edit "$issue_number")
 display="gh issue edit $issue_number"
 for label in ${add_labels[@]+"${add_labels[@]}"}; do
   args+=(--add-label "$label")
-  display+=" --add-label \"$label\""
+  display+=" --add-label $(printf '%q' "$label")"
 done
 for label in ${remove_labels[@]+"${remove_labels[@]}"}; do
   args+=(--remove-label "$label")
-  display+=" --remove-label \"$label\""
+  display+=" --remove-label $(printf '%q' "$label")"
 done
 
 if [[ "$dry_run" -eq 1 ]]; then
@@ -77,6 +87,9 @@ if [[ "$dry_run" -eq 1 ]]; then
   exit 0
 fi
 
-gh "${args[@]}" >/dev/null
+# gh の出力 (Issue URL) を捨てない。--remove-label は存在しないラベルでも成功しうるため、
+# 「更新しました」だけでは実際に何が起きたか分からない。
+gh "${args[@]}"
 
 info "Issue #$issue_number のラベルを更新しました"
+gh issue view "$issue_number" --json labels --jq '"現在のラベル: " + ((.labels | map(.name) | join(", ")) // "")' >&2

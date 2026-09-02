@@ -13,7 +13,8 @@ usage() {
   -t, --title    コミットタイトル (例: "fix: xxx")
   -b, --body     コミット本文 (Why を書く。必須)
   --amend        HEAD のコミットを書き換える。ステージ済みの変更が無くても
-                 メッセージだけを直せる。push 済みのコミットには使えない
+                 メッセージだけを直せる。ステージ済みの変更があれば直前のコミットへ
+                 取り込まれる。push 済みのコミットには使えない
   --allow-main   main ブランチ上での直接コミットを許可する
                  (docs 等の1行変更のみ main 直コミット可)
   -h, --help     このヘルプを表示
@@ -65,8 +66,13 @@ if [[ "$amend" -eq 1 ]]; then
   # push 済みのコミットを書き換えると、他の clone や PR の diff と齟齬が出る。
   # remote へ到達済みかで判定する (upstream 未設定でも効かせるため -r で全 remote を見る)。
   git rev-parse --verify --quiet HEAD >/dev/null || die "書き換える HEAD がありません"
-  [[ -z "$(git branch -r --contains HEAD 2>/dev/null)" ]] \
-    || die "HEAD は push 済みです。--amend では書き換えられません"
+  # remote-tracking ref は最後の fetch/push 時点の状態でしかない。判定前に更新する。
+  # offline 等で更新できない場合はローカルの ref のまま判定を続ける (fetch の失敗自体は理由にしない)。
+  git fetch --quiet origin 2>/dev/null || true
+  # 判定そのものが失敗したときに「push されていない」と誤読しないよう、空文字と失敗を区別する。
+  pushed_refs=$(git branch -r --contains HEAD) \
+    || die "push 済みかどうかを判定できませんでした (git branch -r --contains)"
+  [[ -z "$pushed_refs" ]] || die "HEAD は push 済みです。--amend では書き換えられません"
 elif git diff --cached --quiet; then
   die "ステージ済みの変更がありません (git add で対象ファイルを追加してください)"
 fi

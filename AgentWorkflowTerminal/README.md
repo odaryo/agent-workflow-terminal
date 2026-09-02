@@ -29,7 +29,7 @@ TerminalCoreTests  AdaptersTests
 | ターゲット | 役割 | 依存 |
 |---|---|---|
 | `TerminalCore` | ドメインモデル。状態の正規化、代表状態の決定、境界 protocol の宣言。UI・外部プロセスへの依存を持たない | なし |
-| `Adapters` | tmux / git CLI 等、外部世界との境界。境界型と parser は全 platform、ローカルプロセス実行は macOS のみ | `TerminalCore` |
+| `Adapters` | tmux / git CLI 等、外部世界との境界。共有境界型と parser は全 platform、ローカルプロセス実行配管は macOS のみ | `TerminalCore` |
 | `TerminalCoreTests` | `TerminalCore` のテスト (Swift Testing) | `TerminalCore` |
 | `AdaptersTests` | `Adapters` のテスト (Swift Testing) | `Adapters` |
 
@@ -44,11 +44,15 @@ TerminalCoreTests  AdaptersTests
 
 ### `Adapters` の platform 境界
 
-`ProcessRunResult` / `ProcessRunLimits` / `ProcessRunnerError` / `ProcessRunning` は、iOS の
-SSH クライアントからも同じ境界型を使えるよう全 platform で提供します。一方、
-`Foundation.Process` を使う `FoundationProcessRunner` とその実行状態は macOS 専用です。
-設計書 §20.1 のとおりプロセスの実行ホストは Mac に限定し、platform 差は同じターゲット内の
-条件付きコンパイルで表現しています。
+`ProcessRunResult` / `ProcessRunLimits` / `ProcessRunnerError` / `ProcessRunning` と
+`TmuxListPanes` parser は、iOS の SSH クライアントからも使えるよう全 platform で提供します。
+一方、`FoundationProcessRunner` / `ProcessExecution` / `AsyncPipeReader` / `OutputBudget` は
+ローカルプロセス実行の配管であり、macOS 専用です。設計書 §20.1 のとおり実行ホストは Mac に
+限定し、platform 差は同じターゲット内の条件付きコンパイルで表現しています。
+
+`TmuxRunner` は iOS 向けにもコンパイルされますが、public initializer は端末上の既定パスから
+tmux executable を探すため、iOS では `.binaryNotFound` になります。SSH 越しの実行をどう注入するかは
+Gate 2 の設計対象であり、現時点では iOS から利用できる public API ではありません。
 
 ## ビルドとテスト
 
@@ -67,11 +71,14 @@ swift test
 cd AgentWorkflowTerminal
 swift build --triple arm64-apple-ios17.0-simulator \
   -Xswiftc -sdk \
-  -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+  -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+  -Xcc -isysroot \
+  -Xcc "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 ```
 
-CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、platform 中立な境界へ
-macOS 専用 API が混入しないことを継続的に検証します。
+CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、arm64 iOS 17 simulator triple と
+iOS Simulator SDK を使って package 全体がコンパイルできることを検証します。実機向け triple の
+コンパイルと、simulator・実機での実行時動作はこのジョブの検証範囲外です。
 
 ### tmux 統合テスト
 

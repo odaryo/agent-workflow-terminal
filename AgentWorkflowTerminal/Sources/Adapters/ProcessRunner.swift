@@ -1,5 +1,8 @@
-import Darwin
 import Foundation
+
+#if os(macOS)
+import Darwin
+#endif
 
 public struct ProcessRunResult: Sendable, Equatable {
   public let exitCode: Int32
@@ -27,6 +30,7 @@ public enum ProcessRunnerError: Error, Sendable, Equatable {
   case invalidOutputLimit(Int)
 }
 
+/// 実装は子プロセスへ stdin を渡さない。対話的プロセスは別の境界で駆動する。
 public protocol ProcessRunning: Sendable {
   func run(
     executableURL: URL,

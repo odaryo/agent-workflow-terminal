@@ -97,7 +97,9 @@ TerminalCore  ←  Adapters  ←  (将来) App / Host Core
 - 依存は**一方向**。`TerminalCore` から `Adapters` を参照しない。
 - platform 依存の実装は同じターゲット内で `#if os(macOS)` により表現する。iOS 実装が載る
   設計書 §24 Gate 2 までは、platform を理由にターゲットを分割しない。
-- `TerminalCore` は `Package.swift` が宣言するすべての platform でビルドできる状態を保つ。
+- `TerminalCore` は platform 固有 API に依存させない。CI では arm64 iOS 17 simulator triple と
+  iOS Simulator SDK による package 全体のコンパイルを確認するが、実機向けコンパイルや
+  simulator・実機での実行時動作までは保証しない。
 - 新しいターゲットを足すときは、この図に位置づけられることを確認してから足す。
 
 ### 2.3 エラー

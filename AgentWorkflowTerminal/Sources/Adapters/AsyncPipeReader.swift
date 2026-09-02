@@ -1,3 +1,5 @@
+// pipe(2) と DispatchIO を使うこの配管は、ローカル実行ホストの Mac に限定する (設計書 §20.1)。
+#if os(macOS)
 import Darwin
 import Dispatch
 import Foundation
@@ -130,3 +132,4 @@ struct AsyncPipeReader: Sendable {
     channel.close(flags: .stop)
   }
 }
+#endif

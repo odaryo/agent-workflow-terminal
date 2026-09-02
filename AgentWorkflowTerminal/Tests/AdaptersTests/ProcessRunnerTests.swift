@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Testing
 
-@Suite("Foundation.Process 実行層", .serialized)
+@Suite("Foundation.Process 実行層")
 struct ProcessRunnerTests {
   private let runner = FoundationProcessRunner()
 
@@ -58,7 +58,9 @@ struct ProcessRunnerTests {
 
   @Test("標準入力を継承せず EOF で即時終了する")
   func closesStandardInput() async throws {
-    // テストランナーの stdin は通常 EOF のため、書き手を保持した pipe へ一時的に差し替える。
+    // 親 stdin はテストランナーですでに EOF のため、継承の回帰を検出できるよう書き手を保持した
+    // pipe へ一時的に差し替える。このプロセス全体への操作は、他の子を含むすべての stdin を
+    // nullDevice に固定する ProcessRunning の契約の下でのみ安全である。
     var descriptors: [Int32] = [-1, -1]
     try #require(Darwin.pipe(&descriptors) == 0)
     let inheritedInput = descriptors[0]

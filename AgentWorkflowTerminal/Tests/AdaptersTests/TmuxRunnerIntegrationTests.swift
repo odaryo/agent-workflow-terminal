@@ -18,15 +18,19 @@ struct TmuxRunnerIntegrationTests {
     let socketName = "awt-integration-\(ProcessInfo.processInfo.processIdentifier)"
     let socketURL = integrationSocketURL(socketName: socketName)
     var serverPID: pid_t?
+    var serverWasStopped = false
     let executableURL = try #require(
       TmuxRunner.defaultExecutableCandidates.first {
         FileManager.default.isExecutableFile(atPath: $0.path)
       })
     defer {
       if let serverPID {
-        _ = Darwin.kill(serverPID, SIGTERM)
+        let signalResult = Darwin.kill(serverPID, SIGTERM)
+        serverWasStopped = signalResult == 0 || errno == ESRCH
       }
-      try? FileManager.default.removeItem(at: socketURL)
+      if serverWasStopped {
+        try? FileManager.default.removeItem(at: socketURL)
+      }
     }
     let runner = try TmuxRunner(
       socketName: socketName,
@@ -39,7 +43,7 @@ struct TmuxRunnerIntegrationTests {
       let server = try await runner.run(
         arguments: ["new-session", "-d", "-s", sessionName, "-P", "-F", "#{pid}"])
       serverPID = pid_t(server.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-      try #require(serverPID != nil)
+      try #require(serverPID != nil, "不正な PID stdout: \(String(reflecting: server.stdout))")
 
       let socketPath = try await runner.run(
         arguments: ["display-message", "-p", "#{socket_path}"])
@@ -69,6 +73,7 @@ struct TmuxRunnerIntegrationTests {
     }
 
     if (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil {
+      serverWasStopped = true
       serverPID = nil
     }
     if let testError {

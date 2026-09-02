@@ -1,0 +1,49 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..2378f14
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1 @@
++ignored.log
+diff --git a/bin.dat b/bin.dat
+index 82a7308..1fbe9fe 100644
+Binary files a/bin.dat and b/bin.dat differ
+diff --git a/deleted.txt b/deleted.txt
+deleted file mode 100644
+index 4202011..0000000
+--- a/deleted.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-to be deleted
+diff --git a/dir with space/staged新規.txt b/dir with space/staged新規.txt
+new file mode 100644
+index 0000000..2ce75e2
+--- /dev/null
++++ b/dir with space/staged新規.txt	
+@@ -0,0 +1 @@
++new staged
+diff --git a/oldname.txt b/newname.txt
+similarity index 69%
+rename from oldname.txt
+rename to newname.txt
+index 904a5b6..73acf74 100644
+--- a/oldname.txt
++++ b/newname.txt
+@@ -1,5 +1,5 @@
+ to be renamed
+-line2
++line2 changed
+ line3
+ line4
+ line5
+diff --git a/tracked.txt b/tracked.txt
+old mode 100644
+new mode 100755
+index f384549..b2f931a
+--- a/tracked.txt
++++ b/tracked.txt
+@@ -2,3 +2,4 @@ one
+ two
+ three
+ four
++five

@@ -1,0 +1,1 @@
+%15\037host\\\\$1\\\\name \\037 literal\\ttab\\nline\0370\037@15\0370\03723974\0371\037zsh\0370\037\037\037/dev/ttys031\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local

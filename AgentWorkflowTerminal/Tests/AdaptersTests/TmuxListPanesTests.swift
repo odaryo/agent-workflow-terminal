@@ -1,5 +1,4 @@
 import Adapters
-import Darwin
 import Foundation
 import TerminalCore
 import Testing
@@ -11,6 +10,7 @@ struct TmuxListPanesTests {
   func formatContainsRequiredFields() {
     #expect(
       TmuxListPanes.format
+        // tmux へ渡す format と1文字も違わないことの検証。分割・連結で組み立てると
         // フォーマットの再実装になり検証の意味が消えるため、原文のまま1行で置く。
         // swiftlint:disable:next line_length
         == "#{pane_id}\u{1F}#{s/\\\\/\\\\\\\\/:session_name}\u{1F}#{window_index}\u{1F}#{window_id}\u{1F}#{pane_index}\u{1F}#{pane_pid}\u{1F}#{pane_active}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_command}\u{1F}#{pane_dead}\u{1F}#{pane_dead_status}\u{1F}#{pane_dead_signal}\u{1F}#{s/\\\\/\\\\\\\\/:pane_tty}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_path}\u{1F}#{s/\\\\/\\\\\\\\/:pane_title}"
@@ -50,12 +50,20 @@ struct TmuxListPanesTests {
 
   @Test("session 名をパリティで復号し非 ASCII を文字クラスで推測しない")
   func decodesDollarEscapesInSessionNamesByParity() throws {
-    // 採取: tmux 3.4 / `TMUX_TMPDIR=$root`, socket `awt-issue12-r3-fixtures-$$`。
-    // `for name in 'letter$a' 'under$_' 'brace${x}' 'digit\$1' 'double$$'
-    //   'terminal$' 'symbol$-' 'hebrew$א' 'japanese$日' 'emoji$😀'; do tmux -u -L
-    //   awt-issue12-r3-fixtures-$$
-    //   new-session -d -s "$name" 'sleep 120'; done`
-    // `tmux -u -L awt-issue12-r3-fixtures-$$ list-panes -a -F "$format"`
+    // 採取: tmux 3.4 / socket `awt-issue12-r4-fixtures-$$`。
+    // `for name in 'letter$a' 'under$_' 'brace${x}' 'digit\$1' 'double$$' 'terminal$'
+    //   'symbol$-' 'hebrew$א' 'japanese$日' 'emoji$😀' 'bsletter\$a' 'bshebrew\$א'
+    //   'bsemoji\$😀'; do tmux -u -L awt-issue12-r4-fixtures-$$ new-session -d
+    //   -s "$name" 'sleep 120'; done`
+    // `tmux -u -L awt-issue12-r4-fixtures-$$ list-panes -a -F "$format"`
+    //
+    // `bs` で始まる3件が `\` + `$` + lead byte という判別可能な形を作る。tmux が `\` を
+    // 足すのは `$` の直後が isalpha / `_` / `{` のときだけで、macOS の en_US.UTF-8 では
+    // UTF-8 lead byte のうち 0xD7 (ヘブライ文字ブロック) だけが非 alpha になる。よって
+    // `bshebrew` だけが偶数列のまま出力され、後続文字クラスで挿入を推測する実装はここで
+    // `\` を1本落として `has-session -t` に通らない名前を作る。判別できるのは `bshebrew`
+    // だけで、`bsletter` / `bsemoji` はどちらの実装でも一致する。両実装が一致する側を
+    // 消すと、この期待値は挿入規則の対比を失って欠陥形を検出できなくなる。
     let result = TmuxListPanes.parse(
       output: try fixture(named: "tmux-3.4-list-panes-dollar-pattern-sessions.txt")
     )
@@ -65,6 +73,9 @@ struct TmuxListPanesTests {
       result.panes.map(\.sessionName)
         == [
           #"brace\${x}"#,
+          #"bsemoji\\\$😀"#,
+          #"bshebrew\\$א"#,
+          #"bsletter\\\$a"#,
           #"digit\\$1"#,
           "double$$",
           #"emoji\$😀"#,
@@ -186,6 +197,19 @@ struct TmuxListPanesTests {
     #expect(result.failures.isEmpty)
     #expect(result.panes.first?.termination == .signaled("term"))
     #expect(result.panes.first?.snapshot.termination == .signaled("term"))
+  }
+
+  @Test("空白と一般的な記号をフィールド内に保持する")
+  func preservesSpacesAndSymbols() throws {
+    let pane = try TmuxListPanes.parse(
+      line: encodedLine(
+        sessionName: "session alpha [&]",
+        currentCommand: "agent worker [&]"
+      )
+    )
+
+    #expect(pane.sessionName == "session alpha [&]")
+    #expect(pane.currentCommand == "agent worker [&]")
   }
 
   @Test("生 TAB と LF を含む command は line 単位なら保持し output では failure にする")
@@ -323,8 +347,10 @@ struct TmuxListPanesTests {
 
   @Test("値末尾の単独バックスラッシュを trap せず parse error にする")
   func rejectsTrailingBackslash() {
-    #expect(throws: TmuxListPanesParseError.self) {
-      try TmuxListPanes.parse(line: encodedLine(currentCommand: #"\"#))
+    // 末尾フィールド以外に置くと、その `\` が直後の区切り `\037` と `\\` の対を作って
+    // splitter が分割せず、復号へ届く前に invalidFieldCount になる。
+    #expect(throws: TmuxListPanesParseError.invalidRawFieldEscape(#"\"#)) {
+      try TmuxListPanes.parse(line: encodedLine(title: #"\"#))
     }
   }
 
@@ -386,115 +412,5 @@ struct TmuxListPanesTests {
       Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures")
     )
     return try String(contentsOf: fixtureURL, encoding: .utf8)
-  }
-}
-
-private let isTmuxListPanesIntegrationEnabled =
-  ProcessInfo.processInfo.environment["AWT_TMUX_INTEGRATION"] == "1"
-
-@Suite(
-  "tmux session 名の往復統合",
-  .enabled(if: isTmuxListPanesIntegrationEnabled)
-)
-struct TmuxListPanesIntegrationTests {
-
-  @Test("$ の全分岐を parse 後の session target で指定する")
-  func roundTripsConditionalDollarEscapesThroughHasSession() async throws {
-    let processID = ProcessInfo.processInfo.processIdentifier
-    let socketName = "awt-list-panes-round-trip-\(processID)"
-    let socketURL = integrationSocketURL(socketName: socketName)
-    let prefix = "awt-\(processID)-"
-    let sessionNames = [
-      prefix + "letter$a",
-      prefix + "under$_",
-      prefix + "brace${x}",
-      prefix + "digit\\$1",
-      prefix + "double$$",
-      prefix + "terminal$",
-      prefix + "symbol$-",
-      prefix + "hebrew$א",
-      prefix + "japanese$日",
-      prefix + "emoji$😀",
-    ]
-    var serverPID: pid_t?
-    var serverWasStopped = false
-    let executableURL = try #require(
-      TmuxRunner.defaultExecutableCandidates.first {
-        FileManager.default.isExecutableFile(atPath: $0.path)
-      })
-    defer {
-      if let serverPID {
-        serverWasStopped = terminateServer(serverPID)
-      }
-      removeSocketIfStopped(serverWasStopped, socketURL: socketURL)
-    }
-    let runner = try TmuxRunner(
-      socketName: socketName,
-      processRunner: FoundationProcessRunner(),
-      executableCandidates: [executableURL]
-    )
-
-    var testError: (any Error)?
-    do {
-      let server = try await runner.run(
-        arguments: ["new-session", "-d", "-s", sessionNames[0], "-P", "-F", "#{pid}"])
-      serverPID = pid_t(server.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-      try #require((serverPID ?? 0) > 0)
-      for sessionName in sessionNames.dropFirst() {
-        _ = try await runner.run(
-          arguments: ["new-session", "-d", "-s", sessionName, "sleep 120"])
-      }
-
-      let output = try await runner.run(arguments: ["list-panes", "-a", "-F", TmuxListPanes.format])
-      let result = TmuxListPanes.parse(output: output.stdout)
-
-      #expect(result.failures.isEmpty)
-      #expect(result.panes.count == sessionNames.count)
-      for parsedName in result.panes.map(\.sessionName) {
-        _ = try await runner.run(arguments: ["has-session", "-t", parsedName])
-      }
-    } catch {
-      testError = error
-    }
-
-    if (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil {
-      serverWasStopped = true
-      serverPID = nil
-    }
-    if let testError {
-      throw testError
-    }
-  }
-
-  private func integrationSocketURL(socketName: String) -> URL {
-    let socketParent = ProcessInfo.processInfo.environment["TMUX_TMPDIR"] ?? "/private/tmp"
-    return URL(fileURLWithPath: socketParent)
-      .appending(path: "tmux-\(getuid())")
-      .appending(path: socketName)
-  }
-
-  private func removeSocketIfStopped(_ serverWasStopped: Bool, socketURL: URL) {
-    guard serverWasStopped else {
-      // 生きている server の socket を消すと `-L` から到達不能になるため、停止未確認なら残す。
-      FileHandle.standardError.write(
-        Data("警告: tmux server を停止できなかったため socket を残します: \(socketURL.path)\n".utf8)
-      )
-      return
-    }
-    try? FileManager.default.removeItem(at: socketURL)
-  }
-
-  private func terminateServer(_ serverPID: pid_t) -> Bool {
-    // 0 以下は kill(2) でプロセスグループ等を指すため、外部出力を syscall へ渡す前に弾く。
-    guard serverPID > 0 else { return false }
-    guard Darwin.kill(serverPID, SIGTERM) == 0 else { return errno == ESRCH }
-
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .milliseconds(500))
-    while clock.now < deadline {
-      guard Darwin.kill(serverPID, 0) == 0 else { return errno == ESRCH }
-      Darwin.usleep(10_000)
-    }
-    return Darwin.kill(serverPID, 0) != 0 && errno == ESRCH
   }
 }

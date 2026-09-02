@@ -114,8 +114,10 @@ public enum TmuxListPanes {
   /// session の保存段で `\t` / `\n` / `\ooo` となったテキストも、その `\` バイトを二重化するため
   /// 正式名の一部として偶数列に残る。これにより `$` の後続文字やホストの locale に依存しない。
   /// 制御バイトは 0x01...0x06 / 0x0E...0x1F / 0x7F が八進、BEL / BS / VT / FF / CR が
-  /// named escape、TAB / LF が生出力だった。単独 0x80...0x9F と不正 UTF-8 は macOS の path と
-  /// tmux title が受け付けず、有効な UTF-8 の C1 制御文字は変更されなかった。
+  /// named escape、TAB / LF が生出力だった。有効な UTF-8 の C1 制御文字は変更されなかった。
+  /// 単独 0x80...0x9F と不正 UTF-8 は、実測に使った `pane_current_path` と `pane_title` へは
+  /// macOS の path と tmux title が受け付けず投入できなかったため未確認 (`pane_current_command`
+  /// を含む他フィールドについても同様に未確認)。
   /// リテラル `\` は全フィールドで `\\` となるため通常の区切り走査は順序に依存しないが、出力段が
   /// 実 0x1F を `\037`、LF を生のまま出すため、その値を含む pane は壊れた値を返さず failure にする。
   /// `pane_dead_status` / `pane_dead_signal` は tmux 管理値で、実測値域が空文字列・非負整数・
@@ -393,6 +395,10 @@ public enum TmuxListPanes {
         continue
       }
 
+      // ここへ来る `\n` / `\t` を制御バイトへ戻さず pane ごと failure にする。tmux 3.4 の
+      // 出力段は TAB / LF を生バイトのまま通し (VIS_TAB / VIS_NL を立てない)、実測で
+      // 生成を確認できた escape は `\$` / named (`\a` `\b` `\v` `\f` `\r`) / 八進 `\ooo`
+      // だけだった。よってこの2文字列は tmux 出力ではなく、復号すると値を捏造する。
       throw .invalidRawFieldEscape(field)
     }
 

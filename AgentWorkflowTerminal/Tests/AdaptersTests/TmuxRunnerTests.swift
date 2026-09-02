@@ -98,8 +98,8 @@ struct TmuxRunnerTests {
     }
   }
 
-  @Test("版数取得を専用 socket 経由で実行して制限事項を返す")
-  func getsVersionWithLimitations() async throws {
+  @Test("版数取得を専用 socket 経由で実行して警告を返す")
+  func getsVersionWithWarnings() async throws {
     let spy = ProcessRunnerSpy(
       result: .success(.init(exitCode: 0, stdout: "tmux 3.4\n", stderr: "")))
     let runner = try makeRunner(processRunner: spy)
@@ -109,9 +109,9 @@ struct TmuxRunnerTests {
     #expect(await spy.invocations.first?.arguments == ["-u", "-L", "awt-test", "-V"])
     #expect(
       support
-        == .supportedWithLimitations(
+        == .supportedWithWarnings(
           .init(major: 3, minor: 4),
-          [.zeroWidthJoinerGraphemeWidth]
+          Set([.zeroWidthJoinerGraphemeWidth])
         ))
   }
 

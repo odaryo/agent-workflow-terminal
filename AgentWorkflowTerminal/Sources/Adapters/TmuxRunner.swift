@@ -100,6 +100,8 @@ public struct TmuxRunner: Sendable {
 }
 
 extension TmuxRunner {
+  /// tmux 1.5 以前の `-V` 非対応を含む実行失敗も版数不明を表すため、支援状態へ丸めず
+  /// `TmuxRunnerError` として返す。
   public func version(
     timeout: Duration? = nil
   ) async throws(TmuxRunnerError)

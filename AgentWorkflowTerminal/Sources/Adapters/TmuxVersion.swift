@@ -1,12 +1,17 @@
 import Foundation
 
-public struct TmuxVersion: Sendable, Equatable, Hashable, Comparable {
+public struct TmuxVersion: Sendable, Equatable, Hashable, Comparable, CustomStringConvertible {
   public static let minimumSupported = Self(major: 3, minor: 4)
+  // tmux commit 89c1c43ef（3.4→3.5 の開発期間）と Spikes/gate1/README.md §10.3 の実測に基づく。
   public static let zeroWidthJoinerFixed = Self(major: 3, minor: 5)
 
   public let major: Int
   public let minor: Int
   public let suffix: String
+
+  public var description: String {
+    "\(major).\(minor)\(suffix)"
+  }
 
   public init(major: Int, minor: Int, suffix: String = "") {
     self.major = major
@@ -31,21 +36,17 @@ public struct TmuxVersion: Sendable, Equatable, Hashable, Comparable {
       return .unparsable(versionOutput)
     }
 
-    var version = String(trimmedOutput.dropFirst(prefix.count))
-    let isNextVersion = version.hasPrefix("next-")
-    // tmux upstream の next-X.Y は X.Y の開発版なので、下限判定では X.Y として扱う。
-    if isNextVersion {
-      version.removeFirst("next-".count)
-    }
-
-    guard !version.contains(where: \Character.isWhitespace) else {
+    let version = String(trimmedOutput.dropFirst(prefix.count))
+    if version.hasPrefix("next-") {
+      // next-X.Y はリリース版 X.Y の直前であり、ZWJ 修正を含むか版数だけでは判定できない。
+      // 観測結果を X.Y へ丸めず unknown へ渡す（設計書 §12.3）。
       return .unparsable(versionOutput)
     }
+
     let components = version.split(separator: ".", omittingEmptySubsequences: false)
     guard components.count == 2,
       let major = parseASCIIInteger(components[0]),
-      let (minor, suffix) = parseMinor(components[1]),
-      !isNextVersion || suffix.isEmpty
+      let (minor, suffix) = parseMinor(components[1])
     else {
       return .unparsable(versionOutput)
     }
@@ -60,7 +61,7 @@ public struct TmuxVersion: Sendable, Equatable, Hashable, Comparable {
         return .unsupported(version, minimum: minimumSupported)
       }
       if version < zeroWidthJoinerFixed {
-        return .supportedWithLimitations(version, [.zeroWidthJoinerGraphemeWidth])
+        return .supportedWithWarnings(version, [.zeroWidthJoinerGraphemeWidth])
       }
       return .supported(version)
     case .unparsable(let rawOutput):
@@ -105,12 +106,12 @@ public enum TmuxVersionParseResult: Sendable, Equatable {
 
 public enum TmuxVersionSupport: Sendable, Equatable {
   case supported(TmuxVersion)
-  case supportedWithLimitations(TmuxVersion, [TmuxVersionLimitation])
+  case supportedWithWarnings(TmuxVersion, Set<TmuxVersionWarning>)
   case unsupported(TmuxVersion, minimum: TmuxVersion)
   case unknown(rawOutput: String)
 }
 
-public enum TmuxVersionLimitation: Sendable, Equatable, Hashable {
+public enum TmuxVersionWarning: Sendable, Equatable, Hashable {
   // tmux 3.4 は ZWJ を含む grapheme の表示幅を誤る（Spikes/gate1/README.md §10.3）。
   case zeroWidthJoinerGraphemeWidth
 }

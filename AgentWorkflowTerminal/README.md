@@ -65,7 +65,8 @@ swift test
 ### iOS 向けビルド
 
 `TerminalCore` と、macOS 専用実装を除く `Adapters` が iOS 向けにコンパイルできることは、
-次の product ターゲットのビルドで確認します。テストターゲットは iOS 向けにビルドせず、
+次のビルドで確認します。`swift build` はテストターゲットを除く全ターゲットを対象にします。
+テストターゲットは iOS 向けにビルドせず、
 macOS でのみ実行します。
 
 ```shell
@@ -75,7 +76,8 @@ swift build --triple arm64-apple-ios17.0-simulator \
 ```
 
 CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、arm64 iOS 17 simulator triple と
-iOS Simulator SDK を使って product ターゲットがコンパイルできることを検証します。テストターゲット、
+iOS Simulator SDK を使って、テストターゲットを除く全ターゲットがコンパイルできることを検証します。
+テストターゲット、
 実機向け triple のコンパイル、simulator・実機での実行時動作は検証範囲外です。
 
 ### tmux 統合テスト
@@ -92,8 +94,13 @@ AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
 統合テストは process ID を含む `-L awt-integration-<pid>` の専用 socket だけを使います。
 `new-session -P -F '#{pid}'` で server 作成と同時に PID を取得します。tmux 3.4 では正常な
 `kill-server` 後も socket ファイルが残るため、テストは `defer` で PID による停止 fallback を確保し、
-`kill-server` の完了後に専用 socket ファイルも削除します。途中でテストが失敗した場合も同じ
-後始末を行います。
+専用 socket ファイルも削除します。途中でテストが失敗した場合も同じ後始末を行います。
+
+**socket の削除は無条件ではありません。** `defer` は SIGTERM 後に最大 500ms かけて server の
+消滅を確認し、確認できたときだけ socket を消します。停止できなかった場合は socket を**意図的に
+残し**、標準エラーへ警告を出します。生きている server の socket を消すと `-L` から到達できない
+orphan になり、手で片付けることもできなくなるためです。残った socket は後始末漏れではなく、
+この判断の結果です。
 2026-09-02 に tmux 3.4 で成功を確認しています。
 
 ## Lint / Format

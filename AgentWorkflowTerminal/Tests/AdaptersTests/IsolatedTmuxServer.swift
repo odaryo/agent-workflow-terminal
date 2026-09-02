@@ -7,8 +7,13 @@ import TerminalCore
 /// 呼び出しごとに一意にする。body の成否にかかわらず server を停止し、停止を確認できたときだけ
 /// socket を消す (生きている server の socket を消すと `-L` から到達できない orphan になる)。
 enum IsolatedTmuxServer {
-  /// 統合テストの pane はユーザーの rc ファイルに依存させないため、`default-command` で固定する。
-  /// これを設定しないと `split-window` の既定 shell が起動し、実行時間と出力がホスト環境に依存する。
+  /// server 起動時にユーザーの rc を読ませない。これが無いと `-L` で起動した新 server も
+  /// `$HOME/.tmux.conf` を source し、`status-position` などレイアウトに効く設定がホストから
+  /// 入り込む (実測: rc 有りで `status-position top` / `prefix C-q` が引き継がれた)。
+  /// `TmuxRunner` が前置する `-u -L <socket>` の直後に置いて効くことを実測で確認している。
+  private static let noConfigFile = ["-f", "/dev/null"]
+  /// rc を読ませない分、split 後の pane で起動するコマンドはここで明示する。これが無いと
+  /// 既定 shell が起動し、実行時間と出力がホスト環境に依存する。
   private static let defaultCommand = "sleep 300"
   /// pane 幅・高さは、左右分割と上下分割の双方が `no space for new pane` にならない値を実測で選ぶ。
   private static let windowWidth = 200
@@ -34,9 +39,16 @@ enum IsolatedTmuxServer {
     )
     let socketURL = socketURL(socketName: socketName)
 
-    let serverPID = try await startServer(runner)
+    // new-session が成功した時点で server は存在する。以降は初期化の失敗も含め、必ず停止を通す。
+    let created = try await runner.run(arguments: noConfigFile + newSessionArguments)
+    let serverPID = pid_t(created.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+
     let result: Result<T, any Error>
     do {
+      guard let serverPID, serverPID > 0 else {
+        throw IsolatedTmuxServerError.invalidServerPID(created.stdout)
+      }
+      _ = try await runner.run(arguments: ["set-option", "-g", "default-command", defaultCommand])
       result = .success(try await body(runner))
     } catch {
       result = .failure(error)
@@ -65,29 +77,24 @@ enum IsolatedTmuxServer {
     try await panes(runner).first { $0.isActive }?.id
   }
 
-  private static func startServer(_ runner: TmuxRunner) async throws -> pid_t {
-    let created = try await runner.run(arguments: [
+  private static var newSessionArguments: [String] {
+    [
       "new-session", "-d", "-s", "awt-operations",
       "-x", String(windowWidth), "-y", String(windowHeight),
       "-P", "-F", "#{pid}", defaultCommand,
-    ])
-    guard let serverPID = pid_t(created.stdout.trimmingCharacters(in: .whitespacesAndNewlines)),
-      serverPID > 0
-    else {
-      throw IsolatedTmuxServerError.invalidServerPID(created.stdout)
-    }
-    _ = try await runner.run(arguments: ["set-option", "-g", "default-command", defaultCommand])
-    return serverPID
+    ]
   }
 
+  /// `serverPID` が `nil` なのは `#{pid}` を読めなかったときだけで、その場合は `kill-server` の
+  /// 成否だけで判断する。
   private static func stopServer(
     _ runner: TmuxRunner,
-    serverPID: pid_t,
+    serverPID: pid_t?,
     socketURL: URL
   ) async {
     var serverWasStopped =
       (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil
-    if !serverWasStopped {
+    if !serverWasStopped, let serverPID {
       serverWasStopped = terminate(serverPID)
     }
     guard serverWasStopped else {

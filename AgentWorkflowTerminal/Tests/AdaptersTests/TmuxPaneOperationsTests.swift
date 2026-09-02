@@ -10,7 +10,7 @@ struct TmuxPaneOperationsTests {
   private let prefix = ["-u", "-L", "awt-test"]
   private let pane = PaneID(rawValue: "%3")
 
-  @Test("左右に並べる分割は -h を使い、生成された pane の ID を返す")
+  @Test("左右に並べる分割は、生成された pane の ID を返す")
   func splitsLeftRight() async throws {
     let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "%7\n", stderr: "")))
     let operations = try makeOperations(stub)
@@ -23,7 +23,7 @@ struct TmuxPaneOperationsTests {
         == prefix + ["split-window", "-t", "%3", "-h", "-P", "-F", "#{pane_id}"])
   }
 
-  @Test("上下に並べる分割は -v を使い、生成された pane の ID を返す")
+  @Test("上下に並べる分割は、生成された pane の ID を返す")
   func splitsTopBottom() async throws {
     let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "%7\n", stderr: "")))
     let operations = try makeOperations(stub)
@@ -67,7 +67,7 @@ struct TmuxPaneOperationsTests {
   }
 
   @Test(
-    "方向で pane を移動する",
+    "上下左右の移動は方向ごとに別の pane 選択として tmux へ届く",
     arguments: zip(
       [TmuxPaneDirection.left, .right, .up, .down],
       ["-L", "-R", "-U", "-D"]
@@ -83,12 +83,12 @@ struct TmuxPaneOperationsTests {
       await stub.invocations.first?.arguments == prefix + ["select-pane", "-t", "%3", flag])
   }
 
-  @Test("zoom した状態にする指示は、既に zoom 済みなら存在確認だけをする条件付き実行になる")
-  func setsZoomOn() async throws {
+  @Test("zoom は、既に zoom 対象なら状態を変えない分岐ごと1回で tmux へ渡る")
+  func zoomsPane() async throws {
     let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
     let operations = try makeOperations(stub)
 
-    try await operations.setZoom(true, pane: pane)
+    try await operations.zoom(pane: pane)
 
     #expect(
       await stub.invocations.first?.arguments
@@ -100,12 +100,12 @@ struct TmuxPaneOperationsTests {
         ])
   }
 
-  @Test("zoom を解除した状態にする指示は、zoom 中のときだけ toggle する")
-  func setsZoomOff() async throws {
+  @Test("zoom 解除は、対象自身が zoom 対象のときだけ効く分岐ごと1回で tmux へ渡る")
+  func unzoomsPane() async throws {
     let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
     let operations = try makeOperations(stub)
 
-    try await operations.setZoom(false, pane: pane)
+    try await operations.unzoom(pane: pane)
 
     #expect(
       await stub.invocations.first?.arguments
@@ -168,7 +168,10 @@ struct TmuxPaneOperationsTests {
     let operations = try makeOperations(stub)
 
     await #expect(throws: TmuxPaneOperationError.invalidPaneID(malformed)) {
-      try await operations.setZoom(true, pane: malformed)
+      try await operations.zoom(pane: malformed)
+    }
+    await #expect(throws: TmuxPaneOperationError.invalidPaneID(malformed)) {
+      try await operations.unzoom(pane: malformed)
     }
     await #expect(throws: TmuxPaneOperationError.invalidPaneID(malformed)) {
       try await operations.splitLeftRight(pane: malformed)

@@ -80,8 +80,8 @@ struct TmuxPaneOperationsIntegrationTests {
     }
   }
 
-  @Test("方向指定は隣接 pane を選び、隣が無ければ選択を変えずに成功する")
-  func selectNeighborMovesOnlyWhenNeighborExists() async throws {
+  @Test("方向指定は隣接 pane を選び、その方向に pane が無ければ選択が変わらない")
+  func selectNeighborMovesToAdjacentPane() async throws {
     try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("neighbor")) { runner in
       let operations = TmuxPaneOperations(runner: runner)
       let left = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
@@ -94,9 +94,25 @@ struct TmuxPaneOperationsIntegrationTests {
       try await operations.selectNeighbor(of: right, direction: .left)
       #expect(try await IsolatedTmuxServer.activePaneID(runner) == left)
 
-      // 上下に分割していないので、上下の隣接 pane は存在しない。
+      // 左右にしか分割していないので、上下方向は回り込み先も自分自身になる。
       try await operations.selectNeighbor(of: left, direction: .up)
       #expect(try await IsolatedTmuxServer.activePaneID(runner) == left)
+    }
+  }
+
+  @Test("端の pane から外向きに移動すると、window の反対側の端へ回り込む")
+  func selectNeighborWrapsAtWindowEdge() async throws {
+    try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("wrap")) { runner in
+      let operations = TmuxPaneOperations(runner: runner)
+      let top = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
+      let bottom = try await operations.splitTopBottom(pane: top)
+      try await operations.select(pane: top)
+
+      try await operations.selectNeighbor(of: top, direction: .up)
+      #expect(try await IsolatedTmuxServer.activePaneID(runner) == bottom)
+
+      try await operations.selectNeighbor(of: bottom, direction: .down)
+      #expect(try await IsolatedTmuxServer.activePaneID(runner) == top)
     }
   }
 
@@ -108,14 +124,14 @@ struct TmuxPaneOperationsIntegrationTests {
       _ = try await operations.splitLeftRight(pane: original)
       try await operations.select(pane: original)
 
-      try await operations.setZoom(true, pane: original)
+      try await operations.zoom(pane: original)
       try await expectZoom(runner, pane: original, isZoomed: true, isActive: true)
-      try await operations.setZoom(true, pane: original)
+      try await operations.zoom(pane: original)
       try await expectZoom(runner, pane: original, isZoomed: true, isActive: true)
 
-      try await operations.setZoom(false, pane: original)
+      try await operations.unzoom(pane: original)
       try await expectZoom(runner, pane: original, isZoomed: false, isActive: true)
-      try await operations.setZoom(false, pane: original)
+      try await operations.unzoom(pane: original)
       try await expectZoom(runner, pane: original, isZoomed: false, isActive: true)
     }
   }
@@ -126,25 +142,59 @@ struct TmuxPaneOperationsIntegrationTests {
       let operations = TmuxPaneOperations(runner: runner)
       let first = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
       let second = try await operations.splitLeftRight(pane: first)
-      try await operations.setZoom(true, pane: first)
+      try await operations.zoom(pane: first)
 
-      try await operations.setZoom(true, pane: second)
+      try await operations.zoom(pane: second)
 
       try await expectZoom(runner, pane: second, isZoomed: true, isActive: true)
     }
   }
 
-  @Test("zoom 対象でない pane の解除は window の zoom を変えない")
-  func unzoomDoesNothingForPaneThatIsNotZoomed() async throws {
+  @Test("別 pane が zoom 中のとき、その window の zoom は解除されない")
+  func unzoomLeavesAnotherPanesZoomUntouched() async throws {
     try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("unzoom")) { runner in
       let operations = TmuxPaneOperations(runner: runner)
       let zoomed = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
       let other = try await operations.splitLeftRight(pane: zoomed)
-      try await operations.setZoom(true, pane: zoomed)
+      try await operations.zoom(pane: zoomed)
 
-      try await operations.setZoom(false, pane: other)
+      try await operations.unzoom(pane: other)
 
       try await expectZoom(runner, pane: zoomed, isZoomed: true, isActive: true)
+    }
+  }
+
+  @Test("pane が1つだけの window では、zoom は成功しても zoom されない")
+  func zoomSucceedsWithoutZoomingSinglePaneWindow() async throws {
+    try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("zoom-single")) { runner in
+      let operations = TmuxPaneOperations(runner: runner)
+      let only = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
+
+      try await operations.zoom(pane: only)
+
+      try await expectZoom(runner, pane: only, isZoomed: false, isActive: true)
+    }
+  }
+
+  @Test("最後の pane を閉じると server ごと消え、その後の close は不在エラーにならない")
+  func closingTheLastPaneStopsTheServer() async throws {
+    try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("close-last")) { runner in
+      let operations = TmuxPaneOperations(runner: runner)
+      let only = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
+
+      try await operations.close(pane: only)
+
+      let raised = await #expect(throws: TmuxPaneOperationError.self) {
+        try await operations.close(pane: only)
+      }
+      guard case .tmux(.commandFailed(let exitCode, _, let stderr)) = try #require(raised) else {
+        Issue.record(
+          "server 消失後の close が .tmux(.commandFailed) にならなかった: \(String(describing: raised))"
+        )
+        return
+      }
+      #expect(exitCode == 1)
+      #expect(stderr.hasPrefix("no server running on "))
     }
   }
 
@@ -170,10 +220,10 @@ struct TmuxPaneOperationsIntegrationTests {
         try await operations.selectNeighbor(of: missing, direction: .down)
       }
       await #expect(throws: TmuxPaneOperationError.paneNotFound(missing)) {
-        try await operations.setZoom(true, pane: missing)
+        try await operations.zoom(pane: missing)
       }
       await #expect(throws: TmuxPaneOperationError.paneNotFound(missing)) {
-        try await operations.setZoom(false, pane: missing)
+        try await operations.unzoom(pane: missing)
       }
     }
   }

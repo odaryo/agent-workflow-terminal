@@ -33,8 +33,8 @@ struct GitRunnerTests {
     #expect(GitReadCommand.worktreeList().arguments == ["worktree", "list", "--porcelain", "-z"])
     #expect(
       GitReadCommand.log(range: range, maxCount: 2, pathspec: [path]).arguments == [
-        "log", "-z", "--no-show-signature", "--format=" + GitLog.format, "--max-count=2",
-        "main...topic", "--", "Sources/a.swift",
+        "log", "-z", "--no-show-signature", "--encoding=UTF-8", "--format=" + GitLog.format,
+        "--max-count=2", "main...topic", "--", "Sources/a.swift",
       ])
     #expect(GitReadCommand.log(maxCount: 0).arguments.suffix(1) == ["--"])
     #expect(

@@ -3,7 +3,8 @@ import Foundation
 import Testing
 
 // fixture は Issue #15 記載の共通 repository から git 2.50.1 で採取。
-// `git --no-optional-locks --no-pager log -z --no-show-signature --format=<GitLog.format>`
+// `git --no-optional-locks --no-pager log -z --no-show-signature --encoding=UTF-8
+// --format=<GitLog.format>`
 @Suite("§17.1 git log の解析")
 struct GitLogTests {
   @Test("format と実レコードを欠落なく解析する")
@@ -24,6 +25,9 @@ struct GitLogTests {
     #expect(first.rawBody == "chore: ahead コミット\n")
     #expect(result.commits[1].isMerge)
     #expect(result.commits.last?.parentHashes == [])
+    #expect(
+      result.commits.last?.rawBody
+        == "feat: 初期コミット\n\n本文の1行目\n本文の2行目\n")
   }
 
   @Test("US 衝突を部分失敗にする")

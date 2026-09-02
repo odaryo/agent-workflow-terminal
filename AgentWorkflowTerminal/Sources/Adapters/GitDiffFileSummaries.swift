@@ -89,13 +89,7 @@ public enum GitDiffFileSummaries {
         index += 1
       }
     }
-    var statsByPath: [String: Stat] = [:]
-    for stat in stats {
-      let previous = statsByPath.updateValue(stat, forKey: stat.path)
-      guard previous != nil else { continue }
-      failures.append(
-        .init(recordNumber: stat.number, record: stat.record, error: .duplicatePath(stat.path)))
-    }
+    var statsByPath = indexStats(stats, failures: &failures)
     var summaries: [GitDiffFileSummary] = []
     for raw in raws {
       guard let stat = statsByPath.removeValue(forKey: raw.path) else {
@@ -109,12 +103,35 @@ public enum GitDiffFileSummaries {
           sourceObject: raw.sourceObject, destinationObject: raw.destinationObject, kind: raw.kind,
           path: raw.path, originalPath: raw.originalPath, lineCounts: stat.counts))
     }
-    for stat in statsByPath.values {
+    for stat in stats {
+      guard statsByPath[stat.path]?.number == stat.number else { continue }
       failures.append(
         .init(recordNumber: stat.number, record: stat.record, error: .missingRaw(stat.path)))
+      statsByPath.removeValue(forKey: stat.path)
     }
-    return .init(
-      summaries: summaries, failures: failures.sorted { $0.recordNumber < $1.recordNumber })
+    return .init(summaries: summaries, failures: ordered(failures))
+  }
+
+  private static func ordered(_ failures: [GitDiffParseFailure]) -> [GitDiffParseFailure] {
+    failures.enumerated().sorted {
+      if $0.element.recordNumber != $1.element.recordNumber {
+        return $0.element.recordNumber < $1.element.recordNumber
+      }
+      return $0.offset < $1.offset
+    }.map(\.element)
+  }
+
+  private static func indexStats(
+    _ stats: [Stat], failures: inout [GitDiffParseFailure]
+  ) -> [String: Stat] {
+    var statsByPath: [String: Stat] = [:]
+    for stat in stats {
+      let previous = statsByPath.updateValue(stat, forKey: stat.path)
+      guard previous != nil else { continue }
+      failures.append(
+        .init(recordNumber: stat.number, record: stat.record, error: .duplicatePath(stat.path)))
+    }
+    return statsByPath
   }
 
   // status letter と rename/copy score の直交した分岐を、一つの raw entry として検証する。

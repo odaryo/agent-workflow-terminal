@@ -50,16 +50,33 @@ struct GitDiffFileSummariesTests {
   @Test("壊れた raw entry の path を飛ばして後続 entry を回復する")
   func recoversAfterInvalidRaw() {
     let output =
-      ":100644 broken M\0:broken.txt\0"
+      ":100644 broken M\0broken.txt\0"
+      + ":100644 100644 aaa bbb M\0good.txt\0"
+      + "1\t0\tbroken.txt\0"
+      + "1\t0\tgood.txt\0"
+    let result = GitDiffFileSummaries.parse(output: output)
+    #expect(result.summaries.map(\.path) == ["good.txt"])
+    #expect(result.failures.count == 2)
+    #expect(result.failures.contains { $0.error == .invalidRawRecord(":100644 broken M") })
+  }
+
+  @Test("壊れた rename raw の2 path を飛ばして後続 entry を回復する")
+  func recoversAfterInvalidRenameRaw() {
+    let output =
+      ":100644 100644 aaa R09\0old.txt\0new.txt\0"
       + ":100644 100644 aaa bbb M\0good.txt\0"
       + "1\t0\tgood.txt\0"
     let result = GitDiffFileSummaries.parse(output: output)
     #expect(result.summaries.map(\.path) == ["good.txt"])
-    #expect(result.failures.contains { $0.error == .invalidRawRecord(":100644 broken M") })
+    #expect(result.failures.count == 1)
+    #expect(result.failures.first?.recordNumber == 1)
+    #expect(result.failures.first?.record == ":100644 100644 aaa R09")
+    #expect(result.failures.first?.error == .invalidRawRecord(":100644 100644 aaa R09"))
   }
 
   @Test("SHA-256 の完全長 object を保持する")
   func parsesSHA256Fixture() throws {
+    // diff parser は OID 長を検証しないため、SHA-256 fixture の往復確認だけを目的とする。
     let result = GitDiffFileSummaries.parse(
       output: try fixture(named: "git-2.50.1-sha256-diff-raw-numstat-z.txt"))
     let summary = try #require(result.summaries.first)

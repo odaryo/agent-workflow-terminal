@@ -63,6 +63,8 @@ public struct GitStatusUnmergedEntry: Sendable, Equatable {
 public enum GitStatusEntry: Sendable, Equatable {
   case changed(GitStatusChangedEntry)
   case unmerged(GitStatusUnmergedEntry)
+  /// `normal` では未追跡 directory を末尾 `/` の1件に畳む。git の既定と合わせ、巨大な
+  /// directory で `-uall` による出力件数の爆発を避けるため、file との区別は上位へ発明しない。
   case untracked(path: String)
   case ignored(path: String)
 }

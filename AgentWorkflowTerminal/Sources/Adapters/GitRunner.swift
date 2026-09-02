@@ -76,6 +76,7 @@ public struct GitReadCommand: Sendable, Equatable {
 
   public static func status(includeIgnored: Bool = false) -> Self {
     // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
+    // --renames は git 2.18 以降。サポート下限の決定は Issue #83 に委ねる。
     var arguments = [
       "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=normal", "-z",
     ]
@@ -93,7 +94,10 @@ public struct GitReadCommand: Sendable, Equatable {
     pathspec: [GitPathspec] = []
   ) -> Self {
     // 0 以下は option を付けず、件数を制限しない。
-    var arguments = ["log", "-z", "--no-show-signature", "--format=" + GitLog.format]
+    // --no-show-signature は man page に無い否定形だが、user config の署名出力混入を止める。
+    var arguments = [
+      "log", "-z", "--no-show-signature", "--encoding=UTF-8", "--format=" + GitLog.format,
+    ]
     if let maxCount, maxCount > 0 { arguments.append("--max-count=\(maxCount)") }
     arguments += range?.arguments ?? []
     arguments.append("--")
@@ -104,6 +108,8 @@ public struct GitReadCommand: Sendable, Equatable {
   public static func diffFileSummaries(
     _ target: GitDiffTarget, pathspec: [GitPathspec] = []
   ) -> Self {
+    // --no-abbrev は man page に無い否定形。--full-index は patch の index 行にしか効かず、
+    // raw OID を config 非依存の完全長にする代替にはならない。
     diff(
       [
         "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat", "--no-abbrev",

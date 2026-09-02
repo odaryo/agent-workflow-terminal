@@ -16,10 +16,10 @@ struct GitStatusPorcelainV2Tests {
     #expect(result.status.branch?.behind == 0)
     #expect(result.status.entries.count == 9)
     #expect(result.status.entries.contains(.untracked(path: "untracked\nwith newline.txt")))
-    guard case .changed(let added) = result.status.entries[0],
-      case .changed(let stagedPath) = result.status.entries[3],
-      case .changed(let rename) = result.status.entries[4],
-      case .changed(let tracked) = result.status.entries[6]
+    guard let added = changed(path: ".gitignore", in: result.status.entries),
+      let stagedPath = changed(path: "dir with space/staged新規.txt", in: result.status.entries),
+      let rename = changed(path: "newname.txt", in: result.status.entries),
+      let tracked = changed(path: "tracked.txt", in: result.status.entries)
     else {
       Issue.record("changed entry の順序が異なる")
       return
@@ -90,5 +90,14 @@ struct GitStatusPorcelainV2Tests {
     let url = try #require(
       Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures"))
     return String(decoding: try Data(contentsOf: url), as: UTF8.self)
+  }
+
+  private func changed(
+    path: String, in entries: [GitStatusEntry]
+  ) -> GitStatusChangedEntry? {
+    entries.lazy.compactMap {
+      guard case .changed(let entry) = $0, entry.path == path else { return nil }
+      return entry
+    }.first
   }
 }

@@ -1,7 +1,7 @@
 # AgentWorkflowTerminal (Swift Package)
 
-`agent_workflow_terminal` の Swift Package です。Phase 1 (足場づくり) の成果物であり、
-**機能実装は入っていません**。
+`agent_workflow_terminal` の Swift Package です。Phase 1 の足場と、外部 CLI に接続する
+Adapter 境界の基礎実装を収めています。製品アプリの UI はまだありません。
 
 コーディング規約は [`docs/coding-guidelines.md`](../docs/coding-guidelines.md)、
 仕様は [`docs/architecture.md`](../docs/architecture.md) を参照してください。
@@ -29,7 +29,7 @@ TerminalCoreTests  AdaptersTests
 | ターゲット | 役割 | 依存 |
 |---|---|---|
 | `TerminalCore` | ドメインモデル。状態の正規化、代表状態の決定、境界 protocol の宣言。UI・外部プロセスへの依存を持たない | なし |
-| `Adapters` | tmux / git CLI 等、外部世界との境界の実装。Phase 1 ではプレースホルダのみ | `TerminalCore` |
+| `Adapters` | tmux / git CLI 等、外部世界との境界。境界型と parser は全 platform、ローカルプロセス実行は macOS のみ | `TerminalCore` |
 | `TerminalCoreTests` | `TerminalCore` のテスト (Swift Testing) | `TerminalCore` |
 | `AdaptersTests` | `Adapters` のテスト (Swift Testing) | `Adapters` |
 
@@ -42,6 +42,14 @@ TerminalCoreTests  AdaptersTests
 | `AgentAdapter.swift` | Agent 状態正規化の境界 protocol。**宣言のみ** | 設計書 §12.1 |
 | `TerminalRenderer.swift` | Terminal 描画の境界 protocol。**宣言のみ** | 設計書 §21.5 / Gate 1 スパイク申し送り |
 
+### `Adapters` の platform 境界
+
+`ProcessRunResult` / `ProcessRunLimits` / `ProcessRunnerError` / `ProcessRunning` は、iOS の
+SSH クライアントからも同じ境界型を使えるよう全 platform で提供します。一方、
+`Foundation.Process` を使う `FoundationProcessRunner` とその実行状態は macOS 専用です。
+設計書 §20.1 のとおりプロセスの実行ホストは Mac に限定し、platform 差は同じターゲット内の
+条件付きコンパイルで表現しています。
+
 ## ビルドとテスト
 
 ```shell
@@ -49,6 +57,21 @@ cd AgentWorkflowTerminal
 swift build
 swift test
 ```
+
+### iOS 向けビルド
+
+`TerminalCore` と、macOS 専用実装を除く `Adapters` が iOS 向けにコンパイルできることは、
+次の package 全体のビルドで確認します。テストは iOS 向けにビルドせず、macOS でのみ実行します。
+
+```shell
+cd AgentWorkflowTerminal
+swift build --triple arm64-apple-ios17.0-simulator \
+  -Xswiftc -sdk \
+  -Xswiftc "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+```
+
+CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、platform 中立な境界へ
+macOS 専用 API が混入しないことを継続的に検証します。
 
 ### tmux 統合テスト
 
@@ -62,9 +85,10 @@ AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
 ```
 
 統合テストは process ID を含む `-L awt-integration-<pid>` の専用 socket だけを使います。
-tmux 3.4 では正常な `kill-server` 後も socket ファイルが残るため、テストは `defer` で server を
-停止する fallback を確保し、`kill-server` の完了後に専用 socket ファイルも削除します。途中で
-テストが失敗した場合も同じ後始末を行います。
+`new-session -P -F '#{pid}'` で server 作成と同時に PID を取得します。tmux 3.4 では正常な
+`kill-server` 後も socket ファイルが残るため、テストは `defer` で PID による停止 fallback を確保し、
+`kill-server` の完了後に専用 socket ファイルも削除します。途中でテストが失敗した場合も同じ
+後始末を行います。
 2026-09-02 に tmux 3.4 で成功を確認しています。
 
 ## Lint / Format

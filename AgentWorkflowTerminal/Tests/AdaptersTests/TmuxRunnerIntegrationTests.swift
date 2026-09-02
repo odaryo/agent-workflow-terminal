@@ -36,10 +36,10 @@ struct TmuxRunnerIntegrationTests {
 
     var testError: (any Error)?
     do {
-      _ = try await runner.run(arguments: ["new-session", "-d", "-s", sessionName])
-      let server = try await runner.run(arguments: ["display-message", "-p", "#{pid}"])
+      let server = try await runner.run(
+        arguments: ["new-session", "-d", "-s", sessionName, "-P", "-F", "#{pid}"])
       serverPID = pid_t(server.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
-      #expect(serverPID != nil)
+      try #require(serverPID != nil)
 
       let socketPath = try await runner.run(
         arguments: ["display-message", "-p", "#{socket_path}"])

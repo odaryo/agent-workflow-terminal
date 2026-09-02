@@ -8,6 +8,7 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
 }
 
 public struct TmuxRunner: Sendable {
+  // MacPorts / Nix の設置場所は推測せず、非標準配置は initializer の注入で扱う。
   public static let defaultExecutableCandidates = [
     URL(fileURLWithPath: "/opt/homebrew/bin/tmux"),
     URL(fileURLWithPath: "/usr/local/bin/tmux"),

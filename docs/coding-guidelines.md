@@ -95,6 +95,9 @@ TerminalCore  ←  Adapters  ←  (将来) App / Host Core
   Foundation の値型 (`Date`、`URL` 等) までは許可する。
 - `Adapters`: 外部世界との境界の実装。`TerminalCore` にのみ依存する。
 - 依存は**一方向**。`TerminalCore` から `Adapters` を参照しない。
+- platform 依存の実装は同じターゲット内で `#if os(macOS)` により表現する。iOS 実装が載る
+  設計書 §24 Gate 2 までは、platform を理由にターゲットを分割しない。
+- `TerminalCore` は `Package.swift` が宣言するすべての platform でビルドできる状態を保つ。
 - 新しいターゲットを足すときは、この図に位置づけられることを確認してから足す。
 
 ### 2.3 エラー

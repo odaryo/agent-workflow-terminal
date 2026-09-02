@@ -215,6 +215,18 @@ window/sessionの高度な管理、名前変更、並べ替え、swap-paneなど
 
 複数クライアントからの同時入力が起こり得ることを前提とし、誤操作防止は将来のUX課題として扱う。
 
+複数クライアントが同時attachしているときのwindowサイズは**`smallest`**とし、**Terminalがsession単位で設定する**。サーバ全体のglobal option(`-g`)としては設定せず、ユーザーが自分で作った他のsessionへ波及させない。
+
+Gate 1で3方式を実測した(137x39のクライアントと199x56のクライアントを同一sessionへ同時attach)。
+
+| `window-size` | 実測した挙動 |
+|---|---|
+| `smallest` | 79x20。全クライアントで全内容が見える。大きい側に余白が出る |
+| `latest`(tmuxの既定) | 操作するたびに79x20と199x55が入れ替わる |
+| `largest` | 199x55。小さい側でははみ出し、右下が見えない |
+
+iPhone/iPadとMacの同時attachで**全クライアントが全内容を見られるのは`smallest`だけ**であり、大きい側の余白は許容する。既定の`latest`は「小さい端末を1回触るとMac側がその場で縮む」挙動になるため採らない。
+
 ### 4.3 サポートするtmux版数
 
 サポート下限は**tmux 3.4**とする。3.4以上であれば機能制限を設けない。
@@ -1447,6 +1459,7 @@ PR_READY
 - [x] Unknownを正式状態として扱う
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
+- [x] 複数device同時attach時の`window-size`は`smallest`、session単位で設定(`-g`は使わない)
 - [x] tmuxのサポート下限は3.4、3.5未満はZWJ表示の警告のみで機能制限なし
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
 - [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)

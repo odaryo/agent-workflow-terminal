@@ -93,7 +93,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **Roles**
 - **Director** (the main Claude session): research, decisions, task decomposition, spec writing, progress judgment, reporting. Does not implement. Delegates read-only exploration and codebase lookups to the `explorer` subagent (`.claude/agents/explorer.md`, haiku).
-- **Implementer** (Codex): `codex exec` non-interactively with the workspace-write sandbox; follow-ups via `codex exec resume --last` (no sandbox flags — the session's settings carry over). Codex reads `AGENTS.md`, not this file; `AGENTS.md` is a thin bridge that points here and to `docs/coding-guidelines.md` — keep it a pointer, never a second copy of the rules. When Codex is unavailable, fall back to the implementer subagent defined in `.claude/agents/implementer.md`. The contract differs: unlike Codex, that subagent only edits files — it never commits or pushes, so the Director verifies the changes and commits them.
+- **Implementer** (Codex): `codex exec` non-interactively with the workspace-write sandbox; follow-ups via `codex exec resume --last` (no sandbox flags — the session's settings carry over). Codex reads `AGENTS.md`, not this file; `AGENTS.md` is a thin bridge that points here and to `docs/coding-guidelines.md` — keep it a pointer, never a second copy of the rules. When Codex is unavailable, fall back to the implementer subagent defined in `.claude/agents/implementer.md`. The contract differs: unlike Codex, that subagent only edits files — it never commits or pushes, so the Director verifies the changes and commits them. **"Unavailable" means measured, not assumed**: run `codex exec` and read what it returns (a usage-limit message, a missing binary) before falling back, and say in the report which one it was. Small follow-up fixes are not an exemption — they go to `codex exec resume --last` while Codex is alive.
 - **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
 
 **The loop**
@@ -106,6 +106,13 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop.
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
+
+**Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k) because autocompact effectively never fires on a 1M window.
+
+- **One Issue, one Director session.** `/clear` after reporting the Issue's PR, before creating the next worktree. Never mid-Issue — the reviewer round-trip needs the Director's memory of what was already measured and rejected.
+- **Do not `--resume` a large session left idle for over an hour.** The 1-hour prompt cache has expired and the first request rewrites the entire history: measured $2.06–$2.51 for a 200–233k resume, against $0.43–$0.65 to prime a fresh one. Start a new session and re-read what you need.
+- **Never pass a `model:` override when calling a subagent.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`.
+- **Read-only exploration goes to `explorer`, not `general-purpose`** — restating the Director's role above, because in practice this is the rule that gets skipped.
 
 ## Task tracking (GitHub Projects)
 

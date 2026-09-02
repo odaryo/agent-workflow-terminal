@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Codex (`codex exec`) が使えない場合のフォールバックの実装役に使う。Director が書いた spec (背景 / 要求 / スコープ / 完了条件) を受けて実装する。
+description: Codex (`codex exec`) が usage limit / 不在を返したことを計測で確認した場合**のみ**使うフォールバックの実装役。Director が書いた spec (背景 / 要求 / スコープ / 完了条件) を受けて実装する。小さな追い修正でも、Codex が生きている限り `codex exec resume --last` を使うこと。
 model: opus
 tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch, Skill
 ---

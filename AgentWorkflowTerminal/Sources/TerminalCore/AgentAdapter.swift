@@ -10,21 +10,33 @@ public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
   }
 }
 
+public enum ProcessTermination: Sendable, Hashable, Codable {
+  case exited(status: Int32)
+  case signaled(String)
+  /// プロセス終了と理由の回収には時間差があり、理由が未観測でも終了済みという情報を失わない。
+  case unknown
+}
+
 /// フィールドは Spikes/gate1/README.md §8.10 で実測した
 /// `#{pane_id}` / `#{pane_pid}` / `#{pane_tty}` / `#{pane_current_command}` /
-/// `#{pane_current_path}` / `#{pane_title}` / `#{pane_dead}` に一対一で対応する。
+/// `#{pane_current_path}` / `#{pane_title}` / pane の終了情報に一対一で対応する。
 ///
 /// - Important: libghostty v1.3.1 には `ghostty_surface_foreground_pid` /
 ///   `tty_name` が存在しないため、プロセス観測を renderer から取らず tmux CLI に寄せている
 ///   (Spikes/gate1/README.md 申し送り #2、設計書 §21.3 と整合)。
 public struct PaneSnapshot: Sendable, Hashable, Codable {
   public let id: PaneID
+  /// dead pane では終了済み PID が残り、OS に再利用され得るためプロセス観測に使わない。
   public let processID: Int32
   public let tty: String
   public let currentCommand: String
+  /// dead pane では空になり得るため、空文字列を観測失敗として扱わない。
   public let currentPath: String
   public let title: String
-  public let isDead: Bool
+  /// `nil` は live を表し、`.unknown` は終了済みだが理由を観測できない状態を表す。
+  public let termination: ProcessTermination?
+
+  public var isDead: Bool { termination != nil }
 
   public init(
     id: PaneID,
@@ -33,7 +45,7 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
     currentCommand: String,
     currentPath: String,
     title: String,
-    isDead: Bool
+    termination: ProcessTermination?
   ) {
     self.id = id
     self.processID = processID
@@ -41,7 +53,7 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
     self.currentCommand = currentCommand
     self.currentPath = currentPath
     self.title = title
-    self.isDead = isDead
+    self.termination = termination
   }
 }
 

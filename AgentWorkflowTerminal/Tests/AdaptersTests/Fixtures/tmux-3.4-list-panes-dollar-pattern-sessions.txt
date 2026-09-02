@@ -1,0 +1,7 @@
+%2\037brace\\${x}\0370\037@2\0370\0375161\0371\037sleep\0370\037\037\037/dev/ttys020\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local
+%3\037digit\\$1\0370\037@3\0370\0375163\0371\037sleep\0370\037\037\037/dev/ttys021\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local
+%4\037double$$\0370\037@4\0370\0375165\0371\037sleep\0370\037\037\037/dev/ttys022\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local
+%0\037letter\\$a\0370\037@0\0370\0375157\0371\037sleep\0370\037\037\037/dev/ttys018\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local
+%6\037symbol$-\0370\037@6\0370\0375169\0371\037zsh\0370\037\037\037/dev/ttys024\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local
+%5\037terminal$\0370\037@5\0370\0375167\0371\037sleep\0370\037\037\037/dev/ttys023\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local
+%1\037under\\$_\0370\037@1\0370\0375159\0371\037sleep\0370\037\037\037/dev/ttys019\037/Users/odaryo/workspace/sample/agent-workflow-terminal\037RyotaronoMacBook-Pro-10.local

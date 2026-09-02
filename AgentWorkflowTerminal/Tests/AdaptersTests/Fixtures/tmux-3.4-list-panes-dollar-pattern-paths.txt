@@ -1,0 +1,7 @@
+%0\037path-0\0370\037@0\0370\0375436\0371\037sleep\0370\037\037\037/dev/ttys018\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-0/letter\$a\037RyotaronoMacBook-Pro-10.local
+%1\037path-1\0370\037@1\0370\0375439\0371\037sleep\0370\037\037\037/dev/ttys019\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-1/under\$_\037RyotaronoMacBook-Pro-10.local
+%2\037path-2\0370\037@2\0370\0375442\0371\037sleep\0370\037\037\037/dev/ttys020\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-2/brace\${x}\037RyotaronoMacBook-Pro-10.local
+%3\037path-3\0370\037@3\0370\0375445\0371\037sleep\0370\037\037\037/dev/ttys021\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-3/digit$1\037RyotaronoMacBook-Pro-10.local
+%4\037path-4\0370\037@4\0370\0375448\0371\037sleep\0370\037\037\037/dev/ttys022\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-4/double$$\037RyotaronoMacBook-Pro-10.local
+%5\037path-5\0370\037@5\0370\0375451\0371\037sleep\0370\037\037\037/dev/ttys023\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-5/terminal$\037RyotaronoMacBook-Pro-10.local
+%6\037path-6\0370\037@6\0370\0375454\0371\037sleep\0370\037\037\037/dev/ttys024\037/private/tmp/awt-issue12-r2-paths-zL1d71/path-6/symbol$-\037RyotaronoMacBook-Pro-10.local

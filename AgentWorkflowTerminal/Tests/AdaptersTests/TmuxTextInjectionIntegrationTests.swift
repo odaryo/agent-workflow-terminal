@@ -6,6 +6,26 @@ import Testing
 private let isTmuxIntegrationEnabled =
   ProcessInfo.processInfo.environment["AWT_TMUX_INTEGRATION"] == "1"
 
+/// 注入を拒む pane の状態。受け側 pane の状態がこの型の安全性を決めるので、統合テストの軸にする。
+private enum RefusingPaneState: Sendable, CaseIterable {
+  case copyMode
+  case inputDisabled
+
+  func setUpArguments(for pane: PaneID) -> [String] {
+    switch self {
+    case .copyMode: ["copy-mode", "-t", pane.rawValue]
+    case .inputDisabled: ["select-pane", "-d", "-t", pane.rawValue]
+    }
+  }
+
+  func expectedError(for pane: PaneID) -> TmuxTextInjectionError {
+    switch self {
+    case .copyMode: .paneInCopyMode(pane)
+    case .inputDisabled: .paneInputDisabled(pane)
+    }
+  }
+}
+
 @Suite(
   "隔離 tmux server の pane へのテキスト注入 (設計書 §9.2 / §10)",
   .enabled(if: isTmuxIntegrationEnabled)
@@ -32,19 +52,76 @@ struct TmuxTextInjectionIntegrationTests {
     try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("no-exec")) { runner in
       let workspace = try Workspace()
       defer { workspace.remove() }
-      let hitPath = workspace.path(for: "executed")
-      let token = "AWT_PASTE_\(UInt32.random(in: 0..<1_000_000))"
+      let probe = ExecutionProbe(workspace: workspace)
       let pane = try await makeShellPane(runner)
 
-      try await TmuxTextInjection(runner: runner)
-        .inject("\(token); touch '\(hitPath)'\n", into: pane)
+      try await TmuxTextInjection(runner: runner).inject(probe.text, into: pane)
 
       // 実行されていれば touch が先に走るため、本文が画面に出た時点で判定できる。
       try await waitUntil("注入テキストが pane の画面に現れる") {
-        try await capturePane(runner, pane: pane).contains(token)
+        try await capturePane(runner, pane: pane).contains(probe.token)
       }
       try await Task.sleep(for: .milliseconds(500))
-      #expect(!FileManager.default.fileExists(atPath: hitPath))
+      #expect(!probe.didExecute)
+    }
+  }
+
+  @Test("copy-mode の pane へ注入しても、コマンドは実行されない")
+  func doesNotExecuteInjectedCommandWhilePaneIsInCopyMode() async throws {
+    try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("copy-exec")) { runner in
+      let workspace = try Workspace()
+      defer { workspace.remove() }
+      let probe = ExecutionProbe(workspace: workspace)
+      let pane = try await makeShellPane(runner)
+      _ = try await runner.run(arguments: RefusingPaneState.copyMode.setUpArguments(for: pane))
+
+      await #expect(throws: TmuxTextInjectionError.paneInCopyMode(pane)) {
+        try await TmuxTextInjection(runner: runner).inject(probe.text, into: pane)
+      }
+
+      try await Task.sleep(for: .milliseconds(500))
+      #expect(!probe.didExecute)
+    }
+  }
+
+  @Test(
+    "入力が bracketed paste にならない状態の pane へは1バイトも送らない",
+    arguments: RefusingPaneState.allCases
+  )
+  fileprivate func deliversNothingWhilePaneCannotAcceptABracketedPaste(
+    _ state: RefusingPaneState
+  ) async throws {
+    try await withByteCapturePane(label: "refuse") { runner, pane, capture in
+      _ = try await runner.run(arguments: state.setUpArguments(for: pane))
+
+      await #expect(throws: state.expectedError(for: pane)) {
+        try await TmuxTextInjection(runner: runner).inject("touch /tmp/nope\n", into: pane)
+      }
+
+      try await Task.sleep(for: .milliseconds(500))
+      #expect(capture.delivered() == Data())
+      #expect(try await listBuffers(runner).isEmpty)
+    }
+  }
+
+  @Test("死んだ pane への注入は tmux の失敗のまま返り、buffer を残さない")
+  func reportsDeadPaneAsARawFailure() async throws {
+    try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("dead")) { runner in
+      let root = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
+      _ = try await runner.run(arguments: ["set-option", "-g", "remain-on-exit", "on"])
+      let pane = try await splitPane(runner, from: root, command: "true")
+      try await waitUntil("pane の終了") {
+        try await display(runner, pane: pane, format: "#{pane_dead}") == "1"
+      }
+
+      let raised = await #expect(throws: TmuxTextInjectionError.self) {
+        try await TmuxTextInjection(runner: runner).inject("text\n", into: pane)
+      }
+
+      #expect(
+        raised
+          == .tmux(.commandFailed(exitCode: 1, stdout: "", stderr: "target pane has exited\n")))
+      #expect(try await listBuffers(runner).isEmpty)
     }
   }
 
@@ -52,7 +129,10 @@ struct TmuxTextInjectionIntegrationTests {
   func neverDeliversTextThatCanEscapeTheBracketedPaste() async throws {
     let payload = "safe;\u{1b}[201~touch /tmp/awt-should-never-run\n"
     try await withByteCapturePane(label: "escape") { runner, pane, capture in
-      await #expect(throws: TmuxTextInjectionError.unsafeControlCharacter("\u{1b}")) {
+      await #expect(
+        throws: TmuxTextInjectionError.unsafeControlCharacter(
+          scalar: "\u{1b}", unicodeScalarOffset: 5)
+      ) {
         try await TmuxTextInjection(runner: runner).inject(payload, into: pane)
       }
 
@@ -126,11 +206,9 @@ struct TmuxTextInjectionIntegrationTests {
       defer { workspace.remove() }
       let outputPath = workspace.path(for: "delivered")
       let root = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
-      let created = try await runner.run(arguments: [
-        "split-window", "-t", root.rawValue, "-P", "-F", "#{pane_id}",
-        "stty raw -echo; printf '\\033[?2004hREADY'; cat > '\(outputPath)'",
-      ])
-      let pane = PaneID(rawValue: created.stdout.trimmingCharacters(in: .newlines))
+      let pane = try await splitPane(
+        runner, from: root,
+        command: "stty raw -echo; printf '\\033[?2004hREADY'; cat > '\(outputPath)'")
       // READY は 2004 の直後に同じ stream へ書かれるため、見えた時点で 2004 は処理済み。
       try await waitUntil("観測用 pane の準備") {
         try await capturePane(runner, pane: pane).contains("READY")
@@ -146,19 +224,35 @@ struct TmuxTextInjectionIntegrationTests {
   /// prompt が出ていれば zle が動いている = 2004 が立っている。
   private func makeShellPane(_ runner: TmuxRunner) async throws -> PaneID {
     let root = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
-    let created = try await runner.run(arguments: [
-      "split-window", "-t", root.rawValue, "-e", "PS1=AWT_SHELL_READY> ",
-      "-P", "-F", "#{pane_id}", "/bin/zsh -f -i",
-    ])
-    let pane = PaneID(rawValue: created.stdout.trimmingCharacters(in: .newlines))
+    let pane = try await splitPane(
+      runner, from: root, command: "/bin/zsh -f -i",
+      environment: "PS1=AWT_SHELL_READY> ")
     try await waitUntil("shell の prompt 表示") {
       try await capturePane(runner, pane: pane).contains("AWT_SHELL_READY>")
     }
     return pane
   }
 
+  private func splitPane(
+    _ runner: TmuxRunner,
+    from root: PaneID,
+    command: String,
+    environment: String? = nil
+  ) async throws -> PaneID {
+    let created = try await runner.run(
+      arguments: ["split-window", "-t", root.rawValue]
+        + (environment.map { ["-e", $0] } ?? [])
+        + ["-P", "-F", "#{pane_id}", command])
+    return PaneID(rawValue: created.stdout.trimmingCharacters(in: .newlines))
+  }
+
   private func capturePane(_ runner: TmuxRunner, pane: PaneID) async throws -> String {
     try await runner.run(arguments: ["capture-pane", "-p", "-t", pane.rawValue]).stdout
+  }
+
+  private func display(_ runner: TmuxRunner, pane: PaneID, format: String) async throws -> String {
+    try await runner.run(arguments: ["display-message", "-p", "-t", pane.rawValue, format])
+      .stdout.trimmingCharacters(in: .newlines)
   }
 
   private func listBuffers(_ runner: TmuxRunner) async throws -> String {
@@ -207,6 +301,19 @@ private struct Workspace {
   func remove() {
     try? FileManager.default.removeItem(at: directory)
   }
+}
+
+/// 実行されたら痕跡ファイルが残る注入本文。許可された文字だけで組み立てる。
+private struct ExecutionProbe {
+  let token = "AWT_PASTE_\(UInt32.random(in: 0..<1_000_000))"
+  private let hitPath: String
+
+  init(workspace: Workspace) {
+    hitPath = workspace.path(for: "executed")
+  }
+
+  var text: String { "\(token); touch '\(hitPath)'\n" }
+  var didExecute: Bool { FileManager.default.fileExists(atPath: hitPath) }
 }
 
 /// pane が受け取ったバイト列。

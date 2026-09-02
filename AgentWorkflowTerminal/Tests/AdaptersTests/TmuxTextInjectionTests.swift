@@ -10,22 +10,29 @@ struct TmuxTextInjectionTests {
   private let prefix = ["-u", "-L", "awt-test"]
   private let pane = PaneID(rawValue: "%3")
 
-  @Test("注入は load-buffer と paste-buffer -p だけで組み立て、send-keys を使わない")
-  func injectsThroughLoadBufferAndPasteBuffer() async throws {
+  @Test("注入は load-buffer / 状態判定つき paste / buffer 削除の3コマンドで、send-keys を使わない")
+  func injectsThroughLoadBufferAndGatedPasteBuffer() async throws {
     let spy = ProcessRunnerSpy()
     let injection = try makeInjection(spy)
 
     try await injection.inject("hello\nworld\n", into: pane)
 
     let invocations = await spy.invocations
-    #expect(invocations.count == 2)
+    #expect(invocations.count == 3)
     let load = try #require(invocations.first)
-    let paste = try #require(invocations.last)
-    let bufferName = try #require(load.arguments.dropFirst(5).first)
+    let buffer = try #require(load.arguments.dropFirst(5).first)
+    let token = String(buffer.dropFirst("awt-inject-".count))
     let path = try #require(load.arguments.last)
-    #expect(load.arguments == prefix + ["load-buffer", "-b", bufferName, path])
+    #expect(load.arguments == prefix + ["load-buffer", "-b", buffer, path])
     #expect(
-      paste.arguments == prefix + ["paste-buffer", "-p", "-d", "-b", bufferName, "-t", "%3"])
+      invocations[1].arguments == prefix + [
+        "if-shell", "-F", "-t", "%3", "#{pane_in_mode}",
+        "delete-buffer -b awt-refused-copy-mode-\(token)",
+        "if-shell -F -t %3 '#{pane_input_off}' "
+          + "'delete-buffer -b awt-refused-input-off-\(token)' "
+          + "'paste-buffer -p -d -b \(buffer) -t %3'",
+      ])
+    #expect(invocations[2].arguments == prefix + ["delete-buffer", "-b", buffer])
     #expect(invocations.allSatisfy { !$0.arguments.contains("send-keys") })
   }
 
@@ -43,9 +50,9 @@ struct TmuxTextInjectionTests {
   }
 
   @Test("成功しても失敗しても一時ファイルを残さない", arguments: [0, 1] as [Int32])
-  func removesTemporaryFileOnEveryPath(_ pasteExitCode: Int32) async throws {
+  func removesTemporaryFileOnEveryPath(_ gateExitCode: Int32) async throws {
     let spy = ProcessRunnerSpy(
-      results: ["paste-buffer": .init(exitCode: pasteExitCode, stdout: "", stderr: "boom\n")])
+      results: ["if-shell": .init(exitCode: gateExitCode, stdout: "", stderr: "boom\n")])
     let injection = try makeInjection(spy)
 
     _ = try? await injection.inject("text", into: pane)
@@ -54,8 +61,8 @@ struct TmuxTextInjectionTests {
     #expect(!FileManager.default.fileExists(atPath: path))
   }
 
-  @Test("buffer 名は注入ごとに変え、ユーザーの同名 buffer を巻き込まない")
-  func usesAFreshBufferNamePerInjection() async throws {
+  @Test("buffer 名と分岐用の sentinel は注入ごとに変え、ユーザーの同名 buffer を巻き込まない")
+  func usesFreshNamesPerInjection() async throws {
     let spy = ProcessRunnerSpy()
     let injection = try makeInjection(spy)
 
@@ -63,34 +70,17 @@ struct TmuxTextInjectionTests {
     try await injection.inject("b", into: pane)
 
     let names = await spy.invocations
-      .filter { $0.arguments.contains("load-buffer") }
+      .filter { $0.arguments.dropFirst(3).first == "load-buffer" }
       .compactMap { $0.arguments.dropFirst(5).first }
     #expect(names.count == 2)
     #expect(names[0] != names[1])
+    let gates = await spy.invocations.filter { $0.arguments.dropFirst(3).first == "if-shell" }
+    #expect(gates.count == 2)
+    #expect(gates[0].arguments != gates[1].arguments)
   }
 
-  @Test("paste が失敗したら、その buffer を消してからエラーを返す")
-  func deletesTheBufferWhenPasteFails() async throws {
-    let spy = ProcessRunnerSpy(
-      results: [
-        "paste-buffer": .init(exitCode: 1, stdout: "", stderr: "can't find pane: %3\n")
-      ])
-    let injection = try makeInjection(spy)
-
-    await #expect(throws: TmuxTextInjectionError.paneNotFound(pane)) {
-      try await injection.inject("text", into: pane)
-    }
-
-    let invocations = await spy.invocations
-    let bufferName = try #require(invocations.first?.arguments.dropFirst(5).first)
-    #expect(
-      invocations.compactMap { $0.arguments.dropFirst(3).first }
-        == ["load-buffer", "paste-buffer", "delete-buffer"])
-    #expect(invocations.last?.arguments == prefix + ["delete-buffer", "-b", bufferName])
-  }
-
-  @Test("load-buffer が失敗したときは、作られていない buffer を消しにいかない")
-  func skipsBufferDeletionWhenLoadFails() async throws {
+  @Test("load-buffer が失敗しても buffer を消しにいく (タイムアウト後に残り得るため)")
+  func deletesTheBufferEvenWhenLoadFails() async throws {
     let stderr = "/nope: No such file or directory\n"
     let spy = ProcessRunnerSpy(
       results: ["load-buffer": .init(exitCode: 1, stdout: "", stderr: stderr)])
@@ -103,7 +93,48 @@ struct TmuxTextInjectionTests {
       try await injection.inject("text", into: pane)
     }
 
-    #expect(await spy.invocations.count == 1)
+    let invocations = await spy.invocations
+    #expect(
+      invocations.compactMap { $0.arguments.dropFirst(3).first } == [
+        "load-buffer", "delete-buffer",
+      ])
+    let buffer = try #require(invocations.first?.arguments.dropFirst(5).first)
+    #expect(invocations.last?.arguments == prefix + ["delete-buffer", "-b", buffer])
+  }
+
+  @Test("copy-mode で送らなかった分岐を、専用のエラーとして返す")
+  func reportsCopyModeRefusal() async throws {
+    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-copy-mode-")
+    let injection = try makeInjection(spy)
+
+    await #expect(throws: TmuxTextInjectionError.paneInCopyMode(pane)) {
+      try await injection.inject("text", into: pane)
+    }
+  }
+
+  @Test("入力を受け付けない pane で送らなかった分岐を、copy-mode とは別のエラーで返す")
+  func reportsInputDisabledRefusal() async throws {
+    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-input-off-")
+    let injection = try makeInjection(spy)
+
+    await #expect(throws: TmuxTextInjectionError.paneInputDisabled(pane)) {
+      try await injection.inject("text", into: pane)
+    }
+  }
+
+  @Test("この注入の sentinel でない unknown buffer は、送らなかった判定に丸めない")
+  func keepsForeignUnknownBufferAsRawFailure() async throws {
+    let stderr = "unknown buffer: awt-refused-copy-mode-somebody-else\n"
+    let spy = ProcessRunnerSpy(
+      results: ["if-shell": .init(exitCode: 1, stdout: "", stderr: stderr)])
+    let injection = try makeInjection(spy)
+
+    await #expect(
+      throws: TmuxTextInjectionError.tmux(
+        .commandFailed(exitCode: 1, stdout: "", stderr: stderr))
+    ) {
+      try await injection.inject("text", into: pane)
+    }
   }
 
   @Test("空文字列の注入では tmux を一度も起動しない")
@@ -132,16 +163,27 @@ struct TmuxTextInjectionTests {
   }
 
   @Test(
-    "bracketed paste を抜け出せる制御文字を含むテキストを tmux へ渡す前に拒否する",
-    arguments: ["\u{1b}[201~rm -rf /", "a\u{00}b", "a\u{07}b", "a\u{7f}b", "a\u{9b}201~b"]
+    "bracketed paste を抜け出せる制御文字は、位置つきで tmux へ渡す前に拒否する",
+    arguments: [
+      ("\u{1b}[201~rm -rf /", "\u{1b}" as Unicode.Scalar, 0),
+      ("あ\u{00}b", "\u{00}" as Unicode.Scalar, 1),
+      ("ab\u{07}", "\u{07}" as Unicode.Scalar, 2),
+      ("a\tb\n\u{7f}", "\u{7f}" as Unicode.Scalar, 4),
+      ("🙂\u{9b}201~", "\u{9b}" as Unicode.Scalar, 1),
+    ]
   )
-  func rejectsControlCharactersBeforeRunningTmux(_ text: String) async throws {
+  func rejectsControlCharactersWithTheirPosition(
+    _ text: String,
+    _ scalar: Unicode.Scalar,
+    _ offset: Int
+  ) async throws {
     let spy = ProcessRunnerSpy()
     let injection = try makeInjection(spy)
-    let offending = try #require(
-      text.unicodeScalars.first { $0.value < 0x20 || (0x7f...0x9f).contains($0.value) })
 
-    await #expect(throws: TmuxTextInjectionError.unsafeControlCharacter(offending)) {
+    await #expect(
+      throws: TmuxTextInjectionError.unsafeControlCharacter(
+        scalar: scalar, unicodeScalarOffset: offset)
+    ) {
       try await injection.inject(text, into: pane)
     }
     #expect(await spy.invocations.isEmpty)
@@ -162,7 +204,7 @@ struct TmuxTextInjectionTests {
   func keepsMismatchedMissingPaneAsRawFailure() async throws {
     let stderr = "can't find pane: %9\n"
     let spy = ProcessRunnerSpy(
-      results: ["paste-buffer": .init(exitCode: 1, stdout: "", stderr: stderr)])
+      results: ["if-shell": .init(exitCode: 1, stdout: "", stderr: stderr)])
     let injection = try makeInjection(spy)
 
     await #expect(
@@ -173,7 +215,41 @@ struct TmuxTextInjectionTests {
     }
   }
 
-  private func makeInjection(_ spy: ProcessRunnerSpy) throws -> TmuxTextInjection {
+  @Test(
+    "load-buffer へ渡す path の `#` を literal 化する (tmux が format 展開するため)",
+    arguments: [
+      ("/tmp/plain/awt-inject-1", "/tmp/plain/awt-inject-1"),
+      ("/tmp/tst-#S.txt", "/tmp/tst-##S.txt"),
+      ("/tmp/a#{session_name}b", "/tmp/a##{session_name}b"),
+      ("/tmp/##", "/tmp/####"),
+    ]
+  )
+  func escapesFormatExpansionInThePath(_ path: String, _ expected: String) {
+    #expect(TmuxTextInjection.escapingFormats(path) == expected)
+  }
+
+  @Test("`#` を含む一時ディレクトリでも、tmux は本来の一時ファイルを読む")
+  func escapesTheRealTemporaryFilePath() async throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appending(path: "awt-fmt-#S-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let spy = ProcessRunnerSpy()
+    let injection = try makeInjection(spy, temporaryDirectory: directory)
+
+    try await injection.inject("body\n", into: pane)
+
+    let load = try #require(await spy.invocations.first)
+    let path = try #require(load.arguments.last)
+    #expect(path.hasPrefix(TmuxTextInjection.escapingFormats(directory.path)))
+    #expect(path.contains("awt-fmt-##S-"))
+    #expect(load.fileContents == Data("body\n".utf8))
+  }
+
+  private func makeInjection(
+    _ spy: some ProcessRunning,
+    temporaryDirectory: URL = FileManager.default.temporaryDirectory
+  ) throws -> TmuxTextInjection {
     TmuxTextInjection(
       runner: try TmuxRunner(
         socketName: "awt-test",
@@ -181,7 +257,8 @@ struct TmuxTextInjectionTests {
         executableCandidates: [executableURL],
         parentEnvironment: [:],
         isExecutableFile: { _ in true }
-      ))
+      ),
+      temporaryDirectory: temporaryDirectory)
   }
 }
 
@@ -213,7 +290,9 @@ private actor ProcessRunnerSpy: ProcessRunning {
     let subcommand = arguments.dropFirst(3).first ?? ""
     var fileContents: Data?
     var filePermissions: Int?
-    if subcommand == "load-buffer", let path = arguments.last {
+    if subcommand == "load-buffer", let argument = arguments.last {
+      // tmux 3.4 は path 引数を format 展開するので、`##` を `#` に戻してから読む (実測)。
+      let path = argument.replacingOccurrences(of: "##", with: "#")
       fileContents = FileManager.default.contents(atPath: path)
       filePermissions =
         (try? FileManager.default.attributesOfItem(atPath: path))
@@ -227,5 +306,34 @@ private actor ProcessRunnerSpy: ProcessRunning {
         filePermissions: filePermissions
       ))
     return results[subcommand] ?? ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
+  }
+}
+
+/// 実 tmux が「送らなかった」分岐で返す形 (`delete-buffer -b <sentinel>` の失敗) を、
+/// 引数に現れた sentinel 名から組み立てて返す。名前は注入ごとに変わるのでテストから固定できない。
+private actor SentinelFailingSpy: ProcessRunning {
+  private let sentinelPrefix: String
+
+  init(sentinelPrefix: String) {
+    self.sentinelPrefix = sentinelPrefix
+  }
+
+  func run(
+    executableURL: URL,
+    arguments: [String],
+    environment: [String: String],
+    timeout: Duration,
+    outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    guard arguments.dropFirst(3).first == "if-shell",
+      let sentinel =
+        arguments
+        .flatMap({ $0.split(separator: " ").map { $0.trimmingCharacters(in: ["'"]) } })
+        .first(where: { $0.hasPrefix(sentinelPrefix) })
+    else {
+      return ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
+    }
+    return ProcessRunResult(
+      exitCode: 1, stdout: "", stderr: "unknown buffer: \(sentinel)\n")
   }
 }

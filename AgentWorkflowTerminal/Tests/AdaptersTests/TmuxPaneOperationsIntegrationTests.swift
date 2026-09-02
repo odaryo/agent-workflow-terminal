@@ -105,7 +105,9 @@ struct TmuxPaneOperationsIntegrationTests {
     try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("wrap")) { runner in
       let operations = TmuxPaneOperations(runner: runner)
       let top = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
-      let bottom = try await operations.splitTopBottom(pane: top)
+      // 2段だと「隣へ移動」と「反対側の端へ回り込み」が同じ結果になり、doc の主張を固定できない。
+      let middle = try await operations.splitTopBottom(pane: top)
+      let bottom = try await operations.splitTopBottom(pane: middle)
       try await operations.select(pane: top)
 
       try await operations.selectNeighbor(of: top, direction: .up)

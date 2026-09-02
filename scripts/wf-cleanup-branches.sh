@@ -52,12 +52,16 @@ current_branch=$(git rev-parse --abbrev-ref HEAD)
 # (squash-only 運用の本リポジトリでは削除候補が1件も出ない。Issue #45 で実測)。
 # 代わりにマージ済み PR の head を gh から取得し、ローカル/リモートの ref と突き合わせる。
 # 直近200件より古い PR のブランチは対象外だが、消しすぎ側には倒れない。
-merged_head_tsv=$(gh pr list --state merged --limit 200 --json headRefName,headRefOid \
+# --base main は必須。base が main 以外の PR (stacked PR の子など) は、親が main に
+# 入らないまま閉じられると squash コミットが main から到達不能なままになるため。
+merged_head_tsv=$(gh pr list --state merged --limit 200 --base main --json headRefName,headRefOid \
   --jq '.[] | .headRefName + "\t" + .headRefOid') \
   || die "マージ済み PR の取得に失敗しました (gh pr list)"
 
-# 他の worktree が checkout 中のブランチは `git branch -D` が拒否する。
-# 事前に除外しないと set -e で全体が中断する。
+# 他の worktree が checkout 中のブランチは `git branch -D` が拒否する。一覧に出してから
+# 失敗させないよう事前に除外するが、これは best-effort — rebase が停止中の worktree は
+# `branch` 行ではなく `detached` を出力するのに削除は拒否される (git 2.50.1 で実測)。
+# 取りこぼしは後段の削除ループが per-item で許容する。
 checked_out=$(git worktree list --porcelain | awk '$1 == "branch" { print substr($2, 12) }')
 
 # ローカルとリモートの両方を候補にする。GitHub の deleteBranchOnMerge が有効だと
@@ -83,12 +87,16 @@ while IFS= read -r name; do
   # 同名ブランチが複数 PR で使われた場合はいずれかの head と一致すればマージ済みとみなす。
   # どの head とも一致しない = マージ後に push されたコミットがあるということで、
   # 削除すると未マージの作業を失うためスキップする。
-  merged_oids=$(awk -F '\t' -v name="$name" '$1 == name { print $2 }' <<<"$merged_head_tsv")
+  # `$1 ""` は文字列比較の強制。awk は -v 代入値が数値に見えると数値比較に切り替わり、
+  # `007` と `7` のようなブランチ名が一致してしまう。
+  merged_oids=$(awk -F '\t' -v name="$name" '$1 "" == name "" { print $2 }' <<<"$merged_head_tsv")
   [[ -n "$merged_oids" ]] || continue
 
+  # rev-parse を引数位置に置いているため失敗しても set -e は発火しないが、
+  # 直前の show-ref で ref の存在を保証しており、仮に空になっても不一致 = スキップに倒れる。
   if git show-ref --verify --quiet "refs/heads/$name"; then
     if grep -qxF "$name" <<<"$checked_out"; then
-      info "警告: '$name' は他の worktree が checkout 中のためスキップしました"
+      info "警告: '$name' は他の worktree が checkout 中のためローカル削除をスキップしました"
     elif grep -qxF "$(git rev-parse "refs/heads/$name")" <<<"$merged_oids"; then
       local_branches+=("$name")
     else
@@ -138,13 +146,32 @@ if [[ "$dry_run" -eq 1 ]]; then
   exit 0
 fi
 
-# squash マージ後は上流とコミットが一致せず `git branch -d` が通らないため -D を使う。
-# 上のループで head OID 一致を必須にしているので、-D でも未マージのコミットは失われない。
+# squash マージ後は元コミットが main の祖先にならず `git branch -d` が通らないため -D を使う。
+# -D は元コミットを到達不能にするが、上のループで head OID 一致を必須にしているので
+# 失われるのはコミットだけで、内容は squash コミットとして main に入っている。
+#
+# 1件の失敗で set -e に中断させない。中断すると一覧に出した対象の一部だけが消え、
+# しかもローカル側の失敗でリモート側のループごと飛ぶ (rebase 停止中 worktree、
+# ネットワーク断、保護ブランチなど)。全件試みたうえで終了ステータスに反映する。
+failed=0
+deleted_local=()
+deleted_remote=()
 for b in ${local_branches[@]+"${local_branches[@]}"}; do
-  git branch -D "$b"
+  if git branch -D "$b"; then
+    deleted_local+=("$b")
+  else
+    info "警告: ローカル '$b' の削除に失敗しました"
+    failed=1
+  fi
 done
 for b in ${remote_branches[@]+"${remote_branches[@]}"}; do
-  git push origin --delete "$b"
+  if git push origin --delete "$b"; then
+    deleted_remote+=("$b")
+  else
+    info "警告: 'origin/$b' の削除に失敗しました"
+    failed=1
+  fi
 done
-[[ ${#local_branches[@]} -eq 0 ]] || info "ローカルを削除しました: ${local_branches[*]}"
-[[ ${#remote_branches[@]} -eq 0 ]] || info "リモートを削除しました: ${remote_branches[*]}"
+[[ ${#deleted_local[@]} -eq 0 ]] || info "ローカルを削除しました: ${deleted_local[*]}"
+[[ ${#deleted_remote[@]} -eq 0 ]] || info "リモートを削除しました: ${deleted_remote[*]}"
+[[ "$failed" -eq 0 ]] || die "削除できなかったブランチがあります (上の警告を確認してください)"

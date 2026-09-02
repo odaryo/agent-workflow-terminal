@@ -9,18 +9,26 @@ private let isTmuxIntegrationEnabled =
 /// 注入を拒む pane の状態。受け側 pane の状態がこの型の安全性を決めるので、統合テストの軸にする。
 private enum RefusingPaneState: Sendable, CaseIterable {
   case copyMode
+  case clockMode
+  case treeMode
   case inputDisabled
 
   func setUpArguments(for pane: PaneID) -> [String] {
     switch self {
     case .copyMode: ["copy-mode", "-t", pane.rawValue]
+    case .clockMode: ["clock-mode", "-t", pane.rawValue]
+    case .treeMode: ["choose-tree", "-t", pane.rawValue]
     case .inputDisabled: ["select-pane", "-d", "-t", pane.rawValue]
     }
   }
 
+  /// mode 名は tmux の `#{pane_mode}` の実測値。`choose-tree` が `tree-mode` を名乗るように、
+  /// 入り方のコマンド名とは一致しない。
   func expectedError(for pane: PaneID) -> TmuxTextInjectionError {
     switch self {
-    case .copyMode: .paneInCopyMode(pane)
+    case .copyMode: .paneInMode(pane, mode: "copy-mode")
+    case .clockMode: .paneInMode(pane, mode: "clock-mode")
+    case .treeMode: .paneInMode(pane, mode: "tree-mode")
     case .inputDisabled: .paneInputDisabled(pane)
     }
   }
@@ -75,7 +83,7 @@ struct TmuxTextInjectionIntegrationTests {
       let pane = try await makeShellPane(runner)
       _ = try await runner.run(arguments: RefusingPaneState.copyMode.setUpArguments(for: pane))
 
-      await #expect(throws: TmuxTextInjectionError.paneInCopyMode(pane)) {
+      await #expect(throws: TmuxTextInjectionError.paneInMode(pane, mode: "copy-mode")) {
         try await TmuxTextInjection(runner: runner).inject(probe.text, into: pane)
       }
 

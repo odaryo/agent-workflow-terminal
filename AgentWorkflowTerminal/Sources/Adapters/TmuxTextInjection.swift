@@ -14,14 +14,21 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
   case temporaryFileCreationFailed(path: String)
   /// tmux 3.4 実測: 対象 pane が無いと exit 1 / stderr `can't find pane: %N\n`。1バイトも届かない。
   case paneNotFound(PaneID)
-  /// 対象 pane が copy-mode 等の pane mode にいたため送らなかった。1バイトも届いていない。
+  /// 対象 pane が pane mode にいたため送らなかった。1バイトも届いていない。
   ///
-  /// **copy-mode では bracketed paste が効かない。** tmux 3.4 は mode 中の pane に対して
+  /// **mode 中は bracketed paste が効かない。** tmux 3.4 は mode 中の pane に対して
   /// `paste-buffer -p` の括りを付けず、LF → CR 変換だけが残るため、本文が丸ごと Enter として
   /// 配達される (実測: copy-mode にした zsh 5.9 の pane で、注入したコマンドが実行された)。
+  ///
+  /// `mode` は tmux の `#{pane_mode}` そのままで、実測値は `copy-mode` / `clock-mode` /
+  /// `tree-mode` (`choose-tree`)。**復旧操作は mode ごとに違う**ので、呼び出し側の案内文には
+  /// この値を使う (実測: `send-keys -X cancel` は copy-mode を抜けるが、clock-mode と
+  /// tree-mode は `not in a mode` で失敗して抜けられない)。拒否が決まった後に読み直す値なので、
+  /// ユーザーが既に mode を抜けていれば空文字列になり得る。判定そのものには使えない。
+  ///
   /// `paneInputDisabled` と分けているのは、ユーザーが取る復旧操作が違うため
   /// (mode を抜ける / pane の入力を有効に戻す)。こちらは scroll やマウス操作で日常的に起こる。
-  case paneInCopyMode(PaneID)
+  case paneInMode(PaneID, mode: String)
   /// 対象 pane が入力を受け付けない設定 (`select-pane -d`) だったため送らなかった。
   ///
   /// tmux 3.4 実測: この pane へ `paste-buffer -p -d` を投げると **exit 0 を返して buffer まで
@@ -54,7 +61,8 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
 /// - Important: **注入テキストは一時的にディスクへ載る。** `ProcessRunning` は設計上、子プロセスへ
 ///   stdin を渡さない (`ProcessRunner.swift`) ため `load-buffer -` が使えず、所有者だけが読める
 ///   一時ファイルを経由する。ファイルは `inject` を抜けるときに消すが、プロセスが SIGKILL 等で
-///   即死した場合は消えずに残る。
+///   即死した場合は消えずに残る。同じ即死では tmux server 側にも `awt-inject-<UUID>` の buffer が
+///   本文を抱えて残り得る (`deleteBuffer` を参照)。
 public struct TmuxTextInjection: Sendable {
   /// tmux の buffer 名と一時ファイル名の共通接頭辞。どちらも「この型が作った」と一目で分かる形に
   /// しておき、後始末に失敗した残骸の出どころを追えるようにする。名前には毎回新しい UUID を
@@ -115,11 +123,25 @@ public struct TmuxTextInjection: Sendable {
       _ = try await runner.run(arguments: attempt.gateArguments)
       return .success(())
     } catch {
-      return .failure(attempt.mapFailure(error))
+      return .failure(await labelling(attempt.mapFailure(error)))
     }
   }
 
+  /// mode 名だけは gate の1コマンドに載せられない (分岐の引数の中では `#{…}` が展開されず
+  /// `syntax error` になる。実測) ので、拒否が決まった後に読み直す。
+  ///
+  /// **判定は gate が原子的に済ませており、ここで読むのは表示用のラベルだけ。** 読み直しまでに
+  /// ユーザーが mode を抜けていれば空文字列になるが、「送らなかった」という結果は変わらない。
+  private func labelling(_ error: TmuxTextInjectionError) async -> TmuxTextInjectionError {
+    guard case .paneInMode(let pane, _) = error else { return error }
+    let read = try? await runner.run(
+      arguments: ["display-message", "-p", "-t", pane.rawValue, "#{pane_mode}"])
+    return .paneInMode(pane, mode: read?.stdout.trimmingCharacters(in: .newlines) ?? "")
+  }
+
   /// buffer の後始末。`load-buffer` を投げた後は成功・失敗にかかわらず必ず通す。
+  /// **例外はプロセスが SIGKILL 等で即死した場合で、このときは `delete-buffer` を発行できず、
+  /// 注入本文を抱えた buffer が tmux server に残る。**
   ///
   /// tmux 3.4 実測: `load-buffer` の読み取りはクライアント側で行われ、**データを送り終えた直後に
   /// クライアントを SIGKILL すると 20/20 で server に buffer が残った**。`TmuxRunner` の
@@ -160,7 +182,8 @@ public struct TmuxTextInjection: Sendable {
       while offset < raw.count {
         let count = write(descriptor, base.advanced(by: offset), raw.count - offset)
         guard count > 0 else {
-          if errno == EINTR { continue }
+          // errno を読めるのは `write` が負を返したときだけ。0 は失敗として扱う。
+          if count < 0, errno == EINTR { continue }
           return false
         }
         offset += count
@@ -176,9 +199,16 @@ public struct TmuxTextInjection: Sendable {
 
   /// tmux 3.4 実測: `load-buffer` の path 引数は format 展開される。`…/tst-#S.txt` を渡すと
   /// `#S` が session 名へ展開され、**実在する別のファイルを読み込んで exit 0 になった**。
-  /// `TMPDIR` に `#` を含む値を置かれると、注入が謎の ENOENT になるだけでなく、細工次第で
-  /// 別ファイルの中身を pane へ貼る経路になる。`#` を `##` にすると literal として扱われることを
-  /// 実測で確認している。`~` は展開されない (実測) ので触らない。
+  /// `#` を `##` にすると literal になることも実測で確認している。`~` は展開されない (実測)
+  /// ので触らない。
+  ///
+  /// 既定の置き場である `FileManager.default.temporaryDirectory` に `#` は入らない。macOS では
+  /// `confstr(_CS_DARWIN_USER_TEMP_DIR)` が返す `/var/folders/…/T` に固定され、`TMPDIR` へ `#`
+  /// 入りの値を置いても変わらないことを実測した。したがってこの変換が効くのは
+  /// `init(runner:temporaryDirectory:)` で別の置き場を渡す経路 — 現状はテスト、将来は
+  /// sandbox container など — であり、`inject` を置き場に依存させないために常に通す。
+  ///
+  /// `private` にしていないのは、変換規則そのものをテストから直接固定するため。
   static func escapingFormats(_ path: String) -> String {
     path.replacingOccurrences(of: "#", with: "##")
   }
@@ -256,7 +286,8 @@ extension TmuxTextInjection {
         return .tmux(error)
       }
       switch stderr {
-      case "unknown buffer: \(copyModeSentinel)\n": return .paneInCopyMode(pane)
+      // mode 名は `TmuxTextInjection.labelling` が読み直して埋める。ここでは判別だけする。
+      case "unknown buffer: \(copyModeSentinel)\n": return .paneInMode(pane, mode: "")
       case "unknown buffer: \(inputDisabledSentinel)\n": return .paneInputDisabled(pane)
       case "can't find pane: \(pane.rawValue)\n": return .paneNotFound(pane)
       default: return .tmux(error)

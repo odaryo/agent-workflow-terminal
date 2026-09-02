@@ -102,19 +102,27 @@ struct TmuxTextInjectionTests {
     #expect(invocations.last?.arguments == prefix + ["delete-buffer", "-b", buffer])
   }
 
-  @Test("copy-mode で送らなかった分岐を、専用のエラーとして返す")
-  func reportsCopyModeRefusal() async throws {
-    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-copy-mode-")
+  @Test(
+    "mode で送らなかった分岐は、その mode 名を載せて返す",
+    arguments: ["copy-mode", "clock-mode", "tree-mode", ""]
+  )
+  func reportsPaneModeRefusalWithTheModeName(_ mode: String) async throws {
+    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-copy-mode-", paneMode: mode)
     let injection = try makeInjection(spy)
 
-    await #expect(throws: TmuxTextInjectionError.paneInCopyMode(pane)) {
+    await #expect(throws: TmuxTextInjectionError.paneInMode(pane, mode: mode)) {
       try await injection.inject("text", into: pane)
     }
+    #expect(
+      await spy.lastModeQuery == [
+        "-u", "-L", "awt-test", "display-message", "-p", "-t", "%3",
+        "#{pane_mode}",
+      ])
   }
 
   @Test("入力を受け付けない pane で送らなかった分岐を、copy-mode とは別のエラーで返す")
   func reportsInputDisabledRefusal() async throws {
-    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-input-off-")
+    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-input-off-", paneMode: "")
     let injection = try makeInjection(spy)
 
     await #expect(throws: TmuxTextInjectionError.paneInputDisabled(pane)) {
@@ -246,6 +254,21 @@ struct TmuxTextInjectionTests {
     #expect(load.fileContents == Data("body\n".utf8))
   }
 
+  @Test("キャンセルで load-buffer が中断されても buffer を消しにいく")
+  func deletesTheBufferWhenLoadIsCancelled() async throws {
+    let spy = CancellingLoadSpy()
+    let injection = try makeInjection(spy)
+
+    await #expect(throws: TmuxTextInjectionError.tmux(.process(.cancelled))) {
+      try await injection.inject("text", into: pane)
+    }
+
+    let invocations = await spy.invocations
+    #expect(invocations.compactMap { $0.dropFirst(3).first } == ["load-buffer", "delete-buffer"])
+    let buffer = try #require(invocations.first?.dropFirst(5).first)
+    #expect(invocations.last == prefix + ["delete-buffer", "-b", buffer])
+  }
+
   private func makeInjection(
     _ spy: some ProcessRunning,
     temporaryDirectory: URL = FileManager.default.temporaryDirectory
@@ -313,9 +336,12 @@ private actor ProcessRunnerSpy: ProcessRunning {
 /// 引数に現れた sentinel 名から組み立てて返す。名前は注入ごとに変わるのでテストから固定できない。
 private actor SentinelFailingSpy: ProcessRunning {
   private let sentinelPrefix: String
+  private let paneMode: String
+  private(set) var lastModeQuery: [String]?
 
-  init(sentinelPrefix: String) {
+  init(sentinelPrefix: String, paneMode: String) {
     self.sentinelPrefix = sentinelPrefix
+    self.paneMode = paneMode
   }
 
   func run(
@@ -325,6 +351,11 @@ private actor SentinelFailingSpy: ProcessRunning {
     timeout: Duration,
     outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    if arguments.dropFirst(3).first == "display-message" {
+      lastModeQuery = arguments
+      // 実 tmux の `display-message -p` は末尾に改行を付ける (実測)。
+      return ProcessRunResult(exitCode: 0, stdout: paneMode + "\n", stderr: "")
+    }
     guard arguments.dropFirst(3).first == "if-shell",
       let sentinel =
         arguments
@@ -335,5 +366,25 @@ private actor SentinelFailingSpy: ProcessRunning {
     }
     return ProcessRunResult(
       exitCode: 1, stdout: "", stderr: "unknown buffer: \(sentinel)\n")
+  }
+}
+
+/// `load-buffer` の途中で呼び出し元 Task がキャンセルされたときに `ProcessRunning` が返す形を
+/// そのまま再現する。M1 の実トリガーはタイムアウトとキャンセルであり、単なる非ゼロ終了ではない。
+private actor CancellingLoadSpy: ProcessRunning {
+  private(set) var invocations: [[String]] = []
+
+  func run(
+    executableURL: URL,
+    arguments: [String],
+    environment: [String: String],
+    timeout: Duration,
+    outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    invocations.append(arguments)
+    guard arguments.dropFirst(3).first == "load-buffer" else {
+      return ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
+    }
+    throw .cancelled
   }
 }

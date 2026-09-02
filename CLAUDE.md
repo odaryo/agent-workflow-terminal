@@ -44,6 +44,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
 | Create an Issue | `scripts/wf-issue-create.sh` |
 | Update Issue Project status | `scripts/wf-project-status.sh` |
+| Add / remove Issue labels | `scripts/wf-issue-label.sh` |
 | Create a PR | `scripts/wf-pr-create.sh` |
 | Merge a PR | `scripts/wf-pr-merge.sh` |
 | Close a PR without merging | `scripts/wf-pr-close.sh` |

@@ -84,10 +84,11 @@ public struct AgentStateObservation: Sendable, Hashable, Codable {
 /// - Important: 状態を確定できない場合は `.working` / `.idle` へ丸めず
 ///   `.unknown` を返す (§12.3)。
 ///
-/// - Note: Phase 1 時点では宣言のみで実装体を持たない。取得可能な signal と
-///   `Permission` / `Question` / `Completed` / `Error` の厳密な検出条件は
-///   設計書 §12.4 で未確定であり、確定後にこの protocol の形も見直す。
-///   いま在る形を確定仕様として扱わない。
+/// - Note: Phase 1 時点では宣言のみで実装体を持たない。設計書 §12.4 が
+///   「event 購読を基本形とし、生存確認と状態観測を分ける」を確定させたため、
+///   単発 `observeState` だけのこの形は既に確定仕様と食い違っている。
+///   protocol の形を §12.4 へ合わせるのは実装フェーズで行う。
+///   厳密な検出条件は §12.5 で未確定のまま。
 public protocol AgentAdapter: Sendable {
   var id: AgentAdapterID { get }
 

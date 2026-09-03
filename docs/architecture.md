@@ -558,14 +558,49 @@ Agent processの存在は確認できるが、Adapterが状態を確定できな
 - `Unknown`からAdapter名、最終成功時刻、エラー詳細を確認できる。
 - Agentそのものの失敗とAdapterの状態取得失敗を混同しない。
 
-### 12.4 状態遷移の未確定事項
+### 12.4 Adapter API形状
 
-- Agentごとに実際に取得可能なsignal
-- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件
+**確定(2026-09-03)。** 根拠はPoC Gate 3の実測(§24、`Spikes/gate3/README.md`)。
+
+#### 12.4.1 状態取得はevent購読を基本形とする
+
+`AgentAdapter`の主APIは、pane単位の状態観測を流し続けるevent streamとする。pollingするかどうかはAdapter内部の実装詳細であり、API面には出さない。
+
+根拠: 信号ごとに最適な取得頻度が違う。hookはeventとして届き、tmux formatはpollingで読み、process観測は高コストで低頻度にしたい。呼び出し側が単一の間隔を決める形にすると、この差を吸収できない。
+
+#### 12.4.2 生存確認と状態観測を分ける
+
+「Agent processが存在するか」の確認と、「そのAgentがどの状態か」の観測を別APIとする。
+
+根拠は2つ。
+
+- process table全走査の実測コストが、tmuxからの状態取得の8倍あり、観測コストを支配する。両者を1つの呼び出しに束ねると頻度を分けられない。
+- Agent processを強制終了しても、paneには直前の描画が残り続ける。画面由来の判定は、生存確認を先に通していないと死んだAgentの状態を出し続ける。
+
+**`Agent processが居ない`は`Unknown`ではない。** §12.3の`Unknown`はprocessの存在が確認できている場合に限る。
+
+#### 12.4.3 種別不明の注意状態を表現できるようにする
+
+状態観測の結果には、`AgentState`とは別に§12.2の大分類を持たせる。種別まで確定できなくても「注意が要る」ことだけは伝えられるようにするためである。
+
+根拠: Agentによっては「操作待ちである」ことだけを外部へ出し、それが`Permission`なのか`Question`なのかを区別できない形で提供する。この場合に`Unknown`へ丸めると、Tier上取得できている情報を捨て、`Needs Attention`として通知できなくなる。
+
+`AgentState`の7状態の語彙自体は変更しない(§12.2、§12.3)。
+
+#### 12.4.4 `Unknown`の理由は型で持つ
+
+`Unknown`には理由を列挙型で持たせ、表示専用の文字列とは分ける。
+
+根拠: 「画面を読めない」「信号が存在しない」「Adapterが判断できない」はUIでの扱いが別物である。文字列だけで持つと、UI側が理由で分岐したくなった時に文字列解析が必要になる。§12.3が要求する「Agentそのものの失敗とAdapterの状態取得失敗を混同しない」も、型で持って初めて機械的に守れる。
+
+### 12.5 状態遷移の未確定事項
+
+- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーが未計測であることを含む)
 - PR Readyの検出元
-- process fallback時に`Working`と`Idle`を区別できる範囲
 - Adapter eventの永続化期間
 - false positive／false negativeの許容条件
+
+process fallbackについては、**process観測だけでは`Working`と`Idle`を区別できない**ことがGate 3で実測された。fallbackは推測せず`Unknown`を返す(§12.3)。
 
 ## 13. Active Worktrees Overview
 
@@ -1117,6 +1152,8 @@ SQLite候補テーブル:
 
 ### Gate 3: Agent Adapter
 
+**実施済み(2026-09-03)。** 計画は`Spikes/gate3/PLAN.md`、実測記録と未計測項目は`Spikes/gate3/README.md`。この結果を根拠にAdapter API形状を確定した(§12.4)。**Gate 3の成立／不成立の判断そのものは行っていない** — 取得できない状態は`Unknown`として明示する方針が既に確定しているため(§12.3、下記「PoC後の判断」)、本Gateの産物は可否ではなくどこまで縮退するかの境界線である。
+
 Claude CodeとCodexについて、共通状態をどこまで正確に取得できるか検証する。
 
 確認事項:
@@ -1187,8 +1224,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### Agent
 
-- Adapter API
-- Agentごとの状態取得手段
+- 各Adapterが採用するsignalの組み合わせ(Gate 3で取得可否と誤判定率は実測済み。採否は実装時に決める)
 - 質問fallbackのデータ交換形式
 - `Ask Agent`実行時に使用するAgent CLIの選択方法
 - Unknown通知のデフォルト時間
@@ -1457,6 +1493,10 @@ PR_READY
 - [x] Mac／mobile通知とdeep link
 - [x] Agent Adapterで複数Agentを抽象化
 - [x] Unknownを正式状態として扱う
+- [x] Adapterの状態取得はevent購読が基本形、pollingはAdapter内部の実装詳細
+- [x] 生存確認と状態観測はAPIとして分ける(`Agentが居ない`は`Unknown`ではない)
+- [x] 状態観測は種別不明でも大分類だけを伝えられる(AgentStateの7状態語彙は変えない)
+- [x] `Unknown`の理由は列挙型で持ち、表示専用の文字列と分ける
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
 - [x] 複数device同時attach時の`window-size`は`smallest`、session単位で設定(`-g`は使わない)

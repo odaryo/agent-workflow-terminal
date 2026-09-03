@@ -34,6 +34,7 @@ let package = Package(
     .testTarget(
       name: "TerminalCoreTests",
       dependencies: ["TerminalCore"],
+      resources: [.copy("Fixtures")],
       swiftSettings: commonSwiftSettings
     ),
     .testTarget(

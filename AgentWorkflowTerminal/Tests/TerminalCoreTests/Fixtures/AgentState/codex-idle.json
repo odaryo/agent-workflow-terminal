@@ -1,0 +1,17 @@
+{
+  "expectedState": "idle",
+  "acceptableStates": [
+    "idle"
+  ],
+  "note": "起動後・無入力",
+  "source": "codex-idle",
+  "paneTitle": "gate3-work-codex",
+  "paneCurrentCommand": "codex",
+  "paneInMode": false,
+  "secondsSinceWindowActivity": 9.25,
+  "processNames": [
+    "codex",
+    "node_repl"
+  ],
+  "screen": "\nThe default interactive shell is now zsh.\nTo update your account to use zsh, please run `chsh -s /bin/zsh`.\nFor more details, please visit https://support.apple.com/kb/HT208050.\nbash-3.2$ codex -a on-request -s read-only -c approvals_reviewer=\"user\"\n╭─────────────────────────────────────────────────────────╮\n│ >_ OpenAI Codex (v0.152.1)                              │\n│                                                         │\n│ model:     loading   /model to change                   │\n│ directory: /private/var/folders/99/…/T/gate3-work-codex │\n╰─────────────────────────────────────────────────────────╯\n\n⚠ Ignored invalid status line item: \"context-remaining-percent\".\n\n╭─────────────────────────────────────────────────────────╮\n│ >_ OpenAI Codex (v0.152.1)                              │\n│                                                         │\n│ model:     gpt-5.6-sol low   /model to change           │\n│ directory: /private/var/folders/99/…/T/gate3-work-codex │\n╰─────────────────────────────────────────────────────────╯\n\n  Tip: Switch models or reasoning effort quickly with /model.\n\n• You have 1 usage limit reset available. Run /usage to use one.\n\n\n› Ask Codex to do anything\n\n  gpt-5.6-sol low · gate3-work-codex · 5h 97% left · weekly 30% left · 01a0650a-490b-7a70-9d38-53a3296398e3 · main\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+}

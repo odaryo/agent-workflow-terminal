@@ -1,0 +1,20 @@
+{
+  "expectedState": "idle",
+  "acceptableStates": [
+    "idle"
+  ],
+  "note": "起動後・無入力",
+  "source": "claude-idle",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.259",
+  "paneInMode": false,
+  "secondsSinceWindowActivity": 0.74,
+  "processNames": [
+    "chrome-devtools-mcp",
+    "claude",
+    "node",
+    "npm exec chrome-devtools-mcp@1.8.0",
+    "npx"
+  ],
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.259\n▝▜██████▀  Opus 5 (1M context) · Claude Max\n  ▝▝ ▝▝    /private/var/folders/99/4xt4q3jx2lb25v8nyn5kw_p40000gn/T/gate3-work\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                      tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach for focus tracking\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  Opus 5 (1M context) │ ⚡ high │  main                                                                                                /rc\n  Session: 0m\n  ⏸ manual mode on · ← for agents\n"
+}

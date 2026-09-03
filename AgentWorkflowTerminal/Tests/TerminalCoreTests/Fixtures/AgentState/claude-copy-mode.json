@@ -1,0 +1,20 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "copy-mode。capture-pane が突入時点の画面を返し続けるため画面由来の判定は無効。pane_in_mode で検出する",
+  "source": "claude-copy-mode",
+  "paneTitle": "✳ 1から20の数字と豆知識",
+  "paneCurrentCommand": "2.1.259",
+  "paneInMode": true,
+  "secondsSinceWindowActivity": 38.74,
+  "processNames": [
+    "chrome-devtools-mcp",
+    "claude",
+    "node",
+    "npm exec chrome-devtools-mcp@1.8.0",
+    "npx"
+  ],
+  "screen": "  20. 20 —\n      にじゅう（二十）：「二十歳（はたち\n      ）」「二十日（はつか）」など、20だ\n      け特別な和語読みが今も残っている。\n\n✻ Cogitated for 26s · done 11:35 AM\n\n────────────────────────────────────────\n❯ \n────────────────────────────────────────\n  Opus 5 (1M context) │ ⚡ high │  ma…\n  Session: 0m │ ctx ▍░░░░░░░░░ 4% │ 5…\n"
+}

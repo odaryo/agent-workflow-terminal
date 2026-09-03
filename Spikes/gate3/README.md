@@ -87,7 +87,7 @@ S2 の画面パターンは初回の結果を見てから作り直している�
 | `pane_title` | 起動時 `✳ Claude Code` → **最初のターンで `✳ <タスク見出し>` になり、以降のターンでは更新されない** | **`⠋⠙⠹…`(braille spinner) + ディレクトリ名 = 実行中 / `Action Required | <dir>` = 操作待ち / ディレクトリ名のみ = 待機**(注意マーカーは §3.2) |
 | `alternate_on` | 1(代替画面を使う) | 0(インライン。`capture-pane -a` は "no alternate screen" を返す) |
 | ベル (`window_bell_flag`) | **全計測を通じて 0。鳴らない** | **同じく 0** |
-| `window_activity` | ターン中は毎秒更新、停止で凍結 | 同左。**ただし承認ダイアログ表示中も更新され続ける** |
+| `window_activity` | ターン中は毎秒更新、停止で凍結。**ただし window 単位の値である(§3.3)** | 同左。**加えて承認ダイアログ表示中も更新され続ける**(§3.2) |
 | `pane_in_mode` | copy-mode で 1 | 同左 |
 | hook | **project の `.claude/settings.json` から承認プロンプトなしで発火した。** `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PermissionRequest` / `PostToolUse` / `Stop` / `Notification` を実測 | **`hooks.json` のスキーマを特定できず、発火させられなかった**(§9) |
 | transcript | `$CLAUDE_CONFIG_DIR/projects/<cwd スラッグ>/<uuid>.jsonl` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`(現役。`session_meta` に cwd と session_id を持つ) |
@@ -116,6 +116,28 @@ Codex の「操作待ち」タイトルは `[ . ] Action Required │ <dir>` と
   誤ったのは、タイトルの明滅に伴う再描画で `window_activity` が更新され続けるためである。
   Claude Code は承認待ちで画面が完全に静止するので `Idle` へ倒れた。
   **同じ信号が Agent の描画の癖だけで逆方向へ倒れる。**
+
+### 3.3 `window_activity` は pane 単位ではない
+
+**本スパイクの計測はすべて 1 window / 1 pane で行っており、この交絡を含んでいない。**
+後から隔離ソケットで確認した結果:
+
+```
+出力前         %0(@0)=1788407303  %1(@0)=1788407303  %2(@1)=1788407303
+%1 へ出力した後 %0(@0)=1788407306  %1(@0)=1788407306  %2(@1)=1788407303
+```
+
+同じ window の兄弟 pane が出力すると、**無出力の pane についても値が更新される**。
+別 window の pane は影響を受けない。
+
+§6 の混同行列で `S5-activity` と `TierA-combined` が `Working` を検出できているのは、
+**agent pane が window 内で唯一の pane だったからである。** 設計書 §10.2 は同一 worktree に
+Consultation pane を置く前提であり、agent pane と別 pane が同じ window に並ぶ構成はむしろ標準なので、
+**本番の構成では `window_activity` を pane の出力鮮度として使えない。**
+
+tmux 3.4 に pane 単位の等価な format は見つかっていない
+(`pane_unseen_changes` は client が attach していない間 0 のまま)。
+`capture-pane` の結果を前フレームと差分比較する案は**未検証の仮説**である。
 
 ## 4. M2: 7状態シナリオ
 
@@ -322,6 +344,7 @@ OS 側のキャッシュが効くためと見られるが、**内訳までは切
    同一 cwd に多数の session ファイルが並ぶため、hook 無しで pane と session を結ぶ鍵が無い。
 4. **版数を上げ下げしての再計測**(§7.2)。
 5. **反復数** — 各 Agent 5 run。`PLAN.md` §6.3 の目安 10 回に届いていない。
+8. **同一 window に複数 pane がある構成** — 全計測が 1 window / 1 pane であり、`window_activity` の兄弟 pane による交絡 (§3.3) を含んでいない。**§6 の `Working` 検出率はこの構成に依存している。**
 6. **検出遅延 (p50 / p95)** — 記録は 250ms 刻みで残っているが、集計していない。
 7. **`Question` / `Error` / `Unknown` の混同行列** — シナリオは流したが、
    複合シナリオのように真値区間を機械的に切れないため、定性記録に留めた。
@@ -358,6 +381,7 @@ OS 側のキャッシュが効くためと見られるが、**内訳までは切
    **`[ ! ]` の側だけに一致させない**(§3.2)。
 7. **hook は Claude Code でのみ実測できている。** Codex にも同じ仕組みがある前提でコードを書かない。
 8. **ベルは使えない**(両 Agent とも鳴らさない)。
+9. **`window_activity` を pane の出力鮮度として使わない**(§3.3)。同じ window の別 pane の出力で更新されるため、`Completed` が `Working` に化ける。
 
 ---
 

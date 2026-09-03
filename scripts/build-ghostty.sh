@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib.sh
+# shellcheck disable=SC1091 # 実行時に解決するパスのため静的解析では追跡できない
 source "${SCRIPT_DIR}/lib.sh"
 
 usage() {
@@ -20,15 +20,20 @@ if [[ "${1:-}" = "-h" || "${1:-}" = "--help" ]]; then
 fi
 [[ "$#" -eq 0 ]] || die "引数は指定できません"
 
-GHOSTTY_REF="v1.3.1"
 ZIG_PREFIX="/opt/homebrew/opt/zig@0.15"
 LLVM_PREFIX="/opt/homebrew/opt/llvm@20"
 
 repo_root_cd
 ROOT_DIR="$PWD"
+GHOSTTY_REF="$(<"${ROOT_DIR}/App/ghostty-ref")"
+[ -n "${GHOSTTY_REF}" ] || die "App/ghostty-ref が空です"
 VENDOR_DIR="${ROOT_DIR}/App/vendor"
 GHOSTTY_DIR="${VENDOR_DIR}/ghostty"
 SHIM_DIR="${ROOT_DIR}/App/.build-shim"
+
+if [ -e "${GHOSTTY_DIR}" ] && [ ! -d "${GHOSTTY_DIR}/.git" ]; then
+  die "${GHOSTTY_DIR} は fetch 済みの成果物です。自前ビルドするには App/vendor/ghostty を削除してから再実行してください"
+fi
 
 [ -x "${ZIG_PREFIX}/bin/zig" ] \
   || die "zig 0.15 が見つかりません: brew install zig@0.15"

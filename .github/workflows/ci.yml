@@ -60,6 +60,29 @@ jobs:
             --triple arm64-apple-ios17.0-simulator \
             --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
+  build-app:
+    name: Build (macOS App)
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Fetch GhosttyKit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: scripts/fetch-ghostty.sh
+
+      - name: Build
+        working-directory: App
+        run: swift build
+
   format:
     name: swift-format
     runs-on: macos-15

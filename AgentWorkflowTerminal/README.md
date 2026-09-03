@@ -40,7 +40,8 @@ TerminalCoreTests  AdaptersTests
 | `AgentState.swift` | 正規化状態 `working / question / permission / completed / error / idle / unknown` と、worktree 代表状態の大分類 | 設計書 §12.2 / §12.3 |
 | `WorktreeRepresentativeState.swift` | worktree 代表状態を決める純粋関数 (Phase 1 の TDD リファレンス実装) | 設計書 §12.2 |
 | `AgentAdapter.swift` | Agent 状態正規化の境界 protocol。**宣言のみ** | 設計書 §12.1 |
-| `TerminalRenderer.swift` | Terminal 描画の境界 protocol。**宣言のみ** | 設計書 §21.5 / Gate 1 スパイク申し送り |
+| `TerminalRenderer.swift` | Terminal 描画の境界 protocol。実装体は `App/` の `GhosttyRenderer` | 設計書 §21.5 / Gate 1 スパイク申し送り |
+| `POSIXShellCommandLine.swift` | argv を POSIX shell quoting して1本の文字列にする純粋関数 | Spikes/gate1/README.md 申し送り #5 / libghostty v1.3.1 の command 契約 |
 
 ### `Adapters` の platform 境界
 

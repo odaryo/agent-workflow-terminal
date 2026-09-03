@@ -7,6 +7,9 @@ extension GhosttySurfaceView {
     if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
     let area = NSTrackingArea(
       rect: bounds,
+      // Why not activeAlways: 非 key window へマウスレポートを送ると、複数 worktree タブを
+      // 並べたときに背面のタブの Agent へ入力が届く。上流 Ghostty は activeAlways を選ぶが、
+      // あちらは 1 window = 1 ターミナルであり前提が違う (設計書 §4.2)。
       options: [
         .mouseEnteredAndExited, .mouseMoved, .inVisibleRect,
         .activeInKeyWindow, .cursorUpdate,

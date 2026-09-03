@@ -18,7 +18,7 @@ if [[ "${1:-}" = "-h" || "${1:-}" = "--help" ]]; then
   usage
   exit 0
 fi
-[[ "$#" -eq 0 ]] || { usage >&2; die "引数は指定できません"; }
+[[ "$#" -eq 0 ]] || die "引数は指定できません"
 
 GHOSTTY_REF="v1.3.1"
 ZIG_PREFIX="/opt/homebrew/opt/zig@0.15"

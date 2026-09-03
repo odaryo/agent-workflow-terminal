@@ -31,7 +31,7 @@ swift format format --configuration .swift-format --recursive --in-place \
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 
-`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, and runs format/lint over both packages. `App/` is not built in CI because `GhosttyKit.xcframework` and its toolchain are not available there.
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, and runs format/lint over both packages. `App/` is not built in CI because `GhosttyKit.xcframework` and its toolchain are not available there (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 

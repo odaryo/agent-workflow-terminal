@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import QuartzCore
 import SwiftUI
 import TerminalCore
 
@@ -54,10 +55,10 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
     userdata: nil,
     supports_selection_clipboard: false,
     wakeup_cb: { _ in
-      // Why not assumeIsolated: wakeup は libghostty の IO スレッドから届く
+      // Why main queue へ移す: wakeup は libghostty の IO スレッドから届く
       // (Spikes/gate1/README.md §5.2)。
       DispatchQueue.main.async {
-        MainActor.assumeIsolated { ConcreteGhosttyRuntime.shared.tick() }
+        MainActor.assumeIsolated { GhosttyRuntime.shared.tick() }
       }
     },
     action_cb: { _, target, action in
@@ -112,9 +113,9 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         pendingAction = nil
       }
       if let pendingAction {
-        // Why not assumeIsolated: action は renderer スレッドからも届く。
+        // Why main queue へ移す: action は renderer スレッドからも届く。
         DispatchQueue.main.async {
-          MainActor.assumeIsolated { ConcreteGhosttyRuntime.handleAction(pendingAction) }
+          MainActor.assumeIsolated { GhosttyRuntime.handleAction(pendingAction) }
         }
       }
       return accepted
@@ -124,14 +125,16 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         let userdata,
         let state
       else { return false }
-      // Why not main で復元: takeUnretainedValue 自体は参照カウント操作だけであり、ここで
-      // 強参照を確保しないと main queue が実行する前に view が解放され得る。
+      // Why callback 内で復元: takeUnretainedValue 自体は retain しないが、直後の main queue
+      // closure が view を capture して強参照を持つため、実行までの生存を保証できる。
       let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
       let stateAddress = UInt(bitPattern: state)
-      // Why not assumeIsolated: clipboard request の state は非同期完了まで保持される。
+      // Why main queue へ移す: callback のスレッドは保証されず、NSPasteboard は main actor 上で扱う。
+      // このため空 clipboard でも true を返して空文字列で完了し、上流の performable keybind を
+      // terminal へ透過する経路は失われる。この既知差分は Issue #109 で扱う。
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          ConcreteGhosttyRuntime.readClipboard(
+          GhosttyRuntime.readClipboard(
             view: view,
             stateAddress: stateAddress
           )
@@ -141,7 +144,7 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
     },
     confirm_read_clipboard_cb: { userdata, string, state, request in
       guard let userdata, let string, let state else { return }
-      // Why not main で復元: callback と main queue 実行の間も view の生存を保証する。
+      // Why callback 内で復元: main queue closure の capture により、実行まで強参照を保持する。
       let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
       let confirmation = ClipboardConfirmation(
         view: view,
@@ -149,35 +152,44 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         value: String(cString: string),
         request: request.rawValue
       )
-      // Why not assumeIsolated: confirm callback の呼び出しスレッドは保証されない。
+      // Why main queue へ移す: confirm callback の呼び出しスレッドは保証されない。
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          ConcreteGhosttyRuntime.confirmClipboardRead(confirmation)
+          GhosttyRuntime.confirmClipboardRead(confirmation)
         }
       }
     },
-    write_clipboard_cb: { _, location, content, count, _ in
+    write_clipboard_cb: { userdata, location, content, count, confirm in
       guard location == GHOSTTY_CLIPBOARD_STANDARD, let content, count > 0 else { return }
       var value: String?
       for index in 0..<count {
         let item = content[index]
         guard let mime = item.mime, let data = item.data,
-          String(cString: mime).hasPrefix("text/plain")
+          String(cString: mime) == "text/plain"
         else { continue }
         value = String(cString: data)
         break
       }
       guard let value else { return }
-      // Why not assumeIsolated: write callback の呼び出しスレッドは保証されない。
+      let view = userdata.map {
+        Unmanaged<GhosttySurfaceView>.fromOpaque($0).takeUnretainedValue()
+      }
+      // Why main queue へ移す: write callback の呼び出しスレッドは保証されない。
       DispatchQueue.main.async {
-        MainActor.assumeIsolated { ConcreteGhosttyRuntime.writeClipboard(value) }
+        MainActor.assumeIsolated {
+          if confirm, let view {
+            GhosttyRuntime.confirmClipboardWrite(value, view: view)
+          } else if !confirm {
+            GhosttyRuntime.writeClipboard(value)
+          }
+        }
       }
     },
     close_surface_cb: { userdata, _ in
       guard let userdata else { return }
-      // Why not main で復元: callback と main queue 実行の間も view の生存を保証する。
+      // Why callback 内で復元: main queue closure の capture により、実行まで強参照を保持する。
       let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
-      // Why not assumeIsolated: close callback の呼び出しスレッドは保証されない。
+      // Why main queue へ移す: close callback の呼び出しスレッドは保証されない。
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
           view.window?.performClose(nil)
@@ -192,9 +204,11 @@ private final class GhosttyRuntime {
   static let shared = GhosttyRuntime()
 
   private(set) var app: ghostty_app_t?
+  // Why not local variable: libghostty app が参照する config の寿命を process 全体で保持する。
   private var config: ghostty_config_t?
   private var initializationAttempted = false
   private var configurationFileURL: URL?
+  // Why not discard: NotificationCenter は token の解放時に observer を解除する。
   private var keyboardObserver: (any NSObjectProtocol)?
 
   private init() {}
@@ -245,8 +259,10 @@ private final class GhosttyRuntime {
       object: nil,
       queue: .main
     ) { _ in
-      // Why not dispatch: NotificationCenter の main queue 指定により、この closure は main で動く。
-      MainActor.assumeIsolated { ConcreteGhosttyRuntime.shared.keyboardChanged() }
+      // Why main queue へ移す: OperationQueue.main は main dispatch queue の context を保証しない。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated { Self.shared.keyboardChanged() }
+      }
     }
   }
 
@@ -327,6 +343,8 @@ private final class GhosttyRuntime {
     value: String,
     confirmed: Bool
   ) {
+    // Why not state を手動解放: state は libghostty の allocator 所有で公開解放 API がない。
+    // teardown と非同期完了が競合すると数十 byte が残り得る既知差分を Issue #109 で扱う。
     guard let surface = view.surface,
       let state = UnsafeMutableRawPointer(bitPattern: stateAddress)
     else { return }
@@ -338,6 +356,24 @@ private final class GhosttyRuntime {
   fileprivate static func writeClipboard(_ value: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(value, forType: .string)
+  }
+
+  fileprivate static func confirmClipboardWrite(_ value: String, view: GhosttySurfaceView) {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "クリップボードへの書き込みを許可しますか？"
+    alert.informativeText = "端末内のプログラムがクリップボードの上書きを要求しています。"
+    alert.addButton(withTitle: "許可")
+    alert.addButton(withTitle: "キャンセル")
+
+    let complete: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+      if response == .alertFirstButtonReturn { writeClipboard(value) }
+    }
+    if let window = view.window {
+      alert.beginSheetModal(for: window, completionHandler: complete)
+    } else {
+      complete(alert.runModal())
+    }
   }
 
   fileprivate static func handleAction(_ action: PendingGhosttyAction) {
@@ -379,9 +415,6 @@ private struct ClipboardConfirmation: Sendable {
   let value: String
   let request: UInt32
 }
-
-// Why not GhosttyRuntime directly: C function pointer closure cannot capture dynamic `Self`.
-private typealias ConcreteGhosttyRuntime = GhosttyRuntime
 
 private enum GhosttyRendererError: LocalizedError {
   case emptyCommand
@@ -485,6 +518,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
 
   override public func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
+    updateLayerContentScale()
     updateContentScaleFromWindow()
     updateSurfaceSize()
     updateDisplayID()
@@ -553,6 +587,17 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   private func updateContentScaleFromWindow() {
     guard let window else { return }
     setContentScale(window.backingScaleFactor)
+  }
+
+  private func updateLayerContentScale() {
+    guard let window else { return }
+    // Why not compositor に任せる: Retina / 非 Retina 間の移動時に libghostty 自身が解像度を
+    // 更新するため、Core Animation の追加 scale を防ぐ必要がある。出典:
+    // App/vendor/ghostty/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift:842-865
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    layer?.contentsScale = window.backingScaleFactor
+    CATransaction.commit()
   }
 
   private func updateSurfaceSize() {

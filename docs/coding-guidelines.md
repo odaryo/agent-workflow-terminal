@@ -247,7 +247,7 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 | 2 | `ghostty_surface_foreground_pid` / `tty_name` が libghostty v1.3.1 に無い | **プロセス観測の一次情報源は tmux CLI** (`list-panes` 系)。renderer からプロセス情報を取らない | §3.3 / §8.10 |
 | 3 | C コールバックと `@MainActor` の衝突 | §1.3 のとおり `TerminalRenderer` 実装体を `@MainActor` 固定 | §5.2 |
 | 4 | `GHOSTTY_RESOURCES_DIR` と `terminfo` は兄弟ディレクトリ | バンドル構造の制約としてビルドスクリプト側で担保 | §3.3 |
-| 5 | pane へのテキスト注入 | **`tmux load-buffer` + `paste-buffer -p` を使う。** `send-keys -l` は改行がそのまま実行になるため、1行テキスト以外に使わない | §8.8 |
+| 5 | pane へのテキスト注入 | **`tmux load-buffer` + `paste-buffer -p` を使う。** `send-keys -l` は改行がそのまま実行になるため、1行テキスト以外に使わない | 設計書 §4.1 / §9.2.1 |
 | 6 | detach すると surface のプロセスが死ぬ | 同一 surface でのコマンド再実行 API が無い。タブのライフサイクル設計で吸収する | §8.2 |
 | 7 | ディスプレイスリープ中は surface を生成できない | 生成失敗を正常系として扱い、遅延生成・リトライを用意する | §9.3 |
 | 8 | tmux の版数が grapheme 表示に効く (3.4 は ZWJ を壊す) | サポート下限を 3.4 として検出し、fixture に版数を記録する (§3.2) | 設計書 §4.3 / Spikes/gate1/README.md §10.3 |
@@ -256,7 +256,7 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 | 11 | `window-size` の選択が複数クライアント体験を決める | マルチデバイス接続 (§4.2) の設計時に明示的に決める | §8.7 |
 | 12 | libghostty の選択は pane 境界を無視する | 「pane 単位のコピー」は tmux の copy-mode に寄せる | §8.1 #22 |
 | 13 | `scrollback-limit` がメモリ予算の主要パラメータ | 設定ファイルのロード経路 (`ghostty_config_load_file`) を `TerminalRenderer` に持たせる | §12.5 / §12.8 |
-| 14 | メモリはアプリと tmux サーバの 2 か所に載る | `history-limit` の扱いを製品として決める | §12.5 |
+| 14 | メモリはアプリと tmux サーバの 2 か所に載る | **製品既定として明示する** (`scrollback-limit` 10MB / `history-limit` 10000、tmux 側は session 単位) | 設計書 §4.4 / Spikes/gate1/README.md §12.5 |
 | 15 | libghostty 側の split / tab は握り潰す | action callback で `false` を返す。設計書 §4.1 と整合 | §8.5 |
 
 **スパイクのコードを本体へコピーしない。** `Spikes/` は使い捨てであり、

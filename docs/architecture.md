@@ -209,6 +209,10 @@ Terminal UIで提供する操作は最小限とする。
 
 window/sessionの高度な管理、名前変更、並べ替え、swap-paneなどを網羅する完全GUIは作らない。
 
+paneへのテキスト注入方式は**`load-buffer` + `paste-buffer -p`**とする(§9.2、§10で使う)。`send-keys -l`はbracketed pasteで括る手段を持たず、本文の改行がそのまま実行になるため使わない。
+
+注入は「送信」であって「実行」ではない。本文の改行をEnterとして実行させる機能はTerminalに持たせず、実行するかどうかはユーザーの明示操作として分離する。方式に伴う制約は§9.2.1にまとめる。
+
 ### 4.2 複数端末からの接続
 
 同じtmux sessionをMac、iPhone、iPadから同時に表示・操作できる。独自の`Take Control`や入力排他制御は設けない。
@@ -236,6 +240,23 @@ iPhone/iPadとMacの同時attachで**全クライアントが全内容を見ら�
 したがって3.5未満は**警告を出すのみ**とし、動作の制限や接続の拒否は行わない。3.4を切り捨てないのは、既存のCLI出力パーサの挙動根拠がすべて3.4の実測であり、Ubuntu 24.04 LTSの標準パッケージも3.4であるためである。
 
 Adapterは版数を検出する。版数を解釈できなかった場合は`Unknown`として保持し、**「サポート対象」にも「対象外」にも丸めない**(§12.3と同じ方針)。
+
+### 4.4 スクロールバック履歴とメモリ予算
+
+**履歴はアプリとtmuxサーバの2か所に載る。** どちらの上限もTerminalが製品既定として明示し、ユーザーの`~/.tmux.conf`やghostty設定任せにしない。1 worktree = 1 tmux session(§4.1)を5〜10個同時に開く設計では、この既定値がそのままメモリ予算になるためである。
+
+| 対象 | 製品既定 | 設定単位 |
+|---|---|---|
+| アプリ側scrollback | `scrollback-limit` = **10,000,000**(10MB) | surface単位 |
+| tmuxサーバ側履歴 | `history-limit` = **10,000** | session生成時にsession単位で設定 |
+
+どちらもアプリ設定から変更可能とする。tmux側は`window-size`(§4.2)と同じくsession単位で設定し、サーバ全体のglobal option(`-g`)としては設定しない。ユーザーが自分で作った他のsessionへ波及させないためである。
+
+Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
+
+- **`scrollback-limit`(バイト)がほぼそのまま常駐メモリ増になる。** 既定の10MBで1 surfaceあたり最大+17MB、100MBにすると+103MB。上限に達すると頭から捨てられ、それ以上は増えない(上限として正しく機能している)。
+- **tmuxの履歴メモリは`history-limit` × 行の桁数に比例する。** 174桁で1行あたり約2KB、`history-limit 10000`で1 paneあたり約25MB。**これはpane単位**であり、10タスク × 各数paneならtmuxサーバだけで数百MBに達しうる。
+- アプリのメモリだけを見ていると全体像を見誤る。両方を製品として押さえる理由がこれである。
 
 ## 5. Agent Terminal中心UI
 
@@ -390,6 +411,16 @@ base branchの自動判定方法、merge-baseの使い方、未commit変更を�
 - GitHub PR reviewへの直接投稿は行わない。
 
 コメントの送信先は、そのworktreeの**実装Agent pane**とする。Consultation paneへは送らず、相談機能とレビュー修正依頼の役割を分離する。
+
+#### 9.2.1 テキスト注入の制約
+
+送信は§4.1の`load-buffer` + `paste-buffer -p`で行う。tmux 3.4での実測にもとづき、次の3点を設計上の性質として扱う。§10の`Ask Agent`も同じ経路を使う。
+
+1. **bracketed pasteが効くかは、受け側paneのその瞬間の状態で決まる。** tmuxが`ESC[200~`／`ESC[201~`で括るのはpane上のアプリがDECSET 2004を立てているときだけで、括らないときも本文のLFはCR(= Enter)へ変換して届く。つまり**送ったコメントが受け側次第で実行され得る**。同じアプリでも状態次第で変わり(bracketed paste対応のvim 9.1でも、normal modeでは注入したコマンドが実行された)、「このAgentなら安全」というアプリ単位の判断は成り立たない。DECSET 2004の状態はtmux 3.4のformatに無く、**注入側から観測できない**ため、これは残存リスクとして受け入れる。Terminalが塞げるのは`pane_in_mode`(copy-mode等)と`pane_input_off`だけである。
+2. **bracketed pasteにescapeが無い。** 本文中の`ESC[201~`が受け側でpasteを打ち切り、残りが打鍵として届いて実行される。本文を黙って書き換えるとレビューコメントが壊れるため、tab／LF／CR以外のC0・DEL・C1を含むテキストは**加工せず拒否**して呼び出し側へ返す。
+3. **注入テキストは一時的にディスクへ載る。** 外部プロセス実行層が子プロセスへstdinを渡さない方針のため`load-buffer -`が使えず、所有者だけが読める一時ファイルを経由する。
+
+制約1をユーザーへ事前に示すUI(送信前の警告等)の要否は未確定(§25)。
 
 ### 9.3 snapshot
 
@@ -548,6 +579,14 @@ Agent完了は`Needs Attention`ではなく`Ready for Review`に分類する。
 
 複数Agent paneがある場合でも、タブには最重要の代表状態を1つ表示し、paneごとの詳細はworktreeを開いて確認する。
 
+**代表状態の表示は安定化する。** Adapterの観測をそのままタブへ出すと、通常の作業中とアイドル中に表示が入れ替わり続ける(Gate 3記録のreplay実測: idle区間で11〜13回/分の`Idle`↔`Working`、working区間で19〜33回/分の`Working`↔`Unknown`)。この振動は**許容しない**。
+
+- `Needs Attention`(`Question`／`Permission`／`Error`)および`Ready for Review`への遷移は**即時反映する**。人の対応が要る通知を遅らせない。
+- `Working`から`Idle`／`Unknown`への降格だけ、一定時間の保持を挟んでから反映する。
+- 安定化は**UIへ出す代表状態にのみ適用**し、Adapterのevent stream(§12.4.1)が配信する観測そのものは加工しない。
+
+保持時間の具体値は未確定(§25)。
+
 ### 12.3 Unknown
 
 Agent processの存在は確認できるが、Adapterが状態を確定できない場合は推測で`Working`や`Idle`へ丸めず、正式な`Unknown`状態とする。
@@ -593,12 +632,23 @@ Agent processの存在は確認できるが、Adapterが状態を確定できな
 
 根拠: 「画面を読めない」「信号が存在しない」「Adapterが判断できない」はUIでの扱いが別物である。文字列だけで持つと、UI側が理由で分岐したくなった時に文字列解析が必要になる。§12.3が要求する「Agentそのものの失敗とAdapterの状態取得失敗を混同しない」も、型で持って初めて機械的に守れる。
 
-### 12.5 状態遷移の未確定事項
+### 12.5 Adapterが使う信号の採用基準
+
+Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採点され、`Spikes/gate3/README.md` §6の混同行列に検出率・誤判定率の数字が残っているものに限る。** 「スパイクの記録に写っている」ことは採用根拠にならない。
+
+採点されていない信号を使いたい場合は、`Spikes/gate3/scripts/analyze.py`の分類器へ加えて記録をreplayで再採点し、混同行列を更新してから採用する。記録は保存されているため再採点は安価である。**コード上の根拠コメントで代替することは認めない。**
+
+この基準は、採点していないルールを足したことで`working`の検出率が下がり`idle`が上がるトレードオフが、commitにも仕様にも根拠を残さないまま入っていた実例を受けたものである。今後のAdapter実装の完了条件はこの節を参照する。
+
+信号の**組み合わせ方**(どの信号をどう合成して7状態へ落とすか)は各Adapterの実装判断であり、この基準は個々の信号の採用可否だけを縛る。
+
+### 12.6 状態遷移の未確定事項
 
 - `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーが未計測であることを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
-- false positive／false negativeの許容条件
+- 代表状態の降格を反映するまでの保持時間の具体値(方針は§12.2で確定)
+- false positive／false negativeの許容条件(表示の振動を許容しないことは§12.2で決着済み)
 
 process fallbackについては、**process観測だけでは`Working`と`Idle`を区別できない**ことがGate 3で実測された。fallbackは推測せず`Unknown`を返す(§12.3)。
 
@@ -782,6 +832,16 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 
 Git graphは提供せず、シンプルなCommit Logに留める。
 
+### 17.3 サポートするgit版数
+
+サポート下限は**git 2.39**とする。2.39以上であれば機能制限を設けない。
+
+Terminalはユーザーの`~/.gitconfig`に依存しない決定的な出力を得るため、各git読み取りコマンドへ形式固定用のoptionを明示する。この結果、実装上の実効下限は`git status --renames`の初出である2.18(2018-06)まで下がるが、**実行hostがMac/PCに限られる(§20.1)以上、そこまで下げる意味は無い**。macOS Command Line Toolsが配布するgitは2.39以降であり、下限を2.39に置いても現実の対象環境を落とさず、将来optionを追加する余地も残る。
+
+下限未満を検出した場合は**警告を出すのみ**とし、動作の制限や接続の拒否は行わない(§4.3のtmuxと同じ方針)。版数を解釈できなかった場合は`Unknown`として保持し、「サポート対象」にも「対象外」にも丸めない(§12.3と同じ方針)。
+
+ただしこの「警告のみ」は**Terminal側が能動的に拒否しないという意味であり、下限未満での動作を保証するものではない**。2.18未満では`status --renames`がoption解釈エラー(exit 129)となり、statusは部分的にではなく丸ごと失敗する。
+
 ## 18. Web／GUI確認
 
 ### 18.1 最終決定
@@ -865,6 +925,7 @@ iPhone / iPad
 - iPhone/iPadは監視、レビュー、質問対応を主用途とし、必要なときに完全なTerminal操作へ入る。
 - 外出先からの到達性はTailscale等の既存VPN／private networkへ委譲する。アプリはSSH接続のみを担当し、独自のリレーやNAT越え機能を持たない。
 - Agent状態・Diff・Evidence等の構造化データをモバイルから取得できるのは、Mac側アプリ(Host Core)の起動中のみとする。アプリ非起動時もtmux sessionとAgentは動作し続け、素のSSH + tmux attachは可能である。
+- **tmuxコマンドを実行するのはMac/PC host上のプロセスだけである。** tmuxコマンドの組み立て(引数の構築と検証)と、その実行(hostローカルのprocess起動／SSH越しの実行)を分離し、実行ファイルの解決を伴うローカル実行の型はhost platformに限定する。ローカル実行できない環境へ、必ず失敗するAPIを公開しない。
 - **iPhone/iPadのTerminal描画方式は、macOS版と共通であることを要求しない。** macOS版でlibghostty(完全版)を採用する場合でも、モバイル側は実現可能なrendererを独立に選定してよい。モバイル側の具体的なrenderer選定は未確定(§21.5、§25)。
 
 Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMacとなる。他OSのPC host対応は未確定。
@@ -1224,7 +1285,9 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### Agent
 
-- 各Adapterが採用するsignalの組み合わせ(Gate 3で取得可否と誤判定率は実測済み。採否は実装時に決める)
+- 各Adapterが採用するsignalの組み合わせ(個々の信号の採用基準は§12.5で確定。どう合成して7状態へ落とすかは実装時に決める)
+- 代表状態の降格を反映するまでの保持時間の具体値(§12.2)
+- false positive／false negativeの許容条件(振動の可否は§12.2で決着済み)
 - 質問fallbackのデータ交換形式
 - `Ask Agent`実行時に使用するAgent CLIの選択方法
 - Unknown通知のデフォルト時間
@@ -1236,6 +1299,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - working tree／staged／untrackedの扱い
 - rename、binary Diff、submodule、LFS
 - comment anchor schema
+- テキスト注入の制約1(受け側次第で本文が実行され得ること)をユーザーへ事前に示すUIの要否(§9.2.1)
 
 ### Mobile／remote
 
@@ -1501,6 +1565,12 @@ PR_READY
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
 - [x] 複数device同時attach時の`window-size`は`smallest`、session単位で設定(`-g`は使わない)
 - [x] tmuxのサポート下限は3.4、3.5未満はZWJ表示の警告のみで機能制限なし
+- [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
+- [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容
+- [x] `scrollback-limit` 10MBと`history-limit` 10000を製品既定として明示(tmux側はsession単位)
+- [x] 代表状態はNeeds Attention／Ready for Reviewへ即時反映、Workingからの降格のみ保持
+- [x] Adapterが使う信号はGate 3の混同行列に数字が残るものに限る
+- [x] tmuxコマンドの組み立てと実行を分離し、ローカル実行の型はhost platformに限定
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
 - [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用

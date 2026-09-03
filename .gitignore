@@ -80,4 +80,8 @@ Spikes/gate1/build/
 Spikes/gate1/evidence/
 # Gate 3 の生記録 (pane 画面を毎フレーム保存するため 50MB を超える)。集計結果だけ追跡する。
 Spikes/gate3/evidence/runs/
+App/vendor/
+App/build/
+App/.build-shim/
+App/.build/
 __pycache__/

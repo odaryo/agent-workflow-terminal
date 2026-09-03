@@ -7,6 +7,8 @@
 included:
   - AgentWorkflowTerminal/Sources
   - AgentWorkflowTerminal/Tests
+  - App/Sources
+  - App/Package.swift
 
 excluded:
   # スパイクは使い捨てコードであり、規約の対象外 (docs/coding-guidelines.md)。

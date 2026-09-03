@@ -11,7 +11,19 @@ public struct TerminalSize: Sendable, Hashable, Codable {
   }
 }
 
-/// 座標系は表示面ローカル、単位は point。
+/// 単位は backing store の pixel。libghostty がセル数を決める契約のため、
+/// 呼び出し側で columns / rows へ換算しない。
+public struct TerminalPixelSize: Sendable, Hashable, Codable {
+  public let width: Int
+  public let height: Int
+
+  public init(width: Int, height: Int) {
+    self.width = width
+    self.height = height
+  }
+}
+
+/// 座標系は表示面ローカルの左下原点、単位は point。
 ///
 /// - Important: libghostty v1.3.1 の `ime_point` は width にだけ content scale が
 ///   適用されていない (Spikes/gate1/README.md 申し送り #9)。
@@ -28,13 +40,20 @@ public struct TerminalIMEPoint: Sendable, Hashable {
 }
 
 public struct TerminalRendererConfiguration: Sendable, Hashable {
-  /// shell を経由せず argv として渡す。パイプ・リダイレクト・引用は解釈されないため、
-  /// コマンド行を1本の文字列で組み立てない (例: `["tmux", "new-session", "-A", "-s", name]`)。
+  /// libghostty v1.3.1 の C API は legacy 実装により command を必ず shell 経由で実行する。
+  /// renderer が各要素を POSIX shell quoting するためメタ文字は解釈されない。呼び出し側で
+  /// コマンド行を1本の文字列へ組み立てない (例: `["tmux", "new-session", "-A", "-s", name]`)。
+  ///
+  /// - Important: command を指定すると libghostty が `wait-after-command` を強制的に有効にし、
+  ///   コマンド終了後も surface が残る。surface のライフサイクル設計ではこの副作用を前提とする。
   public let command: [String]
   public let workingDirectory: String?
   /// このフィールドが存在するのは、libghostty の `scrollback-limit` が
   /// メモリ予算の主要パラメータであり、設定ファイルのロード経路を
   /// renderer に持たせる必要があるため (Spikes/gate1/README.md 申し送り #13)。
+  ///
+  /// - Important: libghostty v1.3.1 の設定はプロセス全体で共有されるため、最初の
+  ///   runtime 初期化時にだけ読み込まれる。初期化後に異なる URL は指定できない。
   public let configurationFileURL: URL?
 
   public init(
@@ -69,14 +88,20 @@ public protocol TerminalRenderer: AnyObject {
   ///   遅延生成・リトライで扱う (Spikes/gate1/README.md 申し送り #7)。
   var isRunning: Bool { get }
 
+  /// libghostty が backing store の pixel size から決めたセル数の観測値。
   var size: TerminalSize { get }
 
-  /// 値はスケール適用済み (`TerminalIMEPoint` の Important 参照)。
+  /// 値はスケール適用済み (`TerminalIMEPoint` の Important 参照)。surface が未生成、
+  /// または入力位置を取得できない場合は `nil`。表示面ローカルの左下原点で返す。
   var imePoint: TerminalIMEPoint? { get }
 
   func start(configuration: TerminalRendererConfiguration) throws
 
-  func resize(to size: TerminalSize)
+  /// 表示面のレイアウトが値の所有者であり、明示値は次のレイアウト変更で上書きされる。
+  func resize(to size: TerminalPixelSize)
+
+  /// 表示面のレイアウトが値の所有者であり、明示値は次の backing scale 変更で上書きされる。
+  func setContentScale(_ scale: Double)
 
   func shutdown()
 }

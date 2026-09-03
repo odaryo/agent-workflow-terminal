@@ -76,7 +76,9 @@ jobs:
             --recursive --strict \
             AgentWorkflowTerminal/Sources \
             AgentWorkflowTerminal/Tests \
-            AgentWorkflowTerminal/Package.swift
+            AgentWorkflowTerminal/Package.swift \
+            App/Sources \
+            App/Package.swift
 
   # SwiftLint はランナーイメージに同梱されていればそれを使い、
   # 同梱が外れた場合だけ brew で導入する (数分かかる)。

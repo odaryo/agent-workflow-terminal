@@ -4,30 +4,34 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-`agent_workflow_terminal` is pre-alpha. It holds the design documents, one throwaway PoC spike, and a scaffolding-only Swift package — **no product feature is implemented yet**.
+`agent_workflow_terminal` is pre-alpha. It holds the design documents, one throwaway PoC spike, the core Swift package, and an initial macOS app target.
 
 - `docs/architecture.md` — the specification (Japanese). `docs/coding-guidelines.md` — the coding rules; read it before writing Swift.
 - `Spikes/gate1/` — the PoC Gate 1 spike (SwiftUI + libghostty + PTY + tmux). Throwaway code: excluded from lint, format, tests, and CI. Read it as a reference implementation; never copy code out of it.
 - `AgentWorkflowTerminal/` — the SwiftPM package. Targets: `TerminalCore` (domain model, no UI/process deps) ← `Adapters` (external-world boundary, placeholder only). Each has a Swift Testing test target. Swift 6 language mode, strict concurrency.
-- There is deliberately **no app target / Xcode project yet** — the Gate 1 spike already serves as the running macOS reference, and Gate 2+ is unfinished. See `AgentWorkflowTerminal/README.md`.
+- `App/` — the separate macOS SwiftPM package for the app and libghostty renderer. It is separate because CI cannot build the vendored `GhosttyKit.xcframework`; CI continues to build only `AgentWorkflowTerminal/`. There is no Xcode project. See `App/README.md`.
 - **Tasks live in GitHub Issues — Issues are the single source of truth.** Never keep TODO lists in files, docs, or code comments; file an Issue instead.
 
 ### Build / test / lint
 
 ```shell
-cd AgentWorkflowTerminal && swift build && swift test     # SwiftPM package
+cd AgentWorkflowTerminal && swift build && swift test     # CI 対象の core package
+scripts/build-ghostty.sh                                  # ローカルの libghostty
+scripts/build-app.sh                                      # ローカルの macOS app bundle
 ```
 
 ```shell
 # from the repository root
 swift format lint --configuration .swift-format --recursive --strict \
-  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift
+  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
+  App/Sources App/Package.swift
 swift format format --configuration .swift-format --recursive --in-place \
-  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift
+  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
+  App/Sources App/Package.swift
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 
-`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` + `swift format lint` + `swiftlint lint --strict` on a macOS runner (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, and runs format/lint over both packages. `App/` is not built in CI because `GhosttyKit.xcframework` and its toolchain are not available there.
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 

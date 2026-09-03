@@ -1,7 +1,7 @@
 # AgentWorkflowTerminal (Swift Package)
 
-`agent_workflow_terminal` の Swift Package です。Phase 1 の足場と、外部 CLI に接続する
-Adapter 境界の基礎実装を収めています。製品アプリの UI はまだありません。
+`agent_workflow_terminal` の core Swift Package です。Phase 1 の足場と、外部 CLI に接続する
+Adapter 境界の基礎実装を収めています。macOS アプリは [`App/`](../App/) にあります。
 
 コーディング規約は [`docs/coding-guidelines.md`](../docs/coding-guidelines.md)、
 仕様は [`docs/architecture.md`](../docs/architecture.md) を参照してください。
@@ -118,20 +118,11 @@ swift format format --configuration .swift-format --recursive --in-place \
 swiftlint lint --config .swiftlint.yml
 ```
 
-## アプリ本体 (SwiftUI app / Xcode プロジェクト) について
+## macOS アプリ
 
-**Phase 1 では作りません。** 理由:
-
-- `TerminalRenderer` に libghostty を使う macOS アプリの参照実装は
-  `Spikes/gate1/`(Gate 1 スパイク) に既に存在し、SwiftUI + libghostty + PTY + tmux が
-  動くことは実測済みです。同じものをもう1つ作る価値がありません。
-- 設計書 §24 の Gate 2 以降 (iOS/SSH、Agent Adapter 等) が未実施であり、
-  アプリの形を今固定すると、未確定事項を暗黙に確定させてしまいます。
-- Phase 1 の目的は規約と足場の確定であり、アプリのシェルはその対象外です。
-
-アプリターゲットは、Gate 2 以降の結果を踏まえて別フェーズで追加します。
-その際は `Spikes/gate1/` を参照実装として扱い、コードをそのままコピーするのではなく
-規約 (docs/coding-guidelines.md) に沿って書き直します。
+libghostty を使う macOS アプリは、CI で core package の manifest 解決を妨げないよう
+独立した SwiftPM package [`App/`](../App/) に置いています。ビルド方法と必要な外部成果物は
+[`App/README.md`](../App/README.md) を参照してください。
 
 ## Swift 設定
 

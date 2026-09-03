@@ -1,0 +1,609 @@
+import AppKit
+import GhosttyKit
+import SwiftUI
+import TerminalCore
+
+// Why not 分割: runtime callback と view の userdata 復元を同じファイルに置き、
+// C 境界から @MainActor へ移る経路を一箇所で追跡できるようにする。
+// swiftlint:disable file_length
+
+public struct GhosttyTerminalView: NSViewRepresentable {
+  private let configuration: TerminalRendererConfiguration
+
+  public init(
+    command: [String],
+    workingDirectory: String? = nil,
+    configurationFileURL: URL? = nil
+  ) {
+    configuration = TerminalRendererConfiguration(
+      command: command,
+      workingDirectory: workingDirectory,
+      configurationFileURL: configurationFileURL
+    )
+  }
+
+  public func makeNSView(context: Context) -> GhosttySurfaceView {
+    let view = GhosttySurfaceView()
+    do {
+      try view.start(configuration: configuration)
+    } catch {
+      NSLog("[app] libghostty の初期化に失敗: \(error.localizedDescription)")
+    }
+    return view
+  }
+
+  public func updateNSView(_ nsView: GhosttySurfaceView, context: Context) {}
+
+  public static func dismantleNSView(_ nsView: GhosttySurfaceView, coordinator: ()) {
+    // Why not deinit: SwiftUI は破棄前にこの main actor callback を呼ぶ契約であり、
+    // GhosttySurfaceView はこの representable だけが生成できる。
+    nsView.shutdown()
+  }
+}
+
+@MainActor
+public func setGhosttyApplicationFocus(_ focused: Bool) {
+  GhosttyRuntime.shared.setFocus(focused)
+}
+
+// Why not @MainActor: C callback は renderer / IO を含む任意のスレッドから同期に呼ばれる。
+// actor 隔離を継承しない場所で callback table を生成し、副作用だけを main queue へ移す。
+// swiftlint:disable:next cyclomatic_complexity function_body_length
+private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
+  ghostty_runtime_config_s(
+    userdata: nil,
+    supports_selection_clipboard: false,
+    wakeup_cb: { _ in
+      // Why not assumeIsolated: wakeup は libghostty の IO スレッドから届く
+      // (Spikes/gate1/README.md §5.2)。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated { ConcreteGhosttyRuntime.shared.tick() }
+      }
+    },
+    action_cb: { _, target, action in
+      let accepted: Bool
+      let pendingAction: PendingGhosttyAction?
+      switch action.tag {
+      case GHOSTTY_ACTION_SET_TITLE:
+        accepted = true
+        if target.tag == GHOSTTY_TARGET_SURFACE,
+          let surface = target.target.surface,
+          let title = action.action.set_title.title
+        {
+          pendingAction = .setTitle(
+            surfaceAddress: UInt(bitPattern: surface),
+            title: String(cString: title)
+          )
+        } else {
+          pendingAction = nil
+        }
+      case GHOSTTY_ACTION_MOUSE_OVER_LINK:
+        accepted = true
+        pendingAction = .setLinkCursor(action.action.mouse_over_link.len > 0)
+      case GHOSTTY_ACTION_OPEN_URL:
+        accepted = true
+        let value = action.action.open_url
+        if let bytes = value.url, value.len > 0 {
+          pendingAction = .openURL(
+            String(
+              decoding: UnsafeRawBufferPointer(start: bytes, count: Int(value.len)),
+              as: UTF8.self
+            )
+          )
+        } else {
+          pendingAction = nil
+        }
+      case GHOSTTY_ACTION_NEW_SPLIT, GHOSTTY_ACTION_TOGGLE_SPLIT_ZOOM,
+        GHOSTTY_ACTION_GOTO_SPLIT, GHOSTTY_ACTION_RESIZE_SPLIT,
+        GHOSTTY_ACTION_EQUALIZE_SPLITS, GHOSTTY_ACTION_NEW_TAB,
+        GHOSTTY_ACTION_NEW_WINDOW:
+        // Why not handle: pane / tab / window 操作は tmux の責務である (設計書 §4.1)。
+        accepted = false
+        pendingAction = nil
+      case GHOSTTY_ACTION_MOUSE_SHAPE, GHOSTTY_ACTION_MOUSE_VISIBILITY,
+        GHOSTTY_ACTION_PWD, GHOSTTY_ACTION_RENDER, GHOSTTY_ACTION_RENDERER_HEALTH,
+        GHOSTTY_ACTION_CELL_SIZE, GHOSTTY_ACTION_CONFIG_CHANGE,
+        GHOSTTY_ACTION_COLOR_CHANGE, GHOSTTY_ACTION_KEY_SEQUENCE,
+        GHOSTTY_ACTION_SECURE_INPUT:
+        accepted = true
+        pendingAction = nil
+      default:
+        accepted = false
+        pendingAction = nil
+      }
+      if let pendingAction {
+        // Why not assumeIsolated: action は renderer スレッドからも届く。
+        DispatchQueue.main.async {
+          MainActor.assumeIsolated { ConcreteGhosttyRuntime.handleAction(pendingAction) }
+        }
+      }
+      return accepted
+    },
+    read_clipboard_cb: { userdata, location, state in
+      guard location == GHOSTTY_CLIPBOARD_STANDARD,
+        let userdata,
+        let state
+      else { return false }
+      // Why not main で復元: takeUnretainedValue 自体は参照カウント操作だけであり、ここで
+      // 強参照を確保しないと main queue が実行する前に view が解放され得る。
+      let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+      let stateAddress = UInt(bitPattern: state)
+      // Why not assumeIsolated: clipboard request の state は非同期完了まで保持される。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          ConcreteGhosttyRuntime.readClipboard(
+            view: view,
+            stateAddress: stateAddress
+          )
+        }
+      }
+      return true
+    },
+    confirm_read_clipboard_cb: { userdata, string, state, request in
+      guard let userdata, let string, let state else { return }
+      // Why not main で復元: callback と main queue 実行の間も view の生存を保証する。
+      let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+      let confirmation = ClipboardConfirmation(
+        view: view,
+        stateAddress: UInt(bitPattern: state),
+        value: String(cString: string),
+        request: request.rawValue
+      )
+      // Why not assumeIsolated: confirm callback の呼び出しスレッドは保証されない。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          ConcreteGhosttyRuntime.confirmClipboardRead(confirmation)
+        }
+      }
+    },
+    write_clipboard_cb: { _, location, content, count, _ in
+      guard location == GHOSTTY_CLIPBOARD_STANDARD, let content, count > 0 else { return }
+      var value: String?
+      for index in 0..<count {
+        let item = content[index]
+        guard let mime = item.mime, let data = item.data,
+          String(cString: mime).hasPrefix("text/plain")
+        else { continue }
+        value = String(cString: data)
+        break
+      }
+      guard let value else { return }
+      // Why not assumeIsolated: write callback の呼び出しスレッドは保証されない。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated { ConcreteGhosttyRuntime.writeClipboard(value) }
+      }
+    },
+    close_surface_cb: { userdata, _ in
+      guard let userdata else { return }
+      // Why not main で復元: callback と main queue 実行の間も view の生存を保証する。
+      let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+      // Why not assumeIsolated: close callback の呼び出しスレッドは保証されない。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+          view.window?.performClose(nil)
+        }
+      }
+    }
+  )
+}
+
+@MainActor
+private final class GhosttyRuntime {
+  static let shared = GhosttyRuntime()
+
+  private(set) var app: ghostty_app_t?
+  private var config: ghostty_config_t?
+  private var initializationAttempted = false
+  private var configurationFileURL: URL?
+  private var keyboardObserver: (any NSObjectProtocol)?
+
+  private init() {}
+
+  func initialize(configurationFileURL: URL?) throws {
+    guard !initializationAttempted else {
+      guard self.configurationFileURL == configurationFileURL else {
+        throw GhosttyRendererError.configurationFileChanged
+      }
+      if app == nil { throw GhosttyRendererError.runtimeUnavailable }
+      return
+    }
+    initializationAttempted = true
+    self.configurationFileURL = configurationFileURL
+
+    guard let resourcePath = Bundle.main.resourcePath else {
+      throw GhosttyRendererError.resourcesUnavailable
+    }
+    let resourcesDirectory = URL(fileURLWithPath: resourcePath)
+      .appendingPathComponent("ghostty", isDirectory: true).path
+    setenv("GHOSTTY_RESOURCES_DIR", resourcesDirectory, 1)
+
+    guard ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == 0 else {
+      throw GhosttyRendererError.initializationFailed
+    }
+    guard let newConfig = ghostty_config_new() else {
+      throw GhosttyRendererError.configurationCreationFailed
+    }
+    config = newConfig
+
+    if let configurationFileURL {
+      configurationFileURL.path.withCString { path in
+        ghostty_config_load_file(newConfig, path)
+      }
+    }
+    ghostty_config_finalize(newConfig)
+    logDiagnostics(from: newConfig)
+
+    var runtimeConfiguration = makeGhosttyRuntimeConfiguration()
+
+    guard let newApp = ghostty_app_new(&runtimeConfiguration, newConfig) else {
+      throw GhosttyRendererError.applicationCreationFailed
+    }
+    app = newApp
+    ghostty_app_set_focus(newApp, NSApp.isActive)
+    keyboardObserver = NotificationCenter.default.addObserver(
+      forName: NSTextInputContext.keyboardSelectionDidChangeNotification,
+      object: nil,
+      queue: .main
+    ) { _ in
+      // Why not dispatch: NotificationCenter の main queue 指定により、この closure は main で動く。
+      MainActor.assumeIsolated { ConcreteGhosttyRuntime.shared.keyboardChanged() }
+    }
+  }
+
+  func tick() {
+    guard let app else { return }
+    ghostty_app_tick(app)
+  }
+
+  func setFocus(_ focused: Bool) {
+    guard let app else { return }
+    ghostty_app_set_focus(app, focused)
+    if focused {
+      for window in NSApp.windows {
+        Self.findSurfaceView(in: window.contentView)?.retrySurfaceCreationIfNeeded()
+      }
+    }
+  }
+
+  private func keyboardChanged() {
+    guard let app else { return }
+    ghostty_app_keyboard_changed(app)
+  }
+
+  private func logDiagnostics(from config: ghostty_config_t) {
+    let count = ghostty_config_diagnostics_count(config)
+    for index in 0..<count {
+      let diagnostic = ghostty_config_get_diagnostic(config, index)
+      if let message = diagnostic.message {
+        NSLog("[app] ghostty config: \(String(cString: message))")
+      }
+    }
+  }
+
+  fileprivate static func readClipboard(
+    view: GhosttySurfaceView,
+    stateAddress: UInt
+  ) {
+    let value = NSPasteboard.general.string(forType: .string) ?? ""
+    completeClipboardRequest(
+      view: view,
+      stateAddress: stateAddress,
+      value: value,
+      confirmed: false
+    )
+  }
+
+  fileprivate static func confirmClipboardRead(_ confirmation: ClipboardConfirmation) {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    if confirmation.request == GHOSTTY_CLIPBOARD_REQUEST_OSC_52_READ.rawValue {
+      alert.messageText = "クリップボードの読み取りを許可しますか？"
+      alert.informativeText = "端末内のプログラムがクリップボードの内容を要求しています。"
+    } else {
+      alert.messageText = "複数行または危険な内容をペーストしますか？"
+      alert.informativeText = "内容を確認し、信頼できる場合だけ許可してください。"
+    }
+    alert.addButton(withTitle: "許可")
+    alert.addButton(withTitle: "キャンセル")
+
+    let complete: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+      completeClipboardRequest(
+        view: confirmation.view,
+        stateAddress: confirmation.stateAddress,
+        value: response == .alertFirstButtonReturn ? confirmation.value : "",
+        confirmed: true
+      )
+    }
+    if let window = confirmation.view.window {
+      alert.beginSheetModal(for: window, completionHandler: complete)
+    } else {
+      complete(alert.runModal())
+    }
+  }
+
+  private static func completeClipboardRequest(
+    view: GhosttySurfaceView,
+    stateAddress: UInt,
+    value: String,
+    confirmed: Bool
+  ) {
+    guard let surface = view.surface,
+      let state = UnsafeMutableRawPointer(bitPattern: stateAddress)
+    else { return }
+    value.withCString { pointer in
+      ghostty_surface_complete_clipboard_request(surface, pointer, state, confirmed)
+    }
+  }
+
+  fileprivate static func writeClipboard(_ value: String) {
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(value, forType: .string)
+  }
+
+  fileprivate static func handleAction(_ action: PendingGhosttyAction) {
+    switch action {
+    case .setTitle(let surfaceAddress, let title):
+      guard let view = registeredView(forSurfaceAddress: surfaceAddress) else { return }
+      view.window?.title = title
+    case .setLinkCursor(let isLink):
+      (isLink ? NSCursor.pointingHand : NSCursor.arrow).set()
+    case .openURL(let value):
+      guard let url = URL(string: value) else { return }
+      NSWorkspace.shared.open(url)
+    }
+  }
+
+  private static func registeredView(forSurfaceAddress address: UInt) -> GhosttySurfaceView? {
+    NSApp.windows.lazy.compactMap(\.contentView).compactMap(findSurfaceView(in:)).first {
+      guard let surface = $0.surface else { return false }
+      return UInt(bitPattern: surface) == address
+    }
+  }
+
+  fileprivate static func findSurfaceView(in view: NSView?) -> GhosttySurfaceView? {
+    guard let view else { return nil }
+    if let surfaceView = view as? GhosttySurfaceView { return surfaceView }
+    return view.subviews.lazy.compactMap(findSurfaceView(in:)).first
+  }
+}
+
+private enum PendingGhosttyAction: Sendable {
+  case setTitle(surfaceAddress: UInt, title: String)
+  case setLinkCursor(Bool)
+  case openURL(String)
+}
+
+private struct ClipboardConfirmation: Sendable {
+  let view: GhosttySurfaceView
+  let stateAddress: UInt
+  let value: String
+  let request: UInt32
+}
+
+// Why not GhosttyRuntime directly: C function pointer closure cannot capture dynamic `Self`.
+private typealias ConcreteGhosttyRuntime = GhosttyRuntime
+
+private enum GhosttyRendererError: LocalizedError {
+  case emptyCommand
+  case commandContainsNull
+  case resourcesUnavailable
+  case initializationFailed
+  case configurationCreationFailed
+  case applicationCreationFailed
+  case runtimeUnavailable
+  case configurationFileChanged
+
+  var errorDescription: String? {
+    switch self {
+    case .emptyCommand: "command に1つ以上の argv 要素が必要です"
+    case .commandContainsNull: "command の argv 要素に NUL を含められません"
+    case .resourcesUnavailable: "アプリバンドルの Resources を解決できません"
+    case .initializationFailed: "ghostty_init が失敗しました"
+    case .configurationCreationFailed: "ghostty_config_new が失敗しました"
+    case .applicationCreationFailed: "ghostty_app_new が失敗しました"
+    case .runtimeUnavailable: "libghostty runtime を利用できません"
+    case .configurationFileChanged:
+      "libghostty runtime の初期化後に別の設定ファイルへ変更できません"
+    }
+  }
+}
+
+@MainActor
+public final class GhosttySurfaceView: NSView, TerminalRenderer {
+  private(set) var surface: ghostty_surface_t?
+
+  public private(set) var size = TerminalSize(columns: 0, rows: 0)
+  public var isRunning: Bool { surface != nil }
+  public var imePoint: TerminalIMEPoint? {
+    imeRectangle.map { TerminalIMEPoint(x: $0.origin.x, y: $0.origin.y) }
+  }
+
+  private var configuration: TerminalRendererConfiguration?
+  var trackingAreaReference: NSTrackingArea?
+  let markedTextStorage = NSMutableAttributedString()
+  var textAccumulator: [String]?
+  private var contentScale = 1.0
+  private var hasCreatedSurface = false
+
+  init() {
+    super.init(frame: .zero)
+    focusRingType = .none
+  }
+
+  // Why not deinit: @MainActor class の deinit から isolated な surface へ安全に触れられない。
+  // initializer を module 内に閉じ、SwiftUI の dismantleNSView 契約で破棄前に shutdown する。
+
+  @available(*, unavailable)
+  public required init?(coder: NSCoder) {
+    nil
+  }
+
+  public func start(configuration: TerminalRendererConfiguration) throws {
+    guard !configuration.command.isEmpty else {
+      throw GhosttyRendererError.emptyCommand
+    }
+    guard configuration.command.allSatisfy({ !$0.contains("\0") }) else {
+      throw GhosttyRendererError.commandContainsNull
+    }
+    self.configuration = configuration
+    try GhosttyRuntime.shared.initialize(
+      configurationFileURL: configuration.configurationFileURL
+    )
+    createSurfaceIfPossible()
+  }
+
+  public func resize(to size: TerminalPixelSize) {
+    guard let surface, size.width > 0, size.height > 0 else { return }
+    ghostty_surface_set_size(surface, UInt32(size.width), UInt32(size.height))
+    updateObservedSize()
+  }
+
+  public func setContentScale(_ scale: Double) {
+    guard scale > 0 else { return }
+    contentScale = scale
+    guard let surface else { return }
+    ghostty_surface_set_content_scale(surface, scale, scale)
+    updateObservedSize()
+  }
+
+  public func shutdown() {
+    guard let surface else { return }
+    ghostty_surface_free(surface)
+    self.surface = nil
+    size = TerminalSize(columns: 0, rows: 0)
+  }
+
+  override public func viewDidMoveToWindow() {
+    super.viewDidMoveToWindow()
+    createSurfaceIfPossible()
+  }
+
+  override public func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    updateSurfaceSize()
+  }
+
+  override public func viewDidChangeBackingProperties() {
+    super.viewDidChangeBackingProperties()
+    updateContentScaleFromWindow()
+    updateSurfaceSize()
+    updateDisplayID()
+  }
+
+  override public var acceptsFirstResponder: Bool { true }
+
+  override public func becomeFirstResponder() -> Bool {
+    let accepted = super.becomeFirstResponder()
+    if let surface { ghostty_surface_set_focus(surface, true) }
+    return accepted
+  }
+
+  override public func resignFirstResponder() -> Bool {
+    let accepted = super.resignFirstResponder()
+    if let surface { ghostty_surface_set_focus(surface, false) }
+    return accepted
+  }
+
+  private func createSurfaceIfPossible() {
+    guard surface == nil, !hasCreatedSurface, window != nil, let configuration,
+      let app = GhosttyRuntime.shared.app
+    else { return }
+
+    var surfaceConfiguration = ghostty_surface_config_new()
+    surfaceConfiguration.platform_tag = GHOSTTY_PLATFORM_MACOS
+    surfaceConfiguration.platform = ghostty_platform_u(
+      macos: ghostty_platform_macos_s(
+        nsview: Unmanaged.passUnretained(self).toOpaque()
+      )
+    )
+    surfaceConfiguration.userdata = Unmanaged.passUnretained(self).toOpaque()
+    surfaceConfiguration.scale_factor = Double(window?.backingScaleFactor ?? 1)
+    surfaceConfiguration.context = GHOSTTY_SURFACE_CONTEXT_WINDOW
+
+    let command = POSIXShellCommandLine.joined(configuration.command)
+    command.withCString { commandPointer in
+      surfaceConfiguration.command = commandPointer
+      if let workingDirectory = configuration.workingDirectory {
+        workingDirectory.withCString { workingDirectoryPointer in
+          surfaceConfiguration.working_directory = workingDirectoryPointer
+          surface = ghostty_surface_new(app, &surfaceConfiguration)
+        }
+      } else {
+        surface = ghostty_surface_new(app, &surfaceConfiguration)
+      }
+    }
+
+    guard surface != nil else {
+      NSLog("[app] ghostty_surface_new が失敗しました。画面復帰後に再試行できます")
+      return
+    }
+    hasCreatedSurface = true
+
+    updateContentScaleFromWindow()
+    updateSurfaceSize()
+    updateDisplayID()
+    ghostty_surface_set_focus(surface, window?.isKeyWindow == true)
+    window?.makeFirstResponder(self)
+  }
+
+  fileprivate func retrySurfaceCreationIfNeeded() {
+    createSurfaceIfPossible()
+  }
+
+  private func updateContentScaleFromWindow() {
+    guard let window else { return }
+    setContentScale(window.backingScaleFactor)
+  }
+
+  private func updateSurfaceSize() {
+    let backingSize = convertToBacking(bounds.size)
+    resize(
+      to: TerminalPixelSize(
+        width: Int(backingSize.width),
+        height: Int(backingSize.height)
+      )
+    )
+  }
+
+  private func updateObservedSize() {
+    guard let surface else { return }
+    let observed = ghostty_surface_size(surface)
+    size = TerminalSize(columns: Int(observed.columns), rows: Int(observed.rows))
+  }
+
+  private func updateDisplayID() {
+    guard let surface,
+      let screen = window?.screen,
+      let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+    else { return }
+    ghostty_surface_set_display_id(surface, number.uint32Value)
+  }
+
+  private var cellSize: CGSize {
+    guard let surface else { return CGSize(width: 8, height: 16) }
+    let observed = ghostty_surface_size(surface)
+    return CGSize(
+      width: Double(observed.cell_width_px) / contentScale,
+      height: Double(observed.cell_height_px) / contentScale
+    )
+  }
+
+  var imeRectangle: NSRect? {
+    guard let surface else { return nil }
+    let fallback = cellSize
+    var x = 0.0
+    var y = 0.0
+    var width = 0.0
+    var height = 0.0
+    ghostty_surface_ime_point(surface, &x, &y, &width, &height)
+    // Why not expose width directly: v1.3.1 は width だけ content scale を適用しない
+    // (Spikes/gate1/README.md §10.6)。
+    width /= contentScale
+    return NSRect(
+      x: x,
+      y: bounds.height - y,
+      width: width,
+      height: max(height, fallback.height)
+    )
+  }
+}

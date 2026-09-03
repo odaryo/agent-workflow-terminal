@@ -201,7 +201,8 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 - サポートする下限 version を決め、`Adapters` 側で検出する。tmux の下限は 3.4
   (設計書 §4.3)。git の下限は未決定 (Issue #83)。
 - CLI は shell を経由せず argv 配列で起動し、パイプ・リダイレクトに依存しない
-  (`TerminalRendererConfiguration.command` と同じ方針)。
+  (`TerminalRendererConfiguration.command` は libghostty C API の制約により、renderer 内で
+  POSIX shell quoting して shell 経由で実行するため、この外部 CLI 方針とは異なる)。
 - 出力をパースする CLI は `LC_ALL=C` を明示して起動し、ロケール依存の出力
   (git のメッセージ・日付書式) をパーサへ流さない。
 - tmux 3.4 は `LC_ALL=C` だけでは非 ASCII を `_` へ置換または削除するため、global option `-u` を

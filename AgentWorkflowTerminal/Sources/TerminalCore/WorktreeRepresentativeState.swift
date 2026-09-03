@@ -13,13 +13,20 @@ public struct PaneID: Sendable, Hashable, Codable, RawRepresentable {
 public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public let id: PaneID
   public let state: AgentState
+  public let category: WorktreeStateCategory
   /// このフィールドが必要なのは、§12.2 が同順位の pane を「最終更新順」で並べるため。
   /// 観測した時刻ではなく、状態が変化した時刻を入れる。
   public let lastUpdatedAt: Date
 
-  public init(id: PaneID, state: AgentState, lastUpdatedAt: Date) {
+  public init(
+    id: PaneID,
+    state: AgentState,
+    lastUpdatedAt: Date,
+    category: WorktreeStateCategory? = nil
+  ) {
     self.id = id
     self.state = state
+    self.category = category ?? state.worktreeCategory
     self.lastUpdatedAt = lastUpdatedAt
   }
 }
@@ -57,8 +64,8 @@ public func resolveWorktreeRepresentativeState(
       continue
     }
 
-    let candidateCategory = pane.state.worktreeCategory
-    let currentCategory = current.state.worktreeCategory
+    let candidateCategory = pane.category
+    let currentCategory = current.category
 
     if candidateCategory > currentCategory {
       best = pane
@@ -72,7 +79,7 @@ public func resolveWorktreeRepresentativeState(
   guard let representative = best else { return nil }
 
   return WorktreeRepresentativeState(
-    category: representative.state.worktreeCategory,
+    category: representative.category,
     state: representative.state,
     paneID: representative.id
   )

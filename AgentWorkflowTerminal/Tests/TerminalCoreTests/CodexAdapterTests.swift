@@ -16,12 +16,21 @@ struct CodexAdapterTests {
     }
   }
 
-  // Error は安全に再現できず、検出信号が実証されていない (Spikes/gate3/README.md §4.2)。
-  @Test("fixture は実測できた7種類だけを固定する")
-  func observedKinds() throws {
-    let all = try AgentStateFixture.load(prefix: "")
-    let kinds = Set(all.flatMap(\.acceptableStates))
-    #expect(
-      kinds == ["idle", "working", "permission", "question", "completed", "unknown", "absent"])
+  @Test("copy-mode 中も title 由来の操作待ち category を保つ")
+  func copyModeAttention() {
+    let signals = AgentSignals(
+      paneTitle: "[ . ] Action Required | worktree", screenText: "stale",
+      secondsSinceOutput: nil, isPaneInMode: true, observedAt: .distantPast
+    )
+    guard
+      case .observation(let observation) = CodexAdapter().classify(
+        signals: signals, liveness: .alive
+      )
+    else {
+      Issue.record("状態観測が必要")
+      return
+    }
+    #expect(observation.state == .unknown)
+    #expect(observation.category == .needsAttention)
   }
 }

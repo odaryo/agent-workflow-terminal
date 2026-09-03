@@ -1,5 +1,7 @@
 import Foundation
 
+/// Claude Code 2.1.259 の画面と出力活動の実測だけを使う
+/// (Spikes/gate3/README.md §3、§6.1、§11)。title は状態信号として使わない。
 public struct ClaudeCodeAdapter: AgentAdapter {
   public let id = AgentAdapterID(rawValue: "claude-code")
   public let processNames: Set<String> = ["claude"]
@@ -7,7 +9,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
   public func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {
     guard liveness != .absent else { return .absent }
-    guard liveness == .alive else { return unknown(signals, reason: .signalMissing) }
+    guard liveness == .alive else { return unknown(signals, reason: .livenessUnavailable) }
     guard !signals.isPaneInMode else { return unknown(signals, reason: .screenUnavailable) }
     guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable)
@@ -23,14 +25,15 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     {
       return observation(.idle, signals)
     }
-    if let elapsed = signals.secondsSinceOutput, elapsed <= 2 {
-      return observation(.working, signals)
-    }
-    if screen.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil {
+    let hasEmptyInputPrompt =
+      screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
+    if hasEmptyInputPrompt,
+      screen.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+    {
       return observation(.completed, signals)
     }
-    if screen.contains("mode on") || screen.contains("accept edits") {
-      return observation(.idle, signals)
+    if let elapsed = signals.secondsSinceOutput, elapsed <= 2 {
+      return observation(.working, signals)
     }
     return unknown(signals, reason: .adapterUndetermined)
   }

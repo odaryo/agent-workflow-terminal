@@ -1,5 +1,7 @@
 import Foundation
 
+/// process 観測だけでは Working / Idle を区別できなかったため、状態を推測しない
+/// (Spikes/gate3/README.md §6.3、§7.4)。
 public struct ProcessDetectionFallbackAdapter: AgentAdapter {
   public let id = AgentAdapterID(rawValue: "process-detection")
   public let processNames: Set<String>
@@ -7,7 +9,8 @@ public struct ProcessDetectionFallbackAdapter: AgentAdapter {
 
   public func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {
     guard liveness != .absent else { return .absent }
-    let reason: UnknownReason = liveness == .undetermined ? .signalMissing : .adapterUndetermined
+    let reason: UnknownReason =
+      liveness == .undetermined ? .livenessUnavailable : .adapterUndetermined
     return .observation(
       AgentStateObservation(
         state: .unknown, adapterID: id, observedAt: signals.observedAt, unknownReason: reason

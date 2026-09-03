@@ -1,12 +1,21 @@
 import Foundation
 
+/// `rawValue` は `"claude-code"` / `"codex"` / `"process-detection"` のような
+/// 安定した識別子を入れる。UI 表示名を入れない (永続化と診断表示に使うため)。
 public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
   public let rawValue: String
-  public init(rawValue: String) { self.rawValue = rawValue }
+  public init(rawValue: String) {
+    self.rawValue = rawValue
+  }
 }
 
-/// renderer にプロセス観測を寄せないのは、libghostty v1.3.1 に必要な API が無いため
-/// (Spikes/gate1/README.md §8.10、設計書 §21.3)。
+/// フィールドは Spikes/gate1/README.md §8.10 で実測した
+/// `#{pane_id}` / `#{pane_pid}` / `#{pane_tty}` / `#{pane_current_command}` /
+/// `#{pane_current_path}` / `#{pane_title}` / pane の終了情報に一対一で対応する。
+///
+/// - Important: libghostty v1.3.1 には `ghostty_surface_foreground_pid` /
+///   `tty_name` が存在しないため、プロセス観測を renderer から取らず tmux CLI に寄せている
+///   (Spikes/gate1/README.md 申し送り #2、設計書 §21.3 と整合)。
 public struct PaneSnapshot: Sendable, Hashable, Codable {
   public let id: PaneID
   /// dead pane では終了済み PID が残り、OS に再利用され得るため生存確認に使わない。
@@ -16,12 +25,18 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
   /// dead pane では空になり得るため、空文字列を観測失敗として扱わない。
   public let currentPath: String
   public let title: String
+  /// `nil` は live、`.unknown` は終了済みだが理由を観測できない状態を表す。
   public let termination: ProcessTermination?
   public var isDead: Bool { termination != nil }
 
   public init(
-    id: PaneID, processID: Int32, tty: String, currentCommand: String,
-    currentPath: String, title: String, termination: ProcessTermination?
+    id: PaneID,
+    processID: Int32,
+    tty: String,
+    currentCommand: String,
+    currentPath: String,
+    title: String,
+    termination: ProcessTermination?
   ) {
     self.id = id
     self.processID = processID
@@ -37,6 +52,8 @@ public enum UnknownReason: String, Sendable, Hashable, Codable {
   case screenUnavailable
   case signalMissing
   case adapterUndetermined
+  case observationFailed
+  case livenessUnavailable
 }
 
 public enum AgentLiveness: String, Sendable, Hashable, Codable {
@@ -78,13 +95,17 @@ public struct AgentObservationIntervals: Sendable, Hashable {
   }
 }
 
+/// `AgentState` を裸で返さないのは、`.unknown` のときに「何が分かっているか」を
+/// ユーザーへ提示する必要があるため
+/// (設計書 §12.3「`Unknown` から Adapter 名、最終成功時刻、エラー詳細を確認できる」)。
 public struct AgentStateObservation: Sendable, Hashable, Codable {
   public let state: AgentState
   public let category: WorktreeStateCategory
   public let adapterID: AgentAdapterID
   public let observedAt: Date
-  /// 状態を確定できた直近の時刻。一度も確定できていなければ `nil`。
+  /// 直近で状態を**確定できた**時刻。`observedAt` とは別物で、一度も確定できていなければ `nil`。
   public let lastKnownAt: Date?
+  /// `.unknown` / `.error` の理由。診断表示専用で、分岐や差分配信の条件に使わない。
   public let diagnostics: String?
   public let unknownReason: UnknownReason?
 
@@ -108,6 +129,12 @@ public enum AgentObservationResult: Sendable, Hashable, Codable {
   case absent
 }
 
+/// Agent 固有の情報を Terminal 共通状態へ正規化する境界 (設計書 §12.1、§12.4)。
+///
+/// - Important: この protocol より上のレイヤに、特定 Agent を前提とした分岐を書かない。
+///   Agent 固有の知識はすべて実装体の内側に閉じる。
+/// - Important: 状態を確定できない場合は `.working` / `.idle` へ丸めず
+///   `.unknown` を返す (§12.3)。
 public protocol AgentAdapter: Sendable {
   var id: AgentAdapterID { get }
   var processNames: Set<String> { get }
@@ -149,7 +176,7 @@ extension AgentAdapter {
               result = .observation(
                 AgentStateObservation(
                   state: .unknown, adapterID: id, observedAt: Date(),
-                  diagnostics: String(describing: error), unknownReason: .screenUnavailable
+                  diagnostics: String(describing: error), unknownReason: .observationFailed
                 ))
             }
           }
@@ -173,7 +200,7 @@ extension AgentAdapter {
     case (.absent, .absent): return true
     case (.observation(let lhs), .observation(let rhs)):
       return lhs.state == rhs.state && lhs.category == rhs.category
-        && lhs.unknownReason == rhs.unknownReason && lhs.diagnostics == rhs.diagnostics
+        && lhs.unknownReason == rhs.unknownReason
     default: return false
     }
   }

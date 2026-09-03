@@ -103,6 +103,13 @@ public struct TmuxListPanesParseResult: Sendable, Equatable {
   }
 }
 
+public struct TmuxAgentPaneStatus: Sendable, Equatable {
+  public let paneID: PaneID
+  public let title: String
+  public let isPaneInMode: Bool
+  public let windowActivity: TimeInterval
+}
+
 public enum TmuxListPanes {
   private static let formatSeparator = "\u{1F}"
   private static let encodedSeparator: [UInt8] = [0x5C, 0x30, 0x33, 0x37]
@@ -138,6 +145,42 @@ public enum TmuxListPanes {
     #"#{s/\\/\\\\/:pane_current_path}"#,
     #"#{s/\\/\\\\/:pane_title}"#,
   ].joined(separator: formatSeparator)
+
+  /// `display-message` でも Unit Separator は `\037` になるため、list-panes と同じ
+  /// parity 方式で title 内の backslash と区切りを識別する (Gate 3 README §2.1)。
+  public static let agentPaneStatusFormat = [
+    "#{pane_id}",
+    #"#{s/\\/\\\\/:pane_title}"#,
+    "#{pane_in_mode}",
+    "#{window_activity}",
+  ].joined(separator: formatSeparator)
+
+  public static func parseAgentPaneStatus(
+    output: String
+  ) throws(TmuxListPanesParseError) -> TmuxAgentPaneStatus {
+    var line = output
+    if line.hasSuffix("\n") { line.removeLast() }
+    let fields = splitEncodedFields(line)
+    guard fields.count == 4 else { throw .invalidFieldCount(actual: fields.count) }
+    guard fields[0].first == "%", Int(fields[0].dropFirst()) != nil else {
+      throw .invalidPaneID(fields[0])
+    }
+    let isPaneInMode: Bool
+    switch fields[2] {
+    case "0": isPaneInMode = false
+    case "1": isPaneInMode = true
+    default: throw .invalidPaneActive(fields[2])
+    }
+    guard let windowActivity = TimeInterval(fields[3]) else {
+      throw .invalidRawFieldEscape(fields[3])
+    }
+    return TmuxAgentPaneStatus(
+      paneID: PaneID(rawValue: fields[0]),
+      title: try decodeRawField(fields[1]),
+      isPaneInMode: isPaneInMode,
+      windowActivity: windowActivity
+    )
+  }
 
   public static func parse(line: String) throws(TmuxListPanesParseError) -> TmuxPane {
     let encodedFields = splitEncodedFields(line)

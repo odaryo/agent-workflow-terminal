@@ -1,5 +1,7 @@
 import Foundation
 
+/// Codex 0.152.1 が title に出す spinner / Action Required と画面の実測だけを使う
+/// (Spikes/gate3/README.md §3.2、§4.1、§6.2、§11)。
 public struct CodexAdapter: AgentAdapter {
   public let id = AgentAdapterID(rawValue: "codex")
   public let processNames: Set<String> = ["codex"]
@@ -7,22 +9,14 @@ public struct CodexAdapter: AgentAdapter {
 
   public func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {
     guard liveness != .absent else { return .absent }
-    guard liveness == .alive else { return unknown(signals, reason: .signalMissing) }
-    guard !signals.isPaneInMode else { return unknown(signals, reason: .screenUnavailable) }
-    if signals.paneTitle.contains("Action Required") {
-      guard let screen = signals.screenText else {
-        return unknown(signals, reason: .screenUnavailable, category: .needsAttention)
-      }
-      if screen.contains("Would you like to") || screen.contains("Press enter to confirm") {
-        return observation(.permission, signals)
-      }
-      return unknown(signals, reason: .adapterUndetermined, category: .needsAttention)
+    guard liveness == .alive else { return unknown(signals, reason: .livenessUnavailable) }
+    if let attention = attentionObservation(signals) {
+      return attention
     }
-    if let first = signals.paneTitle.unicodeScalars.first,
-      (0x2800...0x28FF).contains(first.value)
-    {
+    if hasWorkingSpinner(signals.paneTitle) {
       return observation(.working, signals)
     }
+    guard !signals.isPaneInMode else { return unknown(signals, reason: .screenUnavailable) }
     guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable)
     }
@@ -31,6 +25,22 @@ public struct CodexAdapter: AgentAdapter {
     }
     if screen.contains("Ask Codex to do anything") { return observation(.idle, signals) }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  private func attentionObservation(_ signals: AgentSignals) -> AgentObservationResult? {
+    guard signals.paneTitle.contains("Action Required") else { return nil }
+    guard !signals.isPaneInMode, let screen = signals.screenText else {
+      return unknown(signals, reason: .screenUnavailable, category: .needsAttention)
+    }
+    if screen.contains("Would you like to") || screen.contains("Press enter to confirm") {
+      return observation(.permission, signals)
+    }
+    return unknown(signals, reason: .adapterUndetermined, category: .needsAttention)
+  }
+
+  private func hasWorkingSpinner(_ title: String) -> Bool {
+    guard let first = title.unicodeScalars.first else { return false }
+    return (0x2800...0x28FF).contains(first.value)
   }
 
   private func observation(_ state: AgentState, _ signals: AgentSignals) -> AgentObservationResult {

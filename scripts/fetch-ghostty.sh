@@ -28,32 +28,34 @@ require_cmd gh shasum tar uname mktemp
 
 root_dir="$PWD"
 ghostty_dir="$root_dir/App/vendor/ghostty"
+[[ -f "$root_dir/App/ghostty-ref" ]] || die "App/ghostty-ref がありません"
 ghostty_ref="$(<"$root_dir/App/ghostty-ref")"
 [[ -n "$ghostty_ref" ]] || die "App/ghostty-ref が空です"
+[[ -f "$root_dir/App/ghostty-kit.sha256" ]] \
+  || die "App/ghostty-kit.sha256 がありません"
 [[ ! -d "$ghostty_dir/.git" ]] \
   || die "自前ビルド済みのため fetch は不要です。強制するなら App/vendor/ghostty を削除してから再実行してください"
 
 asset="GhosttyKit-${ghostty_ref}-macos-arm64.tar.gz"
-checksum_asset="${asset}.sha256"
 release_tag="ghostty-kit-${ghostty_ref}"
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghostty-fetch.XXXXXX")
 trap 'rm -rf "$tmp_dir"' EXIT
 
 if ! gh release download "$release_tag" \
   --pattern "$asset" \
-  --pattern "$checksum_asset" \
   --dir "$tmp_dir"; then
   die "App/ghostty-ref の ref (${ghostty_ref}) に対応する Release アセットがありません。scripts/build-ghostty.sh && scripts/wf-ghostty-publish.sh で publish してください"
 fi
 
 (
   cd "$tmp_dir"
-  shasum -a 256 -c "$checksum_asset"
-) || die "GhosttyKit Release アセットの sha256 が一致しません"
+  shasum -a 256 -c "$root_dir/App/ghostty-kit.sha256"
+) || die "Release アセットが App/ghostty-kit.sha256 と一致しません"
 
 extract_dir="$tmp_dir/extracted"
 mkdir -p "$extract_dir"
-tar -xzf "$tmp_dir/$asset" -C "$extract_dir"
+tar -xzf "$tmp_dir/$asset" -C "$extract_dir" \
+  || die "GhosttyKit Release アセットの展開に失敗しました"
 [[ -d "$extract_dir/macos/GhosttyKit.xcframework" ]] \
   || die "展開したアセットに macos/GhosttyKit.xcframework がありません"
 [[ -d "$extract_dir/zig-out/share/ghostty" ]] \
@@ -70,6 +72,4 @@ mkdir -p "$(dirname "$ghostty_dir")"
 mv "$extract_dir" "$ghostty_dir"
 
 info "取得した GhosttyKit の manifest:"
-while IFS= read -r line; do
-  info "$line"
-done <"$ghostty_dir/GHOSTTY-MANIFEST.txt"
+cat "$ghostty_dir/GHOSTTY-MANIFEST.txt" >&2

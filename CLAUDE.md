@@ -17,9 +17,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```shell
 cd AgentWorkflowTerminal && swift build && swift test     # CI 対象の core package
 scripts/fetch-ghostty.sh                                  # CI / 通常開発用の事前ビルド済み libghostty
-scripts/build-ghostty.sh                                  # ローカルの libghostty
+scripts/build-ghostty.sh                                  # ref 更新担当者向けの libghostty 自前ビルド
 scripts/build-app.sh                                      # ローカルの macOS app bundle
 ```
+
+初回導入と ghostty ref 更新では、対象ブランチ上で `App/ghostty-ref` の更新（初回は作成済み）→
+`scripts/build-ghostty.sh` → `scripts/wf-ghostty-publish.sh` → 更新された
+`App/ghostty-kit.sha256` を含むコミットと PR、の順に進める。publish より先に PR を開くと、
+対応する Release アセットが無いため `build-app` ジョブは必ず失敗する。
 
 ```shell
 # from the repository root

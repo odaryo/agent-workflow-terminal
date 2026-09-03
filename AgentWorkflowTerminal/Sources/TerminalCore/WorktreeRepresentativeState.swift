@@ -14,6 +14,10 @@ public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public let id: PaneID
   public let state: AgentState
   public let unknownCategoryOverride: UnknownAgentCategoryOverride?
+  public let adapterID: AgentAdapterID?
+  public let lastKnownAt: Date?
+  public let unknownReason: UnknownReason?
+  public let diagnostics: String?
   public var category: WorktreeStateCategory {
     unknownCategoryOverride?.category ?? state.worktreeCategory
   }
@@ -29,16 +33,25 @@ public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
     self.id = id
     self.state = state
     self.unknownCategoryOverride = nil
+    self.adapterID = nil
+    self.lastKnownAt = nil
+    self.unknownReason = nil
+    self.diagnostics = nil
     self.lastUpdatedAt = lastUpdatedAt
   }
 
-  public init(id: PaneID, observation: AgentStateObservation, lastUpdatedAt: Date) {
+  public init(id: PaneID, observation: AgentStateObservation) {
     self.id = id
     self.state = observation.state
     self.unknownCategoryOverride =
       observation.state == .unknown && observation.category == .needsAttention
       ? .needsAttention : nil
-    self.lastUpdatedAt = lastUpdatedAt
+    self.adapterID = observation.adapterID
+    self.lastKnownAt = observation.lastKnownAt
+    self.unknownReason = observation.unknownReason
+    self.diagnostics = observation.diagnostics
+    // observation stream は状態変化時だけ配信するため、その観測時刻が状態の更新時刻になる。
+    self.lastUpdatedAt = observation.observedAt
   }
 }
 

@@ -7,8 +7,7 @@
   "source": "codex-question-is-completed",
   "paneTitle": "gate3-work-codex",
   "paneCurrentCommand": "codex",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 44.86,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "codex",
     "node_repl"

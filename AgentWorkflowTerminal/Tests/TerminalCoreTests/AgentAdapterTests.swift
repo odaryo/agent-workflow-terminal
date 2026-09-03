@@ -82,16 +82,21 @@ struct AgentAdapterTests {
   func preservesObservationCategory() {
     let observation = AgentStateObservation(
       state: .unknown, adapterID: AgentAdapterID(rawValue: "test"),
-      observedAt: Date(timeIntervalSince1970: 1), category: .needsAttention
+      observedAt: Date(timeIntervalSince1970: 1), category: .needsAttention,
+      lastKnownAt: Date(timeIntervalSince1970: 0), diagnostics: "details",
+      unknownReason: .adapterUndetermined
     )
     let representative = resolveWorktreeRepresentativeState(panes: [
-      PaneAgentState(
-        id: PaneID(rawValue: "%1"), observation: observation,
-        lastUpdatedAt: Date(timeIntervalSince1970: 1)
-      )
+      PaneAgentState(id: PaneID(rawValue: "%1"), observation: observation)
     ])
     #expect(representative?.category == .needsAttention)
     #expect(representative?.state == .unknown)
+    let pane = PaneAgentState(id: PaneID(rawValue: "%1"), observation: observation)
+    #expect(pane.adapterID == observation.adapterID)
+    #expect(pane.lastKnownAt == observation.lastKnownAt)
+    #expect(pane.unknownReason == observation.unknownReason)
+    #expect(pane.diagnostics == observation.diagnostics)
+    #expect(pane.lastUpdatedAt == observation.observedAt)
   }
 
   @Test("diagnostics が変わっても同じ Unknown 状態を再配信しない")
@@ -136,6 +141,17 @@ struct AgentAdapterTests {
     #expect(known.state == .idle)
     #expect(failed.unknownReason == .observationFailed)
     #expect(failed.lastKnownAt == known.observedAt)
+  }
+
+  @Test("画面履歴を忘れた pane は次回を初回観測として扱う")
+  func screenTrackerForgetsPane() {
+    let paneID = PaneID(rawValue: "%1")
+    let clock = ContinuousClock()
+    var tracker = AgentScreenChangeTracker()
+    let now = clock.now
+    #expect(tracker.observe(screen: "screen", paneID: paneID, at: now) == nil)
+    tracker.forget(paneID: paneID)
+    #expect(tracker.observe(screen: "screen", paneID: paneID, at: now) == nil)
   }
 
   private func assertNeverError(_ result: AgentObservationResult, fixture: AgentStateFixture) {

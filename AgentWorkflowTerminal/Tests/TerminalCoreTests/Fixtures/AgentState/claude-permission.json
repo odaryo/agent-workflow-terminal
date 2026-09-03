@@ -7,8 +7,7 @@
   "source": "claude-permission",
   "paneTitle": "✳ 1から20の数字リスト",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 14.18,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "caffeinate",
     "chrome-devtools-mcp",

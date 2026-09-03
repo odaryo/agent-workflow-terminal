@@ -7,8 +7,7 @@
   "source": "claude-completed",
   "paneTitle": "✳ 1から20の数字リスト",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 40.7,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "chrome-devtools-mcp",
     "claude",

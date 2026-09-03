@@ -7,8 +7,7 @@
   "source": "codex-idle",
   "paneTitle": "gate3-work-codex",
   "paneCurrentCommand": "codex",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 9.25,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "codex",
     "node_repl"

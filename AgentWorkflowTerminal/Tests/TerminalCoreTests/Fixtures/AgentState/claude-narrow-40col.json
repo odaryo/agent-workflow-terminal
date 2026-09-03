@@ -8,8 +8,7 @@
   "source": "claude-narrow-40col",
   "paneTitle": "✳ 1から20の数字と豆知識",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 0.68,
+  "secondsSinceScreenChange": 0.5,
   "processNames": [
     "caffeinate",
     "chrome-devtools-mcp",

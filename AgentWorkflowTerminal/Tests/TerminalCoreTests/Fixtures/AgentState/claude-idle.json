@@ -7,8 +7,7 @@
   "source": "claude-idle",
   "paneTitle": "✳ Claude Code",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 0.74,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "chrome-devtools-mcp",
     "claude",

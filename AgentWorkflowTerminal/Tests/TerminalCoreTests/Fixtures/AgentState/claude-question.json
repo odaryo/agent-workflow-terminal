@@ -7,8 +7,7 @@
   "source": "claude-question",
   "paneTitle": "✳ AskUserQuestion ツール",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 34.95,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "chrome-devtools-mcp",
     "claude",

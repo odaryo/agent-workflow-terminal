@@ -58,7 +58,6 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     guard TmuxCapturePane.isWellFormed(pane.id) else {
       throw TmuxAgentSignalSourceError.capture(.invalidPaneID(pane.id))
     }
-    let observedAt = Date()
     let displayed: ProcessRunResult
     do {
       displayed = try await tmuxRunner.run(
@@ -67,10 +66,14 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
           TmuxListPanes.agentPaneStatusFormat,
         ]
       )
-    } catch { throw TmuxAgentSignalSourceError.tmux(error) }
+    } catch {
+      screenChangeTracker.forget(paneID: pane.id)
+      throw TmuxAgentSignalSourceError.tmux(error)
+    }
     let status: TmuxAgentPaneStatus
     do { status = try TmuxListPanes.parseAgentPaneStatus(output: displayed.stdout) } catch {
       if case .invalidPaneID(let rawValue) = error, rawValue.isEmpty {
+        screenChangeTracker.forget(paneID: pane.id)
         throw TmuxAgentSignalSourceError.paneNotFound(pane.id)
       }
       throw TmuxAgentSignalSourceError.paneListMalformed([
@@ -78,15 +81,22 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
       ])
     }
     guard status.paneID == pane.id else {
+      screenChangeTracker.forget(paneID: pane.id)
       throw TmuxAgentSignalSourceError.paneNotFound(pane.id)
     }
-    let screen: String
-    do { screen = try await capturePane.capture(pane.id) } catch {
-      throw TmuxAgentSignalSourceError.capture(error)
+    let screen: String?
+    do {
+      screen = try await capturePane.capture(pane.id)
+    } catch {
+      screenChangeTracker.forget(paneID: pane.id)
+      screen = nil
     }
-    let secondsSinceScreenChange = screenChangeTracker.observe(
-      screen: screen, paneID: pane.id, at: observedAt
-    )
+    // await 後に採ることで、actor 再入時も古い時刻で changedAt を上書きしない。
+    let capturedAt = ContinuousClock().now
+    let observedAt = Date()
+    let secondsSinceScreenChange = screen.flatMap {
+      screenChangeTracker.observe(screen: $0, paneID: pane.id, at: capturedAt)
+    }
     return AgentSignals(
       paneTitle: status.title, screenText: screen,
       secondsSinceScreenChange: secondsSinceScreenChange,
@@ -97,7 +107,10 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   public func liveness(
     for pane: PaneSnapshot, matchingProcessNames: Set<String>
   ) async -> AgentLiveness {
-    guard !pane.isDead else { return .absent }
+    guard !pane.isDead else {
+      screenChangeTracker.forget(paneID: pane.id)
+      return .absent
+    }
     let result: ProcessRunResult
     do {
       result = try await processRunner.run(
@@ -107,7 +120,15 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     } catch { return .undetermined }
     guard result.exitCode == 0 else { return .undetermined }
     let names = Self.processTreeNames(of: pane.processID, rows: Self.parseProcesses(result.stdout))
-    return names.isDisjoint(with: matchingProcessNames) ? .absent : .alive
+    let liveness =
+      names.isDisjoint(with: matchingProcessNames)
+      ? AgentLiveness.absent : .alive
+    if liveness == .absent { screenChangeTracker.forget(paneID: pane.id) }
+    return liveness
+  }
+
+  public func forget(_ pane: PaneSnapshot) {
+    screenChangeTracker.forget(paneID: pane.id)
   }
 
   private struct ProcessRow: Sendable {

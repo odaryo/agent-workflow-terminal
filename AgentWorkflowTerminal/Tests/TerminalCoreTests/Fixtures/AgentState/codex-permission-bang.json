@@ -7,8 +7,7 @@
   "source": "codex-permission-bang",
   "paneTitle": "[ ! ] Action Required | gate3-work-codex",
   "paneCurrentCommand": "codex",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 1.41,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "codex",
     "codex-code-mode-host",

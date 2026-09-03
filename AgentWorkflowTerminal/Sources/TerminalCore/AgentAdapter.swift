@@ -81,18 +81,22 @@ public struct AgentSignals: Sendable, Hashable, Codable {
   }
 }
 
+/// pane ごとの `capture-pane` 結果を比較し、単調時計で最後の画面変化からの経過を測る。
+/// 比較対象のない初回と、`forget(paneID:)` 後の初回は `nil` を返す。
+/// 画面の変化が Agent の出力とは限らないため、単独で状態を確定する信号にはできない。
 public struct AgentScreenChangeTracker: Sendable {
   private struct Entry: Sendable {
     let screen: String
-    let changedAt: Date
+    let changedAt: ContinuousClock.Instant
   }
 
   private var entries: [PaneID: Entry] = [:]
 
   public init() {}
 
-  public mutating func observe(screen: String, paneID: PaneID, at observedAt: Date) -> TimeInterval?
-  {
+  public mutating func observe(
+    screen: String, paneID: PaneID, at observedAt: ContinuousClock.Instant
+  ) -> TimeInterval? {
     guard let previous = entries[paneID] else {
       entries[paneID] = Entry(screen: screen, changedAt: observedAt)
       return nil
@@ -101,13 +105,23 @@ public struct AgentScreenChangeTracker: Sendable {
       entries[paneID] = Entry(screen: screen, changedAt: observedAt)
       return 0
     }
-    return max(0, observedAt.timeIntervalSince(previous.changedAt))
+    let elapsed = previous.changedAt.duration(to: observedAt).components
+    return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+  }
+
+  public mutating func forget(paneID: PaneID) {
+    entries.removeValue(forKey: paneID)
   }
 }
 
 public protocol AgentSignalSource: Sendable {
   func signals(for pane: PaneSnapshot) async throws -> AgentSignals
   func liveness(for pane: PaneSnapshot, matchingProcessNames: Set<String>) async -> AgentLiveness
+  func forget(_ pane: PaneSnapshot) async
+}
+
+extension AgentSignalSource {
+  public func forget(_ pane: PaneSnapshot) async {}
 }
 
 public struct AgentObservationIntervals: Sendable, Hashable {
@@ -189,6 +203,7 @@ extension AgentAdapter {
           }
           let result: AgentObservationResult
           if liveness == .absent {
+            await source.forget(pane)
             result = .absent
           } else {
             do {

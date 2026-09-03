@@ -3,6 +3,10 @@ import Foundation
 /// Claude Code 2.1.259 の画面と出力活動の実測だけを使う
 /// (Spikes/gate3/README.md §3、§6.1、§11)。title は状態信号として使わない。
 public struct ClaudeCodeAdapter: AgentAdapter {
+  // Gate 3 §3.4 の working p90 は 1.01 秒。2 秒へ緩めると permission を working に
+  // 倒すため、実測表で危険側の誤判定が 0 の 1.0 秒を境界にする。
+  private static let activeScreenThresholdSeconds: TimeInterval = 1.0
+
   public let id = AgentAdapterID(rawValue: "claude-code")
   public let processNames: Set<String> = ["claude"]
   public init() {}
@@ -21,21 +25,26 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
     let hasEmptyInputPrompt =
       screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
-    if let elapsed = signals.secondsSinceScreenChange, elapsed <= 1 {
+    let hasSubmittedPrompt =
+      screen.range(of: #"(?m)^❯[  ]*\S"#, options: .regularExpression) != nil
+    if let elapsed = signals.secondsSinceScreenChange,
+      elapsed <= Self.activeScreenThresholdSeconds
+    {
       return observation(.working, signals)
     }
+    guard signals.secondsSinceScreenChange != nil else {
+      return unknown(signals, reason: .signalMissing)
+    }
+    // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
-      && !screen.contains("⏺") && signals.secondsSinceScreenChange.map({ $0 > 1 }) == true
+      && !screen.contains("⏺")
     {
       return observation(.idle, signals)
     }
-    if hasEmptyInputPrompt, screen.contains("mode on"),
+    if hasEmptyInputPrompt, hasSubmittedPrompt,
       screen.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
     {
       return observation(.completed, signals)
-    }
-    if signals.secondsSinceScreenChange == nil {
-      return unknown(signals, reason: .signalMissing)
     }
     return unknown(signals, reason: .adapterUndetermined)
   }

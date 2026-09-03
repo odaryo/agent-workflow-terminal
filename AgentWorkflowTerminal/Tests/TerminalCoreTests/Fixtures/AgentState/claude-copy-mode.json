@@ -3,12 +3,11 @@
   "acceptableStates": [
     "unknown"
   ],
-  "note": "copy-mode。capture-pane が突入時点の画面を返し続けるため画面由来の判定は無効。pane_in_mode で検出する",
+  "note": "40桁で過去の送信プロンプトが画面外へ流れ、完了を裏づける情報が不足した静止画面。copy-mode 自体は判定条件にしない (README §7.3.1)",
   "source": "claude-copy-mode",
   "paneTitle": "✳ 1から20の数字と豆知識",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": true,
-  "secondsSinceWindowActivity": 38.74,
+  "secondsSinceScreenChange": 2.0,
   "processNames": [
     "chrome-devtools-mcp",
     "claude",

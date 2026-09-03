@@ -7,8 +7,7 @@
   "source": "claude-working-streaming",
   "paneTitle": "✳ 1から20の数字リスト",
   "paneCurrentCommand": "2.1.259",
-  "paneInMode": false,
-  "secondsSinceWindowActivity": 1.82,
+  "secondsSinceScreenChange": 0.5,
   "processNames": [
     "caffeinate",
     "chrome-devtools-mcp",

@@ -55,16 +55,91 @@ struct TmuxAgentSignalSourceTests {
     #expect(changed.secondsSinceScreenChange == 0)
   }
 
-  @Test("消えた pane の空フィールドを parse 失敗と区別する")
-  func missingPane() async throws {
+  @Test("生産した画面変化信号がそのまま Claude の Working 判定へ届く")
+  func connectsSignalProducerToClassifier() async throws {
+    let status = ProcessRunResult(
+      exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""
+    )
     let tmux = QueueProcessSpy(results: [
-      ProcessRunResult(exitCode: 0, stdout: #"\037"# + "\n", stderr: "")
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "first frame", stderr: ""),
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "second frame", stderr: ""),
     ])
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
+    let pane = pane(id: "%7", pid: 70)
+
+    let initial = try await source.signals(for: pane)
+    let changed = try await source.signals(for: pane)
+
+    #expect(
+      fixtureState(ClaudeCodeAdapter().classify(signals: initial, liveness: .alive)) == "unknown")
+    #expect(
+      fixtureState(ClaudeCodeAdapter().classify(signals: changed, liveness: .alive)) == "working")
+  }
+
+  @Test("absent を観測した pane の画面履歴を解放する")
+  func absentForgetsScreen() async throws {
+    let status = ProcessRunResult(
+      exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""
+    )
+    let tmux = QueueProcessSpy(results: [
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "screen", stderr: ""),
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "screen", stderr: ""),
+    ])
+    let process = QueueProcessSpy(results: [
+      ProcessRunResult(exitCode: 0, stdout: "70 1 /bin/sh\n", stderr: "")
+    ])
+    let source = try makeSource(tmux: tmux, process: process)
+    let pane = pane(id: "%7", pid: 70)
+    _ = try await source.signals(for: pane)
+
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["agent"]) == .absent)
+    #expect(try await source.signals(for: pane).secondsSinceScreenChange == nil)
+  }
+
+  @Test("capture 失敗を画面利用不能の信号として Adapter へ渡す")
+  func captureFailureIsScreenUnavailable() async throws {
+    let tmux = QueueProcessSpy(results: [
+      ProcessRunResult(exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""),
+      ProcessRunResult(exitCode: 1, stdout: "", stderr: "can't find pane"),
+    ])
+    let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
+    let signals = try await source.signals(for: pane(id: "%7", pid: 70))
+
+    guard
+      case .observation(let observation) = ClaudeCodeAdapter().classify(
+        signals: signals, liveness: .alive
+      )
+    else {
+      Issue.record("状態観測が必要")
+      return
+    }
+    #expect(observation.unknownReason == .screenUnavailable)
+  }
+
+  @Test("消えた pane の空フィールドを parse 失敗と区別する")
+  func missingPane() async throws {
+    let status = ProcessRunResult(
+      exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""
+    )
+    let tmux = QueueProcessSpy(results: [
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "screen", stderr: ""),
+      ProcessRunResult(exitCode: 0, stdout: #"\037"# + "\n", stderr: ""),
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "screen", stderr: ""),
+    ])
+    let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
+    let pane = pane(id: "%7", pid: 70)
+    _ = try await source.signals(for: pane)
 
     await #expect(throws: TmuxAgentSignalSourceError.paneNotFound(PaneID(rawValue: "%7"))) {
-      try await source.signals(for: pane(id: "%7", pid: 70))
+      try await source.signals(for: pane)
     }
+    #expect(try await source.signals(for: pane).secondsSinceScreenChange == nil)
   }
 
   @Test("pane_pid 自身が一致すれば子がいなくても alive")
@@ -126,6 +201,13 @@ struct TmuxAgentSignalSourceTests {
       id: PaneID(rawValue: id), processID: pid, tty: "", currentCommand: "",
       currentPath: "", title: "", termination: nil
     )
+  }
+}
+
+private func fixtureState(_ result: AgentObservationResult) -> String {
+  switch result {
+  case .absent: "absent"
+  case .observation(let observation): observation.state.rawValue
   }
 }
 

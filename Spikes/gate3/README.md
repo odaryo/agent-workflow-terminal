@@ -84,10 +84,10 @@ S2 の画面パターンは初回の結果を見てから作り直している�
 |---|---|---|
 | `pane_current_command` | **`2.1.259`**(実体が `versions/<版数>` というファイル名。`claude` にならない) | `codex` |
 | プロセスツリー | `claude` の他に `npx` / `npm exec chrome-devtools-mcp` / `caffeinate` / 定期的な `git` が常駐 | `codex` の他に定期的な `git` |
-| `pane_title` | 起動時 `✳ Claude Code` → **最初のターンで `✳ <タスク見出し>` になり、以降のターンでは更新されない** | **`⠋⠙⠹…`(braille spinner) + ディレクトリ名 = 実行中 / `[ ! ] Action Required │ <dir>` = 操作待ち / ディレクトリ名のみ = 待機** |
+| `pane_title` | 起動時 `✳ Claude Code` → **最初のターンで `✳ <タスク見出し>` になり、以降のターンでは更新されない** | **`⠋⠙⠹…`(braille spinner) + ディレクトリ名 = 実行中 / `Action Required | <dir>` = 操作待ち / ディレクトリ名のみ = 待機**(注意マーカーは §3.2) |
 | `alternate_on` | 1(代替画面を使う) | 0(インライン。`capture-pane -a` は "no alternate screen" を返す) |
 | ベル (`window_bell_flag`) | **全計測を通じて 0。鳴らない** | **同じく 0** |
-| `window_activity` | ターン中は毎秒更新、停止で凍結 | 同左。**ただし承認ダイアログ表示中も更新され続ける** |
+| `window_activity` | ターン中は毎秒更新、停止で凍結。**ただし window 単位の値である(§3.3)** | 同左。**加えて承認ダイアログ表示中も更新され続ける**(§3.2) |
 | `pane_in_mode` | copy-mode で 1 | 同左 |
 | hook | **project の `.claude/settings.json` から承認プロンプトなしで発火した。** `SessionStart` / `UserPromptSubmit` / `PreToolUse` / `PermissionRequest` / `PostToolUse` / `Stop` / `Notification` を実測 | **`hooks.json` のスキーマを特定できず、発火させられなかった**(§9) |
 | transcript | `$CLAUDE_CONFIG_DIR/projects/<cwd スラッグ>/<uuid>.jsonl` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`(現役。`session_meta` に cwd と session_id を持つ) |
@@ -104,6 +104,74 @@ S2 の画面パターンは初回の結果を見てから作り直している�
 実環境では常にこの種のノイズがあると考えるべきである。
 
 ---
+
+### 3.2 Codex の注意マーカーは明滅する
+
+Codex の「操作待ち」タイトルは `[ . ] Action Required │ <dir>` と `[ ! ] Action Required │ <dir>` を
+交互に描く。全 Codex 記録から数えると **`[ . ]` が 405 フレーム、`[ ! ]` が 397 フレーム**でほぼ半々だった。
+
+- **安定して一致させられるのは `Action Required` の側だけである。** 括弧の中身に一致させる実装は
+  半数のフレームを取りこぼす。
+- **この明滅は §6.2 の観測結果を説明する。** `S5-activity` が Codex の承認待ちを 100% `Working` と
+  誤ったのは、タイトルの明滅に伴う再描画で `window_activity` が更新され続けるためである。
+  Claude Code は承認待ちで画面が完全に静止するので `Idle` へ倒れた。
+  **同じ信号が Agent の描画の癖だけで逆方向へ倒れる。**
+
+### 3.3 `window_activity` は pane 単位ではない
+
+**本スパイクの計測はすべて 1 window / 1 pane で行っており、この交絡を含んでいない。**
+後から隔離ソケットで確認した結果:
+
+```
+出力前         %0(@0)=1788407303  %1(@0)=1788407303  %2(@1)=1788407303
+%1 へ出力した後 %0(@0)=1788407306  %1(@0)=1788407306  %2(@1)=1788407303
+```
+
+同じ window の兄弟 pane が出力すると、**無出力の pane についても値が更新される**。
+別 window の pane は影響を受けない。
+
+§6 の混同行列で `S5-activity` と `TierA-combined` が `Working` を検出できているのは、
+**agent pane が window 内で唯一の pane だったからである。** 設計書 §10.2 は同一 worktree に
+Consultation pane を置く前提であり、agent pane と別 pane が同じ window に並ぶ構成はむしろ標準なので、
+**本番の構成では `window_activity` を pane の出力鮮度として使えない。**
+
+tmux 3.4 に pane 単位の等価な format は見つかっていない
+(`pane_unseen_changes` は client が attach していない間 0 のまま)。
+
+**代替として `capture-pane` の前フレーム差分を後から検証し、成立することを確認した(§3.4)。**
+
+### 3.4 pane 単位の出力鮮度は `capture-pane` の差分で取れる
+
+§3.3 で `window_activity` が使えないと分かったため、記録済みの全フレームに対して
+**「直前フレームと画面テキストが違うか」**を後から計算し、真値区間ごとに
+「最後に画面が変化してからの経過秒」を集計した。
+
+| agent/label | n | p50 | p90 | p99 |
+|---|---|---|---|---|
+| claude/working | 443 | **0.25** | **1.01** | 1.52 |
+| claude/idle | 455 | 3.82 | 7.11 | 8.40 |
+| claude/permission | 770 | 20.52 | 36.07 | 40.09 |
+| claude/completed | 2880 | 33.22 | 74.31 | 87.48 |
+| codex/working | 486 | **0.25** | **0.76** | 0.77 |
+| codex/idle | 455 | 11.16 | 20.44 | 22.59 |
+| codex/permission | 763 | 20.30 | 35.80 | 39.75 |
+| codex/completed | 2843 | 38.31 | 70.62 | 84.22 |
+
+しきい値を変えたときの「1 秒以内に画面が変化した = 実行中」の当たり方:
+
+| しきい値 | claude working | claude permission が working に化ける | codex working | codex permission が working に化ける |
+|---|---|---|---|---|
+| **1.0s** | **0.867** | **0.000** | **0.994** | **0.000** |
+| 2.0s | 1.000 | 0.026 | 1.000 | 0.025 |
+| 3.0s | 1.000 | 0.052 | 1.000 | 0.051 |
+
+**1.0 秒が境目である。** 2 秒へ緩めると working の取りこぼしは消えるが、
+**承認待ちを `Working` と誤る経路が開く**(§12.3 が最も避けたい向きの誤り)。
+`Idle` を `Working` と誤る率は 1.0s でも claude 0.108 / codex 0.044 残るが、
+これは危険側ではない。
+
+この信号は pane 単位であり、§3.3 の兄弟 pane 交絡を受けない。
+**`window_activity` の代替として使えることが実測で確かめられた。**
 
 ## 4. M2: 7状態シナリオ
 
@@ -233,15 +301,41 @@ Codex に同じ依頼をすると、**質問を平文で出力してターンを
   プロセスツリー側の `comm` は `claude` なので、そちらを見る必要がある。
 - `S2-screen` の依存文言(`Do you want to …?`、`· done HH:MM`、`Would you like to`、`1. Yes, proceed`)は
   すべて UI 文言であり、版数・ロケール・テーマで変わりうる。
-- `S5-title` の Codex の `[ ! ] Action Required` も UI 文字列である。
+- `S5-title` の Codex の `Action Required` も UI 文字列である。
 
 ### 7.3 画面が読めない状況 (`deprived` シナリオ)
 
 | 状況 | 起きたこと |
 |---|---|
 | 画面幅 40 桁 | Claude Code: ステータス行が切れてパターンが外れ、42% のフレームが `unknown` へ落ちた(危険な誤りは無し)。Codex: 完了後なのに `Idle` と判定した(**誤りだが危険側ではない**) |
-| copy-mode | `capture-pane` が copy-mode 突入時点の画面を返し続け、**判定が固まる**。`pane_in_mode = 1` で検出できるので、ここは `Unknown` へ落とす実装が可能 |
+| copy-mode | 判定が固まった。**ただし当初これを「`capture-pane` が突入時点の画面を返し続けるため」と記録したのは誤りである(§7.3.1)** |
 | Agent プロセスを SIGKILL | 全分類器が `unknown` を返した。ただしこれは分類器が**生存確認を先に行っているから**であって、画面は死ぬ直前の描画のまま残っている。生存確認を外すと全分類器が古い状態を出し続ける |
+
+#### 7.3.1 訂正: `capture-pane` は copy-mode でも凍結しない
+
+**当初の記録は誤りだった。** #21 の敵対的レビューで指摘され、隔離ソケットで再計測した結果:
+
+```
+通常時          in_mode=0  最終行 = TICK 4
+copy-mode 直後  in_mode=1  最終行 = TICK 5
+copy-mode +2s   in_mode=1  最終行 = TICK 9
+copy-mode +4s   in_mode=1  最終行 = TICK 13
+cancel 後       in_mode=0  最終行 = TICK 14
+```
+
+tmux 3.4 の `capture-pane -p` は **copy-mode 中もライブの画面を返す**。スクロール位置の影響も受けない。
+
+`deprived` シナリオで判定が固まって見えたのは、**その区間で Agent が既にターンを終えており
+画面が実際に変化していなかったから**である。当初の記録は「出力が一定だった」という観測から
+「`capture-pane` が凍結する」という機構を**推測で補って**書いたものであり、計測していなかった。
+
+影響は記録に留まらない。この誤りは §11-4 の申し送り
+「`pane_in_mode` を見て copy-mode 中は画面由来の判定を無効化する」を生み、
+#21 の実装がそれに従った結果、**ユーザーが agent pane をスクロールバックしている間だけ
+Permission / Question の検出が消える**という欠陥になった。
+
+**教訓**: 観測が一定であることは、観測手段が壊れていることの証拠にならない。
+本文書の他の箇所も、機構の説明が実測ではなく推測になっていないか区別して読むこと。
 
 ### 7.4 fallback の誤判定
 
@@ -286,7 +380,7 @@ OS 側のキャッシュが効くためと見られるが、**内訳までは切
 |---|---|---|---|
 | `Working` | ✅(Tier A 0.959) | ✅(Tier A 1.000) | §6。画面ではなく出力の動き / タイトルから取る |
 | `Question` | ✅(hook)/⚠️(画面) | ❌ **存在しない** | §4.1 |
-| `Permission` | ✅(Tier A 1.000) | ✅(Tier A 1.000) | §6 |
+| `Permission` | ✅(Tier A 1.000) | ✅(Tier A 1.000) | §6。Codex は注意マーカーが明滅する(§3.2) |
 | `Completed／Ready for Review` | ✅(0.966) | ✅(0.994) | §6。完了直後と放置後で差は出なかった |
 | `Error` | ⚠️ プロセス死のみ | ⚠️ プロセス死のみ | §4.2。**ターン中の API エラーは未計測** |
 | `Idle` | ⚠️(0.813) | ⚠️(0.930) | §6。定期再描画を `Working` と誤る |
@@ -310,6 +404,7 @@ OS 側のキャッシュが効くためと見られるが、**内訳までは切
    同一 cwd に多数の session ファイルが並ぶため、hook 無しで pane と session を結ぶ鍵が無い。
 4. **版数を上げ下げしての再計測**(§7.2)。
 5. **反復数** — 各 Agent 5 run。`PLAN.md` §6.3 の目安 10 回に届いていない。
+8. **同一 window に複数 pane がある構成** — 全計測が 1 window / 1 pane であり、`window_activity` の兄弟 pane による交絡 (§3.3) を含んでいない。**§6 の `Working` 検出率はこの構成に依存している。**
 6. **検出遅延 (p50 / p95)** — 記録は 250ms 刻みで残っているが、集計していない。
 7. **`Question` / `Error` / `Unknown` の混同行列** — シナリオは流したが、
    複合シナリオのように真値区間を機械的に切れないため、定性記録に留めた。
@@ -325,7 +420,7 @@ OS 側のキャッシュが効くためと見られるが、**内訳までは切
 2. **生存確認と状態観測は頻度が違う。** プロセス走査は高コスト(§7.5)で、状態観測は tmux から安価に取れる。
    `AgentAdapter` が両方を 1 つの `observeState` に押し込むと、頻度を分けられない。
 3. **`AgentState` に「注意が要ることは分かるが種別は不明」を置く場所が無い。**
-   Codex のタイトルはまさにこれを返す(`[ ! ] Action Required`)。
+   Codex のタイトルはまさにこれを返す(`Action Required`)。
    現状は `Unknown` へ落とすしかなく、§12.2 の `Needs Attention` へ上げられない。
 4. **`Idle` と `Completed` の境目は観測できない。** Claude Code は完了マーカーを画面に残し続け、
    Codex はタイトルを待機状態へ戻す。「完了直後」と「完了して放置」に観測上の差は出なかった(§6)。
@@ -340,11 +435,13 @@ OS 側のキャッシュが効くためと見られるが、**内訳までは切
 1. **`pane_current_command` で Claude Code を判定しない**(版数文字列になる)。プロセスツリーの `comm` を見る。
 2. **`list-panes` の出力順に依存しない**(`swap-pane` で入れ替わる)。鍵は `pane_id`。
 3. **生存確認を必ず先に置く。** 死んだ Agent の画面は残り続ける(§7.3)。
-4. **`pane_in_mode` を見て、copy-mode 中は画面由来の判定を無効化する。**
+4. ~~`pane_in_mode` を見て、copy-mode 中は画面由来の判定を無効化する。~~ **撤回した (§7.3.1)。`capture-pane` は copy-mode でもライブの画面を返すので、無効化するとユーザーがスクロールバックしている間だけ検出が消える。**
 5. **画面パターンは行末・固定幅を前提に書かない。** 40 桁でステータス行が切れて外れた(§7.3)。
 6. **Codex のタイトルは種別を持たない。** `Action Required` を `Permission` と決めつけない。
+   **`[ ! ]` の側だけに一致させない**(§3.2)。
 7. **hook は Claude Code でのみ実測できている。** Codex にも同じ仕組みがある前提でコードを書かない。
 8. **ベルは使えない**(両 Agent とも鳴らさない)。
+9. **`window_activity` を pane の出力鮮度として使わない**(§3.3)。同じ window の別 pane の出力で更新されるため、`Completed` が `Working` に化ける。
 
 ---
 

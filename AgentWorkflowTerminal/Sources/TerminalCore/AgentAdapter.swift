@@ -4,7 +4,6 @@ import Foundation
 /// 安定した識別子を入れる。UI 表示名を入れない (永続化と診断表示に使うため)。
 public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
   public let rawValue: String
-
   public init(rawValue: String) {
     self.rawValue = rawValue
   }
@@ -19,16 +18,15 @@ public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
 ///   (Spikes/gate1/README.md 申し送り #2、設計書 §21.3 と整合)。
 public struct PaneSnapshot: Sendable, Hashable, Codable {
   public let id: PaneID
-  /// dead pane では終了済み PID が残り、OS に再利用され得るためプロセス観測に使わない。
+  /// dead pane では終了済み PID が残り再利用され得るため、`isDead` を確認せず生存確認に使わない。
   public let processID: Int32
   public let tty: String
   public let currentCommand: String
   /// dead pane では空になり得るため、空文字列を観測失敗として扱わない。
   public let currentPath: String
   public let title: String
-  /// `nil` は live を表し、`.unknown` は終了済みだが理由を観測できない状態を表す。
+  /// `nil` は live、`.unknown` は終了済みだが理由を観測できない状態を表す。
   public let termination: ProcessTermination?
-
   public var isDead: Bool { termination != nil }
 
   public init(
@@ -50,51 +48,216 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
   }
 }
 
+public enum UnknownReason: String, Sendable, Hashable, Codable {
+  case screenUnavailable
+  case signalMissing
+  case adapterUndetermined
+  case observationFailed
+  case livenessUnavailable
+}
+
+public enum AgentLiveness: String, Sendable, Hashable, Codable {
+  case alive
+  case absent
+  case undetermined
+}
+
+public struct AgentSignals: Sendable, Hashable, Codable {
+  public let paneTitle: String
+  public let screenText: String?
+  /// pane の `capture-pane` 画面が最後に変化してからの秒数。window 単位の
+  /// `window_activity` は使わない (Spikes/gate3/README.md §3.3、§3.4)。
+  public let secondsSinceScreenChange: TimeInterval?
+  public let observedAt: Date
+
+  public init(
+    paneTitle: String, screenText: String?, secondsSinceScreenChange: TimeInterval?,
+    observedAt: Date
+  ) {
+    self.paneTitle = paneTitle
+    self.screenText = screenText
+    self.secondsSinceScreenChange = secondsSinceScreenChange
+    self.observedAt = observedAt
+  }
+}
+
+/// pane ごとの `capture-pane` 結果を比較し、単調時計で最後の画面変化からの経過を測る。
+/// 比較対象のない初回と、`forget(paneID:)` 後の初回は `nil` を返す。
+/// 画面の変化が Agent の出力とは限らないため、単独で状態を確定する信号にはできない。
+public struct AgentScreenChangeTracker: Sendable {
+  private struct Entry: Sendable {
+    let screen: String
+    let changedAt: ContinuousClock.Instant
+  }
+
+  private var entries: [PaneID: Entry] = [:]
+
+  public init() {}
+
+  public mutating func observe(
+    screen: String, paneID: PaneID, at observedAt: ContinuousClock.Instant
+  ) -> TimeInterval? {
+    guard let previous = entries[paneID] else {
+      entries[paneID] = Entry(screen: screen, changedAt: observedAt)
+      return nil
+    }
+    if previous.screen != screen {
+      entries[paneID] = Entry(screen: screen, changedAt: observedAt)
+      return 0
+    }
+    let elapsed = previous.changedAt.duration(to: observedAt).components
+    return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+  }
+
+  public mutating func forget(paneID: PaneID) {
+    entries.removeValue(forKey: paneID)
+  }
+}
+
+public protocol AgentSignalSource: Sendable {
+  func signals(for pane: PaneSnapshot) async throws -> AgentSignals
+  func liveness(for pane: PaneSnapshot, matchingProcessNames: Set<String>) async -> AgentLiveness
+  func forget(_ pane: PaneSnapshot) async
+}
+
+extension AgentSignalSource {
+  public func forget(_ pane: PaneSnapshot) async {}
+}
+
+public struct AgentObservationIntervals: Sendable, Hashable {
+  public let signals: Duration
+  public let liveness: Duration
+  public init(signals: Duration, liveness: Duration) {
+    self.signals = signals
+    self.liveness = liveness
+  }
+}
+
 /// `AgentState` を裸で返さないのは、`.unknown` のときに「何が分かっているか」を
 /// ユーザーへ提示する必要があるため
 /// (設計書 §12.3「`Unknown` から Adapter 名、最終成功時刻、エラー詳細を確認できる」)。
 public struct AgentStateObservation: Sendable, Hashable, Codable {
   public let state: AgentState
+  public let category: WorktreeStateCategory
   public let adapterID: AgentAdapterID
   public let observedAt: Date
   /// 直近で状態を**確定できた**時刻。`observedAt` とは別物で、一度も確定できていなければ `nil`。
   public let lastKnownAt: Date?
-  /// `.unknown` / `.error` の理由。診断表示専用で、分岐の条件に使わない。
+  /// `.unknown` / `.error` の理由。診断表示専用で、分岐や差分配信の条件に使わない。
   public let diagnostics: String?
+  public let unknownReason: UnknownReason?
 
   public init(
-    state: AgentState,
-    adapterID: AgentAdapterID,
-    observedAt: Date,
-    lastKnownAt: Date? = nil,
-    diagnostics: String? = nil
+    state: AgentState, adapterID: AgentAdapterID, observedAt: Date,
+    category: WorktreeStateCategory? = nil, lastKnownAt: Date? = nil,
+    diagnostics: String? = nil, unknownReason: UnknownReason? = nil
   ) {
     self.state = state
+    self.category = category ?? state.worktreeCategory
     self.adapterID = adapterID
     self.observedAt = observedAt
     self.lastKnownAt = lastKnownAt
     self.diagnostics = diagnostics
+    self.unknownReason = unknownReason
   }
 }
 
-/// Agent 固有の情報を Terminal 共通状態へ正規化する境界 (設計書 §12.1)。
+public enum AgentObservationResult: Sendable, Hashable, Codable {
+  case observation(AgentStateObservation)
+  case absent
+}
+
+/// Agent 固有の情報を Terminal 共通状態へ正規化する境界 (設計書 §12.1、§12.4)。
 ///
-/// - Important: この protocol より上のレイヤに、特定 Agent (Claude Code 等) を
-///   前提とした分岐を書かない。Agent 固有の知識はすべて実装体の内側に閉じる。
+/// - Important: この protocol より上のレイヤに、特定 Agent を前提とした分岐を書かない。
+///   Agent 固有の知識はすべて実装体の内側に閉じる。
 /// - Important: 状態を確定できない場合は `.working` / `.idle` へ丸めず
 ///   `.unknown` を返す (§12.3)。
-///
-/// - Note: Phase 1 時点では宣言のみで実装体を持たない。設計書 §12.4 が
-///   「event 購読を基本形とし、生存確認と状態観測を分ける」を確定させたため、
-///   単発 `observeState` だけのこの形は既に確定仕様と食い違っている。
-///   protocol の形を §12.4 へ合わせるのは実装フェーズで行う。
-///   厳密な検出条件は §12.5 で未確定のまま。
 public protocol AgentAdapter: Sendable {
   var id: AgentAdapterID { get }
+  var processNames: Set<String> { get }
+  func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult
+  func observations(
+    of pane: PaneSnapshot, from source: any AgentSignalSource,
+    intervals: AgentObservationIntervals
+  ) -> AsyncStream<AgentObservationResult>
+}
 
-  func canHandle(_ pane: PaneSnapshot) -> Bool
+extension AgentAdapter {
+  public func observations(
+    of pane: PaneSnapshot, from source: any AgentSignalSource,
+    intervals: AgentObservationIntervals
+  ) -> AsyncStream<AgentObservationResult> {
+    AsyncStream { continuation in
+      let task = Task {
+        var liveness = AgentLiveness.undetermined
+        var nextLivenessCheck: ContinuousClock.Instant?
+        var previous: AgentObservationResult?
+        var lastKnownAt: Date?
+        let clock = ContinuousClock()
+        while !Task.isCancelled {
+          let now = clock.now
+          if nextLivenessCheck.map({ now >= $0 }) ?? true {
+            liveness = await source.liveness(for: pane, matchingProcessNames: processNames)
+            nextLivenessCheck = now.advanced(by: intervals.liveness)
+          }
+          let result: AgentObservationResult
+          if liveness == .absent {
+            await source.forget(pane)
+            result = .absent
+          } else {
+            do {
+              let classified = classify(
+                signals: try await source.signals(for: pane), liveness: liveness
+              )
+              result = Self.withLastKnownAt(classified, previous: &lastKnownAt)
+            } catch {
+              let failed = AgentObservationResult.observation(
+                AgentStateObservation(
+                  state: .unknown, adapterID: id, observedAt: Date(),
+                  diagnostics: String(describing: error), unknownReason: .observationFailed
+                ))
+              result = Self.withLastKnownAt(failed, previous: &lastKnownAt)
+            }
+          }
+          if !result.hasSameObservableState(as: previous) {
+            continuation.yield(result)
+            previous = result
+          }
+          do { try await Task.sleep(for: intervals.signals) } catch { break }
+        }
+        continuation.finish()
+      }
+      continuation.onTermination = { _ in task.cancel() }
+    }
+  }
 
-  /// 観測に失敗しても `throws` にしないのは、失敗そのものを `.unknown` として
-  /// 返す設計だから (§12.3)。呼び出し側に「状態が無い」経路を作らない。
-  func observeState(of pane: PaneSnapshot) async -> AgentStateObservation
+  private static func withLastKnownAt(
+    _ result: AgentObservationResult, previous lastKnownAt: inout Date?
+  ) -> AgentObservationResult {
+    guard case .observation(let observation) = result else { return result }
+    if observation.state != .unknown {
+      lastKnownAt = observation.observedAt
+    }
+    return .observation(
+      AgentStateObservation(
+        state: observation.state, adapterID: observation.adapterID,
+        observedAt: observation.observedAt, category: observation.category,
+        lastKnownAt: lastKnownAt, diagnostics: observation.diagnostics,
+        unknownReason: observation.unknownReason
+      ))
+  }
+}
+
+extension AgentObservationResult {
+  func hasSameObservableState(as other: AgentObservationResult?) -> Bool {
+    guard let other else { return false }
+    switch (self, other) {
+    case (.absent, .absent): return true
+    case (.observation(let lhs), .observation(let rhs)):
+      return lhs.state == rhs.state && lhs.category == rhs.category
+        && lhs.unknownReason == rhs.unknownReason
+    default: return false
+    }
+  }
 }

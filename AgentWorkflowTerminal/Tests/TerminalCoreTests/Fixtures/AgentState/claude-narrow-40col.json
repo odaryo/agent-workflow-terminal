@@ -1,0 +1,21 @@
+{
+  "expectedState": "working",
+  "acceptableStates": [
+    "working",
+    "unknown"
+  ],
+  "note": "画面幅 40 桁で streaming 中。ステータス行が切れてパターンが外れるが、間違った状態を自信を持って返してはならない",
+  "source": "claude-narrow-40col",
+  "paneTitle": "✳ 1から20の数字と豆知識",
+  "paneCurrentCommand": "2.1.259",
+  "secondsSinceScreenChange": 0.5,
+  "processNames": [
+    "caffeinate",
+    "chrome-devtools-mcp",
+    "claude",
+    "node",
+    "npm exec chrome-devtools-mcp@1.8.0",
+    "npx"
+  ],
+  "screen": "      の定型詩と言われる。\n  18. 18 — じゅうはち（十八）：得意技を\n      「十八番（おはこ）」と呼ぶのは、歌\n      舞伎の市川團十郎家が定めた18の当た\n      り芸に由来する。\n  19.\n\n────────────────────────────────────────\n❯ \n────────────────────────────────────────\n  Opus 5 (1M context) │ ⚡ high │  ma…\n  Session: 0m\n"
+}

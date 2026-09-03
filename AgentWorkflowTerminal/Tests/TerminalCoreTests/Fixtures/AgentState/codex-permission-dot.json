@@ -1,0 +1,17 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "注意マーカーは [ . ] と [ ! ] を交互に描く。安定するのは \"Action Required\" の側だけ",
+  "source": "codex-permission-dot",
+  "paneTitle": "[ . ] Action Required | gate3-work-codex",
+  "paneCurrentCommand": "codex",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "codex",
+    "codex-code-mode-host",
+    "node_repl"
+  ],
+  "screen": "\n› 1 から 20 までの数字を、それぞれ日本語の読みと一言の豆知識つきで、1行ずつ列挙して。ファイルは読まないで。\n\n\n• 1（いち）— 最小の正の整数です。\n  2（に）— 唯一の偶数の素数です。\n  3（さん）— 三角形の辺の数です。\n  4（よん／し）— 日本では「し」が「死」と同音のため、避けられることがあります。\n  5（ご）— 人の片手の指の本数です。\n  6（ろく）— 完全数のうち最小の数です。\n  7（なな／しち）— 虹の色は一般に7色とされます。\n  8（はち）— 漢字の「八」は末広がりで縁起がよいとされます。\n  9（きゅう／く）— 1桁の自然数で最大の数です。\n  10（じゅう）— 十進法の基数です。\n  11（じゅういち）— 同じ数字が並ぶ最初の正の整数です。\n  12（じゅうに）— 1年の月の数です。\n  13（じゅうさん）— 西洋では不吉とされることがあります。\n  14（じゅうよん／じゅうし）— 2週間の日数です。\n  15（じゅうご）— 満月は旧暦の15日ごろに見られます。\n  16（じゅうろく）— 4の平方です。\n  17（じゅうなな／じゅうしち）— 素数の一つです。\n  18（じゅうはち）— 日本では多くの権利や契約に関わる成年年齢です。\n  19（じゅうきゅう／じゅうく）— 10代最後の年齢を表す数です。\n  20（にじゅう）— 片手と片足すべての指の合計本数です。\n\n\n› notes.txt という新しいファイルを作り、中身に today と1行だけ書いて。\n\n\n• notes.txt を新規作成し、指定どおり1行だけ書き込みます。\n\n• Added notes.txt (+1 -0)\n    1 +today\n\n\n  Would you like to make the following edits?\n\n  Description: Apply proposed file edits\n  Destination: /private/var/folders/99/4xt4q3jx2lb25v8nyn5kw_p40000gn/T/gate3-work-codex/notes.txt\n\n› 1. Yes, proceed (y)\n  2. Yes, and don't ask again for these files (a)\n  3. No, and tell Codex what to do differently (esc)\n\n  Press enter to confirm or esc to cancel\n"
+}

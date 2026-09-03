@@ -13,21 +13,58 @@ public struct PaneID: Sendable, Hashable, Codable, RawRepresentable {
 public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public let id: PaneID
   public let state: AgentState
+  public let unknownCategoryOverride: UnknownAgentCategoryOverride?
+  public let adapterID: AgentAdapterID?
+  public let lastKnownAt: Date?
+  public let unknownReason: UnknownReason?
+  public let diagnostics: String?
+  public var category: WorktreeStateCategory {
+    unknownCategoryOverride?.category ?? state.worktreeCategory
+  }
   /// このフィールドが必要なのは、§12.2 が同順位の pane を「最終更新順」で並べるため。
   /// 観測した時刻ではなく、状態が変化した時刻を入れる。
   public let lastUpdatedAt: Date
 
-  public init(id: PaneID, state: AgentState, lastUpdatedAt: Date) {
+  public init(
+    id: PaneID,
+    state: AgentState,
+    lastUpdatedAt: Date
+  ) {
     self.id = id
     self.state = state
+    self.unknownCategoryOverride = nil
+    self.adapterID = nil
+    self.lastKnownAt = nil
+    self.unknownReason = nil
+    self.diagnostics = nil
     self.lastUpdatedAt = lastUpdatedAt
   }
+
+  public init(id: PaneID, observation: AgentStateObservation) {
+    self.id = id
+    self.state = observation.state
+    self.unknownCategoryOverride =
+      observation.state == .unknown && observation.category == .needsAttention
+      ? .needsAttention : nil
+    self.adapterID = observation.adapterID
+    self.lastKnownAt = observation.lastKnownAt
+    self.unknownReason = observation.unknownReason
+    self.diagnostics = observation.diagnostics
+    // observation stream は状態変化時だけ配信するため、その観測時刻が状態の更新時刻になる。
+    self.lastUpdatedAt = observation.observedAt
+  }
+}
+
+public enum UnknownAgentCategoryOverride: String, Sendable, Hashable, Codable {
+  case needsAttention
+
+  fileprivate var category: WorktreeStateCategory { .needsAttention }
 }
 
 public struct WorktreeRepresentativeState: Sendable, Hashable, Codable {
   public let category: WorktreeStateCategory
-  /// `category` から導ける情報だが別に持たせているのは、needsAttention の中の
-  /// question / permission / error を UI が区別して表示するため。
+  /// `.unknown + .needsAttention` では `category` から導けない。別に持たせることで、
+  /// 通知優先度を保ったまま詳細表示では未確定であることを示す。
   public let state: AgentState
   public let paneID: PaneID
 
@@ -57,8 +94,8 @@ public func resolveWorktreeRepresentativeState(
       continue
     }
 
-    let candidateCategory = pane.state.worktreeCategory
-    let currentCategory = current.state.worktreeCategory
+    let candidateCategory = pane.category
+    let currentCategory = current.category
 
     if candidateCategory > currentCategory {
       best = pane
@@ -72,7 +109,7 @@ public func resolveWorktreeRepresentativeState(
   guard let representative = best else { return nil }
 
   return WorktreeRepresentativeState(
-    category: representative.state.worktreeCategory,
+    category: representative.category,
     state: representative.state,
     paneID: representative.id
   )

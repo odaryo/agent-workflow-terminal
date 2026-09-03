@@ -1,0 +1,19 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "40桁で過去の送信プロンプトが画面外へ流れ、完了を裏づける情報が不足した静止画面。copy-mode 自体は判定条件にしない (README §7.3.1)",
+  "source": "claude-copy-mode",
+  "paneTitle": "✳ 1から20の数字と豆知識",
+  "paneCurrentCommand": "2.1.259",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "chrome-devtools-mcp",
+    "claude",
+    "node",
+    "npm exec chrome-devtools-mcp@1.8.0",
+    "npx"
+  ],
+  "screen": "  20. 20 —\n      にじゅう（二十）：「二十歳（はたち\n      ）」「二十日（はつか）」など、20だ\n      け特別な和語読みが今も残っている。\n\n✻ Cogitated for 26s · done 11:35 AM\n\n────────────────────────────────────────\n❯ \n────────────────────────────────────────\n  Opus 5 (1M context) │ ⚡ high │  ma…\n  Session: 0m │ ctx ▍░░░░░░░░░ 4% │ 5…\n"
+}

@@ -1,0 +1,19 @@
+{
+  "expectedState": "question",
+  "acceptableStates": [
+    "question"
+  ],
+  "note": "選択肢付きの質問で停止。permission と取り違えないこと",
+  "source": "claude-question",
+  "paneTitle": "✳ AskUserQuestion ツール",
+  "paneCurrentCommand": "2.1.259",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "chrome-devtools-mcp",
+    "claude",
+    "node",
+    "npm exec chrome-devtools-mcp@1.8.0",
+    "npx"
+  ],
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.259\n▝▜██████▀  Opus 5 (1M context) · Claude Max\n  ▝▝ ▝▝    /private/var/folders/99/4xt4q3jx2lb25v8nyn5kw_p40000gn/T/gate3-work\n\n\n❯ AskUserQuestion ツールを使って、私に1つだけ質問して。\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n ☐ 次の作業\n\nこの作業ディレクトリで、次に何をしましょうか？\n\n❯ 1. リポジトリの状況を調査\n     未コミットのファイル（.claude/、emit-hook.sh、hook-events.jsonl、notes.txt\n     など）を読んで、このリポジトリが何をしているか把握して報告します。\n  2. hook の設定・修正\n     emit-hook.sh と .claude/settings.json のフック設定を確認して、動作させたい内容に合わせて調整します。\n  3. 変更をコミット\n     現在の未追跡ファイルを確認したうえで、適切な単位でコミットします。\n  4. Type something.\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  5. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+}

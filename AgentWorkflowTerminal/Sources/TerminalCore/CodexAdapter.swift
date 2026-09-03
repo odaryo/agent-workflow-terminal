@@ -16,7 +16,6 @@ public struct CodexAdapter: AgentAdapter {
     if hasWorkingSpinner(signals.paneTitle) {
       return observation(.working, signals)
     }
-    guard !signals.isPaneInMode else { return unknown(signals, reason: .screenUnavailable) }
     guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable)
     }
@@ -29,7 +28,7 @@ public struct CodexAdapter: AgentAdapter {
 
   private func attentionObservation(_ signals: AgentSignals) -> AgentObservationResult? {
     guard signals.paneTitle.contains("Action Required") else { return nil }
-    guard !signals.isPaneInMode, let screen = signals.screenText else {
+    guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable, category: .needsAttention)
     }
     if screen.contains("Would you like to") || screen.contains("Press enter to confirm") {

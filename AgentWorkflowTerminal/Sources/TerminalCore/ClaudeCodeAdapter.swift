@@ -10,7 +10,6 @@ public struct ClaudeCodeAdapter: AgentAdapter {
   public func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {
     guard liveness != .absent else { return .absent }
     guard liveness == .alive else { return unknown(signals, reason: .livenessUnavailable) }
-    guard !signals.isPaneInMode else { return unknown(signals, reason: .screenUnavailable) }
     guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable)
     }
@@ -20,20 +19,23 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     if screen.contains("Enter to select ·") && screen.contains("Type something.") {
       return observation(.question, signals)
     }
-    if screen.contains("Claude Code v") && screen.contains("mode on")
-      && !screen.contains("⏺")
+    let hasEmptyInputPrompt =
+      screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
+    if let elapsed = signals.secondsSinceScreenChange, elapsed <= 1 {
+      return observation(.working, signals)
+    }
+    if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
+      && !screen.contains("⏺") && signals.secondsSinceScreenChange.map({ $0 > 1 }) == true
     {
       return observation(.idle, signals)
     }
-    let hasEmptyInputPrompt =
-      screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
-    if hasEmptyInputPrompt,
+    if hasEmptyInputPrompt, screen.contains("mode on"),
       screen.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
     {
       return observation(.completed, signals)
     }
-    if let elapsed = signals.secondsSinceOutput, elapsed <= 2 {
-      return observation(.working, signals)
+    if signals.secondsSinceScreenChange == nil {
+      return unknown(signals, reason: .signalMissing)
     }
     return unknown(signals, reason: .adapterUndetermined)
   }

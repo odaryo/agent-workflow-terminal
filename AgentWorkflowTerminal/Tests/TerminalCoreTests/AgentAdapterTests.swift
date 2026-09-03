@@ -1,14 +1,14 @@
 import Foundation
-import TerminalCore
 import Testing
+
+@testable import TerminalCore
 
 @Suite("Agent Adapter の共通不変条件")
 struct AgentAdapterTests {
   private let signals = AgentSignals(
     paneTitle: "",
     screenText: "stale screen",
-    secondsSinceOutput: 0,
-    isPaneInMode: false,
+    secondsSinceScreenChange: 0,
     observedAt: Date(timeIntervalSince1970: 1)
   )
 
@@ -68,22 +68,26 @@ struct AgentAdapterTests {
       let result = ClaudeCodeAdapter().classify(
         signals: fixture.signals, liveness: fixture.liveness
       )
-      #expect(observationState(result) != .error)
+      assertNeverError(result, fixture: fixture)
     }
     for fixture in try AgentStateFixture.load(prefix: "codex-") {
       let result = CodexAdapter().classify(
         signals: fixture.signals, liveness: fixture.liveness
       )
-      #expect(observationState(result) != .error)
+      assertNeverError(result, fixture: fixture)
     }
   }
 
   @Test("観測の Needs Attention category を代表状態まで保つ")
   func preservesObservationCategory() {
+    let observation = AgentStateObservation(
+      state: .unknown, adapterID: AgentAdapterID(rawValue: "test"),
+      observedAt: Date(timeIntervalSince1970: 1), category: .needsAttention
+    )
     let representative = resolveWorktreeRepresentativeState(panes: [
       PaneAgentState(
-        id: PaneID(rawValue: "%1"), state: .unknown,
-        lastUpdatedAt: Date(timeIntervalSince1970: 1), category: .needsAttention
+        id: PaneID(rawValue: "%1"), observation: observation,
+        lastUpdatedAt: Date(timeIntervalSince1970: 1)
       )
     ])
     #expect(representative?.category == .needsAttention)
@@ -91,43 +95,74 @@ struct AgentAdapterTests {
   }
 
   @Test("diagnostics が変わっても同じ Unknown 状態を再配信しない")
-  func diagnosticsDoNotDriveEvents() async {
+  func diagnosticsDoNotDriveEvents() {
+    let first = AgentObservationResult.observation(
+      AgentStateObservation(
+        state: .unknown, adapterID: AgentAdapterID(rawValue: "test"),
+        observedAt: Date(timeIntervalSince1970: 1), diagnostics: "first",
+        unknownReason: .observationFailed
+      )
+    )
+    let second = AgentObservationResult.observation(
+      AgentStateObservation(
+        state: .unknown, adapterID: AgentAdapterID(rawValue: "test"),
+        observedAt: Date(timeIntervalSince1970: 2), diagnostics: "second",
+        unknownReason: .observationFailed
+      )
+    )
+    #expect(second.hasSameObservableState(as: first))
+  }
+
+  @Test("観測失敗でも直前の確定時刻を保つ")
+  func observationFailurePreservesLastKnownAt() async {
     let pane = PaneSnapshot(
       id: PaneID(rawValue: "%1"), processID: 1, tty: "", currentCommand: "",
       currentPath: "", title: "", termination: nil
     )
     let stream = ClaudeCodeAdapter().observations(
-      of: pane, from: ChangingErrorSignalSource(),
+      of: pane, from: KnownThenFailingSignalSource(),
       intervals: AgentObservationIntervals(
         signals: .milliseconds(1), liveness: .seconds(1)
       )
     )
-    let consumer = Task {
-      var count = 0
-      for await _ in stream { count += 1 }
-      return count
+    var iterator = stream.makeAsyncIterator()
+    guard
+      case .observation(let known) = await iterator.next(),
+      case .observation(let failed) = await iterator.next()
+    else {
+      Issue.record("確定観測と失敗観測が必要")
+      return
     }
-    try? await Task.sleep(for: .milliseconds(30))
-    consumer.cancel()
-    #expect(await consumer.value == 1)
+    #expect(known.state == .idle)
+    #expect(failed.unknownReason == .observationFailed)
+    #expect(failed.lastKnownAt == known.observedAt)
   }
 
-  private func observationState(_ result: AgentObservationResult) -> AgentState? {
-    guard case .observation(let observation) = result else { return nil }
-    return observation.state
+  private func assertNeverError(_ result: AgentObservationResult, fixture: AgentStateFixture) {
+    switch result {
+    case .absent:
+      #expect(fixture.acceptableStates.contains("absent"))
+    case .observation(let observation):
+      #expect(observation.state != .error)
+      #expect(!fixture.acceptableStates.contains("absent"))
+    }
   }
 }
 
-private enum ChangingObservationError: Error {
-  case sequence(Int)
+private enum ObservationFailure: Error {
+  case failed
 }
 
-private actor ChangingErrorSignalSource: AgentSignalSource {
-  private var sequence = 0
+private actor KnownThenFailingSignalSource: AgentSignalSource {
+  private var hasReturnedSignals = false
 
   func signals(for pane: PaneSnapshot) async throws -> AgentSignals {
-    sequence += 1
-    throw ChangingObservationError.sequence(sequence)
+    guard !hasReturnedSignals else { throw ObservationFailure.failed }
+    hasReturnedSignals = true
+    return AgentSignals(
+      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on",
+      secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
+    )
   }
 
   func liveness(

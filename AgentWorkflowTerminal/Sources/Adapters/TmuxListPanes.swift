@@ -106,8 +106,6 @@ public struct TmuxListPanesParseResult: Sendable, Equatable {
 public struct TmuxAgentPaneStatus: Sendable, Equatable {
   public let paneID: PaneID
   public let title: String
-  public let isPaneInMode: Bool
-  public let windowActivity: TimeInterval
 }
 
 public enum TmuxListPanes {
@@ -148,11 +146,11 @@ public enum TmuxListPanes {
 
   /// `display-message` でも Unit Separator は `\037` になるため、list-panes と同じ
   /// parity 方式で title 内の backslash と区切りを識別する (Gate 3 README §2.1)。
+  /// `display-message` は `%H` 等を strftime 展開する点が list-panes と異なるため、
+  /// template へ literal `%` を足さない。
   public static let agentPaneStatusFormat = [
     "#{pane_id}",
     #"#{s/\\/\\\\/:pane_title}"#,
-    "#{pane_in_mode}",
-    "#{window_activity}",
   ].joined(separator: formatSeparator)
 
   public static func parseAgentPaneStatus(
@@ -161,24 +159,13 @@ public enum TmuxListPanes {
     var line = output
     if line.hasSuffix("\n") { line.removeLast() }
     let fields = splitEncodedFields(line)
-    guard fields.count == 4 else { throw .invalidFieldCount(actual: fields.count) }
+    guard fields.count == 2 else { throw .invalidFieldCount(actual: fields.count) }
     guard fields[0].first == "%", Int(fields[0].dropFirst()) != nil else {
       throw .invalidPaneID(fields[0])
     }
-    let isPaneInMode: Bool
-    switch fields[2] {
-    case "0": isPaneInMode = false
-    case "1": isPaneInMode = true
-    default: throw .invalidPaneActive(fields[2])
-    }
-    guard let windowActivity = TimeInterval(fields[3]) else {
-      throw .invalidRawFieldEscape(fields[3])
-    }
     return TmuxAgentPaneStatus(
       paneID: PaneID(rawValue: fields[0]),
-      title: try decodeRawField(fields[1]),
-      isPaneInMode: isPaneInMode,
-      windowActivity: windowActivity
+      title: try decodeRawField(fields[1])
     )
   }
 

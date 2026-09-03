@@ -24,8 +24,7 @@ struct ClaudeCodeAdapterTests {
       screenText: fixture.screen
         .replacingOccurrences(of: "Do you want to ", with: "Confirm whether to ")
         .replacingOccurrences(of: "Esc to cancel · Tab to amend", with: "Escape cancels"),
-      secondsSinceOutput: fixture.secondsSinceWindowActivity,
-      isPaneInMode: fixture.paneInMode,
+      secondsSinceScreenChange: 2,
       observedAt: .distantPast
     )
     let result = ClaudeCodeAdapter().classify(signals: mutated, liveness: .alive)

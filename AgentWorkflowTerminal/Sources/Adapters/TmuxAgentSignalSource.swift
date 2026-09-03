@@ -42,6 +42,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   private let capturePane: TmuxCapturePane
   private let processRunner: any ProcessRunning
   private let processExecutableURL: URL
+  private var screenChangeTracker = AgentScreenChangeTracker()
 
   public init(
     tmuxRunner: TmuxRunner, processRunner: any ProcessRunning,
@@ -69,6 +70,9 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     } catch { throw TmuxAgentSignalSourceError.tmux(error) }
     let status: TmuxAgentPaneStatus
     do { status = try TmuxListPanes.parseAgentPaneStatus(output: displayed.stdout) } catch {
+      if case .invalidPaneID(let rawValue) = error, rawValue.isEmpty {
+        throw TmuxAgentSignalSourceError.paneNotFound(pane.id)
+      }
       throw TmuxAgentSignalSourceError.paneListMalformed([
         TmuxListPanesParseFailure(lineNumber: 1, line: displayed.stdout, error: error)
       ])
@@ -80,11 +84,12 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     do { screen = try await capturePane.capture(pane.id) } catch {
       throw TmuxAgentSignalSourceError.capture(error)
     }
+    let secondsSinceScreenChange = screenChangeTracker.observe(
+      screen: screen, paneID: pane.id, at: observedAt
+    )
     return AgentSignals(
       paneTitle: status.title, screenText: screen,
-      // window_activity は兄弟 pane の出力でも更新されるため pane の鮮度へ写像しない (実測)。
-      secondsSinceOutput: nil,
-      isPaneInMode: status.isPaneInMode,
+      secondsSinceScreenChange: secondsSinceScreenChange,
       observedAt: observedAt
     )
   }

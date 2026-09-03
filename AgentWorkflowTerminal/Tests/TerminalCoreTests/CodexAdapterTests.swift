@@ -16,11 +16,11 @@ struct CodexAdapterTests {
     }
   }
 
-  @Test("copy-mode 中も title 由来の操作待ち category を保つ")
-  func copyModeAttention() {
+  @Test("title 由来の操作待ち category を保つ")
+  func titleAttention() {
     let signals = AgentSignals(
       paneTitle: "[ . ] Action Required | worktree", screenText: "stale",
-      secondsSinceOutput: nil, isPaneInMode: true, observedAt: .distantPast
+      secondsSinceScreenChange: nil, observedAt: .distantPast
     )
     guard
       case .observation(let observation) = CodexAdapter().classify(

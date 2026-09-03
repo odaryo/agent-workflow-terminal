@@ -1,25 +1,36 @@
 import Foundation
-import TerminalCore
 import Testing
+
+@testable import TerminalCore
 
 struct AgentStateFixture: Decodable {
   let source: String
   let acceptableStates: [String]
   let paneTitle: String
-  let paneInMode: Bool
-  let secondsSinceWindowActivity: TimeInterval
   let processNames: [String]
   let screen: String
 
-  var signals: AgentSignals {
-    AgentSignals(
+  func signals(screenChanged: Bool) -> AgentSignals {
+    let paneID = PaneID(rawValue: "%fixture")
+    let observedAt = Date(timeIntervalSince1970: 2)
+    var tracker = AgentScreenChangeTracker()
+    let previousScreen = screenChanged ? screen + " previous frame" : screen
+    _ = tracker.observe(
+      screen: previousScreen, paneID: paneID,
+      at: Date(timeIntervalSince1970: 0)
+    )
+    let secondsSinceScreenChange = tracker.observe(
+      screen: screen, paneID: paneID, at: observedAt
+    )
+    return AgentSignals(
       paneTitle: paneTitle,
       screenText: screen,
-      secondsSinceOutput: secondsSinceWindowActivity,
-      isPaneInMode: paneInMode,
-      observedAt: Date(timeIntervalSince1970: 1)
+      secondsSinceScreenChange: secondsSinceScreenChange,
+      observedAt: observedAt
     )
   }
+
+  var signals: AgentSignals { signals(screenChanged: acceptableStates.contains("working")) }
 
   var liveness: AgentLiveness { processNames.isEmpty ? .absent : .alive }
 

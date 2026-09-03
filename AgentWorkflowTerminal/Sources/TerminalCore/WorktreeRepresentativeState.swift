@@ -13,7 +13,10 @@ public struct PaneID: Sendable, Hashable, Codable, RawRepresentable {
 public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public let id: PaneID
   public let state: AgentState
-  public let category: WorktreeStateCategory
+  public let unknownCategoryOverride: UnknownAgentCategoryOverride?
+  public var category: WorktreeStateCategory {
+    unknownCategoryOverride?.category ?? state.worktreeCategory
+  }
   /// このフィールドが必要なのは、§12.2 が同順位の pane を「最終更新順」で並べるため。
   /// 観測した時刻ではなく、状態が変化した時刻を入れる。
   public let lastUpdatedAt: Date
@@ -21,20 +24,34 @@ public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public init(
     id: PaneID,
     state: AgentState,
-    lastUpdatedAt: Date,
-    category: WorktreeStateCategory? = nil
+    lastUpdatedAt: Date
   ) {
     self.id = id
     self.state = state
-    self.category = category ?? state.worktreeCategory
+    self.unknownCategoryOverride = nil
+    self.lastUpdatedAt = lastUpdatedAt
+  }
+
+  public init(id: PaneID, observation: AgentStateObservation, lastUpdatedAt: Date) {
+    self.id = id
+    self.state = observation.state
+    self.unknownCategoryOverride =
+      observation.state == .unknown && observation.category == .needsAttention
+      ? .needsAttention : nil
     self.lastUpdatedAt = lastUpdatedAt
   }
 }
 
+public enum UnknownAgentCategoryOverride: String, Sendable, Hashable, Codable {
+  case needsAttention
+
+  fileprivate var category: WorktreeStateCategory { .needsAttention }
+}
+
 public struct WorktreeRepresentativeState: Sendable, Hashable, Codable {
   public let category: WorktreeStateCategory
-  /// `category` から導ける情報だが別に持たせているのは、needsAttention の中の
-  /// question / permission / error を UI が区別して表示するため。
+  /// `.unknown + .needsAttention` では `category` から導けない。別に持たせることで、
+  /// 通知優先度を保ったまま詳細表示では未確定であることを示す。
   public let state: AgentState
   public let paneID: PaneID
 

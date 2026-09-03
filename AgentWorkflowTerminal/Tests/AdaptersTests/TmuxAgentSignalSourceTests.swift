@@ -10,7 +10,7 @@ struct TmuxAgentSignalSourceTests {
   func signalsArguments() async throws {
     let tmux = QueueProcessSpy(results: [
       ProcessRunResult(
-        exitCode: 0, stdout: #"%7\037title\0371\03712345"# + "\n", stderr: ""
+        exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""
       ),
       ProcessRunResult(exitCode: 0, stdout: "screen\n", stderr: ""),
     ])
@@ -19,8 +19,7 @@ struct TmuxAgentSignalSourceTests {
 
     #expect(signals.paneTitle == "title")
     #expect(signals.screenText == "screen\n")
-    #expect(signals.isPaneInMode)
-    #expect(signals.secondsSinceOutput == nil)
+    #expect(signals.secondsSinceScreenChange == nil)
     let calls = await tmux.calls
     #expect(calls.count == 2)
     #expect(
@@ -30,6 +29,42 @@ struct TmuxAgentSignalSourceTests {
         ]
     )
     #expect(calls[1].suffix(4) == ["capture-pane", "-p", "-t", "%7"])
+  }
+
+  @Test("画面差分から pane 単位の最終変化時刻を追跡する")
+  func tracksScreenChanges() async throws {
+    let status = ProcessRunResult(
+      exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""
+    )
+    let tmux = QueueProcessSpy(results: [
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "first", stderr: ""),
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "first", stderr: ""),
+      status,
+      ProcessRunResult(exitCode: 0, stdout: "second", stderr: ""),
+    ])
+    let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
+
+    let first = try await source.signals(for: pane(id: "%7", pid: 70))
+    let unchanged = try await source.signals(for: pane(id: "%7", pid: 70))
+    let changed = try await source.signals(for: pane(id: "%7", pid: 70))
+
+    #expect(first.secondsSinceScreenChange == nil)
+    #expect(unchanged.secondsSinceScreenChange.map { $0 >= 0 } == true)
+    #expect(changed.secondsSinceScreenChange == 0)
+  }
+
+  @Test("消えた pane の空フィールドを parse 失敗と区別する")
+  func missingPane() async throws {
+    let tmux = QueueProcessSpy(results: [
+      ProcessRunResult(exitCode: 0, stdout: #"\037"# + "\n", stderr: "")
+    ])
+    let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
+
+    await #expect(throws: TmuxAgentSignalSourceError.paneNotFound(PaneID(rawValue: "%7"))) {
+      try await source.signals(for: pane(id: "%7", pid: 70))
+    }
   }
 
   @Test("pane_pid 自身が一致すれば子がいなくても alive")

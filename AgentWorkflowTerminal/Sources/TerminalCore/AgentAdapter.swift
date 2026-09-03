@@ -18,7 +18,7 @@ public struct AgentAdapterID: Sendable, Hashable, Codable, RawRepresentable {
 ///   (Spikes/gate1/README.md 申し送り #2、設計書 §21.3 と整合)。
 public struct PaneSnapshot: Sendable, Hashable, Codable {
   public let id: PaneID
-  /// dead pane では終了済み PID が残り、OS に再利用され得るため生存確認に使わない。
+  /// dead pane では終了済み PID が残り再利用され得るため、`isDead` を確認せず生存確認に使わない。
   public let processID: Int32
   public let tty: String
   public let currentCommand: String
@@ -65,19 +65,43 @@ public enum AgentLiveness: String, Sendable, Hashable, Codable {
 public struct AgentSignals: Sendable, Hashable, Codable {
   public let paneTitle: String
   public let screenText: String?
-  public let secondsSinceOutput: TimeInterval?
-  public let isPaneInMode: Bool
+  /// pane の `capture-pane` 画面が最後に変化してからの秒数。window 単位の
+  /// `window_activity` は使わない (Spikes/gate3/README.md §3.3、§3.4)。
+  public let secondsSinceScreenChange: TimeInterval?
   public let observedAt: Date
 
   public init(
-    paneTitle: String, screenText: String?, secondsSinceOutput: TimeInterval?,
-    isPaneInMode: Bool, observedAt: Date
+    paneTitle: String, screenText: String?, secondsSinceScreenChange: TimeInterval?,
+    observedAt: Date
   ) {
     self.paneTitle = paneTitle
     self.screenText = screenText
-    self.secondsSinceOutput = secondsSinceOutput
-    self.isPaneInMode = isPaneInMode
+    self.secondsSinceScreenChange = secondsSinceScreenChange
     self.observedAt = observedAt
+  }
+}
+
+public struct AgentScreenChangeTracker: Sendable {
+  private struct Entry: Sendable {
+    let screen: String
+    let changedAt: Date
+  }
+
+  private var entries: [PaneID: Entry] = [:]
+
+  public init() {}
+
+  public mutating func observe(screen: String, paneID: PaneID, at observedAt: Date) -> TimeInterval?
+  {
+    guard let previous = entries[paneID] else {
+      entries[paneID] = Entry(screen: screen, changedAt: observedAt)
+      return nil
+    }
+    if previous.screen != screen {
+      entries[paneID] = Entry(screen: screen, changedAt: observedAt)
+      return 0
+    }
+    return max(0, observedAt.timeIntervalSince(previous.changedAt))
   }
 }
 
@@ -173,14 +197,15 @@ extension AgentAdapter {
               )
               result = Self.withLastKnownAt(classified, previous: &lastKnownAt)
             } catch {
-              result = .observation(
+              let failed = AgentObservationResult.observation(
                 AgentStateObservation(
                   state: .unknown, adapterID: id, observedAt: Date(),
                   diagnostics: String(describing: error), unknownReason: .observationFailed
                 ))
+              result = Self.withLastKnownAt(failed, previous: &lastKnownAt)
             }
           }
-          if !Self.isSameObservation(result, previous) {
+          if !result.hasSameObservableState(as: previous) {
             continuation.yield(result)
             previous = result
           }
@@ -189,19 +214,6 @@ extension AgentAdapter {
         continuation.finish()
       }
       continuation.onTermination = { _ in task.cancel() }
-    }
-  }
-
-  private static func isSameObservation(
-    _ lhs: AgentObservationResult, _ rhs: AgentObservationResult?
-  ) -> Bool {
-    guard let rhs else { return false }
-    switch (lhs, rhs) {
-    case (.absent, .absent): return true
-    case (.observation(let lhs), .observation(let rhs)):
-      return lhs.state == rhs.state && lhs.category == rhs.category
-        && lhs.unknownReason == rhs.unknownReason
-    default: return false
     }
   }
 
@@ -219,5 +231,18 @@ extension AgentAdapter {
         lastKnownAt: lastKnownAt, diagnostics: observation.diagnostics,
         unknownReason: observation.unknownReason
       ))
+  }
+}
+
+extension AgentObservationResult {
+  func hasSameObservableState(as other: AgentObservationResult?) -> Bool {
+    guard let other else { return false }
+    switch (self, other) {
+    case (.absent, .absent): return true
+    case (.observation(let lhs), .observation(let rhs)):
+      return lhs.state == rhs.state && lhs.category == rhs.category
+        && lhs.unknownReason == rhs.unknownReason
+    default: return false
+    }
   }
 }

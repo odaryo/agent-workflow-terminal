@@ -1,0 +1,11 @@
+step	panes(pane_id:pane_pid:cmd:dead:status)	pane_pid	children
+0-after-new-session	%4:50979:zsh:0: 	50979	none
+1-long-running-child	%4:50979:sleep:0: 	50979	50998,
+2-after-split	%4:50979:sleep:0: %5:51053:bash:0: 	50979	50998,
+3-after-zoom	%4:50979:sleep:0: %5:51053:bash:0: 	50979	50998,
+4-after-unzoom	%4:50979:sleep:0: %5:51053:bash:0: 	50979	50998,
+5-client-attached	%4:50979:sleep:0: %5:51053:bash:0: 	50979	50998,
+6-after-detach	%4:50979:sleep:0: %5:51053:bash:0: 	50979	50998,
+7-after-swap-pane	%5:51053:bash:0: %4:50979:sleep:0: 	51053	none
+8-after-respawn	%5:51492:bash:0: %4:50979:sleep:0: 	51492	none
+9-after-shell-exit	%4:50979:sleep:0: 	50979	50998,

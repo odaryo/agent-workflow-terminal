@@ -112,7 +112,9 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 2. Implementer delivers; Director independently re-runs the GREEN commands (cheap; trust but verify).
 3. Reviewer reviews adversarially, classifying Critical / Major / Minor and separating code defects from **spec defects** (the pilot found both).
 4. Critical findings go back to the implementer via `codex exec resume` as a fix spec. **Review findings are hypotheses**: any claim in a fix spec about external behavior must be re-verified by the implementer with a measurement before coding — the pilot's only regression came from implementing a reviewer's unverified premise. Continue looping while each round is backed by fresh measurement; escalate to the user when a round fails without new evidence or a design question emerges.
-5. Completion is reported only with GREEN + no Critical remaining.
+5. Completion is reported only with GREEN + no Critical remaining — and at that point the Director merges (see **Merge authority**).
+
+**Merge authority.** GREEN + no Critical remaining **is** the merge condition, and the Director acts on it — `scripts/wf-pr-merge.sh <PR>` **without waiting for the user's judgment**. The script mechanically verifies the rest (OPEN / non-draft / base=main / not CONFLICTING / checks complete and green), so the Director's own judgment reduces to one question: did an adversarial review run, and did it leave no Critical? For changes that skip the pipeline (below), GREEN alone is the condition. Escalate instead of merging when a Critical is unresolved, when no review was run on a change that needed one, when a design decision is still open, or when the user has said to hold that specific PR.
 
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop.
 
@@ -120,7 +122,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k) because autocompact effectively never fires on a 1M window.
 
-- **One Issue, one Director session.** `/clear` after reporting the Issue's PR, before creating the next worktree. Never mid-Issue — the reviewer round-trip needs the Director's memory of what was already measured and rejected.
+- **One Issue, one Director session.** The Director ends every Issue's final report with an explicit one-line request to run `/clear`, before the next worktree is created. This cannot be automated and the rule exists because the manual step was being forgotten: nothing in Claude Code lets the model invoke `/clear` or `/compact` itself, hooks (`PreCompact` / `PostCompact` included) can observe compaction but not trigger it, and autocompact (`autoCompactEnabled` / `autoCompactWindow`, default on) only fires as the context nears its limit — which the measurements above show a 1M window never reaches. Never `/clear` mid-Issue: the reviewer round-trip needs the Director's memory of what was already measured and rejected.
 - **Do not `--resume` a large session left idle for over an hour.** The 1-hour prompt cache has expired and the first request rewrites the entire history: measured $2.06–$2.51 for a 200–233k resume, against $0.43–$0.65 to prime a fresh one. Start a new session and re-read what you need.
 - **Never pass a `model:` override when calling a subagent.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`.
 - **Read-only exploration goes to `explorer`, not `general-purpose`** — restating the Director's role above, because in practice this is the rule that gets skipped.
@@ -133,14 +135,14 @@ Issues are the single source of truth (see Repository state); [Project #6](https
 | --- | --- | --- |
 | `Todo` | 未着手 | Issue Open 時 — 自動 (CI `project-status.yml`。Project 未追加の Issue は対象外) |
 | `In Progress` | 実装中 | **worktree を作った時** — 手動 (`wf-project-status.sh`) |
-| `In Review` | マージ判断待ち | PR Open 時 — 自動 (CI `project-status.yml`。draft は除外) |
+| `In Review` | PR Open 済み・マージ待ち | PR Open 時 — 自動 (CI `project-status.yml`。draft は除外) |
 | `Done` | マージ済み | PR マージ時 — 自動 (CI `project-status.yml`) |
 
 `In Review` / `Done` は PR 本文の `Closes #N` に依存する。無ければ `In Progress` から先へ進まない。`Todo` の対象は「Open から30秒以内に Project #6 に載っている Issue」で、`wf-issue-create.sh` の `--project` (既定) はこれを満たす。`--no-project` で外したものは CI も board に載せない (item が現れるまで短くリトライし、現れなければ warning を出して何もしない)。既に Status が入っている item は上書きしない — Issue 作成直後に `In Progress` へ動かす通常フローと、遅れて届いた CI が競合して巻き戻るのを防ぐため。 **ProjectV2 の built-in automation は使わない** — Status option ID の再生成で全て無効化されており (下記 `updateProjectV2Field` 警告の事故と整合)、ProjectV2 workflow には公開 API が無く再有効化・変更が Web UI でしかできないため、リポジトリ内で管理できる CI (`.github/workflows/project-status.yml`) に置き換えた。CI からの Status 更新には `secrets.PROJECT_TOKEN` (classic PAT / `project` スコープ) が必要で、未設定の間は warning のみ出して成功する。
 
-`In Review` exists so that **"手が動いているタスク"と"ユーザーのマージ判断で止まっているタスク"が混ざらない** — agents run in parallel, so several tasks sit waiting on the user at once.
+`In Review` exists so that **"手が動いているタスク"と"PR が出てマージを待っているタスク"が混ざらない** — agents run in parallel, so several tasks reach the PR stage at once. マージは Director が GREEN + Critical 無しで行う (上記 **Merge authority**) ため、通常この状態は短い。**長く留まっている PR は異常のサイン** — Critical が未解決か、設計上の決定を待っているか、ユーザーが明示的に保留した PR のいずれか。
 
-**「ユーザー確認待ち」には2種類ある。** `In Review` が拾うのはマージ判断待ちだけ。実装前にユーザーの決定が要るものは `設計判断` ラベルを付け、`Todo` に置いたまま **決定待ち** ビューで分離する — ラベル付きの Issue は着手不可なので、`Todo` を「着手可能」の意味に保つための区別。決定して `/decide` で設計書に反映したらラベルを外す。ステータスは増やさない。
+**ユーザーを待つのは実装前の決定だけ。** マージはユーザーを待たないので、`In Review` はユーザー待ちを意味しない。実装前にユーザーの決定が要るものは `設計判断` ラベルを付け、`Todo` に置いたまま **決定待ち** ビューで分離する — ラベル付きの Issue は着手不可なので、`Todo` を「着手可能」の意味に保つための区別。決定して `/decide` で設計書に反映したらラベルを外す。ステータスは増やさない。
 
 Views: `Board` (Status グループ) / `決定待ち` (`label:"設計判断" -status:Done`) / `View 1` (全件テーブル)。
 

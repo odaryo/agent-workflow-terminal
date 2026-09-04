@@ -201,7 +201,7 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
       // Why main queue へ移す: close callback の呼び出しスレッドは保証されない。
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          view.window?.performClose(nil)
+          view.handleCloseRequest()
         }
       }
     }
@@ -524,6 +524,21 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     perform(lifecycle.handle(.processExited))
   }
 
+  /// - Important: 先に `pollProcessExit` を呼ぶ。tick より先にキーが届くと状態が `.running` の
+  ///   ままで、閉じるかどうかの判定が競合するため。
+  func handleCloseRequest() {
+    pollProcessExit()
+    // Why not 閉じる: プロセス終了後に libghostty が出す "Press any key to close the terminal."
+    // に従うと close 要求が届くが、閉じるかどうかも作り直すかどうかも上位レイヤの判断であり
+    // (TerminalRenderer の Note)、ここで window を閉じると shutdown が走って `.stopped` へ
+    // 落ち、上位の restart() が永久に届かなくなる。無視しても libghostty 側は壊れない —
+    // App/vendor/ghostty/src/apprt/embedded.zig:639 の close() は callback を呼ぶだけで
+    // surface を解放しない (解放は同 :254 の closeSurface)。案内文と実際の挙動が食い違う
+    // 既知差分は、タブ UI を持つ Issue #25 で解消する。
+    guard state != .exited else { return }
+    window?.performClose(nil)
+  }
+
   override public func setFrameSize(_ newSize: NSSize) {
     super.setFrameSize(newSize)
     updateSurfaceSize()
@@ -565,6 +580,10 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   private func destroySurface() {
+    // Why not 残す: プリエディットと入力の蓄積は破棄する surface 宛ての未確定入力であり、
+    // 持ち越すと restart() 後に別 session となった新しい surface へ送られる。
+    markedTextStorage.mutableString.setString("")
+    textAccumulator = nil
     guard let surface else { return }
     ghostty_surface_free(surface)
     self.surface = nil
@@ -598,6 +617,14 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   private func createSurface() {
+    // Why not 状態機械だけに任せる: 通常経路では到達しない防御。ここを抜けて上書きすると
+    // 旧 surface のポインタを失い、その子プロセスがアプリ終了まで孤児として残る。
+    // 状態機械へ成否を返さないのは、これが遷移の結果ではなく不変条件違反だから。
+    guard surface == nil else {
+      assertionFailure("surface が生きているうちに createSurface が呼ばれた")
+      NSLog("[app] surface が生きているうちに createSurface が呼ばれました")
+      return
+    }
     // Why not creationFailed を送る: window が無いのは生成の失敗ではない。ここで失敗として
     // 扱うとバックオフが進み、装着直後の生成が無駄に遅れる。
     guard window != nil, let configuration, let app = GhosttyRuntime.shared.app else { return }

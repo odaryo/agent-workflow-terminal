@@ -19,6 +19,20 @@ struct TerminalSurfaceLifecycleTests {
     .shutdown,
   ]
 
+  private static let allStates: [TerminalRendererState] = [
+    .notStarted, .awaitingSurface, .running, .exited, .stopped,
+  ]
+
+  private func lifecycle(in state: TerminalRendererState) -> TerminalSurfaceLifecycle {
+    switch state {
+    case .notStarted: TerminalSurfaceLifecycle()
+    case .awaitingSurface: awaitingSurface()
+    case .running: running()
+    case .exited: exited()
+    case .stopped: stopped()
+    }
+  }
+
   private func awaitingSurface() -> TerminalSurfaceLifecycle {
     var lifecycle = TerminalSurfaceLifecycle()
     _ = lifecycle.handle(.start)
@@ -287,6 +301,38 @@ struct TerminalSurfaceLifecycleTests {
     #expect(lifecycle.handle(.retryDeadlineReached(token: retry.token)).isEmpty)
   }
 
+  @Test("同じ token を2回配送しても createSurface は1回しか出ない")
+  func retryTokenIsConsumedOnce() throws {
+    var lifecycle = awaitingSurface()
+    let retry = try #require(scheduledRetry(in: lifecycle.handle(.creationFailed)))
+
+    #expect(lifecycle.handle(.retryDeadlineReached(token: retry.token)) == [.createSurface])
+    #expect(lifecycle.handle(.retryDeadlineReached(token: retry.token)).isEmpty)
+    #expect(lifecycle.state == .awaitingSurface)
+  }
+
+  @Test(
+    "scheduleRetry していない awaitingSurface はどの token も受理しない",
+    arguments: [-1, 0, 1, 2]
+  )
+  func retryDeadlineWithoutPendingTimer(token: Int) {
+    var lifecycle = awaitingSurface()
+    #expect(lifecycle.handle(.retryDeadlineReached(token: token)).isEmpty)
+    #expect(lifecycle.state == .awaitingSurface)
+  }
+
+  @Test("cancelRetry で無効化した token は、後で発行し直した token と混ざらない")
+  func cancelledRetryTokenIsNeverAccepted() throws {
+    var lifecycle = awaitingSurface()
+    let cancelled = try #require(scheduledRetry(in: lifecycle.handle(.creationFailed)))
+    #expect(lifecycle.handle(.restartRequested) == [.cancelRetry, .createSurface])
+
+    let reissued = try #require(scheduledRetry(in: lifecycle.handle(.creationFailed)))
+    #expect(reissued.token != cancelled.token)
+    #expect(lifecycle.handle(.retryDeadlineReached(token: cancelled.token)).isEmpty)
+    #expect(lifecycle.handle(.retryDeadlineReached(token: reissued.token)) == [.createSurface])
+  }
+
   @Test("成功後に停止し損ねたタイマーが発火しても surface を二重生成しない")
   func staleTimerAfterSuccessIsIgnored() throws {
     var lifecycle = awaitingSurface()
@@ -297,6 +343,41 @@ struct TerminalSurfaceLifecycleTests {
 
     #expect(lifecycle.handle(.retryDeadlineReached(token: retry.token)).isEmpty)
     #expect(lifecycle.state == .awaitingSurface)
+  }
+
+  // MARK: - 効果列の不変条件
+
+  @Test("createSurface は効果列にあれば必ず末尾で1回だけ")
+  func createSurfaceIsTheLastEffectWhenPresent() throws {
+    for state in Self.allStates {
+      for event in Self.allEvents {
+        var lifecycle = lifecycle(in: state)
+        expectCreateSurfaceIsLast(lifecycle.handle(event), state: state, event: event)
+      }
+    }
+
+    // token が一致する retryDeadlineReached を受理できるのは awaitingSurface だけ。
+    var pending = awaitingSurface()
+    let retry = try #require(scheduledRetry(in: pending.handle(.creationFailed)))
+    let matching = TerminalSurfaceLifecycleEvent.retryDeadlineReached(token: retry.token)
+    expectCreateSurfaceIsLast(
+      pending.handle(matching),
+      state: .awaitingSurface,
+      event: matching
+    )
+  }
+
+  private func expectCreateSurfaceIsLast(
+    _ effects: [TerminalSurfaceLifecycleEffect],
+    state: TerminalRendererState,
+    event: TerminalSurfaceLifecycleEvent
+  ) {
+    guard effects.contains(.createSurface) else { return }
+    #expect(effects.last == .createSurface, "\(state) + \(event) → \(effects)")
+    #expect(
+      effects.filter { $0 == .createSurface }.count == 1,
+      "\(state) + \(event) → \(effects)"
+    )
   }
 
   // MARK: - SurfaceCreationRetryPolicy

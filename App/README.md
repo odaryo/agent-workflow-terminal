@@ -35,13 +35,6 @@ publish より先に PR を開くと、対応する Release アセットがま�
 必ず失敗します。
 
 `scripts/build-ghostty.sh` と `scripts/wf-ghostty-publish.sh` を使うのは、ghostty の ref を
-上げる担当者だけです。
-
-```shell
-scripts/build-ghostty.sh
-scripts/wf-ghostty-publish.sh
-```
-
-`build-ghostty.sh` には zig 0.15、Xcode、Metal Toolchain、`llvm-libtool-darwin` が必要です。
+上げる担当者だけです。`build-ghostty.sh` には zig 0.15、Xcode、Metal Toolchain、`llvm-libtool-darwin` が必要です。
 ユーザーの `~/.config/ghostty/config` は自動では読みません。設定を使う場合は
 `TerminalRendererConfiguration.configurationFileURL` から明示的に指定します。

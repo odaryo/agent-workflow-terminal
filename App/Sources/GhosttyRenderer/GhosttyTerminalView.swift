@@ -101,6 +101,15 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         // Why not handle: pane / tab / window 操作は tmux の責務である (設計書 §4.1)。
         accepted = false
         pendingAction = nil
+      case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
+        // Why not accept: 握り潰すと libghostty 自身の "Process exited." 表示が消える。
+        // 出典: App/vendor/ghostty/macos/Sources/Ghostty/Ghostty.App.swift:664。
+        accepted = false
+        if target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface {
+          pendingAction = .childExited(surfaceAddress: UInt(bitPattern: surface))
+        } else {
+          pendingAction = nil
+        }
       case GHOSTTY_ACTION_MOUSE_SHAPE, GHOSTTY_ACTION_MOUSE_VISIBILITY,
         GHOSTTY_ACTION_PWD, GHOSTTY_ACTION_RENDER, GHOSTTY_ACTION_RENDERER_HEALTH,
         GHOSTTY_ACTION_CELL_SIZE, GHOSTTY_ACTION_CONFIG_CHANGE,
@@ -186,13 +195,17 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
       }
     },
     close_surface_cb: { userdata, _ in
+      // Why not 第2引数を読む: 閉じる判断をしないので、確認ダイアログを出すかどうかの分岐が
+      // 要らない (GhosttySurfaceView.handleCloseRequest)。apprt 層の呼称は process_alive だが、
+      // 実体は App/vendor/ghostty/src/Surface.zig:828 が渡す needsConfirmQuit() であり、
+      // プロセスの生存そのものではない。
       guard let userdata else { return }
       // Why callback 内で復元: main queue closure の capture により、実行まで強参照を保持する。
       let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
       // Why main queue へ移す: close callback の呼び出しスレッドは保証されない。
       DispatchQueue.main.async {
         MainActor.assumeIsolated {
-          view.window?.performClose(nil)
+          view.handleCloseRequest()
         }
       }
     }
@@ -269,16 +282,14 @@ private final class GhosttyRuntime {
   func tick() {
     guard let app else { return }
     ghostty_app_tick(app)
+    // Why ここで poll: libghostty v1.3.1 はプロセス終了を surface の状態としてしか公開せず、
+    // GHOSTTY_ACTION_SHOW_CHILD_EXITED は表示用の副次的な通知でしかない。
+    GhosttySurfaceRegistry.shared.pollProcessExit()
   }
 
   func setFocus(_ focused: Bool) {
     guard let app else { return }
     ghostty_app_set_focus(app, focused)
-    if focused {
-      for window in NSApp.windows {
-        Self.findSurfaceView(in: window.contentView)?.retrySurfaceCreationIfNeeded()
-      }
-    }
   }
 
   private func keyboardChanged() {
@@ -379,8 +390,11 @@ private final class GhosttyRuntime {
   fileprivate static func handleAction(_ action: PendingGhosttyAction) {
     switch action {
     case .setTitle(let surfaceAddress, let title):
-      guard let view = registeredView(forSurfaceAddress: surfaceAddress) else { return }
-      view.window?.title = title
+      GhosttySurfaceRegistry.shared.view(forSurfaceAddress: surfaceAddress)?.window?.title = title
+    case .childExited(let surfaceAddress):
+      // Why not action を信用する: action は表示用の通知であり、届いた時点の surface の状態を
+      // 保証しない。受け側で ghostty_surface_process_exited を読み直す。
+      GhosttySurfaceRegistry.shared.view(forSurfaceAddress: surfaceAddress)?.pollProcessExit()
     case .setLinkCursor(let isLink):
       (isLink ? NSCursor.pointingHand : NSCursor.arrow).set()
     case .openURL(let value):
@@ -388,23 +402,11 @@ private final class GhosttyRuntime {
       NSWorkspace.shared.open(url)
     }
   }
-
-  private static func registeredView(forSurfaceAddress address: UInt) -> GhosttySurfaceView? {
-    NSApp.windows.lazy.compactMap(\.contentView).compactMap(findSurfaceView(in:)).first {
-      guard let surface = $0.surface else { return false }
-      return UInt(bitPattern: surface) == address
-    }
-  }
-
-  fileprivate static func findSurfaceView(in view: NSView?) -> GhosttySurfaceView? {
-    guard let view else { return nil }
-    if let surfaceView = view as? GhosttySurfaceView { return surfaceView }
-    return view.subviews.lazy.compactMap(findSurfaceView(in:)).first
-  }
 }
 
 private enum PendingGhosttyAction: Sendable {
   case setTitle(surfaceAddress: UInt, title: String)
+  case childExited(surfaceAddress: UInt)
   case setLinkCursor(Bool)
   case openURL(String)
 }
@@ -446,7 +448,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   private(set) var surface: ghostty_surface_t?
 
   public private(set) var size = TerminalSize(columns: 0, rows: 0)
-  public var isRunning: Bool { surface != nil }
+  public var state: TerminalRendererState { lifecycle.state }
   public var imePoint: TerminalIMEPoint? {
     imeRectangle.map { TerminalIMEPoint(x: $0.origin.x, y: $0.origin.y) }
   }
@@ -456,7 +458,8 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   let markedTextStorage = NSMutableAttributedString()
   var textAccumulator: [String]?
   private var contentScale = 1.0
-  private var hasCreatedSurface = false
+  private var lifecycle = TerminalSurfaceLifecycle()
+  private var retryWorkItem: DispatchWorkItem?
 
   init() {
     super.init(frame: .zero)
@@ -482,7 +485,12 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     try GhosttyRuntime.shared.initialize(
       configurationFileURL: configuration.configurationFileURL
     )
-    createSurfaceIfPossible()
+    GhosttySurfaceRegistry.shared.register(self)
+    perform(lifecycle.handle(.start))
+  }
+
+  public func restart() {
+    perform(lifecycle.handle(.restartRequested))
   }
 
   public func resize(to size: TerminalPixelSize) {
@@ -500,15 +508,40 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   public func shutdown() {
-    guard let surface else { return }
-    ghostty_surface_free(surface)
-    self.surface = nil
-    size = TerminalSize(columns: 0, rows: 0)
+    perform(lifecycle.handle(.shutdown))
+    GhosttySurfaceRegistry.shared.unregister(self)
   }
 
   override public func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    createSurfaceIfPossible()
+    environmentMayHaveChanged()
+  }
+
+  func environmentMayHaveChanged() {
+    perform(lifecycle.handle(.environmentMayHaveChanged))
+  }
+
+  func pollProcessExit() {
+    guard lifecycle.state == .running, let surface,
+      ghostty_surface_process_exited(surface)
+    else { return }
+    perform(lifecycle.handle(.processExited))
+  }
+
+  func handleCloseRequest() {
+    // Why 呼ぶだけ: close 要求はプロセス終了の早期の手がかりであり、tick を待たずに `.exited`
+    // へ移せる。
+    pollProcessExit()
+    // Why not 閉じる: 閉じるかどうかは上位レイヤの判断 (Issue #23 のユーザー決定)。設計書は
+    // §21.5 で「作り直すか」だけを確定させており、閉じる条件は §25 で未確定のまま残る。
+    // Why not 状態で分岐: close 要求の userdata は view であって surface ではなく、どの世代宛て
+    // かを照合できない。状態で分岐すると、旧世代宛ての要求が restart() 後に drain されたときに
+    // 新しい window を閉じてしまう。
+    // 無視しても libghostty 側は壊れない — App/vendor/ghostty/src/apprt/embedded.zig:639 の
+    // close() は callback を呼ぶだけで surface を解放しない (解放は同 :254 の closeSurface)。
+    // ユーザーが閉じる経路は塞がらない: `.exited` でも window.performClose(nil) と
+    // NSApp.terminate(nil) は機能する (実測)。タブを閉じる操作と、案内文 "Press any key to
+    // close the terminal." との食い違いは Issue #25 のタブ UI が引き取る。
   }
 
   override public func setFrameSize(_ newSize: NSSize) {
@@ -538,10 +571,72 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     return accepted
   }
 
-  private func createSurfaceIfPossible() {
-    guard surface == nil, !hasCreatedSurface, window != nil, let configuration,
-      let app = GhosttyRuntime.shared.app
-    else { return }
+  // Why 再入しても安全: createSurface は成否を同期に状態機械へ戻すため perform を再入するが、
+  // 効果の列は必ず createSurface で終わるので、新しい効果が未適用の効果を追い越さない。
+  private func perform(_ effects: [TerminalSurfaceLifecycleEffect]) {
+    for effect in effects {
+      switch effect {
+      case .createSurface: createSurface()
+      case .destroySurface: destroySurface()
+      case .scheduleRetry(let after, let token): scheduleRetry(after: after, token: token)
+      case .cancelRetry: cancelRetry()
+      }
+    }
+  }
+
+  private func destroySurface() {
+    // Why not 残す: プリエディットと入力の蓄積は破棄する surface 宛ての未確定入力であり、
+    // 持ち越すと restart() 後に別 session となった新しい surface へ送られる。
+    markedTextStorage.mutableString.setString("")
+    textAccumulator = nil
+    guard let surface else { return }
+    ghostty_surface_free(surface)
+    self.surface = nil
+    size = TerminalSize(columns: 0, rows: 0)
+  }
+
+  private func scheduleRetry(after delay: Duration, token: Int) {
+    cancelRetry()
+    // Why not Timer: Timer は default run loop mode でしか発火せず、メニュー追跡や modal 表示中に
+    // 再試行が止まる。ディスプレイスリープ中の再試行は止められない (申し送り #7)。
+    let workItem = DispatchWorkItem { [weak self] in
+      // Why assumeIsolated: DispatchWorkItem の body は MainActor 隔離とみなされない。
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.retryWorkItem = nil
+        self.perform(self.lifecycle.handle(.retryDeadlineReached(token: token)))
+      }
+    }
+    retryWorkItem = workItem
+    DispatchQueue.main.asyncAfter(deadline: .now() + Self.seconds(delay), execute: workItem)
+  }
+
+  private func cancelRetry() {
+    retryWorkItem?.cancel()
+    retryWorkItem = nil
+  }
+
+  private static func seconds(_ duration: Duration) -> Double {
+    let components = duration.components
+    return Double(components.seconds) + Double(components.attoseconds) / 1e18
+  }
+
+  private func createSurface() {
+    // Why not 状態機械だけに任せる: 通常経路では到達しない防御。ここを抜けて上書きすると
+    // 旧 surface のポインタを失い、その子プロセスがアプリ終了まで孤児として残る。
+    // Why creationSucceeded を返す: 到達した時点で surface は実在するので、状態機械を現実へ
+    // 合わせて自己修復させる。何も返さないと release ビルド (assertionFailure が消える) で
+    // 状態が `.awaitingSurface` のまま保留中の再試行も無く、以後の environmentMayHaveChanged が
+    // 何度来てもこのガードへ戻るだけで抜けられなくなる。
+    guard surface == nil else {
+      assertionFailure("surface が生きているうちに createSurface が呼ばれた")
+      NSLog("[app] surface が生きているうちに createSurface が呼ばれました")
+      perform(lifecycle.handle(.creationSucceeded))
+      return
+    }
+    // Why not creationFailed を送る: window が無いのは生成の失敗ではない。ここで失敗として
+    // 扱うとバックオフが進み、装着直後の生成が無駄に遅れる。
+    guard window != nil, let configuration, let app = GhosttyRuntime.shared.app else { return }
 
     var surfaceConfiguration = ghostty_surface_config_new()
     surfaceConfiguration.platform_tag = GHOSTTY_PLATFORM_MACOS
@@ -569,19 +664,16 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
 
     guard surface != nil else {
       NSLog("[app] ghostty_surface_new が失敗しました。画面復帰後に再試行できます")
+      perform(lifecycle.handle(.creationFailed))
       return
     }
-    hasCreatedSurface = true
 
     updateContentScaleFromWindow()
     updateSurfaceSize()
     updateDisplayID()
     ghostty_surface_set_focus(surface, window?.isKeyWindow == true)
     window?.makeFirstResponder(self)
-  }
-
-  fileprivate func retrySurfaceCreationIfNeeded() {
-    createSurfaceIfPossible()
+    perform(lifecycle.handle(.creationSucceeded))
   }
 
   private func updateContentScaleFromWindow() {

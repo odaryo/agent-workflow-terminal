@@ -78,15 +78,15 @@ public struct TerminalRendererConfiguration: Sendable, Hashable {
 ///   renderer 側の split アクションは握り潰す
 ///   (設計書 §4.1、Spikes/gate1/README.md 申し送り #15)。
 ///
-/// - Note: Phase 1 時点では宣言のみで、操作セットは確定していない。
-///   `detach` すると surface のプロセスが死ぬため (申し送り #6)、
-///   surface のライフサイクルはこの protocol の形に影響する見込み。
+/// - Note: プロセスが終了したあと surface を作り直すかどうかは上位レイヤが決める。実装体は
+///   `state` で終了を伝えるだけで自動では作り直さない。ユーザーが意図して終了させた session を
+///   勝手に復活させないため。一方、生成失敗時のリトライは実装体の責務であり、ディスプレイの
+///   電源状態を上位へ漏らさない (Spikes/gate1/README.md 申し送り #6 / #7)。
 @MainActor
 public protocol TerminalRenderer: AnyObject {
-  /// - Note: ディスプレイスリープ中は surface を生成できないことがあり、
-  ///   `start` 成功後でも `false` になり得る。生成失敗は異常系ではなく、
-  ///   遅延生成・リトライで扱う (Spikes/gate1/README.md 申し送り #7)。
-  var isRunning: Bool { get }
+  /// - Note: `start` が成功しても `.running` へ達するとは限らない。ディスプレイスリープ中は
+  ///   surface を生成できず `.awaitingSurface` に留まる (Spikes/gate1/README.md 申し送り #7)。
+  var state: TerminalRendererState { get }
 
   /// libghostty が backing store の pixel size から決めたセル数の観測値。
   var size: TerminalSize { get }
@@ -96,6 +96,11 @@ public protocol TerminalRenderer: AnyObject {
   var imePoint: TerminalIMEPoint? { get }
 
   func start(configuration: TerminalRendererConfiguration) throws
+
+  /// `.exited` からも `.awaitingSurface` からも呼べる。libghostty v1.3.1 には同じ surface で
+  /// コマンドを再実行する API が無いため、実装体は surface を破棄して作り直す
+  /// (Spikes/gate1/README.md 申し送り #6)。
+  func restart()
 
   /// 表示面のレイアウトが値の所有者であり、明示値は次のレイアウト変更で上書きされる。
   func resize(to size: TerminalPixelSize)

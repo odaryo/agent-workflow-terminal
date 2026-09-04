@@ -1049,6 +1049,14 @@ One SSH connection
 
 アプリ全体をlibghostty APIへ直接依存させず、`TerminalRenderer` protocolでrendererを隔離する方針は維持する。
 
+**確定**: surface内のプロセスが終了したあとsurfaceを作り直すかどうかは、**上位レイヤが決める**。`TerminalRenderer`は終了を状態(`exited`)として公開し`restart`を提供するだけで、自動では作り直さない。
+
+根拠: libghostty v1.3.1には同じsurfaceでコマンドを再実行するAPIが無く、再接続はsurfaceを破棄して作り直すしかない(Gate 1申し送り#6)。一方、detachによる終了とユーザーが意図した終了をrendererは区別できない。自動で作り直すと、意図して終えたsessionを復活させてしまう。tmux sessionの存否を見て自動再attachするかどうかの判断は上位レイヤ(§3のworktreeライフサイクル)に属する。
+
+**確定**: surfaceの**生成失敗**は異常系ではなく、遅延生成とリトライで扱う。リトライはrenderer実装体の内部責務とし、上位レイヤへ漏らさない。
+
+根拠: ディスプレイスリープ中は`ghostty_surface_new`自体が失敗する(Gate 1申し送り#7)。これは「フタを閉じたままエージェントを走らせ続ける」という§4.2の想定運用で正常に起きる。ディスプレイの電源状態は上位レイヤの関心事ではなく、`start`の成功／失敗としても表現できない。リトライ回数に上限は設けない。
+
 ```text
 TerminalRenderer
 ├─ GhosttyRenderer            # macOS、確定(Gate 1通過)
@@ -1281,7 +1289,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - tmux未導入時のセットアップ
 - Close時の安全確認
 - session消失時の再作成方針
-- detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、タブとsurfaceのライフサイクル設計(Gate 1)
+- detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、**タブ**のライフサイクル設計(Gate 1)。surface側の責務分担は§21.5で確定済みで、残るのは「上位レイヤがどう再生成を判断するか」(tmux sessionの存否確認、タブを閉じる条件)
 
 ### Agent
 
@@ -1574,6 +1582,7 @@ PR_READY
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
 - [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
+- [x] surfaceのプロセス終了後に作り直すかは上位レイヤが決める(rendererは状態と`restart`を公開するだけ、生成失敗のリトライはrenderer内部の責務)
 - [x] Project登録はlocal選択またはclone
 - [x] Git認証は既存環境へ完全委譲
 - [x] Git GUIは閲覧中心

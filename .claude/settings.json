@@ -22,6 +22,7 @@
       "Bash(scripts/wf-push.sh:*)",
       "Bash(scripts/wf-review-diff.sh:*)",
       "Bash(scripts/wf-issue-create.sh:*)",
+      "Bash(scripts/wf-issue-comment.sh:*)",
       "Bash(scripts/wf-project-status.sh:*)",
       "Bash(scripts/wf-issue-label.sh:*)",
       "Bash(scripts/wf-pr-create.sh:*)",

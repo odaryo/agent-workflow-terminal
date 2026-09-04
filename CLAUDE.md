@@ -54,6 +54,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Push | `scripts/wf-push.sh` |
 | Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
 | Create an Issue | `scripts/wf-issue-create.sh` |
+| Comment on an Issue | `scripts/wf-issue-comment.sh` |
 | Update Issue Project status | `scripts/wf-project-status.sh` |
 | Add / remove Issue labels | `scripts/wf-issue-label.sh` |
 | Create a PR | `scripts/wf-pr-create.sh` |

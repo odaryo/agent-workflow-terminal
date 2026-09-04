@@ -199,17 +199,29 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 
 作業ツリーのパスやbranch名を識別子にしない。branchはworktree内で切り替えられ、作業ツリーのパスは`git worktree move`で変わるためである。管理ディレクトリ名はどちらの操作でも不変であることを実測で確認している。
 
-tmux session名は安定IDから決定的に導出する。
+tmux session名は安定IDだけから決定的に導出する。**作業ツリーのパスもbranch名も導出に使わない。**
 
 ```text
-awt-<作業ツリーのbasenameを [A-Za-z0-9_-] へ正規化したもの>-<安定IDのSHA-256先頭8桁>
+awt-<slug>-<安定IDのSHA-256先頭8桁>
 ```
+
+`slug`は安定IDの最後のパス要素を`[A-Za-z0-9_-]`へ正規化したものとする。通常のworktreeでは
+`git worktree add`時のディレクトリ名がそのまま残るため人が読める。Project Rootでは正規化結果が
+`_git`(`.git`由来)になるので、その場合に限り一つ上のパス要素、つまりrepositoryのディレクトリ名を
+使う。
+
+導出元を安定IDに閉じるのは、**名前の決定性がResume(§3.3)の前提だから**である。作業ツリーの
+basenameをslugに使うと、安定IDが不変であるはずの`git worktree move`で名前が変わり、移動後に
+同じworktreeへ二重にsessionを作ってしまう。
 
 Project Rootのsessionも同じ規則で導出し、別体系の命名規則を設けない。§2.3のとおりProject RootはTask worktreeと別枠だが、識別子としては同じ導出規則に載せたほうが衝突回避も再現も一箇所で済む。
 
 `.`と`:`は生成名から必ず除外する。tmux 3.4の実測では、session名の`.`と`:`はどちらも`_`へ置換されて格納され、`a.b`と`a:b`が同一session名へ衝突する。さらに`has-session -t "=a.b"`は`.`をwindow指定として解釈するため、`.`を含む名前は完全一致でも引けない。
 
 正規化とhashを組み合わせるのは、人が読める部分を残しつつ衝突を避けるためである。**session名は導出結果をそのまま使い、既存sessionと衝突した場合に連番などで回避しない。** 同じ安定IDからは常に同じ名前が出るという性質が、再起動後のResume(§3.3)の前提になる。
+
+slugは`git worktree move`後に実際のディレクトリ名とずれ得る。管理ディレクトリ名は移動しても
+作成時の名前のままだからである。可読性より決定性を優先した結果として受け入れる。
 
 ### 3.6 未確定事項
 
@@ -252,7 +264,9 @@ paneへのテキスト注入方式は**`load-buffer` + `paste-buffer -p`**とす
 
 複数クライアントからの同時入力が起こり得ることを前提とし、誤操作防止は将来のUX課題として扱う。
 
-複数クライアントが同時attachしているときのwindowサイズは**`smallest`**とし、**Terminalがsession単位で設定する**。サーバ全体のglobal option(`-g`)としては設定せず、ユーザーが自分で作った他のsessionへ波及させない。
+複数クライアントが同時attachしているときのwindowサイズは**`smallest`**とし、**Terminalが自分の作ったwindowに対して設定する**。サーバ全体のglobal option(`-g`)としては設定せず、ユーザーが自分で作った他のsessionへ波及させない。
+
+`window-size`はtmuxのwindow optionである。tmux 3.4の実測では、`set-option -t <session> window-size smallest`が効くのはそのsessionの**現在のwindowだけ**で、後から作ったwindowは`latest`のままだった。§4.1のとおり1 worktreeは1 window相当で運用するが、windowを増やした場合はそのたびに設定する必要がある。
 
 Gate 1で3方式を実測した(137x39のクライアントと199x56のクライアントを同一sessionへ同時attach)。
 
@@ -282,6 +296,8 @@ Adapterは版数を検出する。版数を解釈できなかった場合は`Unk
 |---|---|---|
 | アプリ側scrollback | `scrollback-limit` = **10,000,000**(10MB) | surface単位 |
 | tmuxサーバ側履歴 | `history-limit` = **10,000** | session生成時にsession単位で設定 |
+
+`history-limit`はsession optionだが、**paneの履歴容量はpane生成時に確定する**。tmux 3.4の実測では、`new-session`のあとに`set-option`しても、そのsessionの最初のpaneは既定値(`2000`)のまま残り、以後に作ったpaneだけが新しい値になった。sessionを作ってから設定する素直な実装では、最初のpane —— つまり最も出力の多いAgent実装pane —— にだけ予算が効かない。Terminalは最初のpaneにも設定値が適用された状態でsessionを引き渡す。
 
 どちらもアプリ設定から変更可能とする。tmux側は`window-size`(§4.2)と同じくsession単位で設定し、サーバ全体のglobal option(`-g`)としては設定しない。ユーザーが自分で作った他のsessionへ波及させないためである。
 
@@ -1580,7 +1596,7 @@ PR_READY
 - [x] 1 Task = 1 worktree = 1 Task Tab
 - [x] Project Rootは別枠の常設tmux session
 - [x] worktreeごとに独立tmux session
-- [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は`awt-<正規化basename>-<安定IDのSHA-256先頭8桁>`
+- [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は安定IDだけから導出する`awt-<slug>-<安定IDのSHA-256先頭8桁>`
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
@@ -1607,7 +1623,7 @@ PR_READY
 - [x] `Unknown`の理由は列挙型で持ち、表示専用の文字列と分ける
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
-- [x] 複数device同時attach時の`window-size`は`smallest`、session単位で設定(`-g`は使わない)
+- [x] 複数device同時attach時の`window-size`は`smallest`、自分の作ったwindowごとに設定(`-g`は使わない)
 - [x] tmuxのサポート下限は3.4、3.5未満はZWJ表示の警告のみで機能制限なし
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容

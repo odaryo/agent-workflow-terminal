@@ -31,7 +31,6 @@
       "Bash(scripts/wf-pr-comments.sh:*)",
       "Bash(scripts/wf-pr-reply.sh:*)",
       "Bash(scripts/wf-cleanup-branches.sh:*)",
-      "Bash(scripts/wf-handoff.sh:*)",
       "Bash(shellcheck:*)"
     ],
     "deny": []
@@ -52,14 +51,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PROJECT_DIR}/scripts/wf-handoff.sh\" seal"
+            "command": "\"${CLAUDE_PROJECT_DIR}/scripts/wf-handoff.sh\" seal",
+            "timeout": 5
           }
         ]
       }
     ],
     "SessionStart": [
       {
-        "matcher": "startup|clear|resume",
+        "matcher": "startup|clear",
         "hooks": [
           {
             "type": "command",

@@ -26,7 +26,7 @@ public struct TmuxSessionName: Sendable, Hashable {
 
   /// 識別は hash が担い、slug は人が `list-sessions` を読むためだけのものなので、
   /// 長さで可読性を損なわないところで切る。
-  private static let slugCharacterLimit = 32
+  private static let slugScalarLimit = 32
 
   /// 安定 ID にパス要素が1つも無いときに使う。空 slug は `awt--<hash>` という読みづらい
   /// 名前になるため。
@@ -39,22 +39,30 @@ public struct TmuxSessionName: Sendable, Hashable {
 
   private static let hashByteCount = 4
 
+  /// 分割・置換・切り詰めをすべて Unicode スカラ単位で行う。書記素クラスタの境界は Unicode の
+  /// 版に従って変わり、Darwin では Swift stdlib が OS 側にあるため、Character 単位だと OS 更新で
+  /// 同じ安定 ID から別の名前が出る。それは §3.5 が防ごうとしている二重 session 生成そのもの。
   private static func slug(for identity: WorktreeIdentity) -> String {
-    let components = identity.rawValue.split(separator: "/").map { normalize($0) }
+    let components = identity.rawValue.unicodeScalars.split(separator: "/").map { normalize($0) }
     guard let last = components.last else { return emptySlugFallback }
 
     let selected = last == projectRootSlugMarker ? (components.dropLast().last ?? last) : last
-    return String(selected.prefix(slugCharacterLimit))
+    return String(String.UnicodeScalarView(selected.unicodeScalars.prefix(slugScalarLimit)))
   }
 
-  private static func normalize(_ pathComponent: Substring) -> String {
-    String(pathComponent.map { isAllowedInSlug($0) ? $0 : "_" })
+  private static func normalize(_ pathComponent: String.UnicodeScalarView.SubSequence) -> String {
+    var normalized = String.UnicodeScalarView()
+    for scalar in pathComponent {
+      normalized.append(isAllowedInSlug(scalar) ? scalar : "_")
+    }
+    return String(normalized)
   }
 
-  /// 判定は Character 単位。複数スカラーからなる書記素はまとめて1文字の `_` になる。
-  private static func isAllowedInSlug(_ character: Character) -> Bool {
-    guard character.isASCII else { return false }
-    return character.isLetter || character.isNumber || character == "_" || character == "-"
+  private static func isAllowedInSlug(_ scalar: Unicode.Scalar) -> Bool {
+    switch scalar {
+    case "A"..."Z", "a"..."z", "0"..."9", "_", "-": true
+    default: false
+    }
   }
 
   private static func hash8(of identity: WorktreeIdentity) -> String {

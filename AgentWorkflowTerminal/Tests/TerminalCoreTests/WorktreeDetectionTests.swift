@@ -97,6 +97,20 @@ struct WorktreeDetectionTests {
     #expect(result.disappeared == [root.identity])
   }
 
+  @Test("前回も今回も居るProject Rootは消失に載せない")
+  func retainedProjectRootIsNotReportedAsDisappeared() throws {
+    let root = try detected("root", isProjectRoot: true)
+    let alpha = try detected("alpha")
+
+    let result = reconcileDetectedWorktrees(
+      detected: [root, alpha],
+      previous: inventory(projectRoot: root, [(alpha, .active)])
+    )
+
+    #expect(result.disappeared.isEmpty)
+    #expect(result.inventory.projectRoot == root)
+  }
+
   @Test("2件目以降のProject Rootは捨て、Task worktreeへ格下げしない")
   func extraProjectRootIsDropped() throws {
     let root = try detected("root", isProjectRoot: true)
@@ -142,6 +156,21 @@ struct WorktreeDetectionTests {
     )
 
     #expect(result.inventory.taskWorktrees.map(\.activation) == [activation])
+    #expect(result.appeared.isEmpty)
+  }
+
+  /// 前回状態は上位が組み立てるので、同じ identity が重複した一覧を渡され得る。どちらの
+  /// Active/Inactive を引き継ぐかは決定的でなければならない (先頭を採る)。
+  @Test("前回状態に同じidentityが重複していたら先頭のActive/Inactiveを引き継ぐ")
+  func duplicatedPreviousEntryKeepsTheFirstActivation() throws {
+    let alpha = try detected("alpha")
+
+    let result = reconcileDetectedWorktrees(
+      detected: [alpha],
+      previous: inventory([(alpha, .active), (alpha, .inactive)])
+    )
+
+    #expect(result.inventory.taskWorktrees.map(\.activation) == [.active])
     #expect(result.appeared.isEmpty)
   }
 

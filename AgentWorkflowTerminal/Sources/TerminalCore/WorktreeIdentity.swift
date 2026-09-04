@@ -11,6 +11,14 @@ import Foundation
 ///   この型は与えられた文字列を正規化しない (末尾 `/` の除去も `//` の畳み込みもしない)。
 ///   アプリ独自の正規化を挟むと、同じ worktree に対して git が返す決定的な文字列とは
 ///   一致しない ID を作り得るため。表記が違えば別の ID になる。
+/// - Important: 同一性は **rawValue の UTF-8 バイト列**で判定する。`String` の `==` は Unicode の
+///   正準等価を見るため `caf\u{00E9}` と `cafe\u{0301}` を等しいと答える (実測: `hashValue` も
+///   一致する) 一方、`TmuxSessionName` の hash はバイト列から計算される。`String` 基準のままだと
+///   等しい安定 ID から2つの session 名が出てしまう (実測: `awt-caf_-9e18cdc2` と
+///   `awt-caf_-281659d9`)。この型が支えているのは名前の決定性 (設計書 §3.5) なので、比較の
+///   粒度を名前の導出側へ揃える。バイト列で見る別の理由として、正準等価な表記を同じファイルへ
+///   解決するのは APFS の性質 (実測: `open(NFD, O_EXCL)` が EEXIST) であって POSIX 一般の
+///   性質ではない。
 public struct WorktreeIdentity: Sendable, Hashable, Codable {
   public let rawValue: String
 
@@ -19,6 +27,16 @@ public struct WorktreeIdentity: Sendable, Hashable, Codable {
   public init?(rawValue: String) {
     guard rawValue.hasPrefix("/") else { return nil }
     self.rawValue = rawValue
+  }
+
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.rawValue.utf8.elementsEqual(rhs.rawValue.utf8)
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    for byte in rawValue.utf8 {
+      hasher.combine(byte)
+    }
   }
 }
 

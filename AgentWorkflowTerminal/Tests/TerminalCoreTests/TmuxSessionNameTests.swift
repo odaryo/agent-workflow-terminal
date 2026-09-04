@@ -91,20 +91,38 @@ struct TmuxSessionNameTests {
 
   // MARK: - slug の正規化
 
+  /// 置換は Unicode スカラ単位で行う。書記素クラスタの分割規則は Unicode の版に依存し、
+  /// Darwin では Swift stdlib が OS 側にあるため、Character 単位だと **OS 更新で同じ安定 ID から
+  /// 別の名前が出る**。それは §3.5 が防ごうとしている二重 session 生成そのものになる。
+  /// (実測: `x👨‍👩‍👧y` は Character 数 3 / スカラ数 7)
   @Test(
-    "[A-Za-z0-9_-] 以外のCharacterを `_` へ置換する",
+    "[A-Za-z0-9_-] 以外のUnicodeスカラを `_` へ置換する",
     arguments: [
       ("/r/.git/worktrees/Ab9_-", "Ab9_-"),
       ("/r/.git/worktrees/feat ure", "feat_ure"),
       ("/r/.git/worktrees/feat\\ure", "feat_ure"),
       ("/r/.git/worktrees/a+b=c", "a_b_c"),
       ("/r/.git/worktrees/機能追加", "____"),
-      // 複数スカラーからなる書記素も1 Characterとして1文字へ潰れる。
-      ("/r/.git/worktrees/x👨‍👩‍👧y", "x_y"),
+      // ZWJ 連結の絵文字は1書記素だが7スカラ。結合文字も独立したスカラとして置換される。
+      ("/r/.git/worktrees/x👨‍👩‍👧y", "x_____y"),
+      ("/r/.git/worktrees/caf\u{00E9}", "caf_"),
+      ("/r/.git/worktrees/cafe\u{0301}", "cafe_"),
     ]
   )
-  func nonAllowedCharactersBecomeUnderscore(identityPath: String, expectedSlug: String) throws {
+  func nonAllowedScalarsBecomeUnderscore(identityPath: String, expectedSlug: String) throws {
     #expect(try slug(of: name(identityPath)) == expectedSlug)
+  }
+
+  /// 「同じ安定 ID からは常に同じ名前」の対偶。安定 ID の等価性が `String` の正準等価だった頃は、
+  /// 等しい ID から `awt-caf_-9e18cdc2` と `awt-caf_-281659d9` の2つの名前が出ていた (実測)。
+  @Test("安定IDが等しいことと、導出される名前が等しいことは一致する")
+  func identityEqualityMatchesNameEquality() throws {
+    let composed = try #require(WorktreeIdentity(rawValue: "/r/.git/worktrees/caf\u{00E9}"))
+    let decomposed = try #require(WorktreeIdentity(rawValue: "/r/.git/worktrees/cafe\u{0301}"))
+
+    #expect(
+      (composed == decomposed)
+        == (TmuxSessionName(identity: composed) == TmuxSessionName(identity: decomposed)))
   }
 
   /// `od.d na:me` という作業ツリーを作ると git 2.50.1 は管理ディレクトリを `od.d-na-me` にする。

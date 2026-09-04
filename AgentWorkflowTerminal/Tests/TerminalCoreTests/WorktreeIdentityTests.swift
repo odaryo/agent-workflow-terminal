@@ -52,6 +52,20 @@ struct WorktreeIdentityTests {
     #expect(Set([plain, trailingSlash]).count == 2)
   }
 
+  /// `é` の合成済み (U+00E9) と分解 (U+0065 U+0301) は Swift の `String` としては等しく
+  /// (実測: `==` も `hashValue` も一致)、UTF-8 バイト列としては異なる。安定 ID は
+  /// バイト列で比較する。
+  @Test("正準等価な別表記も別のIDとして扱う")
+  func canonicallyEquivalentSpellingsAreDistinctIdentities() throws {
+    let composed = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/caf\u{00E9}"))
+    let decomposed = try #require(
+      WorktreeIdentity(rawValue: "/repo/.git/worktrees/cafe\u{0301}"))
+
+    #expect(composed.rawValue == decomposed.rawValue)
+    #expect(composed != decomposed)
+    #expect(Set([composed, decomposed]).count == 2)
+  }
+
   @Test("同じ文字列からは等しいIDになる")
   func sameSpellingIsEqual() throws {
     let lhs = try #require(WorktreeIdentity(rawValue: "/repo/.git"))

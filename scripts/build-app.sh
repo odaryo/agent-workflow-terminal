@@ -35,7 +35,9 @@ require_cmd swift codesign plutil
 [ -d "${SHARE_DIR}/terminfo" ] || die "terminfo resources がありません"
 
 info "swift build -c ${CONFIGURATION}"
-# --show-bin-path はビルドも行うため、ビルドとパス取得を分けて2回走らせない。
+# --show-bin-path はビルドせずパスを表示するだけ (Swift 6.3.2 で実測)。
+# 1回にまとめると古いバイナリを黙ってバンドルへ配るため、ビルドとパス取得を分ける。
+(cd "${PACKAGE_DIR}" && swift build -c "${CONFIGURATION}")
 BIN_DIR="$(cd "${PACKAGE_DIR}" && swift build -c "${CONFIGURATION}" --show-bin-path)"
 BIN="${BIN_DIR}/${EXECUTABLE}"
 [ -f "${BIN}" ] || die "実行ファイルがありません: ${BIN}"

@@ -31,10 +31,15 @@ set +u
 set +o pipefail
 
 handoff_dir() {
-  local top_level base key hash_output hash8
+  local project_root base key hash_output hash8
 
-  top_level=$(git rev-parse --show-toplevel 2>/dev/null) || return 10
-  top_level=$(cd -- "$top_level" 2>/dev/null && pwd -P) || return 10
+  if [[ -n "${CLAUDE_PROJECT_DIR:-}" ]]; then
+    # hook 環境の CLAUDE_PROJECT_DIR はセッション中不変。未設定時の Git fallback は cwd に追従するため不安定。
+    project_root=$CLAUDE_PROJECT_DIR
+  else
+    project_root=$(git rev-parse --show-toplevel 2>/dev/null) || return 10
+  fi
+  project_root=$(cd -- "$project_root" 2>/dev/null && pwd -P) || return 10
 
   if [[ -n "${AWT_HANDOFF_DIR:-}" ]]; then
     base=$AWT_HANDOFF_DIR
@@ -46,9 +51,9 @@ handoff_dir() {
     return 11
   fi
 
-  key=${top_level//\//-}
+  key=${project_root//\//-}
   if command -v shasum >/dev/null 2>&1; then
-    hash_output=$(printf '%s' "$top_level" | shasum -a 256 2>/dev/null)
+    hash_output=$(printf '%s' "$project_root" | shasum -a 256 2>/dev/null)
     hash8=${hash_output%% *}
     hash8=${hash8:0:8}
     if [[ "$hash8" =~ ^[0-9a-fA-F]{8}$ ]]; then
@@ -69,7 +74,7 @@ resolve_handoff_dir() {
       return 0
       ;;
     10)
-      info "wf-handoff: Git worktree のルートを決められませんでした"
+      info "wf-handoff: セッションのプロジェクトルートを決められませんでした"
       ;;
     11)
       info "wf-handoff: 保存先の基準ディレクトリを決められませんでした"
@@ -97,7 +102,7 @@ json_value_or_unknown() {
 session_key() {
   local input=$1 session_id sanitized
   session_id=$(json_value_or_unknown "$input" session_id)
-  sanitized=$(printf '%s' "$session_id" | sed 's/[^A-Za-z0-9_-]/_/g' 2>/dev/null)
+  sanitized=$(printf '%s' "$session_id" | LC_ALL=C tr -c 'A-Za-z0-9_-' '_' 2>/dev/null)
   [[ -n "$sanitized" ]] || sanitized=unknown
   printf '%s' "$sanitized"
 }
@@ -162,23 +167,34 @@ capture() {
   }
 }
 
-cleanup_old_last_turns() {
+cleanup_old_last_turns() (
   local dir=$1 now_epoch file modified_epoch
   now_epoch=$(date '+%s' 2>/dev/null)
   [[ "$now_epoch" =~ ^[0-9]+$ ]] || return
 
   shopt -s nullglob
   for file in "$dir"/last-turn.*.md; do
+    [[ -f "$file" ]] || continue
     modified_epoch=$(file_mtime "$file") || continue
     if ((now_epoch - modified_epoch > 604800)); then
       rm -f -- "$file" 2>/dev/null || info "wf-handoff: 古い一時記録を削除できませんでした: $file"
     fi
   done
-  shopt -u nullglob
+)
+
+current_branch() {
+  local branch short_sha
+  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null) || return 1
+  [[ -n "$branch" ]] || return 1
+  if [[ "$branch" == HEAD ]]; then
+    short_sha=$(git rev-parse --short HEAD 2>/dev/null)
+    [[ -n "$short_sha" ]] && branch="HEAD ($short_sha)"
+  fi
+  printf '%s' "$branch"
 }
 
 seal() {
-  local input dir session last_turn session_id reason sealed_at branch short_sha worktrees temporary
+  local input dir session last_turn session_id reason sealed_at branch worktrees temporary
 
   input=$(read_input)
   session=$(session_key "$input")
@@ -191,12 +207,8 @@ seal() {
   reason=$(json_value_or_unknown "$input" reason)
   sealed_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)
   [[ -n "$sealed_at" ]] || sealed_at=unknown
-  branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  branch=$(current_branch)
   [[ -n "$branch" ]] || branch=unknown
-  if [[ "$branch" == HEAD ]]; then
-    short_sha=$(git rev-parse --short HEAD 2>/dev/null)
-    [[ -n "$short_sha" ]] && branch="HEAD ($short_sha)"
-  fi
   worktrees=$(git worktree list 2>/dev/null)
   [[ -n "$worktrees" ]] || worktrees=unknown
 
@@ -254,63 +266,36 @@ sealed_at_epoch() {
   printf '%s' "$epoch"
 }
 
-newest_record() {
-  local dir=$1 candidate modified_epoch newest_epoch=-1
-  NEWEST_RECORD=""
-
-  shopt -s nullglob
-  for candidate in "$dir"/handoff.md "$dir"/last-turn.*.md; do
-    [[ -f "$candidate" ]] || continue
-    modified_epoch=$(file_mtime "$candidate") || continue
-    if ((modified_epoch >= newest_epoch)); then
-      newest_epoch=$modified_epoch
-      NEWEST_RECORD=$candidate
-    fi
-  done
-  shopt -u nullglob
-  [[ -n "$NEWEST_RECORD" ]]
-}
-
 quote_lines() {
   awk '{ if (length($0) == 0) print "|"; else print "| " $0 }'
 }
 
 show() {
-  local dir handoff source_file sealed_at session_id reason branch worktrees body unsealed_line stale_line
-  local worktree_count hidden_worktrees body_length body_truncated chosen_epoch sealed_epoch
+  local dir handoff sealed_at session_id reason branch current_branch_name branch_warning worktrees body stale_line
+  local worktree_count hidden_worktrees body_length body_truncated sealed_epoch
 
   resolve_handoff_dir || return
   dir=$HANDOFF_DIR
   handoff="$dir/handoff.md"
-  newest_record "$dir" || return
-  source_file=$NEWEST_RECORD
-  unsealed_line=""
-  stale_line=""
+  cleanup_old_last_turns "$dir"
+  [[ -f "$handoff" ]] || return
 
-  if [[ "$source_file" == "$handoff" ]]; then
-    sealed_at=$(frontmatter_value "$handoff" sealed_at)
-    session_id=$(frontmatter_value "$handoff" session_id)
-    reason=$(frontmatter_value "$handoff" reason)
-    branch=$(frontmatter_value "$handoff" branch)
-    worktrees=$(awk '/^worktrees: \|$/ { reading=1; next } reading && /^---$/ { exit } reading { sub(/^  /, ""); print }' "$handoff" 2>/dev/null)
-    [[ -n "$worktrees" ]] || worktrees=unknown
-    body=$(awk 'separators < 2 && /^---$/ { separators++; next } separators >= 2 { print }' "$handoff" 2>/dev/null)
-    sealed_epoch=$(sealed_at_epoch "$sealed_at")
-    if [[ -n "$sealed_epoch" ]] && is_epoch_older_than_seven_days "$sealed_epoch"; then
-      stale_line="7日以上前の記録です。"
-    fi
-  else
-    sealed_at=unknown
-    session_id=unknown
-    reason=unknown
-    branch=unknown
-    worktrees=unknown
-    body=$(cat -- "$source_file" 2>/dev/null)
-    unsealed_line="seal されずに終了したセッションの記録です。"
-    chosen_epoch=$(file_mtime "$source_file")
-    if [[ -n "$chosen_epoch" ]] && is_epoch_older_than_seven_days "$chosen_epoch"; then
-      stale_line="7日以上前の記録です。"
-    fi
+  stale_line=""
+  branch_warning=""
+  sealed_at=$(frontmatter_value "$handoff" sealed_at)
+  session_id=$(frontmatter_value "$handoff" session_id)
+  reason=$(frontmatter_value "$handoff" reason)
+  branch=$(frontmatter_value "$handoff" branch)
+  current_branch_name=$(current_branch)
+  if [[ "$branch" != unknown && -n "$current_branch_name" && "$branch" != "$current_branch_name" ]]; then
+    branch_warning="記録時のブランチ ($branch) は現在のブランチ ($current_branch_name) と異なります。"
+  fi
+  worktrees=$(awk '/^worktrees: \|$/ { reading=1; next } reading && /^---$/ { exit } reading { sub(/^  /, ""); print }' "$handoff" 2>/dev/null)
+  [[ -n "$worktrees" ]] || worktrees=unknown
+  body=$(awk 'separators < 2 && /^---$/ { separators++; next } separators >= 2 { print }' "$handoff" 2>/dev/null)
+  sealed_epoch=$(sealed_at_epoch "$sealed_at")
+  if [[ -n "$sealed_epoch" ]] && is_epoch_older_than_seven_days "$sealed_epoch"; then
+    stale_line="7日以上前の記録です。"
   fi
 
   [[ -n "$body" ]] || return
@@ -345,8 +330,8 @@ EOF
   if ((hidden_worktrees > 0)); then
     printf '| (他 %s 件)\n' "$hidden_worktrees"
   fi
-  if [[ -n "$unsealed_line" ]]; then
-    printf '\n%s\n' "$unsealed_line"
+  if [[ -n "$branch_warning" ]]; then
+    printf '\n%s\n' "$branch_warning"
   fi
   if [[ -n "$stale_line" ]]; then
     printf '\n%s\n' "$stale_line"

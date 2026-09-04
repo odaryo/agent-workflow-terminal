@@ -9,16 +9,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `docs/architecture.md` — the specification (Japanese). `docs/coding-guidelines.md` — the coding rules; read it before writing Swift.
 - `Spikes/gate1/` — the PoC Gate 1 spike (SwiftUI + libghostty + PTY + tmux). Throwaway code: excluded from lint, format, tests, and CI. Read it as a reference implementation; never copy code out of it.
 - `AgentWorkflowTerminal/` — the SwiftPM package. Targets: `TerminalCore` (domain model, no UI/process deps) ← `Adapters` (external-world boundary, placeholder only). Each has a Swift Testing test target. Swift 6 language mode, strict concurrency.
-- `App/` — the separate macOS SwiftPM package for the app and libghostty renderer. It is separate because CI cannot build the vendored `GhosttyKit.xcframework`; CI continues to build only `AgentWorkflowTerminal/`. There is no Xcode project. See `App/README.md`.
+- `App/` — the separate macOS SwiftPM package for the app and libghostty renderer. CI compiles it with a prebuilt `GhosttyKit.xcframework` downloaded from a Release asset; CI does not build the xcframework itself. There is no Xcode project. See `App/README.md`.
 - **Tasks live in GitHub Issues — Issues are the single source of truth.** Never keep TODO lists in files, docs, or code comments; file an Issue instead.
 
 ### Build / test / lint
 
 ```shell
 cd AgentWorkflowTerminal && swift build && swift test     # CI 対象の core package
-scripts/build-ghostty.sh                                  # ローカルの libghostty
+scripts/fetch-ghostty.sh                                  # CI / 通常開発用の事前ビルド済み libghostty
+scripts/build-ghostty.sh                                  # ref 更新担当者向けの libghostty 自前ビルド
 scripts/build-app.sh                                      # ローカルの macOS app bundle
 ```
+
+初回導入と ghostty ref 更新では、対象ブランチ上で `App/ghostty-ref` の更新（初回は作成済み）→
+`scripts/build-ghostty.sh` → `scripts/wf-ghostty-publish.sh` → 更新された
+`App/ghostty-kit.sha256` を含むコミットと PR、の順に進める。publish より先に PR を開くと、
+対応する Release アセットが無いため `build-app` ジョブは必ず失敗する。
 
 ```shell
 # from the repository root
@@ -31,7 +37,7 @@ swift format format --configuration .swift-format --recursive --in-place \
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 
-`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, and runs format/lint over both packages. `App/` is not built in CI because `GhosttyKit.xcframework` and its toolchain are not available there (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, compiles `App/`, and runs format/lint over both packages. The app job downloads a prebuilt `GhosttyKit.xcframework` from a Release asset, so CI does not require the toolchain that builds the xcframework (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 
@@ -44,6 +50,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Operation | Script |
 | --- | --- |
 | Commit | `scripts/wf-commit.sh` |
+| Publish the prebuilt GhosttyKit Release asset | `scripts/wf-ghostty-publish.sh` |
 | Push | `scripts/wf-push.sh` |
 | Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
 | Create an Issue | `scripts/wf-issue-create.sh` |

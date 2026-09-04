@@ -3,7 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=lib.sh
+# shellcheck disable=SC1091 # 実行時に解決するパスのため静的解析では追跡できない
 source "${SCRIPT_DIR}/lib.sh"
 
 usage() {
@@ -20,15 +20,21 @@ if [[ "${1:-}" = "-h" || "${1:-}" = "--help" ]]; then
 fi
 [[ "$#" -eq 0 ]] || die "引数は指定できません"
 
-GHOSTTY_REF="v1.3.1"
 ZIG_PREFIX="/opt/homebrew/opt/zig@0.15"
 LLVM_PREFIX="/opt/homebrew/opt/llvm@20"
 
 repo_root_cd
 ROOT_DIR="$PWD"
+[[ -f "${ROOT_DIR}/App/ghostty-ref" ]] || die "App/ghostty-ref がありません"
+GHOSTTY_REF="$(<"${ROOT_DIR}/App/ghostty-ref")"
+[ -n "${GHOSTTY_REF}" ] || die "App/ghostty-ref が空です"
 VENDOR_DIR="${ROOT_DIR}/App/vendor"
 GHOSTTY_DIR="${VENDOR_DIR}/ghostty"
 SHIM_DIR="${ROOT_DIR}/App/.build-shim"
+
+if [ -e "${GHOSTTY_DIR}" ] && [ ! -d "${GHOSTTY_DIR}/.git" ]; then
+  die "${GHOSTTY_DIR} は fetch 済みの成果物です。自前ビルドするには App/vendor/ghostty を削除してから再実行してください"
+fi
 
 [ -x "${ZIG_PREFIX}/bin/zig" ] \
   || die "zig 0.15 が見つかりません: brew install zig@0.15"
@@ -46,8 +52,18 @@ if [ ! -d "${GHOSTTY_DIR}/.git" ]; then
 fi
 
 current_ref="$(git -C "${GHOSTTY_DIR}" describe --tags --exact-match 2>/dev/null || true)"
+if [ "${current_ref}" != "${GHOSTTY_REF}" ]; then
+  info "ghostty を ${GHOSTTY_REF} へ更新します (現在: ${current_ref:-不明})"
+  git -C "${GHOSTTY_DIR}" fetch --depth 1 origin tag "${GHOSTTY_REF}" \
+    || die "ghostty ${GHOSTTY_REF} の取得に失敗しました。App/vendor/ghostty を削除して再実行してください"
+  git -C "${GHOSTTY_DIR}" checkout --detach "${GHOSTTY_REF}" \
+    || die "ghostty ${GHOSTTY_REF} の checkout に失敗しました。App/vendor/ghostty を削除して再実行してください"
+  current_ref="$(git -C "${GHOSTTY_DIR}" describe --tags --exact-match 2>/dev/null || true)"
+fi
 [ "${current_ref}" = "${GHOSTTY_REF}" ] \
-  || die "ghostty は ${GHOSTTY_REF} である必要があります (現在: ${current_ref:-不明})"
+  || die "ghostty を ${GHOSTTY_REF} へ更新できませんでした (現在: ${current_ref:-不明})。App/vendor/ghostty を削除して再実行してください"
+
+rm -f "${GHOSTTY_DIR}/GHOSTTY-BUILD-STAMP.txt"
 
 mkdir -p "${SHIM_DIR}"
 ln -sf "${LLVM_PREFIX}/bin/llvm-libtool-darwin" "${SHIM_DIR}/libtool"
@@ -84,5 +100,14 @@ for directory in zig-out/share/ghostty zig-out/share/terminfo; do
   [ -d "${GHOSTTY_DIR}/${directory}" ] \
     || die "必要なリソースがありません: ${GHOSTTY_DIR}/${directory}"
 done
+
+commit="$(git -C "${GHOSTTY_DIR}" rev-parse HEAD)" \
+  || die "ghostty の commit SHA を取得できませんでした"
+{
+  printf 'ref: %s\n' "${GHOSTTY_REF}"
+  printf 'commit: %s\n' "${commit}"
+  printf 'built_at: %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  printf 'host: %s\n' "$(uname -sm)"
+} >"${GHOSTTY_DIR}/GHOSTTY-BUILD-STAMP.txt"
 
 info "完了: ${XCFRAMEWORK}"

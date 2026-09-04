@@ -18,6 +18,7 @@
       "Bash(tmux list-panes:*)",
       "Bash(rg:*)",
       "Bash(scripts/wf-commit.sh:*)",
+      "Bash(scripts/wf-ghostty-publish.sh:*)",
       "Bash(scripts/wf-push.sh:*)",
       "Bash(scripts/wf-review-diff.sh:*)",
       "Bash(scripts/wf-issue-create.sh:*)",

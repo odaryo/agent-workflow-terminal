@@ -195,6 +195,8 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
       }
     },
     close_surface_cb: { userdata, _ in
+      // Why not process_alive を読む: 閉じる判断をしないので、生存中のプロセスを巻き込む前に
+      // 確認ダイアログを出すかどうかの分岐が要らない (GhosttySurfaceView.handleCloseRequest)。
       guard let userdata else { return }
       // Why callback 内で復元: main queue closure の capture により、実行まで強参照を保持する。
       let view = Unmanaged<GhosttySurfaceView>.fromOpaque(userdata).takeUnretainedValue()
@@ -524,19 +526,28 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     perform(lifecycle.handle(.processExited))
   }
 
-  /// - Important: 先に `pollProcessExit` を呼ぶ。tick より先にキーが届くと状態が `.running` の
-  ///   ままで、閉じるかどうかの判定が競合するため。
   func handleCloseRequest() {
+    // Why 呼ぶだけ: close 要求はプロセス終了の早期の手がかりであり、tick を待たずに `.exited`
+    // へ移せる。
     pollProcessExit()
-    // Why not 閉じる: プロセス終了後に libghostty が出す "Press any key to close the terminal."
-    // に従うと close 要求が届くが、閉じるかどうかも作り直すかどうかも上位レイヤの判断であり
-    // (TerminalRenderer の Note)、ここで window を閉じると shutdown が走って `.stopped` へ
-    // 落ち、上位の restart() が永久に届かなくなる。無視しても libghostty 側は壊れない —
-    // App/vendor/ghostty/src/apprt/embedded.zig:639 の close() は callback を呼ぶだけで
-    // surface を解放しない (解放は同 :254 の closeSurface)。案内文と実際の挙動が食い違う
-    // 既知差分は、タブ UI を持つ Issue #25 で解消する。
-    guard state != .exited else { return }
-    window?.performClose(nil)
+    // Why not 閉じる: 閉じるかどうかは上位レイヤの判断であり (設計書 §21.5 / TerminalRenderer
+    // の Note)、renderer が自分で window を閉じてよい状態は無い。閉じると shutdown が走って
+    // `.stopped` へ落ち、上位の restart() が永久に届かなくなる。
+    // Why not 状態で分岐: close 要求の userdata は view であって surface ではなく、どの世代宛て
+    // かを照合できない。`.exited` で積まれた要求が drain される前に restart() が走ると、
+    // 先頭の pollProcessExit() が新世代の surface を読んで `.running` を素通しさせる。
+    // `.running` で閉じると applicationShouldTerminateAfterLastWindowClosed が true なので
+    // アプリごと終了し、全 worktree のエージェントが落ちる (旧挙動で実測)。常に無視すれば
+    // 世代の照合が要らない。
+    // 無視しても libghostty 側は壊れない — App/vendor/ghostty/src/apprt/embedded.zig:639 の
+    // close() は callback を呼ぶだけで surface を解放しない (解放は同 :254 の closeSurface)。
+    // ユーザーが閉じる経路は塞がらない: `.exited` でも赤ボタン相当の window.performClose(nil)
+    // と Cmd-Q 相当の NSApp.terminate(nil) は機能する (実測)。メニュー File>Close も同じ
+    // performClose: を responder chain へ送る。ghostty 既定の cmd+w=close_surface は
+    // main menu が先に食って surface へ届かない (実測: window.performKeyEquivalent が false、
+    // mainMenu.performKeyEquivalent が true)。
+    // タブを閉じる操作は Issue #25 のタブ UI が提供する。案内文 "Press any key to close the
+    // terminal." と実際の挙動が食い違う既知差分も同 Issue で解消する。
   }
 
   override public func setFrameSize(_ newSize: NSSize) {
@@ -619,10 +630,14 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   private func createSurface() {
     // Why not 状態機械だけに任せる: 通常経路では到達しない防御。ここを抜けて上書きすると
     // 旧 surface のポインタを失い、その子プロセスがアプリ終了まで孤児として残る。
-    // 状態機械へ成否を返さないのは、これが遷移の結果ではなく不変条件違反だから。
+    // Why creationSucceeded を返す: 到達した時点で surface は実在するので、状態機械を現実へ
+    // 合わせて自己修復させる。何も返さないと release ビルド (assertionFailure が消える) で
+    // 状態が `.awaitingSurface` のまま保留中の再試行も無く、以後の environmentMayHaveChanged が
+    // 何度来てもこのガードへ戻るだけで抜けられなくなる。
     guard surface == nil else {
       assertionFailure("surface が生きているうちに createSurface が呼ばれた")
       NSLog("[app] surface が生きているうちに createSurface が呼ばれました")
+      perform(lifecycle.handle(.creationSucceeded))
       return
     }
     // Why not creationFailed を送る: window が無いのは生成の失敗ではない。ここで失敗として

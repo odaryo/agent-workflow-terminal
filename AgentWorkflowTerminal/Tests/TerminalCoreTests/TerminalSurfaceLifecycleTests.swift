@@ -57,6 +57,13 @@ struct TerminalSurfaceLifecycleTests {
     return lifecycle
   }
 
+  /// `creationFailed` を1回流した直後の `awaitingSurface` と、そのとき発行された token。
+  private func awaitingSurfaceWithPendingRetry() throws -> (TerminalSurfaceLifecycle, token: Int) {
+    var lifecycle = awaitingSurface()
+    let retry = try #require(scheduledRetry(in: lifecycle.handle(.creationFailed)))
+    return (lifecycle, retry.token)
+  }
+
   private func scheduledRetry(
     in effects: [TerminalSurfaceLifecycleEffect]
   ) -> (after: Duration, token: Int)? {
@@ -265,6 +272,15 @@ struct TerminalSurfaceLifecycleTests {
     #expect(retry.after == .seconds(2))
   }
 
+  @Test("environmentMayHaveChanged は保留中の retry をキャンセルしない")
+  func environmentEventKeepsPendingRetry() throws {
+    var lifecycle = awaitingSurface()
+    let retry = try #require(scheduledRetry(in: lifecycle.handle(.creationFailed)))
+
+    #expect(lifecycle.handle(.environmentMayHaveChanged) == [.createSurface])
+    #expect(lifecycle.handle(.retryDeadlineReached(token: retry.token)) == [.createSurface])
+  }
+
   @Test("restartRequested はバックオフのカウンタを 0 に戻す")
   func restartResetsBackoff() throws {
     var lifecycle = awaitingSurface()
@@ -349,22 +365,23 @@ struct TerminalSurfaceLifecycleTests {
 
   @Test("createSurface は効果列にあれば必ず末尾で1回だけ")
   func createSurfaceIsTheLastEffectWhenPresent() throws {
-    for state in Self.allStates {
-      for event in Self.allEvents {
-        var lifecycle = lifecycle(in: state)
-        expectCreateSurfaceIsLast(lifecycle.handle(event), state: state, event: event)
+    // 掃引に保留中のタイマーを持つ awaitingSurface を含める。これが無いと
+    // retryDeadlineReached は全フィクスチャで不受理になり、掃引が何も検査しない。
+    let (pendingRetry, pendingToken) = try awaitingSurfaceWithPendingRetry()
+    let matching = TerminalSurfaceLifecycleEvent.retryDeadlineReached(token: pendingToken)
+
+    var accepting = pendingRetry
+    #expect(accepting.handle(matching) == [.createSurface])
+
+    let fixtures =
+      Self.allStates.map { (state: $0, lifecycle: lifecycle(in: $0)) }
+      + [(state: TerminalRendererState.awaitingSurface, lifecycle: pendingRetry)]
+    for fixture in fixtures {
+      for event in Self.allEvents + [matching] {
+        var lifecycle = fixture.lifecycle
+        expectCreateSurfaceIsLast(lifecycle.handle(event), state: fixture.state, event: event)
       }
     }
-
-    // token が一致する retryDeadlineReached を受理できるのは awaitingSurface だけ。
-    var pending = awaitingSurface()
-    let retry = try #require(scheduledRetry(in: pending.handle(.creationFailed)))
-    let matching = TerminalSurfaceLifecycleEvent.retryDeadlineReached(token: retry.token)
-    expectCreateSurfaceIsLast(
-      pending.handle(matching),
-      state: .awaitingSurface,
-      event: matching
-    )
   }
 
   private func expectCreateSurfaceIsLast(
@@ -391,15 +408,17 @@ struct TerminalSurfaceLifecycleTests {
     #expect(policy.delay(forAttempt: 1000) == .seconds(30))
   }
 
-  @Test("multiplier が 1 以下でも初期値のまま頭打ちにする")
-  func nonGrowingRetryPolicy() {
+  @Test("multiplier を大きくしても maximumDelay を超えない")
+  func steepRetryPolicySaturates() {
     let policy = SurfaceCreationRetryPolicy(
       initialDelay: .seconds(2),
       maximumDelay: .seconds(30),
-      multiplier: 1
+      multiplier: 10
     )
     #expect(policy.delay(forAttempt: 0) == .seconds(2))
-    #expect(policy.delay(forAttempt: 1_000_000) == .seconds(2))
+    #expect(policy.delay(forAttempt: 1) == .seconds(20))
+    #expect(policy.delay(forAttempt: 2) == .seconds(30))
+    #expect(policy.delay(forAttempt: 1_000_000) == .seconds(30))
   }
 
   @Test("initialDelay が maximumDelay を超えるときは maximumDelay を返す")

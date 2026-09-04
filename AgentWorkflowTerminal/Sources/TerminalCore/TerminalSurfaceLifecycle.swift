@@ -175,9 +175,10 @@ public struct SurfaceCreationRetryPolicy: Sendable, Hashable {
   public let maximumDelay: Duration
   public let multiplier: Int
 
-  /// - Precondition: `initialDelay` と `maximumDelay` はいずれも正であること。
-  ///   0 以下を clamp して黙って続行しない。0 秒間隔は生成が失敗し続ける間ずっと
-  ///   再試行を即時に繰り返すことになり、実行時の状態ではなく呼び出し側の誤りだから。
+  /// - Precondition: `initialDelay` と `maximumDelay` はいずれも正、`multiplier` は 1 より大きい
+  ///   こと。範囲外を clamp して黙って続行しない。0 以下の間隔は生成が失敗し続ける間ずっと
+  ///   再試行を即時に繰り返し、1 以下の `multiplier` はバックオフを固定間隔へ黙って退化させる。
+  ///   いずれも実行時の状態ではなく呼び出し側の誤りだから。
   public init(
     initialDelay: Duration = .milliseconds(500),
     maximumDelay: Duration = .seconds(30),
@@ -185,6 +186,7 @@ public struct SurfaceCreationRetryPolicy: Sendable, Hashable {
   ) {
     precondition(initialDelay > .zero, "initialDelay は正でなければならない")
     precondition(maximumDelay > .zero, "maximumDelay は正でなければならない")
+    precondition(multiplier > 1, "multiplier は 1 より大きくなければならない")
     self.initialDelay = initialDelay
     self.maximumDelay = maximumDelay
     self.multiplier = multiplier
@@ -194,7 +196,7 @@ public struct SurfaceCreationRetryPolicy: Sendable, Hashable {
   /// 正常系であり、何時間続いてもよい (Spikes/gate1/README.md 申し送り #7)。
   public func delay(forAttempt attempt: Int) -> Duration {
     var delay = min(initialDelay, maximumDelay)
-    guard attempt > 0, multiplier > 1 else { return delay }
+    guard attempt > 0 else { return delay }
     for _ in 0..<attempt {
       delay *= multiplier
       if delay >= maximumDelay { return maximumDelay }

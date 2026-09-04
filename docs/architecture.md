@@ -205,10 +205,20 @@ tmux session名は安定IDだけから決定的に導出する。**作業ツリ�
 awt-<slug>-<安定IDのSHA-256先頭8桁>
 ```
 
-`slug`は安定IDの最後のパス要素を`[A-Za-z0-9_-]`へ正規化したものとする。通常のworktreeでは
-`git worktree add`時のディレクトリ名がそのまま残るため人が読める。Project Rootでは正規化結果が
-`_git`(`.git`由来)になるので、その場合に限り一つ上のパス要素、つまりrepositoryのディレクトリ名を
-使う。
+`slug`は安定IDの最後のパス要素を、`[A-Za-z0-9_-]`以外の**Unicodeスカラをそれぞれ**`_`へ置換して
+作る。通常のworktreeでは`git worktree add`時のディレクトリ名がそのまま残るため人が読める。
+
+- 置換結果が`_git`になった場合に限り、一つ上のパス要素を使う。Project Rootの安定IDは
+  `<git common dir>`、つまり通常`<repo>/.git`であり、そのままでは全ProjectのProject Rootが
+  `awt-_git-<hash>`になって`list-sessions`から読めなくなるためである。判定は「`.git`由来か」では
+  なく「置換結果が`_git`か」で行う。`.`は置換で消えるので由来を区別する情報が残らない。
+- 置換結果が32文字を超えたら先頭32文字で切り詰める。識別はhashが担い、slugは人が
+  `list-sessions`を読むためだけのものである。
+- パス要素が1つも無いなど置換結果が空になる場合は`worktree`を使う。`awt--<hash>`は読めない。
+
+置換をCharacter(書記素クラスタ)単位ではなくUnicodeスカラ単位で行うのは、書記素の分割規則が
+Unicodeの版に依存し、**OSを更新すると同じ安定IDから別のsession名が出る**ためである。それは
+この節が防ごうとしている二重session生成そのものになる。
 
 導出元を安定IDに閉じるのは、**名前の決定性がResume(§3.3)の前提だから**である。作業ツリーの
 basenameをslugに使うと、安定IDが不変であるはずの`git worktree move`で名前が変わり、移動後に

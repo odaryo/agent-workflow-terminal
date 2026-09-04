@@ -160,6 +160,10 @@ Dedicated tmux session and Task Tab become available
 - AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。
 - Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
 
+**アプリが観測している間に新規出現したworktreeは自動的にActive化する。** Project登録後の初回スキャンで見つかったworktreeはすべてInactiveから始め、自動Active化の対象は「観測中に新しく現れたworktree」に限る。`+ New Task`からAgentが作ったworktreeを人が改めて選ぶ手間を無くしつつ、登録時点で既に存在していた過去のworktreeが一斉にタブ化する事故を防ぐためである。
+
+この自動Active化は新規出現だけに適用する。既存Inactive worktreeの再利用は上記のとおり人が選択する。
+
 ### 3.3 Active化とtmux
 
 Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
@@ -175,17 +179,41 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 1. UI上でInactiveにするだけ
 2. Inactive化し、tmux sessionも終了する
 3. Inactive化し、tmux sessionを終了し、worktreeも削除する
+4. 3に加えて、対応branchも削除する
 
 削除を選ばない限り、tmux sessionとworktreeは保持する。
 
-### 3.5 未確定事項
+**4はbranchがマージ済みの場合にだけ選択できる。** 未マージbranchの削除はTerminalから行わず、§17.2のとおりAgentまたは通常Terminalに委ねる。Closeの後始末としてのマージ済みbranch削除だけを例外として認め、任意のbranchを消せる汎用機能にはしない。
 
-- Agentが新規作成したworktreeを、検出直後に常にActive化するか、確認を挟むか
-- worktree削除前の未commit、未push、未merge検証と警告条件
+**3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
+
+| 検査 | 判定 |
+|---|---|
+| 未commit変更 | 対象worktreeに変更またはuntrackedファイルがある |
+| 未push | 対象branchがupstreamを持たない、またはupstreamより先行している |
+| 未merge | 対象branchがProjectの既定branchへマージされていない |
+
+### 3.5 安定IDとtmux session命名
+
+**worktreeの安定IDは、そのworktreeの管理ディレクトリの絶対パスとする。** 通常のworktreeでは`<git common dir>/worktrees/<name>`、Project Rootでは`<git common dir>`そのものである。
+
+作業ツリーのパスやbranch名を識別子にしない。branchはworktree内で切り替えられ、作業ツリーのパスは`git worktree move`で変わるためである。管理ディレクトリ名はどちらの操作でも不変であることを実測で確認している。
+
+tmux session名は安定IDから決定的に導出する。
+
+```text
+awt-<作業ツリーのbasenameを [A-Za-z0-9_-] へ正規化したもの>-<安定IDのSHA-256先頭8桁>
+```
+
+Project Rootのsessionも同じ規則で導出し、別体系の命名規則を設けない。§2.3のとおりProject RootはTask worktreeと別枠だが、識別子としては同じ導出規則に載せたほうが衝突回避も再現も一箇所で済む。
+
+`.`と`:`は生成名から必ず除外する。tmux 3.4の実測では、session名の`.`と`:`はどちらも`_`へ置換されて格納され、`a.b`と`a:b`が同一session名へ衝突する。さらに`has-session -t "=a.b"`は`.`をwindow指定として解釈するため、`.`を含む名前は完全一致でも引けない。
+
+正規化とhashを組み合わせるのは、人が読める部分を残しつつ衝突を避けるためである。**session名は導出結果をそのまま使い、既存sessionと衝突した場合に連番などで回避しない。** 同じ安定IDからは常に同じ名前が出るという性質が、再起動後のResume(§3.3)の前提になる。
+
+### 3.6 未確定事項
+
 - `Close`後にActiveへ戻す具体的UI
-- branch削除をClose操作に含めるか
-- Project Root用tmux sessionの命名規則
-- worktreeとtmux sessionの安定ID設計
 
 ## 4. tmuxモデル
 
@@ -197,6 +225,11 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 - Terminalはpane構成、実行中process、対応Agent、Agent状態を読み取る。
 - 操作主体はtmuxのままだが、Terminal UIから日常操作を呼び出せる。
 - tmuxのキーバインドもそのまま利用可能にする。
+- **アプリはユーザーの既定tmuxサーバを使う**。専用socket(`-L`)へ隔離しない。
+
+既定サーバを使うのは、ユーザーが素のターミナルから`tmux attach -t <session>`で同じsessionへ入れることを保証するためである。アプリが観測する実体と、ユーザーが自分の端末で見る実体を一致させることがこの製品の前提であり、専用socketではユーザー側が毎回`-L`を要求される。
+
+代償として、session名前空間をユーザー自身のsessionと共有する。衝突回避は§3.5の命名規則が担い、サーバ全体へ波及する設定(`-g`)は使わない(§4.2、§4.4)。
 
 Terminal UIで提供する操作は最小限とする。
 
@@ -830,6 +863,8 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 
 これらはAgentまたは通常Terminalから実行する。Project Rootからworktreeへの設定同期も同様である。
 
+branch削除の唯一の例外がworktree Closeの後始末であり、**マージ済みbranchに限って**Closeの選択肢に含める(§3.4)。任意のbranchを選んで消せるUIは持たない。
+
 Git graphは提供せず、シンプルなCommit Logに留める。
 
 ### 17.3 サポートするgit版数
@@ -1284,10 +1319,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### Worktree／tmux
 
-- 新規検出worktreeのActive化確認
-- session命名とcollision回避
 - tmux未導入時のセットアップ
-- Close時の安全確認
 - session消失時の再作成方針
 - detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、**タブ**のライフサイクル設計(Gate 1)。surface側の責務分担は§21.5で確定済みで、残るのは「上位レイヤがどう再生成を判断するか」(tmux sessionの存否確認、タブを閉じる条件)
 
@@ -1548,6 +1580,10 @@ PR_READY
 - [x] 1 Task = 1 worktree = 1 Task Tab
 - [x] Project Rootは別枠の常設tmux session
 - [x] worktreeごとに独立tmux session
+- [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は`awt-<正規化basename>-<安定IDのSHA-256先頭8桁>`
+- [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
+- [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
+- [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割

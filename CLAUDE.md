@@ -124,8 +124,23 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 - **One Issue, one Director session.** The Director ends every Issue's final report with an explicit one-line request to run `/clear`, before the next worktree is created. This cannot be automated and the rule exists because the manual step was being forgotten: nothing in Claude Code lets the model invoke `/clear` or `/compact` itself, hooks (`PreCompact` / `PostCompact` included) can observe compaction but not trigger it, and autocompact (`autoCompactEnabled` / `autoCompactWindow`, default on) only fires as the context nears its limit — which the measurements above show a 1M window never reaches. Never `/clear` mid-Issue: the reviewer round-trip needs the Director's memory of what was already measured and rejected.
 - **Do not `--resume` a large session left idle for over an hour.** The 1-hour prompt cache has expired and the first request rewrites the entire history: measured $2.06–$2.51 for a 200–233k resume, against $0.43–$0.65 to prime a fresh one. Start a new session and re-read what you need.
-- **Never pass a `model:` override when calling a subagent.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`.
+- **Never pass a `model:` override when calling a subagent on your own initiative.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`.
 - **Read-only exploration goes to `explorer`, not `general-purpose`** — restating the Director's role above, because in practice this is the rule that gets skipped.
+- **Never pass a `model:` override when calling a subagent unless the user names the model.** The frontmatter is otherwise the decision; a user asking for a specific model overrides it, and the report says which model ran.
+
+**What survives a `/clear`.** Nothing is destroyed — the transcript persists and `/resume` still reaches it. What is lost is only what was loaded in context, and it has four kinds with four different homes. Getting this wrong produces a second, stale source of truth that contradicts the Issues.
+
+| 種類 | 例 | 行き先 |
+| --- | --- | --- |
+| タスクの一覧・状態 | 何が Todo / In Progress か | **Issue + Project #6 のみ。** ファイルに書かない — 二重管理になる |
+| Issue 内の一時記憶 | 計測結果、Codex へ渡した spec、棄却したレビュー仮説 | spec は **Issue コメント**、棄却した仮説とその理由は **PR 本文** |
+| 横断的な学び | 「Codex は exec mode で矛盾を回避して報告する」 | **`CLAUDE.md` / `.claude/agents/*.md`。** 第二の規約集を別ファイルに育てない |
+| 引き継ぎポインタ | 直前セッションの最終報告、in-flight の worktree / PR、次の着手候補 | **handoff ファイル** (下記) |
+
+- **Codex へ渡す spec は、渡す前に Issue コメントとして投稿する** (`scripts/wf-issue-comment.sh`)。spec がセッション scratchpad にしか無いと、`/clear` で辿れなくなる — Issue #100 で実際に起きた。scratchpad はパスにセッション UUID を含み、公式ドキュメントに記載が無く、`/private/tmp` にあるため揮発する。
+- **レビューで棄却した指摘は、棄却した理由とともに PR 本文に残す。** 次のラウンドや次の Issue で同じ仮説が再提出されるのを止められるのは、この記録だけ。
+- **handoff ファイルは1セッション寿命・上書き専用・手で編集しない。** 読んで残す価値があるものは Issue / PR / CLAUDE.md へ移し、残りは捨てる。TODO を溜める場所ではない。
+- **`CLAUDE.local.md` は使わない。** 自動で読まれるが「指示」の位置に「状態」を置くことになり、古い引き継ぎが規約として効き続ける。加えてこの環境では実測で gitignore されていない — `core.excludesFile` が設定されているため `~/.config/git/ignore` の `**/CLAUDE.local.md` が参照されない。
 
 ## Task tracking (GitHub Projects)
 

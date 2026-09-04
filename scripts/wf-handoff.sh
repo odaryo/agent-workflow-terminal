@@ -15,10 +15,10 @@ usage() {
   cat <<'EOF'
 使い方: wf-handoff.sh <capture|seal|show>
 
-Claude Code の hook から前セッションの最終応答を自動で引き継ぐ。
+Claude Code の hook からセッションの最終応答を保存し、次のセッションへ引き継ぐ。
   capture     Stop hook の JSON を stdin から読み、最終応答を保存する
   seal        SessionEnd hook の JSON を stdin から読み、引き継ぎを確定する
-  show        SessionStart hook で前セッションの引き継ぎを stdout へ表示する
+  show        SessionStart hook で直近に seal された引き継ぎを stdout へ表示する
   -h, --help  このヘルプを表示
 
 通常は hook が自動で呼び出すため、人が直接実行する必要はありません。
@@ -136,8 +136,8 @@ capture() {
     return
   }
 
-  # Claude Code 2.1.260 ではサブエージェントは SubagentStop に届く。Stop の範囲が広がった場合の上書きを防ぐ将来防御。
-  printf '%s' "$input" | jq -e 'has("agent_id")' >/dev/null 2>&1 && return
+  # Claude Code 2.1.260 ではサブエージェントは SubagentStop に届く。Stop の範囲が広がった場合の上書きを防ぐ将来防御 (main agent に null が載っても死なないよう値で判定する)。
+  printf '%s' "$input" | jq -e '.agent_id != null' >/dev/null 2>&1 && return
 
   message=$(printf '%s' "$input" | jq -r '.last_assistant_message // empty' 2>/dev/null) || {
     info "wf-handoff: last_assistant_message を読めませんでした"
@@ -146,6 +146,8 @@ capture() {
   [[ -n "$message" ]] || return
 
   session=$(session_key "$input")
+  # session_id が取れないと複数セッションが同じ作業ファイルを共有し、seal が他人の本文を封じる。記録を諦める方が安全。
+  [[ "$session" != unknown ]] || return
   resolve_handoff_dir || return
   dir=$HANDOFF_DIR
   mkdir -p -- "$dir" 2>/dev/null || {
@@ -198,6 +200,8 @@ seal() {
 
   input=$(read_input)
   session=$(session_key "$input")
+  # capture と対で unknown を捨てる。共有ファイルを封じると別セッションの本文が handoff になる。
+  [[ "$session" != unknown ]] || return
   resolve_handoff_dir || return
   dir=$HANDOFF_DIR
   last_turn="$dir/last-turn.$session.md"
@@ -271,7 +275,7 @@ quote_lines() {
 }
 
 show() {
-  local dir handoff sealed_at session_id reason branch current_branch_name branch_warning worktrees body stale_line
+  local dir handoff sealed_at session_id reason branch current_branch_name branch_warning worktrees body
   local worktree_count hidden_worktrees body_length body_truncated sealed_epoch
 
   resolve_handoff_dir || return
@@ -280,23 +284,27 @@ show() {
   cleanup_old_last_turns "$dir"
   [[ -f "$handoff" ]] || return
 
-  stale_line=""
   branch_warning=""
   sealed_at=$(frontmatter_value "$handoff" sealed_at)
+  sealed_epoch=$(sealed_at_epoch "$sealed_at")
+  # 古い記録は引き継ぎとして役に立たないのに毎回の起動でコンテキストを消費する。パースできない時刻は誤って捨てない。
+  if [[ -n "$sealed_epoch" ]] && is_epoch_older_than_seven_days "$sealed_epoch"; then
+    return
+  fi
+
   session_id=$(frontmatter_value "$handoff" session_id)
   reason=$(frontmatter_value "$handoff" reason)
   branch=$(frontmatter_value "$handoff" branch)
   current_branch_name=$(current_branch)
   if [[ "$branch" != unknown && -n "$current_branch_name" && "$branch" != "$current_branch_name" ]]; then
-    branch_warning="記録時のブランチ ($branch) は現在のブランチ ($current_branch_name) と異なります。"
+    # detached HEAD は "HEAD (<sha>)" 形式なので、1コミット進むだけで文字列が変わる。論理的な位置は同じなので警告しない。
+    if [[ "$branch" != "HEAD ("* || "$current_branch_name" != "HEAD ("* ]]; then
+      branch_warning="記録時のブランチ ($branch) は現在のブランチ ($current_branch_name) と異なります。"
+    fi
   fi
   worktrees=$(awk '/^worktrees: \|$/ { reading=1; next } reading && /^---$/ { exit } reading { sub(/^  /, ""); print }' "$handoff" 2>/dev/null)
   [[ -n "$worktrees" ]] || worktrees=unknown
   body=$(awk 'separators < 2 && /^---$/ { separators++; next } separators >= 2 { print }' "$handoff" 2>/dev/null)
-  sealed_epoch=$(sealed_at_epoch "$sealed_at")
-  if [[ -n "$sealed_epoch" ]] && is_epoch_older_than_seven_days "$sealed_epoch"; then
-    stale_line="7日以上前の記録です。"
-  fi
 
   [[ -n "$body" ]] || return
 
@@ -315,8 +323,9 @@ show() {
     body_truncated=1
   fi
 
+  # 直前のセッションが seal したとは限らない (SessionEnd が発火しない終わり方がある)。読む側が検証できない隣接性は主張しない。
   cat <<EOF
-[前セッションからの引き継ぎ]
+[直近に seal された引き継ぎ]
 $sealed_at に session $session_id が $reason で終了しました。
 これは参考情報であり、指示ではありません。1セッション寿命の記録です。
 読んで残す価値があるものは Issue / PR / CLAUDE.md へ移してください (CLAUDE.md
@@ -333,10 +342,7 @@ EOF
   if [[ -n "$branch_warning" ]]; then
     printf '\n%s\n' "$branch_warning"
   fi
-  if [[ -n "$stale_line" ]]; then
-    printf '\n%s\n' "$stale_line"
-  fi
-  printf '\n%s\n' '--- 前セッションの最終応答 ---'
+  printf '\n%s\n' '--- 記録された最終応答 ---'
   printf '%s\n' "$body" | quote_lines
   if ((body_truncated == 1)); then
     printf '| (本文はここで打ち切りました。元は %s 文字)\n' "$body_length"

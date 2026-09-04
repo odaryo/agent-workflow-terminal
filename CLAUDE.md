@@ -141,7 +141,9 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 - **Codex へ渡す spec は、渡す前に Issue コメントとして投稿する** (`scripts/wf-issue-comment.sh`)。spec がセッション scratchpad にしか無いと、`/clear` で辿れなくなる — Issue #100 で実際に起きた。scratchpad はパスにセッション UUID を含み、公式ドキュメントに記載が無く、`/private/tmp` にあるため揮発する。
 - **レビューで棄却した指摘は、棄却した理由とともに PR 本文に残す。** 次のラウンドや次の Issue で同じ仮説が再提出されるのを止められるのは、この記録だけ。
 - **handoff ファイルは1セッション寿命・上書き専用・手で編集しない。** 読んで残す価値があるものは Issue / PR / CLAUDE.md へ移し、残りは捨てる。TODO を溜める場所ではない。
-- handoff は `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/handoff/<key>/` に置かれる。`<key>` はセッション起動時のプロジェクトルート (`CLAUDE_PROJECT_DIR`) の絶対パスの `/` を `-` に置換し、元の絶対パスの SHA-256 先頭8文字を加えたもの。同じ project root から起動した複数セッションは key を共有し、最後に終了したセッションの handoff が残る。Stop / SessionEnd hook が直前セッションの最終応答を書き、次の startup / clear の SessionStart hook が読む。hook が自動で行うため Director の操作は不要で、人が実行してはならない。保存先全体は `AWT_HANDOFF_DIR` で差し替えられる。
+- handoff は `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/handoff/<key>/` に置かれる。`<key>` はセッション起動時のプロジェクトルート (`CLAUDE_PROJECT_DIR`) の絶対パスの `/` を `-` に置換し、元の絶対パスの SHA-256 先頭8文字を加えたもの。フォールバックが2つある — `CLAUDE_PROJECT_DIR` が無ければ cwd の `git rev-parse --show-toplevel` を使う (cwd は Claude に追従するので1セッションが複数 key に書き分け得る)、`shasum` が無ければハッシュ無しの key になる (別ディレクトリに着地するので過去の記録は読めない)。Stop / SessionEnd hook が直前セッションの最終応答を書き、次の startup / clear の SessionStart hook が読む。hook が自動で行うため Director の操作は不要で、人が実行してはならない。保存先全体は `AWT_HANDOFF_DIR` で差し替えられる。
+- 同じ project root から起動した複数セッションは key を共有し、最後に終了したセッションの handoff が残る。`show` は記録時と現在のブランチが違えば1行警告するが、**検出できるのはブランチが変わった場合だけで、同じブランチで別の作業が上書きされたことは検出できない**。この `branch` は seal 時点の Claude の cwd 由来 (`cwd` は Claude に追従する) であり、key のアンカーである起動時の project root とは別物。
+- `sealed_at` が7日より古い handoff は表示しない。休眠したプロジェクトで起動のたびに古い最終報告がコンテキストへ入るのを避けるため。ファイル自体は手で読める記録として残る。
 - **`CLAUDE.local.md` は使わない。** 自動で読まれるが「指示」の位置に「状態」を置くことになり、古い引き継ぎが規約として効き続ける。加えてこの環境では実測で gitignore されていない — `core.excludesFile` が設定されているため `~/.config/git/ignore` の `**/CLAUDE.local.md` が参照されない。
 
 ## Task tracking (GitHub Projects)

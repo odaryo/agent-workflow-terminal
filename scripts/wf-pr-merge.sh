@@ -15,6 +15,7 @@ checks がゼロ件の場合は check run 未登録ウィンドウを考慮し�
 (このフラグの有無によらない)。
   --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ
   --delete-local     マージ後、ローカルの head ブランチを削除する
+                     (作業ツリーが checkout 中の場合は警告を出してスキップする)
   --no-wait-main-ci  マージ後の main CI 完了待ちを省略する
   --dry-run          実行せず、実行するはずの内容を表示する
   -h, --help         このヘルプを表示
@@ -171,32 +172,43 @@ trap 'info "注意: マージ自体は成功しています (sha=$merge_sha)。�
 
 git fetch --prune origin
 
-# 指定ブランチを checkout している worktree のパスを返す (どこにも無ければ空)。
-# 1タスク = 1 worktree の運用では main は常に別の作業ツリーにあり、そこでは
-# `git branch -f main` も `git branch -D <head>` も git が拒否する (Issue #131)。
+# 指定ブランチを checkout している worktree のパスを返す (見つからなければ空)。
+# これは best-effort — rebase / bisect が停止中の worktree は `branch` 行ではなく
+# `detached` を出力するのにブランチは使用中と見なされる (実測。同じ制約が
+# wf-cleanup-branches.sh にもある)。ブランチを書き換えられるかどうかの判定には
+# 使わず、書き換えに失敗したあとで相手のパスを引くためだけに使う。
+# awk を早期 exit させないのは、worktree が数十を超えると git が SIGPIPE で死に
+# pipefail が 141 を伝播してマージ直後に中断するため。
 worktree_for_branch() {
   git worktree list --porcelain | awk -v ref="refs/heads/$1" '
     $1 == "worktree" { path = substr($0, 10) }
-    $1 == "branch" && $2 == ref { print path; exit }
+    $1 == "branch" && $2 == ref && !found { print path; found = 1 }
   '
 }
 
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$current_branch" == "$pr_head" ]]; then
-  main_worktree=$(worktree_for_branch main)
-  if [[ -z "$main_worktree" ]]; then
+  # ref を直接書き換えられるかは git に訊く。1タスク = 1 worktree の運用では main は
+  # 別の作業ツリーが checkout したままで、`git branch -f` は拒否される (Issue #131)。
+  # 事前に判定せず試すのは、上記の通り porcelain の出力が使用中を取りこぼすため。
+  # 拒否されても ref は動かない (実測) ので、失敗を検出手段として使ってよい。
+  if branch_force_error=$(git branch -f main origin/main 2>&1); then
     # 陳腐化したローカル main へ直接 checkout すると、PR が変更したファイルに
     # 作業ツリーの未コミット差分がある場合に中断する (Issue #37)。先に main を
     # origin/main へ合わせれば、マージ済み内容と作業ツリーの間に差は生じない。
-    git branch -f main origin/main
     git checkout main
     current_branch="main"
   else
-    # 別の作業ツリーが持つ main は ref を書き換えられないので、その作業ツリー側で
-    # fast-forward する。無関係な未コミット差分があっても通り、更新対象のファイルに
-    # 差分がある場合だけ git が拒否する (実測)。後処理全体を止める理由にはならない。
-    git -C "$main_worktree" merge --ff-only origin/main \
-      || info "警告: '$main_worktree' の main を fast-forward できませんでした。その作業ツリーで手動で更新してください"
+    main_worktree=$(worktree_for_branch main)
+    if [[ -z "$main_worktree" ]]; then
+      info "警告: ローカル main を更新できませんでした: $branch_force_error"
+    else
+      # 別の作業ツリーが持つ main は ref を書き換えられないので、その作業ツリー側で
+      # fast-forward する。無関係な未コミット差分があっても通り、更新対象のファイルに
+      # 差分がある場合だけ git が拒否する (実測)。後処理を止める理由にはならない。
+      git -C "$main_worktree" merge --ff-only origin/main \
+        || info "警告: '$main_worktree' の main を fast-forward できませんでした。その作業ツリーで手動で更新してください"
+    fi
     info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだら 'git worktree remove' と scripts/wf-cleanup-branches.sh --yes で掃除してください"
   fi
 fi
@@ -212,12 +224,12 @@ if [[ "$delete_local" -eq 1 ]]; then
   # 不一致 = マージ後にローカルへ積まれた未 push コミットがあるということで、
   # -D はそれらを到達不能にしてしまうため削除をスキップする。
   if git show-ref --verify --quiet "refs/heads/$pr_head"; then
-    head_worktree=$(worktree_for_branch "$pr_head")
     local_head_oid=$(git rev-parse "refs/heads/$pr_head" 2>/dev/null || true)
-    if [[ -n "$head_worktree" ]]; then
-      info "警告: ローカルブランチ '$pr_head' は作業ツリー '$head_worktree' が checkout 中のため削除をスキップしました (その作業ツリーを削除してから scripts/wf-cleanup-branches.sh --yes)"
-    elif [[ -n "$local_head_oid" && "$local_head_oid" == "$pr_head_oid" ]]; then
-      git branch -D "$pr_head"
+    if [[ -n "$local_head_oid" && "$local_head_oid" == "$pr_head_oid" ]]; then
+      # checkout 中のブランチは git が削除を拒否する (rc=1、副作用なし。実測)。
+      # main と同じ理由でここも事前判定せず、失敗を検出手段として使う。
+      git branch -D "$pr_head" \
+        || info "警告: ローカルブランチ '$pr_head' を削除できませんでした。作業ツリーが checkout 中の可能性があります (その作業ツリーを削除してから scripts/wf-cleanup-branches.sh --yes)"
     else
       info "警告: ローカルブランチ '$pr_head' はマージした PR の head と一致しないため削除をスキップしました (local=$local_head_oid, pr_head=$pr_head_oid)"
     fi

@@ -171,14 +171,34 @@ trap 'info "注意: マージ自体は成功しています (sha=$merge_sha)。�
 
 git fetch --prune origin
 
+# 指定ブランチを checkout している worktree のパスを返す (どこにも無ければ空)。
+# 1タスク = 1 worktree の運用では main は常に別の作業ツリーにあり、そこでは
+# `git branch -f main` も `git branch -D <head>` も git が拒否する (Issue #131)。
+worktree_for_branch() {
+  git worktree list --porcelain | awk -v ref="refs/heads/$1" '
+    $1 == "worktree" { path = substr($0, 10) }
+    $1 == "branch" && $2 == ref { print path; exit }
+  '
+}
+
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$current_branch" == "$pr_head" ]]; then
-  # 陳腐化したローカル main へ直接 checkout すると、PR が変更したファイルに
-  # 作業ツリーの未コミット差分がある場合に中断する (Issue #37)。先に main を
-  # origin/main へ合わせれば、マージ済み内容と作業ツリーの間に差は生じない。
-  git branch -f main origin/main
-  git checkout main
-  current_branch="main"
+  main_worktree=$(worktree_for_branch main)
+  if [[ -z "$main_worktree" ]]; then
+    # 陳腐化したローカル main へ直接 checkout すると、PR が変更したファイルに
+    # 作業ツリーの未コミット差分がある場合に中断する (Issue #37)。先に main を
+    # origin/main へ合わせれば、マージ済み内容と作業ツリーの間に差は生じない。
+    git branch -f main origin/main
+    git checkout main
+    current_branch="main"
+  else
+    # 別の作業ツリーが持つ main は ref を書き換えられないので、その作業ツリー側で
+    # fast-forward する。無関係な未コミット差分があっても通り、更新対象のファイルに
+    # 差分がある場合だけ git が拒否する (実測)。後処理全体を止める理由にはならない。
+    git -C "$main_worktree" merge --ff-only origin/main \
+      || info "警告: '$main_worktree' の main を fast-forward できませんでした。その作業ツリーで手動で更新してください"
+    info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだら 'git worktree remove' と scripts/wf-cleanup-branches.sh --yes で掃除してください"
+  fi
 fi
 
 if [[ "$current_branch" == "main" ]]; then
@@ -192,8 +212,11 @@ if [[ "$delete_local" -eq 1 ]]; then
   # 不一致 = マージ後にローカルへ積まれた未 push コミットがあるということで、
   # -D はそれらを到達不能にしてしまうため削除をスキップする。
   if git show-ref --verify --quiet "refs/heads/$pr_head"; then
+    head_worktree=$(worktree_for_branch "$pr_head")
     local_head_oid=$(git rev-parse "refs/heads/$pr_head" 2>/dev/null || true)
-    if [[ -n "$local_head_oid" && "$local_head_oid" == "$pr_head_oid" ]]; then
+    if [[ -n "$head_worktree" ]]; then
+      info "警告: ローカルブランチ '$pr_head' は作業ツリー '$head_worktree' が checkout 中のため削除をスキップしました (その作業ツリーを削除してから scripts/wf-cleanup-branches.sh --yes)"
+    elif [[ -n "$local_head_oid" && "$local_head_oid" == "$pr_head_oid" ]]; then
       git branch -D "$pr_head"
     else
       info "警告: ローカルブランチ '$pr_head' はマージした PR の head と一致しないため削除をスキップしました (local=$local_head_oid, pr_head=$pr_head_oid)"

@@ -118,6 +118,12 @@ struct TmuxSessionWorkingDirectoryTests: TmuxSessionOperationsTestSupport {
   }
 
   /// tmux 3.4 実測で pane が `$HOME` へ落ちたパス。tmux 自身は exit 0 を返す。
+  ///
+  /// `unsearchableDirectory` と `readOnlyDirectory` は**テストプロセスが root でない**ことを前提に
+  /// する。`access(2)` は appropriate privileges を持つプロセスには実行ビットが無くても `X_OK` の
+  /// 成功を返し得ると規定しており (macOS `man 2 access`)、root ではこの2件が弾かれなくなる。
+  /// root での実測は行っていない。CI の macOS runner もローカルも非 root で走るため、前提を
+  /// 書くだけに留める。
   enum UnenterablePath: String, Sendable, CaseIterable {
     case unsearchableDirectory
     /// 読み取りだけでは chdir できない。存否だけを見る述語はここを通してしまう。

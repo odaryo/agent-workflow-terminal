@@ -13,18 +13,22 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// (`TmuxSessionOperations.isServerAbsent` に実測した文字列がある)。
   case serverNotRunning
   /// tmux は pane をそこへ入れられなくても exit 0 で session を作り、cwd を `$HOME` へ落とす
-  /// (tmux 3.4 実測)。落ちる入力は3つ — 不在、通常ファイル、**chdir できない権限**
-  /// (`chmod 000` のディレクトリ、search を deny する ACL のいずれも実測)。
+  /// (tmux 3.4 実測)。族の輪郭は「ディレクトリとして chdir できない値すべて」であって、閉じた
+  /// 列挙は無い。実測した代表例は、不在・通常ファイル・**chdir できない権限**
+  /// (`chmod 000` のディレクトリ、search を deny する ACL)・symlink ループ・fifo・`/dev/null`・
+  /// `PATH_MAX` 超え・通常ファイル + 末尾スラッシュで、いずれも rc=0 のまま `$HOME` になった。
   /// 相対パスはこの族に入らない。tmux の `-c` は client (= このプロセス) の cwd に対して解決され、
   /// `FileManager` の相対解決と同じ場所を指す (実測: server と client の cwd に同名を実在させ、
   /// pane が client 側へ落ちることを確認した)。
-  ///
-  /// - Important: 判定は `new-session` とは別プロセス・別時刻の検査であり原子的ではない。検査から
-  ///   tmux が chdir するまでの間に権限やディレクトリが変われば、この保証は破れる。
   case workingDirectoryUnusable(String)
-  /// `formatEscaped` の encoding では pane へ復元できない作業ディレクトリ
-  /// (`TmuxSessionOperations.isSafeWorkingDirectory`)。tmux が受け取れない値という意味ではない
-  /// — `#[` を含むパスは、素通しすれば pane はその値を得る (実測)。
+  /// tmux へ渡す前に値の形で弾いた作業ディレクトリ
+  /// (`TmuxSessionOperations.isSafeWorkingDirectory`)。3つのメンバは弾く理由が別で、共通するのは
+  /// 「渡しても呼び出し側が意図した pane にならない」だけである (いずれも tmux 3.4 実測)。
+  ///
+  /// - `#[` を含む: tmux は受け取れるが `formatEscaped` の encoding で復元できない。
+  ///   素通しすれば pane はその値を得る。
+  /// - 末尾が `;`: tmux が受け取れない。argv がそこで切れて exit 1 になり、session もできない。
+  /// - 空文字: encoding とは無関係で、tmux は受け取ったうえで pane を client の cwd へ落とす。
   case invalidWorkingDirectory(String)
   /// tmux が受け付けない `history-limit` (`TmuxSessionOperations.historyLimitRange`)。
   case invalidHistoryLimit(Int)
@@ -92,6 +96,14 @@ public struct TmuxSessionOperations: Sendable {
         else {
           return false
         }
+        // 同期 FS I/O を呼び出しスレッド上で行い、打ち切る手段が無い点は
+        // `GitWorktreeDetector` 側の同じ述語と共通だが、そちらの逃げ道 (外部プロセスが
+        // 有界に戻った後にだけ撃つ) はここでは使えない。この述語が `create` の最初の
+        // FS 操作で、前段に有界に戻る外部プロセスが無いためである。それでも同期で撃つのは、
+        // 撃たない場合の代替が「tmux が別のディレクトリで rc=0 を返す」— まさにこの検査が
+        // 防いでいるもの — しか無いからで、応答しないマウント上の worktree では
+        // cooperative thread が無期限に残ることを承知で受け入れている。
+        //
         // 見るのは chdir に要る search 権限だけで、読み取りは要らない (実測: `--x` だけの
         // ディレクトリへ pane は入り、`r--` では `$HOME` へ落ちた)。mode ビットを自分で
         // 見ずに `access` を使うのは、ACL を取りこぼすため (search を deny する ACL を付けた
@@ -137,16 +149,33 @@ public struct TmuxSessionOperations: Sendable {
   ///   起動できないからではなく、起動してしまうと `TmuxRunner` が渡す限定環境
   ///   (`LC_ALL=C` と `HOME` / `PATH` / `TMUX_TMPDIR` だけ) がユーザーの既定 server の
   ///   global environment になり、ユーザー自身が素の端末で作る pane まで巻き込むからである。
-  ///   **この guard が効いている限り、作った session が受け取るのは限定環境ではなく、server を
-  ///   起動した側の global environment である** (実測: rich な環境で起動した server へ限定環境から
-  ///   `new-session` を撃つと、pane は `MYMARK=user-env` とユーザーの `PATH` を持ち、`LC_ALL` は
-  ///   持たなかった)。それでも `update-environment` (既定8変数) は `new-session` のたびに
-  ///   クライアント環境を session environment へ写し、クライアントに無い変数は明示的に unset する。
+  ///   **この guard が止めるのは server 全体への波及だけで、限定環境そのものは pane に届く。**
+  ///   pane が受け取るのは server を起動した側の global environment だが、**`PATH` だけは例外で、
+  ///   pane を作らせた client すなわちこのプロセスの `PATH` になる** (実測: server と client に
+  ///   別々の目印を付けると、server 側の pane は `PATH=/opt/SERVERPATH:…`、`create` が残す pane は
+  ///   `PATH=/opt/CLIENTPATH:…` を得た。同じ pane の `MYMARK` と `LANG` は両方とも server 由来)。
+  ///   したがって agent pane が `git` / `node` / `claude` を見つけられるかは、ユーザーのシェルでは
+  ///   なく**アプリのプロセスの `PATH`** が決める。害はアプリが作る pane に閉じており、ユーザーが
+  ///   attach 済みの client から自分で分割した pane は server 側の `PATH` を得る。アプリが `PATH` を
+  ///   持たなければ pane は server 側の値を保つ (いずれも実測)。`LC_ALL` は逆向きで、こちらの
+  ///   `LC_ALL=C` は pane へ届かない (実測: server に `LC_ALL` があれば pane はその値を得て、
+  ///   server に無ければ pane も持たない)。それでも `update-environment` (既定8変数) は
+  ///   `new-session` のたびにクライアント環境を session environment へ写し、クライアントに無い
+  ///   変数は明示的に unset する。
   ///   限定環境から作った session の `show-environment` は実測で `-DISPLAY` `-KRB5CCNAME`
   ///   `-SSH_AGENT_PID` `-SSH_ASKPASS` `-SSH_AUTH_SOCK` `-SSH_CONNECTION` `-WINDOWID`
   ///   `-XAUTHORITY` の8行だけを返し、pane には `SSH_AUTH_SOCK` が無い。同じ server に
   ///   ユーザー自身が作った session には残る。agent pane からの `git push` が通らない害は
   ///   この guard では消えていない。どの環境で server を起動し session へ何を渡すかは Issue #61。
+  /// - Important: **作業ディレクトリの事前検査は、tmux が実際に chdir できることを保証しない。**
+  ///   検査はこのプロセスで、chdir は tmux server で行われる。時間が経たなくても答えは割れる
+  ///   — 同じパスに対して権限判定が2プロセスで違い得るためで、macOS では MAC ポリシー
+  ///   (App Sandbox / TCC) がその差を恒常的に作る。実測 (同一プロセス・同一パス・対象を
+  ///   `file-read-metadata` deny にした `sandbox-exec` 下): `stat` は `EPERM` で落ちるのに
+  ///   `access(X_OK)` と `chdir` は成功した。向きは「黙って別の場所へ落ちる」ではなく
+  ///   「入れるディレクトリを拒否する」なので、worktree が TCC 管理下 (`~/Documents` など) に
+  ///   あってアプリに許可が無いときに `workingDirectoryUnusable` が偽陽性になる。
+  ///   検査後に権限やディレクトリが変わる時間差の窓も、これとは別に残る。
   /// - Important: 探索から作成までの競合窓は残る。server の存在を確かめてから `new-session` を
   ///   撃つまでの間に server が落ちると、`new-session` が server を起動してしまう。連鎖の先頭に
   ///   `has-session` を置いても塞げないことは実測済み (server 不在の socket へ

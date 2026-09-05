@@ -3,6 +3,13 @@ import TerminalCore
 
 /// entry 単位に還元できない失敗。これだけが `scan()` から throw される。
 public enum GitWorktreeScanError: Error, Sendable, Equatable {
+  /// - Important: `worktree list` 自体が entry 1件の事故で全滅する。git 2.50.1 実測では、ある
+  ///   worktree の `locked` を `chmod 000` にすると
+  ///   `fatal: failed to read '.git/worktrees/wt2/locked': Permission denied` で exit 128 になり、
+  ///   その worktree より前の record を完全な形で吐いてから死ぬ (壊れた worktree 自身の record は
+  ///   終端の `\0` を欠いた途中まで、それより後の worktree は1件も現れない)。部分 stdout は
+  ///   `GitRunnerError.commandFailed` が保持しているが、それを信用して検出を続けるかは
+  ///   Issue #140 の担当で、現状はここへ来て Project 全体の検出が止まる。
   case list(GitRunnerError)
   /// 1件でもあればスキャン全体を失敗させる。どの record が壊れたかは分かっても、それが
   /// どの worktree の record だったかは分からないので、entry 単位の失敗にできない。
@@ -11,10 +18,15 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
   case projectCommonDirectory(GitRunnerError)
   /// 基準の `rev-parse` が絶対パス1行を返さなかった。
   case unexpectedProjectCommonDirectoryOutput(output: String)
-  /// entry 用の `GitRunner` を作れなかった。原因は git 実行ファイル側にあり、残りの entry も
-  /// 同じ理由で失敗するので、entry 単位の失敗として集めても意味が無い。
+  /// entry 用の `GitRunner` を作れなかった。実際に起きるのは git 実行ファイルを見つけられない
+  /// 場合で、残りの entry も同じ理由で失敗するため entry 単位の失敗として集めても意味が無い。
+  /// `GitRunner.init` は entry のパスに依存する `invalidRepositoryDirectory` も throw するが、
+  /// `worktree list --porcelain` は `worktree.useRelativePaths=true` を設定しても作業ツリーの
+  /// **絶対**パスしか吐かず (git 2.50.1 実測: 相対になるのは `.git` ファイルの中身だけで
+  /// `gitdir: ../main/.git/worktrees/wt1`)、絶対パスから作った `URL` は `baseURL` を持たないので
+  /// (macOS 26.5 実測: 相対パスだと cwd が `baseURL` に入って弾かれる) 現状は到達しない。
   /// `GitWorktreeEntryFailure.Reason.gitDirectory` と分けているのは、そちらが
-  /// 「git は動いたが失敗した」に限定され、作業ツリーの到達可能性で除外へ振り替わるためである。
+  /// 「git は動いた」に限定され、作業ツリーの到達可能性で除外へ振り替わるためである。
   /// git を一度も起動できていない状況をその判定に混ぜると、git 実行ファイルの消失が
   /// 「作業ツリーが消えた」に化ける。
   case gitRunnerUnavailable(worktreePath: String, GitRunnerError)
@@ -25,14 +37,24 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
 /// - Important: 呼び出し側が原因を再現できるよう、git の生の出力を丸めずに持つ。
 ///   失敗した worktree を UI でどう扱うかは Issue #137 の担当で、ここでは決めない。
 public struct GitWorktreeEntryFailure: Sendable, Equatable {
-  /// `worktree list` が返した作業ツリーのパス。安定 ID を引けていないので、これしか手掛かりが無い。
+  /// `worktree list` が返した作業ツリーのパス。呼び出し側が失敗を既存の worktree と突き合わせる
+  /// 手掛かりはこれだけである。
+  ///
+  /// - Note: `invalidCommonDirectoryPath` に限っては `rev-parse` の1行目から `WorktreeIdentity` を
+  ///   作れているが、ここには載せない。その ID は「この Project のものか」を確かめる2行目が壊れた
+  ///   ままの未照合の値であり、照合を省くと別 repository へ置き換わった worktree の ID が
+  ///   この Project の ID として通って Project Root が2件になる (`describe`)。載せると呼び出し側は
+  ///   照合済みの ID と混ぜて使うか、同じ照合をもう一度書くかのどちらかになる。どちらが要るかは
+  ///   照合の要否を決められる呼び出し側 (Issue #137) と一緒に決める。
   public let worktreePath: String
   public let reason: Reason
 
   public enum Reason: Sendable, Equatable {
-    /// 到達できる作業ツリーで安定 ID の `rev-parse` が失敗した。壊れているのが git ディレクトリ側
-    /// とは限らない。分類は作業ツリーへ**到達できたかどうか**だけで決めており、git のメッセージは
-    /// 見ていない (`describe`)。git 2.50.1 実測では、管理ディレクトリの `commondir` 欠落が
+    /// 安定 ID の `rev-parse` が失敗し、作業ツリーの不在として除外できなかった。壊れているのが
+    /// git ディレクトリ側とは限らない。分類は作業ツリーへ**到達できたかどうか**だけで決めており、
+    /// git のメッセージは見ていない (`describe`)。git が exit code を返さなかった失敗
+    /// (timeout 等) も、不在の証拠にならないのでここへ来る。git 2.50.1 実測では、
+    /// 管理ディレクトリの `commondir` 欠落が
     /// `not a git repository: <管理ディレクトリ>`、`.git` ファイルの破損が `invalid gitfile format`、
     /// `.git` ファイルの消失が `not a git repository (or any of the parent directories): .git` で、
     /// いずれも exit 128。`worktree list` はこのどれにも `prunable` を付けない (網羅ではない)。
@@ -97,9 +119,19 @@ public struct GitWorktreeDetector: Sendable {
   /// なる。git 2.50.1 実測では、パスが消えていれば `No such file or directory`、パスがファイル
   /// なら `Not a directory`、探索権限が無ければ `Permission denied` で、いずれも exit 128。
   ///
-  /// - Note: 同期 FS I/O を cooperative thread 上で行う。応答しないマウントで詰まり得るが、
-  ///   この述語は git が既に同じパスへ `-C` して失敗した後にしか走らないので、そのマウントでは
-  ///   git 側が先に詰まる。呼ぶ位置がここから動いたら、この前提も崩れる。
+  /// - Note: 同期 FS I/O を cooperative thread 上で行い、**打ち切る手段が無い**。
+  ///   `fileExists` / `isExecutableFile` は timeout も cancellation も取らない同期 API で
+  ///   (macOS 26.5 SDK の `NSFileManager.h`)、下の `stat(2)` / `access(2)` にも timeout は無い。
+  ///   別スレッドへ逃がして時間で見切ることはできるが、ブロックしたスレッド自体は殺せないので
+  ///   漏れるだけである。一方 git 側は有界に戻る (実測: 永久にブロックする子を 2 秒 timeout で
+  ///   撃つと `timedOut(exitCode: nil, ...)` を 2.129586084 秒で throw。`GitRunner.defaultTimeout`
+  ///   は 30 秒)。Swift の同期ブロックはキャンセルもプリエンプトもされないため
+  ///   (実測: 10 コアの機で 3 秒ブロックする `Task` を10本作ると直列化し、その間ずっと別の
+  ///   `Task` が走れない)、応答しないマウントでは git が回復しても述語だけが無期限に残る。
+  ///   そのため `describe` はこの述語を **git が exit code を返した失敗にだけ**撃つ。
+  ///   git が終了しなかった場合 (timeout 等) は撃たずに失敗として返し、詰まる窓を閉じている。
+  ///   `commandFailed` を返しつつ後続の `stat` は詰まるマウントは残るが、それは実測できておらず、
+  ///   打ち切れない以上どのみち別の設計判断 (どの時点で不在とみなすか) が要るので今は許容する。
   private static let isReachableWorkingTree: @Sendable (String) -> Bool = { path in
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
@@ -187,10 +219,13 @@ public struct GitWorktreeDetector: Sendable {
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。
   ///
-  /// - `prunable`: 作業ツリーが実在しないので、タブも tmux session も持てず、そもそも
-  ///   安定 ID を引けない (`rev-parse` が exit 128。git 2.50.1 実測)。§3.2 には
+  /// - `prunable`: 安定 ID を引けない (`rev-parse` が exit 128。git 2.50.1 実測)。§3.2 には
   ///   「検出したが使えない worktree」という状態が無く、ここで返すと設計書に無い状態を
   ///   発明することになる。`git worktree prune` は書き込み操作であり §17.2 で Agent へ委譲済み。
+  ///   **作業ツリーが実在しないことは根拠にできない。** `.git` ファイルが消えるだけで
+  ///   `prunable gitdir file points to non-existent location` が付き、作業ツリーもユーザーの
+  ///   未コミットの変更もそのまま残る (git 2.50.1 実測)。つまりここでは、cwd としては完全に
+  ///   使えるディレクトリを、安定 ID を引けないという理由だけで落としている。
   /// - bare: 作業ツリーが無い。`rev-parse` 自体は exit 0 で使える安定 ID を返すが (git 2.50.1
   ///   実測: `--git-dir` も `--git-common-dir` も bare ディレクトリ自身)、`worktreePath` が
   ///   指すのは git ディレクトリであって checkout ではないため、タブの cwd にも tmux session の
@@ -215,9 +250,11 @@ public struct GitWorktreeDetector: Sendable {
   ///   Active 化。Issue #137)。それ以外の失敗は `.failed` で返し、黙って落とさない。
   ///   - 作業ツリーへ到達できない: `locked` で `prunable` が抑止された entry がここへ来る。
   ///     stderr の文言ではなく作業ツリーの到達可能性で判定するのは、git のメッセージが版と
-  ///     locale で変わるためである。到達できる作業ツリーでの失敗は
-  ///     `GitWorktreeEntryFailure.Reason.gitDirectory` に回す。壊れているのが git ディレクトリ
-  ///     側か作業ツリー側かは、そこでも区別していない。
+  ///     locale で変わるためである。到達可能性を確かめるのは git が exit code を返した失敗
+  ///     (`commandFailed`) に限る。git が終了しなかった失敗は不在の証拠にならず、述語が
+  ///     打ち切れない FS 呼び出しに入る (`isReachableWorkingTree`)。確かめなかった失敗も
+  ///     到達できた作業ツリーでの失敗も `GitWorktreeEntryFailure.Reason.gitDirectory` に回す。
+  ///     壊れているのが git ディレクトリ側か作業ツリー側かは、そこでも区別していない。
   ///   - common dir がこの Project のものでない: 登録済み worktree のディレクトリが別の
   ///     repository に置き換わると、git は `prunable` を付けず、`rev-parse` も exit 0 で
   ///     **その別 repository の** git ディレクトリを返す (git 2.50.1 実測)。そのまま通すと
@@ -241,7 +278,7 @@ public struct GitWorktreeDetector: Sendable {
       // 注入させないためである (§17.2)。
       stdout = try await runner.run(GitReadCommand(arguments: Self.gitDirectoryArguments)).stdout
     } catch {
-      guard isWorktreeReachable(entry.path) else { return .absent }
+      if case .commandFailed = error, !isWorktreeReachable(entry.path) { return .absent }
       return .failed(entry.path, .gitDirectory(error))
     }
 

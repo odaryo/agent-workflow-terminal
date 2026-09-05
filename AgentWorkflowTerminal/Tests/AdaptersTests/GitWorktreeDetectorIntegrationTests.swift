@@ -185,6 +185,31 @@ struct GitWorktreeDetectorIntegrationTests {
     }
   }
 
+  /// 同じリムーバブルボリューム上に worktree を複数置けば entry 失敗は同時に複数立つ。1件でも
+  /// 捨てると、捨てた worktree は上位から消失と区別できなくなる (Issue #137)。作成順を出力順と
+  /// 変えているのは、`worktree list` が main worktree の次を管理ディレクトリ名の昇順で吐く
+  /// (git 2.50.1 実測: `zz`→`aa`→`mm` の順に作っても `aa`→`mm`→`zz` で出る) ことに寄りかからず、
+  /// 検出順そのものを固定するためである。
+  @Test("同じスキャンで2件の entry が失敗しても、両方を検出順で返す")
+  func reportsEveryEntryFailureFromOneScan() async throws {
+    try await withRepository { repository in
+      for name in ["wt-keep", "wt-broken-b", "wt-broken-a"] {
+        try await repository.git(["worktree", "add", "-q", "-b", name, "../\(name)"])
+      }
+      let broken = ["wt-broken-a", "wt-broken-b"].map { repository.root.appending(path: $0) }
+      for worktree in broken {
+        try Data().write(to: worktree.appending(path: ".git"))
+      }
+
+      let result = try await repository.detector().scan()
+
+      #expect(
+        result.detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+      #expect(result.failures.map(\.worktreePath) == broken.map(\.path))
+    }
+  }
+
   /// 置き換わった先でも `rev-parse` は exit 0 で、その repository の git ディレクトリを返す
   /// (git 2.50.1 実測)。`worktree list` も `prunable` を付けないので、common dir を確かめないと
   /// 無関係な repository の `.git` が安定 ID として通り、Project Root が2件になる。

@@ -218,6 +218,52 @@ struct GitWorktreeDetectorTests {
       ])
   }
 
+  /// 1回のスキャンで entry 失敗が複数立つのは異常系ではない。同じリムーバブルボリューム上に
+  /// worktree を複数置けば必ずそうなる。1件でも捨てると、捨てた worktree は上位から消失と
+  /// 区別できなくなる (Issue #137)。
+  @Test("同じスキャンで複数の entry が失敗したら、全件を検出順で返す")
+  func reportsEveryEntryFailureInDetectionOrder() async throws {
+    let listOutput =
+      singleWorktreeList
+      + "worktree /wt/beta\0branch refs/heads/beta\0\0"
+      + "worktree /wt/gamma\0branch refs/heads/gamma\0\0"
+      + "worktree /wt/delta\0branch refs/heads/delta\0\0"
+    let failing: Set<String> = ["/wt/beta", "/wt/delta"]
+    let stub = ProcessRunnerStub(
+      handler: stubHandler(listOutput: listOutput) { directory in
+        failing.contains(directory)
+          ? .success(revParseFailure)
+          : success(gitDirectoryLines(linkedGitDirectory(of: directory)))
+      })
+
+    let result = try await makeDetector(stub).scan()
+
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha", "/wt/gamma"])
+    #expect(result.failures.map(\.worktreePath) == ["/wt/beta", "/wt/delta"])
+  }
+
+  /// git が終了していない以上、作業ツリーが不在だという証拠が無い。加えて到達可能性の述語は
+  /// 打ち切れない同期 FS 呼び出しなので、応答しないマウントではそこで無期限に止まる。述語が
+  /// 「到達できない」と答えても `.absent` にならないことで、撃っていないことを固定する。
+  @Test("git が exit code を返さずに終わった entry は、到達可能性で除外へ振り替えない")
+  func doesNotFallBackToReachabilityWhenGitDoesNotExit() async throws {
+    let timedOut = ProcessRunnerError.timedOut(exitCode: nil, stdout: "", stderr: "")
+    let stub = ProcessRunnerStub { arguments in
+      guard !arguments.contains("worktree") else { return success(singleWorktreeList) }
+      guard arguments.contains("--git-dir") else { return success("\(commonDirectory)\n") }
+      return .failure(timedOut)
+    }
+
+    let result = try await makeDetector(stub, unreachable: ["/wt/alpha"]).scan()
+
+    #expect(result.detected.isEmpty)
+    #expect(
+      result.failures == [
+        GitWorktreeEntryFailure(
+          worktreePath: "/wt/alpha", reason: .gitDirectory(.process(timedOut)))
+      ])
+  }
+
   @Test(
     "rev-parse の出力が2行でなければ原文を捨てずに失敗として返す",
     arguments: ["", "/repo/.git\n", "/repo/.git\n/repo/.git\n/extra\n"]

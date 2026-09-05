@@ -28,7 +28,8 @@ public enum IgnoredFilesStatus: Sendable, Hashable {
 public enum UnpushedCommitsStatus: Sendable, Hashable {
   case present
   case absent
-  case trackingBranchMissing
+  /// upstream 設定だけでは、追跡 ref が未作成なのか prune 済みなのかを区別できない。
+  case aheadUnknownWithoutTrackingReference
   case notApplicable
   case unknown
 }
@@ -41,9 +42,16 @@ public enum BranchMergeStatus: Sendable, Hashable {
 }
 
 public enum DefaultBranchResolution: Sendable, Hashable {
+  public enum UnresolvedReason: Sendable, Hashable {
+    case originHeadMissing
+    case invalidOriginHead(String)
+    case lookupFailed
+    case notNeededForDetachedHead
+  }
+
   case originHead(branch: String)
   case projectRoot(branch: String)
-  case unresolved
+  case unresolved(reason: UnresolvedReason)
 
   public var branch: String? {
     switch self {

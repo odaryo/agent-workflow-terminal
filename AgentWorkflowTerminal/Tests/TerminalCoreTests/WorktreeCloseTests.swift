@@ -31,7 +31,8 @@ struct WorktreeCloseTests {
         targetBranch: nil, defaultBranch: .originHead(branch: "main"), merge: .notApplicable))
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: .unresolved, merge: .unknown))
+        targetBranch: "topic",
+        defaultBranch: .unresolved(reason: .originHeadMissing), merge: .unknown))
     #expect(
       !isBranchDeletionAvailable(
         targetBranch: "main", defaultBranch: .projectRoot(branch: "main"), merge: .merged))

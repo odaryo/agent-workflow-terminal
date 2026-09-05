@@ -123,11 +123,13 @@ public struct GitWorktreeDetector: Sendable {
   ///   `fileExists` / `isExecutableFile` は timeout も cancellation も取らない同期 API で
   ///   (macOS 26.5 SDK の `NSFileManager.h`)、下の `stat(2)` / `access(2)` にも timeout は無い。
   ///   別スレッドへ逃がして時間で見切ることはできるが、ブロックしたスレッド自体は殺せないので
-  ///   漏れるだけである。一方 git 側は有界に戻る (実測: 永久にブロックする子を 2 秒 timeout で
-  ///   撃つと `timedOut(exitCode: nil, ...)` を 2.129586084 秒で throw。`GitRunner.defaultTimeout`
-  ///   は 30 秒)。Swift の同期ブロックはキャンセルもプリエンプトもされないため
-  ///   (実測: 10 コアの機で 3 秒ブロックする `Task` を10本作ると直列化し、その間ずっと別の
-  ///   `Task` が走れない)、応答しないマウントでは git が回復しても述語だけが無期限に残る。
+  ///   漏れるだけである。SIGTERM / SIGKILL で殺せる子については git 側も有界に戻る
+  ///   (実測: SIGTERM を無視する直接の子を 80 ミリ秒 timeout で撃ち、0.201 秒で停止・回収)。
+  ///   応答しないマウント上の `chdir` では SIGKILL が syscall の復帰まで保留され得るため、git 側も
+  ///   有界に戻るかは未確認である。Swift の同期ブロックはキャンセルもプリエンプトもされないため
+  ///   (実測: 10 コアの機で 0.3 秒ブロックする `Task.detached` を10本作ると10本は並列に走るが、
+  ///   11本目は 0.308 秒まで走れない。トップレベルの `Task` は MainActor 隔離を継承して直列になり、
+  ///   10本で 3.110 秒かかった)、応答しないマウントでは git が回復しても述語だけが無期限に残る。
   ///   そのため `describe` はこの述語を **git が exit code を返した失敗にだけ**撃つ。
   ///   git が終了しなかった場合 (timeout 等) は撃たずに失敗として返し、詰まる窓を閉じている。
   ///   `commandFailed` を返しつつ後続の `stat` は詰まるマウントは残るが、それは実測できておらず、
@@ -245,9 +247,12 @@ public struct GitWorktreeDetector: Sendable {
     entry.prunableReason == nil && !entry.isBare
   }
 
-  /// - Returns: `.absent` になるのは、この Project の作業ツリーとして存在しないと判定できた
+  /// - Returns: `.absent` になるのは、この実装がこの Project の作業ツリーではないとして除外する
   ///   次の2つだけ。どちらも `isScannable` の除外と同じ代償を負う (消失扱い → 復帰時に自動
-  ///   Active 化。Issue #137)。それ以外の失敗は `.failed` で返し、黙って落とさない。
+  ///   Active 化。Issue #137)。それ以外の失敗は `.failed` で返し、黙って落とさない。ただし前者は
+  ///   実在しないことの証明ではない。macOS 26.5 実測では、MAC ポリシーで対象の metadata 読み取りを
+  ///   拒否すると、`access(X_OK)` と `chdir` は成功する実在 worktree でも `fileExists` は `false`、
+  ///   git は exit 128 になり、`.absent` へ入る。
   ///   - 作業ツリーへ到達できない: `locked` で `prunable` が抑止された entry がここへ来る。
   ///     stderr の文言ではなく作業ツリーの到達可能性で判定するのは、git のメッセージが版と
   ///     locale で変わるためである。到達可能性を確かめるのは git が exit code を返した失敗

@@ -27,7 +27,9 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   ///
   /// - `#[` を含む: tmux は受け取れるが `formatEscaped` の encoding で復元できない。
   ///   素通しすれば pane はその値を得る。
-  /// - 末尾が `;`: tmux が受け取れない。argv がそこで切れて exit 1 になり、session もできない。
+  /// - 末尾が `;`: `;` が tmux のコマンド区切りとして食われ、この実装の引数順では後続の
+  ///   `-P -F ...` が未知のコマンドになって exit 1 となり、session もできない。`-c` を最後に
+  ///   置けば exit 0 で session はできる (tmux 3.4 実測)。
   /// - 空文字: encoding とは無関係で、tmux は受け取ったうえで pane を client の cwd へ落とす。
   case invalidWorkingDirectory(String)
   /// tmux が受け付けない `history-limit` (`TmuxSessionOperations.historyLimitRange`)。
@@ -149,13 +151,25 @@ public struct TmuxSessionOperations: Sendable {
   ///   起動できないからではなく、起動してしまうと `TmuxRunner` が渡す限定環境
   ///   (`LC_ALL=C` と `HOME` / `PATH` / `TMUX_TMPDIR` だけ) がユーザーの既定 server の
   ///   global environment になり、ユーザー自身が素の端末で作る pane まで巻き込むからである。
-  ///   **この guard が止めるのは server 全体への波及だけで、限定環境そのものは pane に届く。**
+  ///   **この guard が止めるのは server 全体への波及だけであり、限定環境が pane へ届くかは
+  ///   変数ごとに異なる。** tmux 3.4 で server と client に別の値を持たせた実測結果は次のとおり。
+  ///
+  ///   | 限定環境の変数 | `create` が残す pane の値 |
+  ///   | --- | --- |
+  ///   | `HOME` | server 由来 (client の値は届かない) |
+  ///   | `PATH` | client 由来 |
+  ///   | `TMUX_TMPDIR` | server 由来 (client の値は届かない) |
+  ///   | `LC_ALL` | server 由来 (client の値は届かない) |
+  ///
   ///   pane が受け取るのは server を起動した側の global environment だが、**`PATH` だけは例外で、
   ///   pane を作らせた client すなわちこのプロセスの `PATH` になる** (実測: server と client に
   ///   別々の目印を付けると、server 側の pane は `PATH=/opt/SERVERPATH:…`、`create` が残す pane は
   ///   `PATH=/opt/CLIENTPATH:…` を得た。同じ pane の `MYMARK` と `LANG` は両方とも server 由来)。
-  ///   したがって agent pane が `git` / `node` / `claude` を見つけられるかは、ユーザーのシェルでは
-  ///   なく**アプリのプロセスの `PATH`** が決める。害はアプリが作る pane に閉じており、ユーザーが
+  ///   ただし `create` が残す対話 pane では login shell の `path_helper` と shell rc が `PATH` を
+  ///   組み直すため、実質的にはユーザーのシェル設定が決める。実測では client の `PATH` を
+  ///   `/opt/NOTHING` だけにしても `git` と `node` を解決でき、client の値は末尾近くに足されただけ
+  ///   だった。アプリ由来の値がそのまま害になるのは、shell rc を経ない spawn や login shell 以外で
+  ///   `PATH` を組む構成である。害はアプリが作る pane に閉じており、ユーザーが
   ///   attach 済みの client から自分で分割した pane は server 側の `PATH` を得る。アプリが `PATH` を
   ///   持たなければ pane は server 側の値を保つ (いずれも実測)。`LC_ALL` は逆向きで、こちらの
   ///   `LC_ALL=C` は pane へ届かない (実測: server に `LC_ALL` があれば pane はその値を得て、

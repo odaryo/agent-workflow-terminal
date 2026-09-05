@@ -186,10 +186,9 @@ struct GitWorktreeDetectorIntegrationTests {
   }
 
   /// 同じリムーバブルボリューム上に worktree を複数置けば entry 失敗は同時に複数立つ。1件でも
-  /// 捨てると、捨てた worktree は上位から消失と区別できなくなる (Issue #137)。作成順を出力順と
-  /// 変えているのは、`worktree list` が main worktree の次を管理ディレクトリ名の昇順で吐く
-  /// (git 2.50.1 実測: `zz`→`aa`→`mm` の順に作っても `aa`→`mm`→`zz` で出る) ことに寄りかからず、
-  /// 検出順そのものを固定するためである。
+  /// 捨てると、捨てた worktree は上位から消失と区別できなくなる (Issue #137)。`worktree list` は
+  /// main worktree の次を作業ツリーのパスの大小無視昇順で吐く (git 2.50.1 実測)。期待値はこの
+  /// git の出力順に依存するが、作成順を逆にしてあるので作成順を保つ実装では通らない。
   @Test("同じスキャンで2件の entry が失敗しても、両方を検出順で返す")
   func reportsEveryEntryFailureFromOneScan() async throws {
     try await withRepository { repository in

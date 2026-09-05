@@ -84,6 +84,37 @@ struct TmuxSessionOperationsIntegrationTests {
     }
   }
 
+  /// `create` が作業ディレクトリを事前に検証する根拠を実サーバで固定する。tmux は chdir できない
+  /// ディレクトリを渡されても exit 0 で session を作り、pane を `$HOME` へ落とす。
+  @Test("chdir できないディレクトリは、tmux が黙って別の場所へ pane を作る前に弾かれる")
+  func rejectsWorkingDirectoryThePaneCannotEnter() async throws {
+    try await withServer("session-noexec") { runner, workingDirectory in
+      let directory = "\(workingDirectory)/noexec"
+      try FileManager.default.createDirectory(
+        atPath: directory, withIntermediateDirectories: false,
+        attributes: [.posixPermissions: 0o000])
+      // 権限を戻さないと `withServer` の後片付けがこのディレクトリを消せない。
+      defer {
+        try? FileManager.default.setAttributes(
+          [.posixPermissions: 0o700], ofItemAtPath: directory)
+      }
+
+      _ = try await runner.run(
+        arguments: ["new-session", "-d", "-s", "awt-noexec", "-c", directory])
+      #expect(
+        try await lines(
+          runner, ["list-panes", "-s", "-t", "=awt-noexec", "-F", "#{pane_current_path}"])
+          == [NSHomeDirectory()])
+
+      let name = try sessionName()
+      await #expect(throws: TmuxSessionOperationError.workingDirectoryUnusable(directory)) {
+        try await TmuxSessionOperations(runner: runner).create(
+          session: name, workingDirectory: directory)
+      }
+      #expect(try await TmuxSessionOperations(runner: runner).exists(session: name) == false)
+    }
+  }
+
   @Test("同名 session があるときは既存 session を変更せずに専用のエラーを返す")
   func duplicateCreateLeavesTheExistingSessionUntouched() async throws {
     try await withServer("session-dup") { runner, workingDirectory in

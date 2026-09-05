@@ -12,11 +12,19 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// server が動いていない。tmux 3.4 はこれを socket ファイルの状態で2通りに書き分ける
   /// (`TmuxSessionOperations.isServerAbsent` に実測した文字列がある)。
   case serverNotRunning
-  /// tmux は存在しないディレクトリを渡されても exit 0 で session を作り、pane の cwd は
-  /// `$HOME` へ落ちる (tmux 3.4 実測)。通常ファイルと相対パスでも同じ場所へ落ちる。
-  case workingDirectoryNotFound(String)
-  /// pane がその値を得られないと分かっている作業ディレクトリ
-  /// (`TmuxSessionOperations.isSafeWorkingDirectory`)。
+  /// tmux は pane をそこへ入れられなくても exit 0 で session を作り、cwd を `$HOME` へ落とす
+  /// (tmux 3.4 実測)。落ちる入力は3つ — 不在、通常ファイル、**chdir できない権限**
+  /// (`chmod 000` のディレクトリ、search を deny する ACL のいずれも実測)。
+  /// 相対パスはこの族に入らない。tmux の `-c` は client (= このプロセス) の cwd に対して解決され、
+  /// `FileManager` の相対解決と同じ場所を指す (実測: server と client の cwd に同名を実在させ、
+  /// pane が client 側へ落ちることを確認した)。
+  ///
+  /// - Important: 判定は `new-session` とは別プロセス・別時刻の検査であり原子的ではない。検査から
+  ///   tmux が chdir するまでの間に権限やディレクトリが変われば、この保証は破れる。
+  case workingDirectoryUnusable(String)
+  /// `formatEscaped` の encoding では pane へ復元できない作業ディレクトリ
+  /// (`TmuxSessionOperations.isSafeWorkingDirectory`)。tmux が受け取れない値という意味ではない
+  /// — `#[` を含むパスは、素通しすれば pane はその値を得る (実測)。
   case invalidWorkingDirectory(String)
   /// tmux が受け付けない `history-limit` (`TmuxSessionOperations.historyLimitRange`)。
   case invalidHistoryLimit(Int)
@@ -72,22 +80,32 @@ public struct TmuxSessionOperations: Sendable {
   public static let historyLimitRange = 0...Int(Int32.max)
 
   private let runner: TmuxRunner
-  private let directoryExists: @Sendable (String) -> Bool
+  private let canEnterDirectory: @Sendable (String) -> Bool
 
   public init(runner: TmuxRunner) {
     self.init(
       runner: runner,
-      directoryExists: { path in
+      canEnterDirectory: { path in
         var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
-        return exists && isDirectory.boolValue
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+          isDirectory.boolValue
+        else {
+          return false
+        }
+        // 見るのは chdir に要る search 権限だけで、読み取りは要らない (実測: `--x` だけの
+        // ディレクトリへ pane は入り、`r--` では `$HOME` へ落ちた)。mode ビットを自分で
+        // 見ずに `access` を使うのは、ACL を取りこぼすため (search を deny する ACL を付けた
+        // `0755` でも pane は `$HOME` へ落ちた) と、親ディレクトリの search 不足も symlink 先の
+        // 権限もパス解決に含まれるためである。X_OK は実行ビットの立った通常ファイルにも立つので、
+        // ディレクトリ判定と併せて初めて chdir 可否になる (いずれも実測)。
+        return access(path, X_OK) == 0
       }
     )
   }
 
-  init(runner: TmuxRunner, directoryExists: @escaping @Sendable (String) -> Bool) {
+  init(runner: TmuxRunner, canEnterDirectory: @escaping @Sendable (String) -> Bool) {
     self.runner = runner
-    self.directoryExists = directoryExists
+    self.canEnterDirectory = canEnterDirectory
   }
 
   /// - Returns: server が動いていない場合も `false`。§3.3 で見たいのは「Resume できる session が
@@ -119,8 +137,10 @@ public struct TmuxSessionOperations: Sendable {
   ///   起動できないからではなく、起動してしまうと `TmuxRunner` が渡す限定環境
   ///   (`LC_ALL=C` と `HOME` / `PATH` / `TMUX_TMPDIR` だけ) がユーザーの既定 server の
   ///   global environment になり、ユーザー自身が素の端末で作る pane まで巻き込むからである。
-  ///   **この guard で塞げるのはそこまでで、作った session の環境は限定環境のままになる。**
-  ///   server が動いていても `update-environment` (既定8変数) は `new-session` のたびに
+  ///   **この guard が効いている限り、作った session が受け取るのは限定環境ではなく、server を
+  ///   起動した側の global environment である** (実測: rich な環境で起動した server へ限定環境から
+  ///   `new-session` を撃つと、pane は `MYMARK=user-env` とユーザーの `PATH` を持ち、`LC_ALL` は
+  ///   持たなかった)。それでも `update-environment` (既定8変数) は `new-session` のたびに
   ///   クライアント環境を session environment へ写し、クライアントに無い変数は明示的に unset する。
   ///   限定環境から作った session の `show-environment` は実測で `-DISPLAY` `-KRB5CCNAME`
   ///   `-SSH_AGENT_PID` `-SSH_ASKPASS` `-SSH_AUTH_SOCK` `-SSH_CONNECTION` `-WINDOWID`
@@ -150,11 +170,13 @@ public struct TmuxSessionOperations: Sendable {
     guard Self.historyLimitRange.contains(historyLimit) else {
       throw .invalidHistoryLimit(historyLimit)
     }
+    // 値の形の検査を先に置く。空文字や末尾 `;` はファイルシステムの状態に関係なく不正であり、
+    // 後段に置くと「そのディレクトリが無い」と報告して原因を取り違える。
     guard Self.isSafeWorkingDirectory(workingDirectory) else {
       throw .invalidWorkingDirectory(workingDirectory)
     }
-    guard directoryExists(workingDirectory) else {
-      throw .workingDirectoryNotFound(workingDirectory)
+    guard canEnterDirectory(workingDirectory) else {
+      throw .workingDirectoryUnusable(workingDirectory)
     }
     guard try await probe(session) == .absent else {
       throw .sessionAlreadyExists(session)
@@ -332,11 +354,15 @@ public struct TmuxSessionOperations: Sendable {
   /// `$` の前へ `\` を足し、改行を含む値は行に割れるため、照合には使えない)。弾くのは3つ。
   ///
   /// - 空文字: rc=0 で session ができ、pane は **tmux クライアント (= このプロセス) の cwd** へ
-  ///   落ちる。`workingDirectoryNotFound` が捉える「存在しないディレクトリ」の `$HOME` 落ちとは
-  ///   別の落ち方をするので、同じ扱いにはできない。
-  /// - 末尾が `;`: argv がそこでコマンド列として切れる。`new-session` は exit 1 と
-  ///   `unknown command: -P` を返し、escape しても変わらない。値の途中の `;` は残るので弾かない。
+  ///   落ちる。`workingDirectoryUnusable` の族は `$HOME` へ落ちるので、落ち先が違う以上
+  ///   同じ扱いにはできない。
+  /// - 末尾が `;`: argv がそこでコマンド列として切れ、`new-session` は exit 1 で session を作らない。
+  ///   escape しても変わらない。値の途中の `;` は残るので弾かない。stderr は server の状態で変わり、
+  ///   server があれば `unknown command: -P`、無ければ `isServerAbsent` が畳む server 不在の
+  ///   メッセージになる (いずれも実測)。`create` は事前拒否と server guard の後ろなので到達しない。
   /// - `#[` を含む: `formatEscaped` が効かない唯一の入力 (理由はそちらの doc コメント)。
+  ///   代償として、`#[` を含む名前の worktree は session を持てない。`mkdir '#[fg=red]'` は
+  ///   APFS 上で成功するので、その worktree は作れてしまう (実測)。
   ///
   /// 末尾が `\` の値は弾かない。tmux は argv 要素の中の `\` を escape として扱わず、末尾 `\` の
   /// ディレクトリを実在させて `create` と同じ argv で撃つと pane の cwd はその値のままだった。

@@ -19,21 +19,21 @@ struct WorktreeCloseTests {
   func permitsBranchDeletionOnlyForMergedNondefaultBranch() {
     #expect(
       isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: "main", merge: .merged))
+        targetBranch: "topic", defaultBranch: .originHead(branch: "main"), merge: .merged))
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: "main", merge: .unmerged))
+        targetBranch: "topic", defaultBranch: .originHead(branch: "main"), merge: .unmerged))
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: "main", merge: .unknown))
+        targetBranch: "topic", defaultBranch: .originHead(branch: "main"), merge: .unknown))
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: nil, defaultBranch: "main", merge: .notApplicable))
+        targetBranch: nil, defaultBranch: .originHead(branch: "main"), merge: .notApplicable))
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: nil, merge: .unknown))
+        targetBranch: "topic", defaultBranch: .unresolved, merge: .unknown))
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "main", defaultBranch: "main", merge: .merged))
+        targetBranch: "main", defaultBranch: .projectRoot(branch: "main"), merge: .merged))
   }
 }

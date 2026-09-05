@@ -19,9 +19,16 @@ public enum UncommittedChangesStatus: Sendable, Hashable {
   case unknown
 }
 
+public enum IgnoredFilesStatus: Sendable, Hashable {
+  case present
+  case absent
+  case unknown
+}
+
 public enum UnpushedCommitsStatus: Sendable, Hashable {
   case present
   case absent
+  case trackingBranchMissing
   case notApplicable
   case unknown
 }
@@ -33,17 +40,33 @@ public enum BranchMergeStatus: Sendable, Hashable {
   case unknown
 }
 
+public enum DefaultBranchResolution: Sendable, Hashable {
+  case originHead(branch: String)
+  case projectRoot(branch: String)
+  case unresolved
+
+  public var branch: String? {
+    switch self {
+    case .originHead(let branch), .projectRoot(let branch): branch
+    case .unresolved: nil
+    }
+  }
+}
+
 public struct WorktreeCloseInspection: Sendable, Hashable {
   public let uncommittedChanges: UncommittedChangesStatus
+  public let ignoredFiles: IgnoredFilesStatus
   public let unpushedCommits: UnpushedCommitsStatus
   public let branchMerge: BranchMergeStatus
 
   public init(
     uncommittedChanges: UncommittedChangesStatus,
+    ignoredFiles: IgnoredFilesStatus,
     unpushedCommits: UnpushedCommitsStatus,
     branchMerge: BranchMergeStatus
   ) {
     self.uncommittedChanges = uncommittedChanges
+    self.ignoredFiles = ignoredFiles
     self.unpushedCommits = unpushedCommits
     self.branchMerge = branchMerge
   }
@@ -51,9 +74,11 @@ public struct WorktreeCloseInspection: Sendable, Hashable {
 
 public func isBranchDeletionAvailable(
   targetBranch: String?,
-  defaultBranch: String?,
+  defaultBranch: DefaultBranchResolution,
   merge: BranchMergeStatus
 ) -> Bool {
-  guard merge == .merged, let targetBranch, let defaultBranch else { return false }
+  guard merge == .merged, let targetBranch, let defaultBranch = defaultBranch.branch else {
+    return false
+  }
   return targetBranch != defaultBranch
 }

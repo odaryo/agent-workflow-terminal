@@ -4,6 +4,7 @@ import TerminalCore
 public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
   public enum Check: Sendable, Equatable {
     case uncommittedChanges
+    case ignoredFiles
     case unpushedCommits
     case branchMerge
   }
@@ -12,8 +13,6 @@ public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
     case git(GitRunnerError)
     case statusParse([GitStatusParseFailure])
     case missingStatusBranch
-    case missingAhead
-    case invalidOriginHead(String)
     case invalidRevision(String)
   }
 
@@ -23,7 +22,7 @@ public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
 
 public struct GitCloseSafetyInspectionResult: Sendable, Equatable {
   public let inspection: WorktreeCloseInspection
-  public let defaultBranch: String?
+  public let defaultBranch: DefaultBranchResolution
   public let failures: [GitCloseSafetyInspectionFailure]
 }
 
@@ -49,7 +48,7 @@ public struct GitCloseSafetyInspector: Sendable {
   }
 
   public func inspect(
-    detectedWorktrees: [DetectedWorktree]
+    projectRootBranch: String?
   ) async -> GitCloseSafetyInspectionResult {
     var failures: [GitCloseSafetyInspectionFailure] = []
     let statusChecks = await inspectStatus(targetBranch: targetBranch)
@@ -59,18 +58,19 @@ public struct GitCloseSafetyInspector: Sendable {
       return .init(
         inspection: .init(
           uncommittedChanges: statusChecks.uncommittedChanges,
+          ignoredFiles: statusChecks.ignoredFiles,
           unpushedCommits: .notApplicable,
           branchMerge: .notApplicable),
-        defaultBranch: nil,
+        defaultBranch: .unresolved,
         failures: failures)
     }
 
-    let defaultBranchResult = await resolveDefaultBranch(detectedWorktrees: detectedWorktrees)
+    let defaultBranchResult = await resolveDefaultBranch(projectRootBranch: projectRootBranch)
     failures += defaultBranchResult.failures
     let branchMerge: BranchMergeStatus
-    if let defaultBranch = defaultBranchResult.branch {
+    if let defaultRevision = defaultBranchResult.revision {
       let mergeResult = await inspectMerge(
-        targetBranch: targetBranch, defaultRevision: defaultBranch.revision)
+        targetBranch: targetBranch, defaultRevision: defaultRevision)
       branchMerge = mergeResult.status
       failures += mergeResult.failures
     } else {
@@ -80,9 +80,10 @@ public struct GitCloseSafetyInspector: Sendable {
     return .init(
       inspection: .init(
         uncommittedChanges: statusChecks.uncommittedChanges,
+        ignoredFiles: statusChecks.ignoredFiles,
         unpushedCommits: statusChecks.unpushedCommits,
         branchMerge: branchMerge),
-      defaultBranch: defaultBranchResult.branch?.name,
+      defaultBranch: defaultBranchResult.resolution,
       failures: failures)
   }
 
@@ -91,17 +92,19 @@ public struct GitCloseSafetyInspector: Sendable {
   ) async -> StatusInspection {
     let output: String
     do {
-      output = try await runner.run(.status()).stdout
+      output = try await runner.run(.status(includeIgnored: true)).stdout
     } catch {
       let reason = GitCloseSafetyInspectionFailure.Reason.git(error)
       var failures = [
-        GitCloseSafetyInspectionFailure(check: .uncommittedChanges, reason: reason)
+        GitCloseSafetyInspectionFailure(check: .uncommittedChanges, reason: reason),
+        GitCloseSafetyInspectionFailure(check: .ignoredFiles, reason: reason),
       ]
       if targetBranch != nil {
         failures.append(.init(check: .unpushedCommits, reason: reason))
       }
       return .init(
         uncommittedChanges: .unknown,
+        ignoredFiles: .unknown,
         unpushedCommits: targetBranch == nil ? .notApplicable : .unknown,
         failures: failures)
     }
@@ -111,88 +114,109 @@ public struct GitCloseSafetyInspector: Sendable {
 
   private func interpretStatus(_ output: String, targetBranch: String?) -> StatusInspection {
     let parsed = GitStatusPorcelainV2.parse(output: output)
-    let uncommittedChanges: UncommittedChangesStatus
-    var failures: [GitCloseSafetyInspectionFailure] = []
+    let files = inspectFiles(parsed)
+    let unpushed = inspectUnpushed(parsed, targetBranch: targetBranch)
+    return .init(
+      uncommittedChanges: files.uncommittedChanges,
+      ignoredFiles: files.ignoredFiles,
+      unpushedCommits: unpushed.status,
+      failures: files.failures + unpushed.failures)
+  }
+
+  private func inspectFiles(_ parsed: GitStatusParseResult) -> FileInspection {
     if parsed.failures.isEmpty {
-      uncommittedChanges =
+      let uncommittedChanges: UncommittedChangesStatus =
         parsed.status.entries.contains { entry in
           if case .ignored = entry { return false }
           return true
         } ? .present : .absent
-    } else {
-      uncommittedChanges = .unknown
-      failures.append(.init(check: .uncommittedChanges, reason: .statusParse(parsed.failures)))
-    }
-
-    guard targetBranch != nil else {
+      let ignoredFiles: IgnoredFilesStatus =
+        parsed.status.entries.contains { entry in
+          if case .ignored = entry { return true }
+          return false
+        } ? .present : .absent
       return .init(
-        uncommittedChanges: uncommittedChanges,
-        unpushedCommits: .notApplicable,
-        failures: failures)
+        uncommittedChanges: uncommittedChanges, ignoredFiles: ignoredFiles, failures: [])
+    }
+    let reason = GitCloseSafetyInspectionFailure.Reason.statusParse(parsed.failures)
+    return .init(
+      uncommittedChanges: .unknown,
+      ignoredFiles: .unknown,
+      failures: [
+        .init(check: .uncommittedChanges, reason: reason),
+        .init(check: .ignoredFiles, reason: reason),
+      ])
+  }
+
+  private func inspectUnpushed(
+    _ parsed: GitStatusParseResult,
+    targetBranch: String?
+  ) -> UnpushedInspection {
+    guard targetBranch != nil else {
+      return .init(status: .notApplicable, failures: [])
     }
     guard let branch = parsed.status.branch else {
-      failures.append(.init(check: .unpushedCommits, reason: .missingStatusBranch))
       return .init(
-        uncommittedChanges: uncommittedChanges,
-        unpushedCommits: .unknown,
-        failures: failures)
+        status: .unknown, failures: [.init(check: .unpushedCommits, reason: .missingStatusBranch)])
     }
     guard !branch.isDetached else {
-      return .init(
-        uncommittedChanges: uncommittedChanges,
-        unpushedCommits: .notApplicable,
-        failures: failures)
+      // porcelain v2 では同名の実在 branch `(detached)` と detached HEAD を区別できない。
+      return .init(status: .notApplicable, failures: [])
     }
     guard branch.upstream != nil else {
+      return .init(status: .present, failures: [])
+    }
+    let aheadBehindFailures = parsed.failures.filter {
+      if case .invalidBranchAheadBehind = $0.error { return true }
+      return false
+    }
+    guard aheadBehindFailures.isEmpty else {
       return .init(
-        uncommittedChanges: uncommittedChanges,
-        unpushedCommits: .present,
-        failures: failures)
+        status: .unknown,
+        failures: [.init(check: .unpushedCommits, reason: .statusParse(aheadBehindFailures))])
     }
     guard let ahead = branch.ahead else {
-      failures.append(.init(check: .unpushedCommits, reason: .missingAhead))
-      return .init(
-        uncommittedChanges: uncommittedChanges,
-        unpushedCommits: .unknown,
-        failures: failures)
+      return .init(status: .trackingBranchMissing, failures: [])
     }
-    return .init(
-      uncommittedChanges: uncommittedChanges,
-      unpushedCommits: ahead > 0 ? .present : .absent,
-      failures: failures)
+    return .init(status: ahead > 0 ? .present : .absent, failures: [])
   }
 
   private func resolveDefaultBranch(
-    detectedWorktrees: [DetectedWorktree]
-  ) async -> (branch: ResolvedDefaultBranch?, failures: [GitCloseSafetyInspectionFailure]) {
-    var failures: [GitCloseSafetyInspectionFailure] = []
+    projectRootBranch: String?
+  ) async -> DefaultBranchInspection {
     do {
       let output = try await runner.run(.originHead()).stdout
         .trimmingCharacters(in: .whitespacesAndNewlines)
-      let prefix = "refs/remotes/origin/"
-      if output.hasPrefix(prefix), output.count > prefix.count {
-        return (
-          .init(name: String(output.dropFirst(prefix.count)), revision: output), failures
-        )
+      guard let branch = Self.remoteBranchName(from: output) else {
+        return .init(resolution: .unresolved, revision: nil, failures: [])
       }
-      failures.append(.init(check: .branchMerge, reason: .invalidOriginHead(output)))
+      return .init(
+        resolution: .originHead(branch: branch), revision: output, failures: [])
     } catch GitRunnerError.commandFailed(let exitCode, _, _) where exitCode == 1 {
       // --quiet の exit 1 は symbolic ref が無いという正常なフォールバック条件。
+      guard let projectRootBranch else {
+        return .init(resolution: .unresolved, revision: nil, failures: [])
+      }
+      return .init(
+        resolution: .projectRoot(branch: Self.shortBranchName(projectRootBranch)),
+        revision: Self.localBranchRevision(projectRootBranch),
+        failures: [])
     } catch {
-      failures.append(.init(check: .branchMerge, reason: .git(error)))
+      return .init(
+        resolution: .unresolved,
+        revision: nil,
+        failures: [.init(check: .branchMerge, reason: .git(error))])
     }
-
-    let projectRootBranch = detectedWorktrees.first(where: \.isProjectRoot)?.branch
-    return (projectRootBranch.map { .init(name: $0, revision: $0) }, failures)
   }
 
   private func inspectMerge(
     targetBranch: String,
     defaultRevision: String
   ) async -> (status: BranchMergeStatus, failures: [GitCloseSafetyInspectionFailure]) {
-    guard let target = GitRevision(targetBranch) else {
+    let targetRevision = Self.localBranchRevision(targetBranch)
+    guard let target = GitRevision(targetRevision) else {
       return (
-        .unknown, [.init(check: .branchMerge, reason: .invalidRevision(targetBranch))]
+        .unknown, [.init(check: .branchMerge, reason: .invalidRevision(targetRevision))]
       )
     }
     guard let destination = GitRevision(defaultRevision) else {
@@ -210,14 +234,47 @@ public struct GitCloseSafetyInspector: Sendable {
     }
   }
 
-  private struct ResolvedDefaultBranch: Sendable {
-    let name: String
-    let revision: String
+  private static func localBranchRevision(_ branch: String) -> String {
+    branch.hasPrefix("refs/") ? branch : "refs/heads/\(branch)"
+  }
+
+  private static func shortBranchName(_ branch: String) -> String {
+    let prefix = "refs/heads/"
+    return branch.hasPrefix(prefix) ? String(branch.dropFirst(prefix.count)) : branch
+  }
+
+  private static func remoteBranchName(from revision: String) -> String? {
+    let prefix = "refs/remotes/"
+    guard revision.hasPrefix(prefix) else { return nil }
+    let remoteAndBranch = revision.dropFirst(prefix.count)
+    guard let separator = remoteAndBranch.firstIndex(of: "/") else { return nil }
+    let remote = remoteAndBranch[..<separator]
+    let branch = remoteAndBranch[remoteAndBranch.index(after: separator)...]
+    guard !remote.isEmpty, !branch.isEmpty else { return nil }
+    return String(branch)
+  }
+
+  private struct DefaultBranchInspection: Sendable {
+    let resolution: DefaultBranchResolution
+    let revision: String?
+    let failures: [GitCloseSafetyInspectionFailure]
   }
 
   private struct StatusInspection: Sendable {
     let uncommittedChanges: UncommittedChangesStatus
+    let ignoredFiles: IgnoredFilesStatus
     let unpushedCommits: UnpushedCommitsStatus
+    let failures: [GitCloseSafetyInspectionFailure]
+  }
+
+  private struct FileInspection: Sendable {
+    let uncommittedChanges: UncommittedChangesStatus
+    let ignoredFiles: IgnoredFilesStatus
+    let failures: [GitCloseSafetyInspectionFailure]
+  }
+
+  private struct UnpushedInspection: Sendable {
+    let status: UnpushedCommitsStatus
     let failures: [GitCloseSafetyInspectionFailure]
   }
 }

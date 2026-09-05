@@ -88,6 +88,14 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["worktree", "list", "--porcelain", "-z"])
   }
 
+  public static func originHead() -> Self {
+    Self(arguments: ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
+  }
+
+  public static func isAncestor(_ ancestor: GitRevision, of descendant: GitRevision) -> Self {
+    Self(arguments: ["merge-base", "--is-ancestor", ancestor.rawValue, descendant.rawValue])
+  }
+
   public static func log(
     range: GitRevisionRange? = nil,
     maxCount: Int? = nil,

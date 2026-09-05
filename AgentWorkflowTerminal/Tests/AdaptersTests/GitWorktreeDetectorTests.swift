@@ -7,7 +7,7 @@ import Testing
 private let projectDirectory = "/repo"
 private let commonDirectory = "/repo/.git"
 
-@Suite("§3.2 worktree 検出が git へ渡す引数と、部分結果を返さないこと")
+@Suite("§3.2 worktree 検出が git へ渡す引数と、失敗を黙って落とさないこと")
 struct GitWorktreeDetectorTests {
 
   // MARK: - 実出力からの検出
@@ -18,8 +18,10 @@ struct GitWorktreeDetectorTests {
     let paths = GitWorktreeList.parse(output: listOutput).entries.map(\.path)
     let stub = ProcessRunnerStub(handler: fixtureHandler(listOutput))
 
-    let detected = try await makeDetector(stub).scan()
+    let result = try await makeDetector(stub).scan()
 
+    let detected = result.detected
+    #expect(result.failures.isEmpty)
     #expect(detected.count == 4)
     #expect(detected.map(\.worktreePath) == paths)
     #expect(detected.map(\.isProjectRoot) == [true, false, false, false])
@@ -61,9 +63,10 @@ struct GitWorktreeDetectorTests {
       + "worktree /wt/gone\0detached\0prunable gitdir file points to non-existent location\0\0"
     let stub = ProcessRunnerStub(handler: listThenGitDirectories(listOutput))
 
-    let detected = try await makeDetector(stub).scan()
+    let result = try await makeDetector(stub).scan()
 
-    #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.failures.isEmpty)
     #expect(await stub.invocations.allSatisfy { !$0.contains("/wt/gone") })
   }
 
@@ -73,9 +76,10 @@ struct GitWorktreeDetectorTests {
     let barePath = try #require(GitWorktreeList.parse(output: bareOutput).entries.first?.path)
     let stub = ProcessRunnerStub(handler: listThenGitDirectories(bareOutput + singleWorktreeList))
 
-    let detected = try await makeDetector(stub).scan()
+    let result = try await makeDetector(stub).scan()
 
-    #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.failures.isEmpty)
     #expect(await stub.invocations.allSatisfy { !$0.contains(barePath) })
   }
 
@@ -87,9 +91,10 @@ struct GitWorktreeDetectorTests {
     let stub = ProcessRunnerStub(
       handler: listThenGitDirectories(listOutput, failingIn: "/wt/locked"))
 
-    let detected = try await makeDetector(stub, unreachable: ["/wt/locked"]).scan()
+    let result = try await makeDetector(stub, unreachable: ["/wt/locked"]).scan()
 
-    #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.failures.isEmpty)
   }
 
   /// 置き換わった先の repository でも `rev-parse` は exit 0 で、その repository の git
@@ -105,13 +110,14 @@ struct GitWorktreeDetectorTests {
           : success(gitDirectoryLines(commonDirectory))
       })
 
-    let detected = try await makeDetector(stub).scan()
+    let result = try await makeDetector(stub).scan()
 
-    #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
-    #expect(detected.map(\.isProjectRoot) == [true])
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(result.detected.map(\.isProjectRoot) == [true])
+    #expect(result.failures.isEmpty)
   }
 
-  // MARK: - 部分結果を返さない
+  // MARK: - entry 単位に還元できない失敗
 
   @Test("壊れた record が1件でもあればスキャン全体を失敗させ、安定 ID を問い合わせない")
   func failsEntireScanOnMalformedRecord() async throws {
@@ -128,22 +134,7 @@ struct GitWorktreeDetectorTests {
     #expect(await stub.invocations.count == 1)
   }
 
-  /// 作業ツリーへ到達できるのに答えられないのは git ディレクトリ側の破損である (git 2.50.1
-  /// 実測: 管理ディレクトリの `commondir` を消すと `not a git repository`)。除外へ回さない。
-  @Test("到達できる作業ツリーの rev-parse が失敗したら、残りを返さずスキャン全体を失敗させる")
-  func failsEntireScanWhenGitDirectoryLookupFails() async throws {
-    let listOutput = singleWorktreeList + "worktree /wt/beta\0branch refs/heads/beta\0\0"
-    let stub = ProcessRunnerStub(handler: listThenGitDirectories(listOutput, failingIn: "/wt/beta"))
-
-    await #expect(
-      throws: GitWorktreeScanError.gitDirectory(
-        worktreePath: "/wt/beta",
-        .commandFailed(exitCode: 128, stdout: "", stderr: revParseFailure.stderr))
-    ) {
-      try await makeDetector(stub).scan()
-    }
-  }
-
+  /// git バイナリが消えていれば残りの entry も同じ理由で失敗するので、entry 単位に還元しない。
   @Test("git を起動できなかった entry は、作業ツリーの到達可能性で除外に振り替えない")
   func classifiesRunnerConstructionFailureSeparately() async throws {
     let stub = ProcessRunnerStub(handler: listThenGitDirectories(singleWorktreeList))
@@ -207,37 +198,67 @@ struct GitWorktreeDetectorTests {
     }
   }
 
-  @Test(
-    "rev-parse の出力が2行でなければ原文を捨てずに失敗させる",
-    arguments: ["", "/repo/.git\n", "/repo/.git\n/repo/.git\n/extra\n"]
-  )
-  func rejectsUnexpectedGitDirectoryOutput(stdout: String) async throws {
-    let stub = ProcessRunnerStub(handler: listThenFixedGitDirectoryOutput(stdout))
+  // MARK: - entry 単位の失敗
 
-    await #expect(
-      throws: GitWorktreeScanError.unexpectedGitDirectoryOutput(
-        worktreePath: "/wt/alpha", output: stdout)
-    ) {
-      try await makeDetector(stub).scan()
-    }
+  /// 到達できる作業ツリーで失敗した entry を黙って落とすと、上位からは消失と区別できない。
+  @Test("到達できる作業ツリーの rev-parse が失敗したら、他の worktree を返したうえで失敗も返す")
+  func reportsGitDirectoryFailureAlongsideDetectedWorktrees() async throws {
+    let listOutput = singleWorktreeList + "worktree /wt/beta\0branch refs/heads/beta\0\0"
+    let stub = ProcessRunnerStub(handler: listThenGitDirectories(listOutput, failingIn: "/wt/beta"))
+
+    let result = try await makeDetector(stub).scan()
+
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(
+      result.failures == [
+        GitWorktreeEntryFailure(
+          worktreePath: "/wt/beta",
+          reason: .gitDirectory(
+            .commandFailed(exitCode: 128, stdout: "", stderr: revParseFailure.stderr)))
+      ])
   }
 
   @Test(
-    "絶対パスでない git ディレクトリを安定 ID にも判定基準にもしない",
-    arguments: [
-      (".git/worktrees/alpha\n/repo/.git\n", ".git/worktrees/alpha"),
-      ("/repo/.git/worktrees/alpha\n.git\n", ".git"),
-    ]
+    "rev-parse の出力が2行でなければ原文を捨てずに失敗として返す",
+    arguments: ["", "/repo/.git\n", "/repo/.git\n/repo/.git\n/extra\n"]
   )
-  func rejectsRelativeGitDirectory(stdout: String, rejected: String) async throws {
+  func reportsUnexpectedGitDirectoryOutput(stdout: String) async throws {
     let stub = ProcessRunnerStub(handler: listThenFixedGitDirectoryOutput(stdout))
 
-    await #expect(
-      throws: GitWorktreeScanError.invalidGitDirectoryPath(
-        worktreePath: "/wt/alpha", gitDirectory: rejected)
-    ) {
-      try await makeDetector(stub).scan()
-    }
+    let result = try await makeDetector(stub).scan()
+
+    #expect(result.detected.isEmpty)
+    #expect(
+      result.failures == [
+        GitWorktreeEntryFailure(
+          worktreePath: "/wt/alpha", reason: .unexpectedGitDirectoryOutput(output: stdout))
+      ])
+  }
+
+  /// 安定 ID が不正なのか、この Project のものかを判定する基準が不正なのかで打ち手が変わる。
+  @Test(
+    "絶対パスでない git ディレクトリは、安定 ID 側と判定基準側を区別して失敗として返す",
+    arguments: [
+      (
+        ".git/worktrees/alpha\n/repo/.git\n",
+        GitWorktreeEntryFailure.Reason.invalidGitDirectoryPath(
+          gitDirectory: ".git/worktrees/alpha")
+      ),
+      (
+        "/repo/.git/worktrees/alpha\n.git\n",
+        GitWorktreeEntryFailure.Reason.invalidCommonDirectoryPath(commonDirectory: ".git")
+      ),
+    ]
+  )
+  func reportsInvalidGitDirectoryPath(
+    stdout: String, reason: GitWorktreeEntryFailure.Reason
+  ) async throws {
+    let stub = ProcessRunnerStub(handler: listThenFixedGitDirectoryOutput(stdout))
+
+    let result = try await makeDetector(stub).scan()
+
+    #expect(result.detected.isEmpty)
+    #expect(result.failures == [GitWorktreeEntryFailure(worktreePath: "/wt/alpha", reason: reason)])
   }
 
   // MARK: - branch の短縮
@@ -255,7 +276,7 @@ struct GitWorktreeDetectorTests {
     let stub = ProcessRunnerStub(
       handler: listThenGitDirectories("worktree /wt/alpha\0\(attribute)\0\0"))
 
-    let detected = try await makeDetector(stub).scan()
+    let detected = try await makeDetector(stub).scan().detected
 
     #expect(detected.map(\.branch) == [expected])
   }

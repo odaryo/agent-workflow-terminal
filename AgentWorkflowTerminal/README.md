@@ -117,8 +117,12 @@ AWT_GIT_INTEGRATION=1 swift test --filter GitWorktreeDetectorIntegrationTests
 repository は毎回 `/private/tmp/awt-git-<UUID>` に作り、`defer` で削除します。
 `NSTemporaryDirectory()` を使わないのは、返る `/var/...` を git が実体パス `/private/var/...` へ
 解決してしまい、`worktree list` の出力と作成時のパスが文字列として一致しなくなるためです。
-`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` を `/dev/null` に向け、identity と `LC_ALL` を明示して、
-ホストの git 設定の影響を受けないようにしています。
+`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` を `/dev/null` に向け、identity と `LC_ALL` を明示するのは
+**fixture を作るテスト側のヘルパー (`TestRepository.git`) だけ**です。被テスト側の `GitRunner` は
+この2つを設定せず `HOME` をそのまま子へ渡すので、ホストの `~/.gitconfig` を読みます
+(実測: `env -i LC_ALL=C HOME=<偽の HOME> PATH=/usr/bin:/bin git config --list --show-origin` に
+その `.gitconfig` の内容が出る)。出力形式に効く config は各 `GitReadCommand` が option で固定して
+いますが、統合テストはホストの git 設定から完全に隔離されてはいません。
 2026-09-05 に git 2.50.1 (Apple Git-155) で成功を確認しています。
 
 ## Lint / Format

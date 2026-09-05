@@ -20,8 +20,10 @@ struct GitWorktreeDetectorIntegrationTests {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
 
-      let detected = try await repository.detector().scan()
+      let result = try await repository.detector().scan()
 
+      let detected = result.detected
+      #expect(result.failures.isEmpty)
       #expect(detected.count == 2)
       #expect(detected.filter(\.isProjectRoot).count == 1)
       let root = try #require(detected.first { $0.isProjectRoot })
@@ -38,10 +40,10 @@ struct GitWorktreeDetectorIntegrationTests {
   func stableIdentitySurvivesBranchSwitch() async throws {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
-      let before = try await repository.detector().scan()
+      let before = try await repository.detector().scan().detected
 
       try await repository.git(["checkout", "-q", "-b", "feat2"], in: "wt-feat")
-      let after = try await repository.detector().scan()
+      let after = try await repository.detector().scan().detected
 
       #expect(before.map(\.identity) == after.map(\.identity))
       #expect(after.first { !$0.isProjectRoot }?.branch == "feat2")
@@ -52,11 +54,11 @@ struct GitWorktreeDetectorIntegrationTests {
   func stableIdentitySurvivesWorktreeMove() async throws {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
-      let before = try await repository.detector().scan()
+      let before = try await repository.detector().scan().detected
 
       try await repository.git(
         ["worktree", "move", "\(repository.root.path)/wt-feat", "\(repository.root.path)/wt-moved"])
-      let after = try await repository.detector().scan()
+      let after = try await repository.detector().scan().detected
 
       #expect(before.map(\.identity) == after.map(\.identity))
       let moved = try #require(after.first { !$0.isProjectRoot })
@@ -72,16 +74,19 @@ struct GitWorktreeDetectorIntegrationTests {
       try await repository.git(["worktree", "add", "-q", "-b", "wt-gone", "../wt-gone"])
       try FileManager.default.removeItem(at: repository.root.appending(path: "wt-gone"))
 
-      let detected = try await repository.detector().scan()
+      let result = try await repository.detector().scan()
 
-      #expect(detected.map(\.isProjectRoot) == [true])
-      #expect(detected.allSatisfy { !$0.worktreePath.hasSuffix("/wt-gone") })
+      #expect(result.detected.map(\.isProjectRoot) == [true])
+      #expect(result.detected.allSatisfy { !$0.worktreePath.hasSuffix("/wt-gone") })
+      #expect(result.failures.isEmpty)
     }
   }
 
   /// git は `locked` な worktree に `prunable` を付けない (git 2.50.1 実測)。可搬ボリューム上の
   /// worktree を lock するのは `git worktree --help` が勧める運用なので、ここで失敗させると
   /// lock を外すまで Project Root を含む全 worktree が検出できなくなる。
+  ///
+  /// 公開 init が使う到達可能性の述語を、注入で置き換えずに通す3経路のうちの1つ (消失)。
   @Test("locked な worktree の作業ツリーが消えても、他の worktree の検出は止まらない")
   func lockedWorktreeWithMissingWorkingTreeDoesNotFailTheScan() async throws {
     try await withRepository { repository in
@@ -91,12 +96,92 @@ struct GitWorktreeDetectorIntegrationTests {
         ["worktree", "lock", "\(repository.root.path)/wt-lock", "--reason", "removable volume"])
       try FileManager.default.removeItem(at: repository.root.appending(path: "wt-lock"))
 
-      let detected = try await repository.detector().scan()
+      let result = try await repository.detector().scan()
 
       #expect(
-        detected.map(\.worktreePath)
+        result.detected.map(\.worktreePath)
           == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
-      #expect(detected.filter(\.isProjectRoot).count == 1)
+      #expect(result.detected.filter(\.isProjectRoot).count == 1)
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// 述語の3経路のうちの1つ (作業ツリーのパスが通常ファイル)。実行ビットを立てるのは、
+  /// 立てないと `isExecutableFile` だけで除外されてしまい、「ディレクトリか」を見る判定が
+  /// 効いていることを固定できないためである (macOS 26.5 実測)。
+  @Test("作業ツリーのパスが通常ファイルに置き換わっても、他の worktree の検出は止まらない")
+  func regularFileAtWorkingTreePathDoesNotFailTheScan() async throws {
+    try await withRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-file", "../wt-file"])
+      try await repository.git(
+        ["worktree", "lock", "\(repository.root.path)/wt-file", "--reason", "removable volume"])
+      let replaced = repository.root.appending(path: "wt-file")
+      try FileManager.default.removeItem(at: replaced)
+      try Data().write(to: replaced)
+      try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: replaced.path)
+
+      let result = try await repository.detector().scan()
+
+      #expect(
+        result.detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// 述語の3経路のうちの1つ (探索権限が無い)。root で走らせるとパーミッションが効かないため、
+  /// この経路は再現しない。
+  @Test("作業ツリーを探索できなくなっても、他の worktree の検出は止まらない")
+  func unsearchableWorkingTreeDoesNotFailTheScan() async throws {
+    try await withRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-locked", "../wt-locked"])
+      try await repository.git(
+        ["worktree", "lock", "\(repository.root.path)/wt-locked", "--reason", "removable volume"])
+      let unsearchable = repository.root.appending(path: "wt-locked")
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o000], ofItemAtPath: unsearchable.path)
+      // 戻さないと後片付けの削除が Permission denied で失敗し、repository が /private/tmp に残る。
+      defer {
+        try? FileManager.default.setAttributes(
+          [.posixPermissions: 0o755], ofItemAtPath: unsearchable.path)
+      }
+
+      let result = try await repository.detector().scan()
+
+      #expect(
+        result.detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// 0 バイトの `.git` ファイルには `prunable` が付かず、作業ツリーへは到達できるのに
+  /// `rev-parse` が exit 128 になる (git 2.50.1 実測: `fatal: invalid gitfile format`)。
+  /// 中断した書き込みや sync で起こる形なので、ここで throw すると Project 全体の検出が止まる。
+  @Test("作業ツリーは開けるのに rev-parse が失敗する worktree は、失敗として返して他は検出する")
+  func brokenGitFileIsReportedAsAnEntryFailure() async throws {
+    try await withRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-broken", "../wt-broken"])
+      let broken = repository.root.appending(path: "wt-broken")
+      try Data().write(to: broken.appending(path: ".git"))
+
+      let result = try await repository.detector().scan()
+
+      #expect(
+        result.detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+      #expect(result.failures.map(\.worktreePath) == [broken.path])
+      let failure = try #require(result.failures.first)
+      guard case .gitDirectory(.commandFailed(let exitCode, _, let stderr)) = failure.reason else {
+        Issue.record("想定と違う失敗の種類: \(failure)")
+        return
+      }
+      // git のメッセージ本文は版と locale で変わるので、原文を保持していることだけを見る。
+      #expect(exitCode == 128)
+      #expect(!stderr.isEmpty)
     }
   }
 
@@ -112,10 +197,11 @@ struct GitWorktreeDetectorIntegrationTests {
       try FileManager.default.createDirectory(at: swapped, withIntermediateDirectories: true)
       try await repository.git(["init", "-q", "-b", "other"], in: "wt-swap")
 
-      let detected = try await repository.detector().scan()
+      let result = try await repository.detector().scan()
 
-      #expect(detected.map(\.worktreePath) == [repository.mainWorktree.path])
-      #expect(detected.map(\.isProjectRoot) == [true])
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.detected.map(\.isProjectRoot) == [true])
+      #expect(result.failures.isEmpty)
     }
   }
 
@@ -124,7 +210,7 @@ struct GitWorktreeDetectorIntegrationTests {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "--detach", "../wt-detached"])
 
-      let detected = try await repository.detector().scan()
+      let detected = try await repository.detector().scan().detected
 
       let detached = try #require(detected.first { !$0.isProjectRoot })
       #expect(detached.branch == nil)

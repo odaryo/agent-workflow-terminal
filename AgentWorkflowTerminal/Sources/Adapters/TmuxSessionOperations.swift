@@ -29,7 +29,8 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   ///   素通しすれば pane はその値を得る。
   /// - 末尾が `;`: `;` が tmux のコマンド区切りとして食われ、この実装の引数順では後続の
   ///   `-P -F ...` が未知のコマンドになって exit 1 となり、session もできない。`-c` を最後に
-  ///   置けば exit 0 で session はできる (tmux 3.4 実測)。
+  ///   置けば exit 0 で session はできるが、`;` が落ちた別のパスが pane の cwd になる
+  ///   (tmux 3.4 実測)。
   /// - 空文字: encoding とは無関係で、tmux は受け取ったうえで pane を client の cwd へ落とす。
   case invalidWorkingDirectory(String)
   /// tmux が受け付けない `history-limit` (`TmuxSessionOperations.historyLimitRange`)。
@@ -154,10 +155,10 @@ public struct TmuxSessionOperations: Sendable {
   ///   **この guard が止めるのは server 全体への波及だけであり、限定環境が pane へ届くかは
   ///   変数ごとに異なる。** tmux 3.4 で server と client に別の値を持たせた実測結果は次のとおり。
   ///
-  ///   | 限定環境の変数 | `create` が残す pane の値 |
+  ///   | 限定環境の変数 | tmux が pane プロセスへ渡す値 |
   ///   | --- | --- |
   ///   | `HOME` | server 由来 (client の値は届かない) |
-  ///   | `PATH` | client 由来 |
+  ///   | `PATH` | client 由来 (対話 pane では login shell が組み直す。下記) |
   ///   | `TMUX_TMPDIR` | server 由来 (client の値は届かない) |
   ///   | `LC_ALL` | server 由来 (client の値は届かない) |
   ///

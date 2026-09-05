@@ -131,7 +131,9 @@ public struct GitWorktreeDetector: Sendable {
   ///   11本目は 0.308 秒まで走れない。トップレベルの `Task` は MainActor 隔離を継承して直列になり、
   ///   10本で 3.110 秒かかった)、応答しないマウントでは git が回復しても述語だけが無期限に残る。
   ///   そのため `describe` はこの述語を **git が exit code を返した失敗にだけ**撃つ。
-  ///   git が終了しなかった場合 (timeout 等) は撃たずに失敗として返し、詰まる窓を閉じている。
+  ///   git が終了しなかった場合 (timeout 等) は述語を撃たず、述語が詰まる窓は閉じている。ただし
+  ///   `ProcessRunner` は deadline 後も子の終了通知を待つため、子が死ななければ `GitRunner.run` の
+  ///   `await` 自体が解けず、応答しないマウントで git 自体が戻らない窓は別に残る。
   ///   `commandFailed` を返しつつ後続の `stat` は詰まるマウントは残るが、それは実測できておらず、
   ///   打ち切れない以上どのみち別の設計判断 (どの時点で不在とみなすか) が要るので今は許容する。
   private static let isReachableWorkingTree: @Sendable (String) -> Bool = { path in

@@ -16,14 +16,7 @@ struct GitWorktreeDetectorTests {
   func detectsWorktreesFromFixture() async throws {
     let listOutput = try fixture(named: "git-2.50.1-worktree-list-porcelain-z.txt")
     let paths = GitWorktreeList.parse(output: listOutput).entries.map(\.path)
-    let mainWorktree = try #require(paths.first)
-    let stub = ProcessRunnerStub { arguments in
-      guard let directory = repositoryDirectory(of: arguments) else { return .failure(.cancelled) }
-      if directory == projectDirectory { return success(listOutput) }
-      // main worktree では2行が等しくなる (git 2.50.1 実測)。
-      if directory == mainWorktree { return success(gitDirectories(commonDirectory)) }
-      return success(gitDirectories(linkedGitDirectory(of: directory)))
-    }
+    let stub = ProcessRunnerStub(handler: fixtureHandler(listOutput))
 
     let detected = try await makeDetector(stub).scan()
 
@@ -32,29 +25,31 @@ struct GitWorktreeDetectorTests {
     #expect(detected.map(\.isProjectRoot) == [true, false, false, false])
     #expect(detected.map(\.branch) == ["main", "feat/wt1", nil, "feat/日本語🚀"])
     #expect(detected[0].identity.rawValue == commonDirectory)
+    #expect(detected[2].identity.rawValue == "\(commonDirectory)/worktrees/wt2-with-space")
     #expect(detected[3].identity.rawValue == "\(commonDirectory)/worktrees/wt3-日本語🚀")
   }
 
-  @Test("一覧は project root で、安定 ID は各作業ツリーで問い合わせる")
+  @Test("一覧と Project の common dir は project root で、安定 ID は各作業ツリーで問い合わせる")
   func queriesEachWorktreeForItsGitDirectory() async throws {
     let stub = ProcessRunnerStub(handler: listThenGitDirectories(singleWorktreeList))
 
     _ = try await makeDetector(stub).scan()
 
-    let invocations = await stub.invocations
-    #expect(invocations.count == 2)
     #expect(
-      invocations.first
-        == [
+      await stub.invocations == [
+        [
           "--no-optional-locks", "-C", projectDirectory, "--no-pager",
           "worktree", "list", "--porcelain", "-z",
-        ])
-    #expect(
-      invocations.last
-        == [
+        ],
+        [
+          "--no-optional-locks", "-C", projectDirectory, "--no-pager",
+          "rev-parse", "--path-format=absolute", "--git-common-dir",
+        ],
+        [
           "--no-optional-locks", "-C", "/wt/alpha", "--no-pager",
           "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
-        ])
+        ],
+      ])
   }
 
   // MARK: - 除外
@@ -74,13 +69,46 @@ struct GitWorktreeDetectorTests {
 
   @Test("bare な entry は検出結果に含めない")
   func skipsBareEntries() async throws {
-    let listOutput = "worktree /srv/myrepo.git\0bare\0\0" + singleWorktreeList
-    let stub = ProcessRunnerStub(handler: listThenGitDirectories(listOutput))
+    let bareOutput = try fixture(named: "git-2.50.1-worktree-list-porcelain-z-bare.txt")
+    let barePath = try #require(GitWorktreeList.parse(output: bareOutput).entries.first?.path)
+    let stub = ProcessRunnerStub(handler: listThenGitDirectories(bareOutput + singleWorktreeList))
 
     let detected = try await makeDetector(stub).scan()
 
     #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
-    #expect(await stub.invocations.allSatisfy { !$0.contains("/srv/myrepo.git") })
+    #expect(await stub.invocations.allSatisfy { !$0.contains(barePath) })
+  }
+
+  /// `locked` が付いた worktree には、作業ツリーが消えても `prunable` が付かない (git 2.50.1
+  /// 実測)。失敗させると Project Root を含む全 worktree の検出が止まる。
+  @Test("到達できない作業ツリーの entry は、スキャンを失敗させずに除外する")
+  func skipsUnreachableWorkingTreeWithoutFailingTheScan() async throws {
+    let listOutput = singleWorktreeList + "worktree /wt/locked\0branch refs/heads/locked\0\0"
+    let stub = ProcessRunnerStub(
+      handler: listThenGitDirectories(listOutput, failingIn: "/wt/locked"))
+
+    let detected = try await makeDetector(stub, unreachable: ["/wt/locked"]).scan()
+
+    #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
+  }
+
+  /// 置き換わった先の repository でも `rev-parse` は exit 0 で、その repository の git
+  /// ディレクトリを返す (git 2.50.1 実測)。common dir を見ないと Project Root が2件になる。
+  @Test("別 repository に置き換わった entry は除外し、2つめの Project Root にしない")
+  func skipsEntriesFromAnotherRepository() async throws {
+    let listOutput = singleWorktreeList + "worktree /wt/foreign\0branch refs/heads/other\0\0"
+    // /wt/alpha は main worktree、/wt/foreign は別 repository に置き換わった entry。
+    let stub = ProcessRunnerStub(
+      handler: stubHandler(listOutput: listOutput) { directory in
+        directory == "/wt/foreign"
+          ? success("/wt/foreign/.git\n/wt/foreign/.git\n")
+          : success(gitDirectoryLines(commonDirectory))
+      })
+
+    let detected = try await makeDetector(stub).scan()
+
+    #expect(detected.map(\.worktreePath) == ["/wt/alpha"])
+    #expect(detected.map(\.isProjectRoot) == [true])
   }
 
   // MARK: - 部分結果を返さない
@@ -100,27 +128,36 @@ struct GitWorktreeDetectorTests {
     #expect(await stub.invocations.count == 1)
   }
 
-  @Test("prunable でない entry の rev-parse が失敗したら、残りを返さずスキャン全体を失敗させる")
+  /// 作業ツリーへ到達できるのに答えられないのは git ディレクトリ側の破損である (git 2.50.1
+  /// 実測: 管理ディレクトリの `commondir` を消すと `not a git repository`)。除外へ回さない。
+  @Test("到達できる作業ツリーの rev-parse が失敗したら、残りを返さずスキャン全体を失敗させる")
   func failsEntireScanWhenGitDirectoryLookupFails() async throws {
     let listOutput = singleWorktreeList + "worktree /wt/beta\0branch refs/heads/beta\0\0"
-    let failure = ProcessRunResult(
-      exitCode: 128,
-      stdout: "",
-      stderr: "fatal: cannot change to '/wt/beta': No such file or directory\n"
-    )
-    let stub = ProcessRunnerStub { arguments in
-      guard let directory = repositoryDirectory(of: arguments) else { return .failure(.cancelled) }
-      if directory == projectDirectory { return success(listOutput) }
-      if directory == "/wt/beta" { return .success(failure) }
-      return success(gitDirectories(linkedGitDirectory(of: directory)))
-    }
+    let stub = ProcessRunnerStub(handler: listThenGitDirectories(listOutput, failingIn: "/wt/beta"))
 
     await #expect(
       throws: GitWorktreeScanError.gitDirectory(
         worktreePath: "/wt/beta",
-        .commandFailed(exitCode: 128, stdout: failure.stdout, stderr: failure.stderr))
+        .commandFailed(exitCode: 128, stdout: "", stderr: revParseFailure.stderr))
     ) {
       try await makeDetector(stub).scan()
+    }
+  }
+
+  @Test("git を起動できなかった entry は、作業ツリーの到達可能性で除外に振り替えない")
+  func classifiesRunnerConstructionFailureSeparately() async throws {
+    let stub = ProcessRunnerStub(handler: listThenGitDirectories(singleWorktreeList))
+    let detector = GitWorktreeDetector(
+      projectRunner: try testGitRunner(directory: projectDirectory, processRunner: stub),
+      makeRunner: { _ throws(GitRunnerError) in throw .binaryNotFound(candidates: []) },
+      isWorktreeReachable: { _ in false }
+    )
+
+    await #expect(
+      throws: GitWorktreeScanError.gitRunnerUnavailable(
+        worktreePath: "/wt/alpha", .binaryNotFound(candidates: []))
+    ) {
+      try await detector.scan()
     }
   }
 
@@ -139,6 +176,37 @@ struct GitWorktreeDetectorTests {
     #expect(await stub.invocations.count == 1)
   }
 
+  @Test("Project の common dir を引けなければ、entry を1件も問い合わせずに失敗させる")
+  func failsWhenProjectCommonDirectoryLookupFails() async throws {
+    let stub = ProcessRunnerStub { arguments in
+      arguments.contains("worktree") ? success(singleWorktreeList) : .success(revParseFailure)
+    }
+
+    await #expect(
+      throws: GitWorktreeScanError.projectCommonDirectory(
+        .commandFailed(exitCode: 128, stdout: "", stderr: revParseFailure.stderr))
+    ) {
+      try await makeDetector(stub).scan()
+    }
+    #expect(await stub.invocations.count == 2)
+  }
+
+  @Test(
+    "Project の common dir が絶対パス1行でなければ原文を捨てずに失敗させる",
+    arguments: ["", ".git\n", "/repo/.git\n/repo/.git\n"]
+  )
+  func rejectsUnexpectedProjectCommonDirectoryOutput(stdout: String) async throws {
+    let stub = ProcessRunnerStub { arguments in
+      arguments.contains("worktree") ? success(singleWorktreeList) : success(stdout)
+    }
+
+    await #expect(
+      throws: GitWorktreeScanError.unexpectedProjectCommonDirectoryOutput(output: stdout)
+    ) {
+      try await makeDetector(stub).scan()
+    }
+  }
+
   @Test(
     "rev-parse の出力が2行でなければ原文を捨てずに失敗させる",
     arguments: ["", "/repo/.git\n", "/repo/.git\n/repo/.git\n/extra\n"]
@@ -154,14 +222,19 @@ struct GitWorktreeDetectorTests {
     }
   }
 
-  @Test("絶対パスでない git ディレクトリを安定 ID にしない")
-  func rejectsRelativeGitDirectory() async throws {
-    let stub = ProcessRunnerStub(
-      handler: listThenFixedGitDirectoryOutput(".git/worktrees/alpha\n.git\n"))
+  @Test(
+    "絶対パスでない git ディレクトリを安定 ID にも判定基準にもしない",
+    arguments: [
+      (".git/worktrees/alpha\n/repo/.git\n", ".git/worktrees/alpha"),
+      ("/repo/.git/worktrees/alpha\n.git\n", ".git"),
+    ]
+  )
+  func rejectsRelativeGitDirectory(stdout: String, rejected: String) async throws {
+    let stub = ProcessRunnerStub(handler: listThenFixedGitDirectoryOutput(stdout))
 
     await #expect(
       throws: GitWorktreeScanError.invalidGitDirectoryPath(
-        worktreePath: "/wt/alpha", gitDirectory: ".git/worktrees/alpha")
+        worktreePath: "/wt/alpha", gitDirectory: rejected)
     ) {
       try await makeDetector(stub).scan()
     }
@@ -189,12 +262,17 @@ struct GitWorktreeDetectorTests {
 
   // MARK: - Helpers
 
-  private func makeDetector(_ stub: ProcessRunnerStub) throws -> GitWorktreeDetector {
+  /// 既定で全 entry を到達可能として扱い、単体テストをファイルシステムから切り離す。
+  private func makeDetector(
+    _ stub: ProcessRunnerStub,
+    unreachable: Set<String> = []
+  ) throws -> GitWorktreeDetector {
     GitWorktreeDetector(
       projectRunner: try testGitRunner(directory: projectDirectory, processRunner: stub),
       makeRunner: { directory throws(GitRunnerError) in
         try testGitRunner(directory: directory.path, processRunner: stub)
-      }
+      },
+      isWorktreeReachable: { !unreachable.contains($0) }
     )
   }
 
@@ -209,25 +287,63 @@ struct GitWorktreeDetectorTests {
 
 private let singleWorktreeList = "worktree /wt/alpha\0branch refs/heads/alpha\0\0"
 
+private let revParseFailure = ProcessRunResult(
+  exitCode: 128,
+  stdout: "",
+  stderr: "fatal: cannot change to '/wt/beta': No such file or directory\n"
+)
+
+/// fixture と同じ構成の repository で `rev-parse --git-dir` を撃った結果 (git 2.50.1 実測)。
+/// `wt2 with space` の管理ディレクトリ名は git がサニタイズして `wt2-with-space` になるため、
+/// 作業ツリー名を連結するだけでは実挙動を再現できない。`nil` は main worktree を表す。
+private let fixtureAdministrativeNames: [String: String?] = [
+  "repo": nil, "wt1": "wt1", "wt2 with space": "wt2-with-space", "wt3-日本語🚀": "wt3-日本語🚀",
+]
+
 private typealias StubResult = Result<ProcessRunResult, ProcessRunnerError>
 private typealias StubHandler = @Sendable ([String]) -> StubResult
 
-/// `worktree list` には与えた出力を、`rev-parse` には `<common>/worktrees/<作業ツリー名>` を返す。
-private func listThenGitDirectories(_ listOutput: String) -> StubHandler {
+/// `-C` の作業ツリーごとに `rev-parse --git-dir --git-common-dir` の応答を差し替える。
+/// Project 自身への問い合わせは `worktree list` と common dir 単独の2つで、引数で見分ける。
+private func stubHandler(
+  listOutput: String,
+  gitDirectories: @escaping @Sendable (String) -> StubResult
+) -> StubHandler {
   { arguments in
     guard let directory = repositoryDirectory(of: arguments) else { return .failure(.cancelled) }
-    if directory == projectDirectory { return success(listOutput) }
-    return success(gitDirectories(linkedGitDirectory(of: directory)))
+    if arguments.contains("worktree") { return success(listOutput) }
+    guard arguments.contains("--git-dir") else { return success("\(commonDirectory)\n") }
+    return gitDirectories(directory)
+  }
+}
+
+private func fixtureHandler(_ listOutput: String) -> StubHandler {
+  stubHandler(listOutput: listOutput) { directory in
+    let name = URL(fileURLWithPath: directory).lastPathComponent
+    guard let administrativeName = fixtureAdministrativeNames[name] else {
+      return .failure(.cancelled)
+    }
+    return success(
+      gitDirectoryLines(
+        administrativeName.map { "\(commonDirectory)/worktrees/\($0)" } ?? commonDirectory))
+  }
+}
+
+/// `rev-parse` には `<common>/worktrees/<作業ツリー名>` を返す。サニタイズの要らない名前でしか
+/// 実挙動と一致しないので、安定 ID の値そのものを検証しないテストにだけ使う。
+private func listThenGitDirectories(
+  _ listOutput: String,
+  failingIn failingDirectory: String? = nil
+) -> StubHandler {
+  stubHandler(listOutput: listOutput) { directory in
+    guard directory != failingDirectory else { return .success(revParseFailure) }
+    return success(gitDirectoryLines(linkedGitDirectory(of: directory)))
   }
 }
 
 /// `rev-parse` の出力だけを差し替えて、解釈できない出力の扱いを見るためのハンドラ。
 private func listThenFixedGitDirectoryOutput(_ stdout: String) -> StubHandler {
-  { arguments in
-    guard let directory = repositoryDirectory(of: arguments) else { return .failure(.cancelled) }
-    if directory == projectDirectory { return success(singleWorktreeList) }
-    return success(stdout)
-  }
+  stubHandler(listOutput: singleWorktreeList) { _ in success(stdout) }
 }
 
 private func linkedGitDirectory(of worktreePath: String) -> String {
@@ -235,7 +351,7 @@ private func linkedGitDirectory(of worktreePath: String) -> String {
 }
 
 /// `rev-parse --git-dir --git-common-dir` の2行出力。
-private func gitDirectories(_ gitDirectory: String) -> String {
+private func gitDirectoryLines(_ gitDirectory: String) -> String {
   "\(gitDirectory)\n\(commonDirectory)\n"
 }
 

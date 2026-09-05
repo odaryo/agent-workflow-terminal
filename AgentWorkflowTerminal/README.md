@@ -104,6 +104,23 @@ orphan になり、手で片付けることもできなくなるためです。�
 この判断の結果です。
 2026-09-02 に tmux 3.4 で成功を確認しています。
 
+### git 統合テスト
+
+worktree 検出 (`GitWorktreeDetectorIntegrationTests`) は実際の `git` を起動します。tmux を使わない
+ので、tmux 統合テストとは別の環境変数で切り替えます。既定の `swift test` では走りません。
+
+```shell
+cd AgentWorkflowTerminal
+AWT_GIT_INTEGRATION=1 swift test --filter GitWorktreeDetectorIntegrationTests
+```
+
+repository は毎回 `/private/tmp/awt-git-<UUID>` に作り、`defer` で削除します。
+`NSTemporaryDirectory()` を使わないのは、返る `/var/...` を git が実体パス `/private/var/...` へ
+解決してしまい、`worktree list` の出力と作成時のパスが文字列として一致しなくなるためです。
+`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` を `/dev/null` に向け、identity と `LC_ALL` を明示して、
+ホストの git 設定の影響を受けないようにしています。
+2026-09-05 に git 2.50.1 (Apple Git-155) で成功を確認しています。
+
 ## Lint / Format
 
 repository ルートの設定ファイルを使います。ツール本体はこのリポジトリでは配布していません。

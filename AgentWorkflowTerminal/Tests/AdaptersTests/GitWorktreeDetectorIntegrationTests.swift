@@ -79,6 +79,46 @@ struct GitWorktreeDetectorIntegrationTests {
     }
   }
 
+  /// git は `locked` な worktree に `prunable` を付けない (git 2.50.1 実測)。可搬ボリューム上の
+  /// worktree を lock するのは `git worktree --help` が勧める運用なので、ここで失敗させると
+  /// lock を外すまで Project Root を含む全 worktree が検出できなくなる。
+  @Test("locked な worktree の作業ツリーが消えても、他の worktree の検出は止まらない")
+  func lockedWorktreeWithMissingWorkingTreeDoesNotFailTheScan() async throws {
+    try await withRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-lock", "../wt-lock"])
+      try await repository.git(
+        ["worktree", "lock", "\(repository.root.path)/wt-lock", "--reason", "removable volume"])
+      try FileManager.default.removeItem(at: repository.root.appending(path: "wt-lock"))
+
+      let detected = try await repository.detector().scan()
+
+      #expect(
+        detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+      #expect(detected.filter(\.isProjectRoot).count == 1)
+    }
+  }
+
+  /// 置き換わった先でも `rev-parse` は exit 0 で、その repository の git ディレクトリを返す
+  /// (git 2.50.1 実測)。`worktree list` も `prunable` を付けないので、common dir を確かめないと
+  /// 無関係な repository の `.git` が安定 ID として通り、Project Root が2件になる。
+  @Test("別 repository に置き換わった worktree は検出結果に含めない")
+  func worktreeReplacedByAnotherRepositoryIsExcluded() async throws {
+    try await withRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-swap", "../wt-swap"])
+      let swapped = repository.root.appending(path: "wt-swap")
+      try FileManager.default.removeItem(at: swapped)
+      try FileManager.default.createDirectory(at: swapped, withIntermediateDirectories: true)
+      try await repository.git(["init", "-q", "-b", "other"], in: "wt-swap")
+
+      let detected = try await repository.detector().scan()
+
+      #expect(detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(detected.map(\.isProjectRoot) == [true])
+    }
+  }
+
   @Test("detached HEAD の worktree では branch が nil になる")
   func detachedWorktreeHasNoBranch() async throws {
     try await withRepository { repository in

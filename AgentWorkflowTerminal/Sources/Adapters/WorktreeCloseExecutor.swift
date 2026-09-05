@@ -115,15 +115,60 @@ struct GitCloseWriteRunner: Sendable {
 /// ごと削除されていた。作業ツリーのディレクトリは中途半端に消えた状態で残る (`--force` を付けても
 /// 同じ)。一方、未commit変更があって git が実行を拒否した場合は rc=128 で登録は残る。
 /// **exit code だけでは区別できない**ので、この層が読み取りを1回撃って確かめる。
+///
+/// - Important: **「登録が残っている」と「アプリから見える」は別物である。** git 2.50.1 実測では、
+///   同じ `chmod 500` でも対象が管理ディレクトリ (`.git/worktrees/<名前>`) 側だと結果が変わる。
+///   `worktree remove` は同じ rc=255 /
+///   `error: failed to delete '.git/worktrees/p6': Permission denied` で終わり、作業ツリーは
+///   **完全に消える**のに、`worktree list --porcelain` には
+///   `prunable gitdir file points to non-existent location` を伴う record が残る。
+///   `GitWorktreeDetector` は `prunable` の付いた entry をスキャン対象から落とすので、
+///   「record がある」を「やり直せる」と答えると、ユーザーのファイルが全部消えた worktree を
+///   無傷だと伝えることになる。だから record の有無だけでなく、その record が
+///   スキャン対象になり得るかまで見る。
 public enum WorktreeRegistrationAfterFailedRemoval: Sendable, Equatable {
-  /// 登録が残っている。`GitWorktreeDetector.scan()` は今までどおりこの worktree を返し、
-  /// Close をやり直せる。
+  /// record があり、`GitWorktreeDetector` が一覧段で落とす条件 (`prunable` / bare) にも当たらない。
+  ///
+  /// **呼び出し側にできること**: 次のスキャンでもこの worktree は現れるので、UI から同じ Close を
+  /// もう一度選べる。git が実行を拒否した場合 (未commit変更など) がここへ来る。
+  ///
+  /// - Important: 「`scan()` が必ず返す」までは約束しない。`GitWorktreeDetector.describe` は
+  ///   一覧段を通った entry も、作業ツリーへ到達できない・common dir がこの Project のもので
+  ///   ないという理由で落とす。ここで見ているのは `worktree list` の record だけである。
   case retained
-  /// 登録が消えている。`scan()` は `worktree list` しか見ないので**以後この worktree は
-  /// アプリから検出されない**。Active/Inactive を失い、Close をやり直す経路も無くなる一方、
-  /// ディスクにはユーザーのファイルが残る。
+  /// record はあるが `prunable` (または bare) が付いており、`GitWorktreeDetector` が一覧段で落とす。
+  ///
+  /// **呼び出し側にできること**: `scan()` には現れないので、**UI からもう一度 Close を選ぶ経路は
+  /// 無い**。やり直せるのは、いま手元にある `WorktreeCloseExecutor` から同じ計画を撃ち直す場合
+  /// だけである。git 2.50.1 実測では、`prunable` の原因を取り除いた後の `worktree remove` は
+  /// rc=0 で record ごと消えるが、原因が残っている間は同じ rc=255 を繰り返す
+  /// (`worktree prune` も同じ `Permission denied` を出し、record を残したまま rc=0 で終わる)。
+  /// 原因を取り除く操作はアプリの書き込み範囲の外にあり、§17.2 のとおり Agent か通常 shell へ委ねる。
+  case retainedButNotScannable
+  /// 消したい作業ツリーのパスが `worktree list` に**見えなくなった**。
+  ///
+  /// 本当に登録が消えている形は実在する (上の「サブディレクトリを `chmod 500`」がそれで、
+  /// `.git/worktrees/<名前>` ごと消えたうえに作業ツリーは中途半端に残る)。ただしこの判定は
+  /// 「`DetectedWorktree.worktreePath` と `worktree list` の `worktree` 行が同じバイト列か」しか
+  /// 見ておらず、**両者が同じスキャンから来ている保証は型に無い**。git 2.50.1 実測では、
+  /// 登録が無傷のまま `.dropped` に見える形が少なくとも3つある。
+  ///
+  /// 1. `git worktree move` の後。安定 ID は不変なので `scan()` はこの worktree を返し続けるが、
+  ///    `worktree` 行は新しいパスになる (実測: `p7` → `p7-moved` で安定 ID は
+  ///    `.../worktrees/p7` のまま、旧パスは list から消える)。手元の `DetectedWorktree` が
+  ///    移動前のものなら一致しない。呼び出し側のバグは要らない。
+  /// 2. `repositoryDirectory` が別 repository を指していた場合。その repository の list に対象の
+  ///    パスは無い (実測) 一方、対象の登録は無傷である。
+  /// 3. `worktree remove` が受け付けるパス表記は list が吐く表記より広い。実測では末尾スラッシュ・
+  ///    `..` を含む形・symlink 経由 (`/tmp` → `/private/tmp`) がいずれも rc=0 で同じ worktree を
+  ///    消すが、list は解決後の1表記しか吐かない。`WorktreeCloseExecutor.init` の検証は
+  ///    `hasPrefix("/")` だけなのでこれらは argv に入り、入った時点で文字列比較は外れる。
+  ///
+  /// **呼び出し側にできること**: この値だけで「消えた」と断定しない。次のスキャン結果と安定 ID で
+  /// 突き合わせ直すのが唯一の確かめ方である。挙動を安全側 (`.retained` へ丸めない) に寄せている
+  /// のは、上の3つがどれも**登録が残っている**方向の誤りだからである。
   case dropped
-  /// 読み直し自体が失敗し、どちらか決められなかった。`retained` へ丸めない —— 消えた登録を
+  /// 読み直し自体が失敗し、どれか決められなかった。`retained` へ丸めない —— 消えた登録を
   /// 「何も起きていない」と読ませることが、この読み直しが防ごうとしている事故そのものである。
   case unknown(GitRunnerError)
 }
@@ -214,18 +259,24 @@ public struct WorktreeCloseExecutor: Sendable {
   /// 安定 ID だけで足りないのは、`WorktreeIdentity` が**管理ディレクトリ**のパスであって
   /// `worktree remove` へ渡す作業ツリーのパスではないためである (設計書 §3.5)。
   ///
+  /// - Important: **tmux session 名も同じ理由で引数に取らない。** §3.5 は session 名を安定 ID
+  ///   だけから決定的に導出すると確定しており、外から渡す正当な理由が無い一方、渡せるようにすると
+  ///   worktree A と session B を組にできる。tmux 3.4 実測では
+  ///   `kill-session -t "=awt-feature-b-e7b88064"` はその名前の session だけを rc=0 で落とし、
+  ///   もう一方の session は残る。つまり組にした場合、対象照合を通過したうえで **B の session を
+  ///   殺してから A の worktree を消す**という順で完走する。
+  ///
   /// - Throws: 作業ツリーのパスが `GitCloseWriteCommand` の受け付ける形でないとき、
   ///   `repositoryDirectory` が消す worktree そのものだったとき、git を起動できないとき。
   public init(
     repositoryDirectory: URL,
     worktree: DetectedWorktree,
-    session: TmuxSessionName,
     sessionOperations: TmuxSessionOperations,
     processRunner: any ProcessRunning,
     executableCandidates: [URL] = GitRunner.defaultExecutableCandidates
   ) throws(WorktreeCloseExecutorError) {
     try self.init(
-      repositoryDirectory: repositoryDirectory, worktree: worktree, session: session,
+      repositoryDirectory: repositoryDirectory, worktree: worktree,
       sessionOperations: sessionOperations, processRunner: processRunner,
       executableCandidates: executableCandidates,
       parentEnvironment: ProcessInfo.processInfo.environment,
@@ -235,7 +286,6 @@ public struct WorktreeCloseExecutor: Sendable {
   init(
     repositoryDirectory: URL,
     worktree: DetectedWorktree,
-    session: TmuxSessionName,
     sessionOperations: TmuxSessionOperations,
     processRunner: any ProcessRunning,
     executableCandidates: [URL],
@@ -263,7 +313,7 @@ public struct WorktreeCloseExecutor: Sendable {
     self.worktreePath = worktree.worktreePath
     self.unforcedRemoval = unforcedRemoval
     self.forcedRemoval = forcedRemoval
-    self.session = session
+    self.session = TmuxSessionName(identity: worktree.identity)
     self.sessionOperations = sessionOperations
     do {
       self.runner = try GitCloseWriteRunner(
@@ -329,17 +379,24 @@ public struct WorktreeCloseExecutor: Sendable {
   }
 
   /// - Note: 突き合わせは `DetectedWorktree.worktreePath` と `worktree list --porcelain` の
-  ///   `worktree` 行の文字列比較で行う。前者の出どころも同じ `worktree list --porcelain` なので
-  ///   (`GitWorktreeDetector`)、git が返す表記どうしの比較になる。アプリ側で正規化しない
-  ///   (`WorktreeIdentity` の doc コメントと同じ理由)。
+  ///   `worktree` 行を **UTF-8 バイト列**で比べる。`String` の `==` は Unicode の正準等価を見るので
+  ///   `caf\u{00E9}` と `cafe\u{0301}` を等しいと答えるが (実測: `String ==` は `true`、
+  ///   UTF-8 バイト列は `false`)、その向きは**偽 `.retained`** —— 消えた登録を残っていると読ませる。
+  ///   `WorktreeIdentity` が同じ理由でバイト列比較を選んでいるので、粒度をそちらへ揃える。
+  ///   アプリ側で正規化もしない (`WorktreeIdentity` の doc コメントと同じ理由)。
   /// - Note: 解釈できなかった record があっても `dropped` の判定は曇らない。`GitWorktreeList` が
   ///   record を落とすのは `worktree ` 行そのものが無いときだけで、探しているパスを持つ record は
   ///   定義上そこに含まれない。
+  /// - Important: `prunable` / bare を落とす条件は `GitWorktreeDetector.isScannable` と同じもので、
+  ///   あちらが `private static` なため書き写している。**片方だけを変えると、この層の答えと
+  ///   実際にスキャンへ載るかが割れる** —— それがこの3分類が閉じようとしている欠陥そのものである。
   private func registration() async -> WorktreeRegistrationAfterFailedRemoval {
     do {
       let result = try await readRunner.run(.worktreeList())
       let entries = GitWorktreeList.parse(output: result.stdout).entries
-      return entries.contains { $0.path == worktreePath } ? .retained : .dropped
+      guard let entry = entries.first(where: { $0.path.utf8.elementsEqual(worktreePath.utf8) })
+      else { return .dropped }
+      return entry.prunableReason == nil && !entry.isBare ? .retained : .retainedButNotScannable
     } catch {
       return .unknown(error)
     }

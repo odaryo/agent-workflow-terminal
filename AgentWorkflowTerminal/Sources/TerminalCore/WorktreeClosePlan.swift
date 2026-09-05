@@ -62,7 +62,13 @@ public struct WorktreeClosePlan: Sendable, Hashable {
   /// `.deleteBranch` は B の Close として A の branch を消す。値そのものではなく、
   /// 「計画と実行の対象が同じであること」を確かめられるようにするために持つ。
   ///
+  /// - Note: 安定 ID だけで足りるのは、実行層が撃つ値 —— 作業ツリーのパスと tmux session 名 ——
+  ///   をすべて実行層自身の `DetectedWorktree` から導くためである。計画から実行層へ渡る値のうち
+  ///   対象に依存するのは `.deleteBranch(name:)` だけで、それは同じ安定 ID の
+  ///   `DetectedWorktree.branch` から来ている。
   /// - Note: 「いつの検査か」(検査から実行までの間に worktree が変わる) はこの値では扱えない。
+  ///   計画と実行層が**別のスキャン**から来た場合、安定 ID が一致していても branch は
+  ///   切り替わり得るので、`.deleteBranch` は計画時点の branch 名を消しにいく。
   public let worktree: WorktreeIdentity
   public let steps: [WorktreeCloseStep]
 
@@ -80,6 +86,15 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
   /// `isBranchDeletionAvailable` が許さない状態で選択肢4を要求した。選択肢3へ暗黙に格下げしない
   /// — 要求より少ない後始末を黙って行うのは、branch も消えたと信じている呼び出し側への嘘になる。
   case branchDeletionNotPermitted
+  /// Project Root を Close しようとした。§2.3 上 Project Root は Task worktree と別枠で、
+  /// Active/Inactive を持たない。
+  ///
+  /// **実行層ではなく計画段階で弾く。** git は main working tree の削除を拒否する
+  /// (git 2.50.1 実測: `worktree remove -- <main>` は `--force` の有無にかかわらず rc=128 /
+  /// `fatal: '<path>' is a main working tree`) が、その拒否が起きるのは計画の順序上
+  /// `terminateSession` を撃った**後**である。Project Root の常設 session (§2.3) を落として
+  /// から失敗するのでは遅い。
+  case projectRootIsNotClosable
 }
 
 /// 設計書 §3.4 の4択を実行単位へ落とす。
@@ -92,33 +107,40 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
 ///   tmux や git への操作ではないため、`WorktreeActivation` 側の責務として分けてある。
 ///   したがって `.hideFromUI` が返す空の計画は「Close として何もしなくてよい」ではなく
 ///   「外部プロセスへ撃つものが無い」の意味であり、呼び出し側は空の計画でも Inactive 化を行う。
+///
+/// - Important: 安定 ID と branch を**別引数で受け取らない**。別々に受け取ると worktree A の
+///   安定 ID と worktree B の branch 名を組にでき、計画と実行層の対象照合
+///   (`WorktreeCloseExecutor.execute`) を通ったうえで **A の Close として B の branch が消える**。
+///   同じ形の取り違えは実行層側 (作業ツリーのパス・tmux session 名) でも閉じてあり、規則は
+///   「`DetectedWorktree` から導ける値は別引数で受け取らない」の一つである。
 public func planWorktreeClose(
-  worktree: WorktreeIdentity,
+  worktree: DetectedWorktree,
   choice: WorktreeCloseChoice,
-  branch: String?,
   defaultBranch: DefaultBranchResolution,
   confirmation: WorktreeRemovalConfirmation?
 ) throws(WorktreeClosePlanError) -> WorktreeClosePlan {
+  guard !worktree.isProjectRoot else { throw .projectRootIsNotClosable }
+  let identity = worktree.identity
   switch choice {
   case .hideFromUI:
-    return WorktreeClosePlan(worktree: worktree, steps: [])
+    return WorktreeClosePlan(worktree: identity, steps: [])
   case .terminateSession(.keepWorktree):
-    return WorktreeClosePlan(worktree: worktree, steps: [.terminateSession])
+    return WorktreeClosePlan(worktree: identity, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
     guard let confirmation else { throw .removalNotConfirmed }
     var steps: [WorktreeCloseStep] = [
       .terminateSession, .removeWorktree(force: confirmation.forcesWorktreeRemoval),
     ]
     guard afterRemoval == .deleteBranch else {
-      return WorktreeClosePlan(worktree: worktree, steps: steps)
+      return WorktreeClosePlan(worktree: identity, steps: steps)
     }
     guard
-      let branch,
+      let branch = worktree.branch,
       isBranchDeletionAvailable(
         targetBranch: branch, defaultBranch: defaultBranch,
         merge: confirmation.inspection.branchMerge)
     else { throw .branchDeletionNotPermitted }
     steps.append(.deleteBranch(name: branch))
-    return WorktreeClosePlan(worktree: worktree, steps: steps)
+    return WorktreeClosePlan(worktree: identity, steps: steps)
   }
 }

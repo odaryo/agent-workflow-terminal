@@ -176,7 +176,7 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 | 2 | **Claude Code 専用機能を作らない。** Agent 固有の知識は `AgentAdapter` 実装体の内側に閉じる。その外側に `if agent == .claudeCode` を書かない | §12.1 |
 | 3 | **tmux を再実装しない。** pane 分割・キーバインド・session 管理は tmux の責務。アプリが持つのは最小操作 (split / close / select / zoom) と状態の読み取りだけ | §4.1 |
 | 4 | **tmux と git は外部 CLI プロセスとして駆動する。** ライブラリ (libgit2 等) を組み込まない | §21.3 |
-| 5 | **Git の書き込み操作を実装しない。** commit / merge / rebase / worktree 作成は Agent か素の shell へ委譲する。実装するのは読み取り (file browser / code viewer / diff / history / blame) だけ | §17 |
+| 5 | **Git の書き込み操作を実装しない。** commit / merge / rebase / worktree 作成は Agent か素の shell へ委譲する。実装するのは読み取り (file browser / code viewer / diff / history / blame) だけ。**唯一の例外が worktree Close の後始末** (`worktree remove` とマージ済み branch の `branch -d`) で、これも任意の branch を消せる汎用機能にはしない | §17.2 / §3.4 |
 | 6 | **Terminal 本体は Agent Skills 無しで動く。** 観測できない phase 状態を発明しない | §26 |
 | 7 | **`TerminalRenderer` の外へ libghostty API を漏らさない。** Gate 1 では libghostty 呼び出しを1ファイルに閉じたまま完了できている | §21.5 |
 

@@ -160,6 +160,10 @@ Dedicated tmux session and Task Tab become available
 - AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。
 - Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
 
+**アプリが観測している間に新規出現したworktreeは自動的にActive化する。** Project登録後の初回スキャンで見つかったworktreeはすべてInactiveから始め、自動Active化の対象は「観測中に新しく現れたworktree」に限る。`+ New Task`からAgentが作ったworktreeを人が改めて選ぶ手間を無くしつつ、登録時点で既に存在していた過去のworktreeが一斉にタブ化する事故を防ぐためである。
+
+この自動Active化は新規出現だけに適用する。既存Inactive worktreeの再利用は上記のとおり人が選択する。
+
 ### 3.3 Active化とtmux
 
 Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
@@ -175,17 +179,110 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 1. UI上でInactiveにするだけ
 2. Inactive化し、tmux sessionも終了する
 3. Inactive化し、tmux sessionを終了し、worktreeも削除する
+4. 3に加えて、対応branchも削除する
 
 削除を選ばない限り、tmux sessionとworktreeは保持する。
 
-### 3.5 未確定事項
+**4はbranchがマージ済みの場合にだけ選択できる。** 未マージbranchの削除はTerminalから行わず、§17.2のとおりAgentまたは通常Terminalに委ねる。Closeの後始末としてのマージ済みbranch削除だけを例外として認め、任意のbranchを消せる汎用機能にはしない。
 
-- Agentが新規作成したworktreeを、検出直後に常にActive化するか、確認を挟むか
-- worktree削除前の未commit、未push、未merge検証と警告条件
+**3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
+
+| 検査 | 判定 |
+|---|---|
+| 未commit変更 | 対象worktreeに変更またはuntrackedファイルがある |
+| ignoredファイル | 対象worktreeにgitignore済みのファイルがある |
+| 未push | 対象branchがupstreamを持たない、またはupstreamより先行している |
+| 未merge | 対象branchがProjectの既定branchへマージされていない |
+
+**ignoredファイルを独立した検査にするのは、`git worktree remove`が`--force`なしでこれらを消すため
+である。** 実測では、`.gitignore`済みの`.env`を持つworktreeが「変更なし」と判定され、
+`worktree remove`はrc=0で`.env`ごと削除した。task worktreeがper-worktreeの`.env`やローカル設定を
+持つのは普通の運用であり、「変更なし」と表示したまま消えるのは、この節が防ごうとしている事故
+そのものである。
+
+**ignored検査は他の検査と別のgit呼び出しで行い、その失敗を他の検査へ波及させない。**
+`--ignored`を付けたstatusの出力は、`*.o`／`*.pyc`／`*.log`のようにファイル単位で一致するignore
+パターンの下で際限なく増える(実測: ignoredファイル11,000件で8.56 MiB。`node_modules/`のように
+ディレクトリ自身が一致する形は1レコードに畳まれるので増えない)。出力上限を超えると実行層は
+切り詰めではなく失敗を返すため、1回のstatusに相乗りさせると、**ignoredの在庫が未commit検査を
+道連れにする**。未commit検査は`git worktree remove`が実際に拒否する唯一の条件であり、ignoredの
+量とは無関係に答えられなければならない。2回のstatusが別時点のworktreeを見ることは許容する
+——どちらも実行を禁止する条件ではなく警告だからである。
+
+**upstream設定を持ちながら追跡refが存在しない状態は、未pushともpush済みとも別の第三の状態として
+扱う。** git status porcelain v2はこのとき`# branch.upstream`を出しながら`# branch.ab`を出さない
+ため、先行しているかを答えられない。これを検査の失敗として扱うと毎回「検査に失敗しました」を出す
+ことになるので、確定した状態として表示する。
+
+この状態に落ちる原因は1つではない。上流branchが削除されて`git fetch --prune`が走った直後(PRが
+マージされてユーザーがCloseを押す最も普通のタイミング)と、upstream設定だけあって一度もpushして
+いない場合の**両方**がここへ来る。後者は未pushそのものである。gitの出力からこの2つを区別すること
+はできない(実測。`status.aheadBehind`や`--no-ahead-behind`はporcelain v2では影響しない)ため、
+**表示は「追跡先が消えた」と読める文言にせず、「追跡refが無く先行しているか判定できない」に留める。**
+削除前の警告としてはどちらの原因でも出す。
+
+**Projectの既定branchは`git symbolic-ref --quiet refs/remotes/origin/HEAD`で決め、得られなければ
+main worktreeがその時点でチェックアウトしているbranchを使う。** remoteがあってもなくても決まり、
+branch名を`main`／`master`などに決め打ちしない。`--quiet`を付けるのは、`origin/HEAD`が無いときに
+素の`symbolic-ref`が`fatal:`とrc=128を返し、通常の失敗と区別できないためである(実測:
+`--quiet`ではrc=1)。
+
+`origin/HEAD`はgit 2.46以降`git fetch`が作成・更新するため、cloneしていないremoteでも最初のfetchで
+生え、上流の既定branchの改名にも追従する(実測)。それでも陳腐化し得る経路は残るが、そのとき
+main worktree側へ落とすと、一時的に別branchをチェックアウトしているmain worktreeで判定がずれる。
+**`origin/HEAD`が値を返す限りその値を使い、main worktreeへは落とさない。**
+
+**フォールバックするのは`origin/HEAD`が「無い」ときだけで、「壊れている」ときはしない。**
+値が`refs/remotes/<remote>/`で始まらないなど解釈できない場合は、main worktreeへ落ちずに判定不能と
+する。壊れた値を黙って捨てて別の答えを出すと、既定branchの出どころがユーザーに見えないまま
+削除可否が決まる。
+
+どちらの経路でも既定branchを特定できなければ、未mergeを「マージ済み」と誤って判定せず、
+**判定不能として削除前に警告する**。
+
+### 3.5 安定IDとtmux session命名
+
+**worktreeの安定IDは、そのworktreeの管理ディレクトリの絶対パスとする。** 通常のworktreeでは`<git common dir>/worktrees/<name>`、Project Rootでは`<git common dir>`そのものである。
+
+作業ツリーのパスやbranch名を識別子にしない。branchはworktree内で切り替えられ、作業ツリーのパスは`git worktree move`で変わるためである。管理ディレクトリ名はどちらの操作でも不変であることを実測で確認している。
+
+tmux session名は安定IDだけから決定的に導出する。**作業ツリーのパスもbranch名も導出に使わない。**
+
+```text
+awt-<slug>-<安定IDのSHA-256先頭8桁>
+```
+
+`slug`は安定IDの最後のパス要素を、`[A-Za-z0-9_-]`以外の**Unicodeスカラをそれぞれ**`_`へ置換して
+作る。通常のworktreeでは`git worktree add`時のディレクトリ名がそのまま残るため人が読める。
+
+- 置換結果が`_git`になった場合に限り、一つ上のパス要素を使う。Project Rootの安定IDは
+  `<git common dir>`、つまり通常`<repo>/.git`であり、そのままでは全ProjectのProject Rootが
+  `awt-_git-<hash>`になって`list-sessions`から読めなくなるためである。判定は「`.git`由来か」では
+  なく「置換結果が`_git`か」で行う。`.`は置換で消えるので由来を区別する情報が残らない。
+- 置換結果が32文字を超えたら先頭32文字で切り詰める。識別はhashが担い、slugは人が
+  `list-sessions`を読むためだけのものである。
+- パス要素が1つも無いなど置換結果が空になる場合は`worktree`を使う。`awt--<hash>`は読めない。
+
+置換をCharacter(書記素クラスタ)単位ではなくUnicodeスカラ単位で行うのは、書記素の分割規則が
+Unicodeの版に依存し、**OSを更新すると同じ安定IDから別のsession名が出る**ためである。それは
+この節が防ごうとしている二重session生成そのものになる。
+
+導出元を安定IDに閉じるのは、**名前の決定性がResume(§3.3)の前提だから**である。作業ツリーの
+basenameをslugに使うと、安定IDが不変であるはずの`git worktree move`で名前が変わり、移動後に
+同じworktreeへ二重にsessionを作ってしまう。
+
+Project Rootのsessionも同じ規則で導出し、別体系の命名規則を設けない。§2.3のとおりProject RootはTask worktreeと別枠だが、識別子としては同じ導出規則に載せたほうが衝突回避も再現も一箇所で済む。
+
+`.`と`:`は生成名から必ず除外する。tmux 3.4の実測では、session名の`.`と`:`はどちらも`_`へ置換されて格納され、`a.b`と`a:b`が同一session名へ衝突する。さらに`has-session -t "=a.b"`は`.`をwindow指定として解釈するため、`.`を含む名前は完全一致でも引けない。
+
+正規化とhashを組み合わせるのは、人が読める部分を残しつつ衝突を避けるためである。**session名は導出結果をそのまま使い、既存sessionと衝突した場合に連番などで回避しない。** 同じ安定IDからは常に同じ名前が出るという性質が、再起動後のResume(§3.3)の前提になる。
+
+slugは`git worktree move`後に実際のディレクトリ名とずれ得る。管理ディレクトリ名は移動しても
+作成時の名前のままだからである。可読性より決定性を優先した結果として受け入れる。
+
+### 3.6 未確定事項
+
 - `Close`後にActiveへ戻す具体的UI
-- branch削除をClose操作に含めるか
-- Project Root用tmux sessionの命名規則
-- worktreeとtmux sessionの安定ID設計
 
 ## 4. tmuxモデル
 
@@ -197,6 +294,11 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 - Terminalはpane構成、実行中process、対応Agent、Agent状態を読み取る。
 - 操作主体はtmuxのままだが、Terminal UIから日常操作を呼び出せる。
 - tmuxのキーバインドもそのまま利用可能にする。
+- **アプリはユーザーの既定tmuxサーバを使う**。専用socket(`-L`)へ隔離しない。
+
+既定サーバを使うのは、ユーザーが素のターミナルから`tmux attach -t <session>`で同じsessionへ入れることを保証するためである。アプリが観測する実体と、ユーザーが自分の端末で見る実体を一致させることがこの製品の前提であり、専用socketではユーザー側が毎回`-L`を要求される。
+
+代償として、session名前空間をユーザー自身のsessionと共有する。衝突回避は§3.5の命名規則が担い、サーバ全体へ波及する設定(`-g`)は使わない(§4.2、§4.4)。
 
 Terminal UIで提供する操作は最小限とする。
 
@@ -219,7 +321,9 @@ paneへのテキスト注入方式は**`load-buffer` + `paste-buffer -p`**とす
 
 複数クライアントからの同時入力が起こり得ることを前提とし、誤操作防止は将来のUX課題として扱う。
 
-複数クライアントが同時attachしているときのwindowサイズは**`smallest`**とし、**Terminalがsession単位で設定する**。サーバ全体のglobal option(`-g`)としては設定せず、ユーザーが自分で作った他のsessionへ波及させない。
+複数クライアントが同時attachしているときのwindowサイズは**`smallest`**とし、**Terminalが自分の作ったwindowに対して設定する**。サーバ全体のglobal option(`-g`)としては設定せず、ユーザーが自分で作った他のsessionへ波及させない。
+
+`window-size`はtmuxのwindow optionである。tmux 3.4の実測では、`set-option -t <session> window-size smallest`が効くのはそのsessionの**現在のwindowだけ**で、後から作ったwindowは`latest`のままだった。§4.1のとおり1 worktreeは1 window相当で運用するが、windowを増やした場合はそのたびに設定する必要がある。
 
 Gate 1で3方式を実測した(137x39のクライアントと199x56のクライアントを同一sessionへ同時attach)。
 
@@ -249,6 +353,8 @@ Adapterは版数を検出する。版数を解釈できなかった場合は`Unk
 |---|---|---|
 | アプリ側scrollback | `scrollback-limit` = **10,000,000**(10MB) | surface単位 |
 | tmuxサーバ側履歴 | `history-limit` = **10,000** | session生成時にsession単位で設定 |
+
+`history-limit`はsession optionだが、**paneの履歴容量はpane生成時に確定する**。tmux 3.4の実測では、`new-session`のあとに`set-option`しても、そのsessionの最初のpaneは既定値(`2000`)のまま残り、以後に作ったpaneだけが新しい値になった。sessionを作ってから設定する素直な実装では、最初のpane —— つまり最も出力の多いAgent実装pane —— にだけ予算が効かない。Terminalは最初のpaneにも設定値が適用された状態でsessionを引き渡す。
 
 どちらもアプリ設定から変更可能とする。tmux側は`window-size`(§4.2)と同じくsession単位で設定し、サーバ全体のglobal option(`-g`)としては設定しない。ユーザーが自分で作った他のsessionへ波及させないためである。
 
@@ -830,6 +936,8 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 
 これらはAgentまたは通常Terminalから実行する。Project Rootからworktreeへの設定同期も同様である。
 
+branch削除の唯一の例外がworktree Closeの後始末であり、**マージ済みbranchに限って**Closeの選択肢に含める(§3.4)。任意のbranchを選んで消せるUIは持たない。
+
 Git graphは提供せず、シンプルなCommit Logに留める。
 
 ### 17.3 サポートするgit版数
@@ -1284,10 +1392,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### Worktree／tmux
 
-- 新規検出worktreeのActive化確認
-- session命名とcollision回避
 - tmux未導入時のセットアップ
-- Close時の安全確認
 - session消失時の再作成方針
 - detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、**タブ**のライフサイクル設計(Gate 1)。surface側の責務分担は§21.5で確定済みで、残るのは「上位レイヤがどう再生成を判断するか」(tmux sessionの存否確認、タブを閉じる条件)
 
@@ -1548,6 +1653,12 @@ PR_READY
 - [x] 1 Task = 1 worktree = 1 Task Tab
 - [x] Project Rootは別枠の常設tmux session
 - [x] worktreeごとに独立tmux session
+- [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は安定IDだけから導出する`awt-<slug>-<安定IDのSHA-256先頭8桁>`
+- [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
+- [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
+- [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
+- [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。壊れた値ではフォールバックせず、特定できなければ判定不能として警告する
+- [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割
@@ -1571,7 +1682,7 @@ PR_READY
 - [x] `Unknown`の理由は列挙型で持ち、表示専用の文字列と分ける
 - [x] Mac/PC host、iPhone/iPad client
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
-- [x] 複数device同時attach時の`window-size`は`smallest`、session単位で設定(`-g`は使わない)
+- [x] 複数device同時attach時の`window-size`は`smallest`、自分の作ったwindowごとに設定(`-g`は使わない)
 - [x] tmuxのサポート下限は3.4、3.5未満はZWJ表示の警告のみで機能制限なし
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容

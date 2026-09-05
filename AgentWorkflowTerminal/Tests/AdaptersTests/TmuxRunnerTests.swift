@@ -30,6 +30,26 @@ struct TmuxRunnerTests {
     #expect(result.stdout == "ok\n")
   }
 
+  @Test("既定サーバでは -L を付けず、ユーザーが素の tmux で入れる名前空間を使う")
+  func buildsUserDefaultServerArguments() async throws {
+    let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+    let runner = try makeRunner(server: .userDefault, processRunner: spy)
+
+    _ = try await runner.run(arguments: ["list-sessions", "-F", "#{session_name}"])
+
+    #expect(
+      await spy.invocations.first?.arguments == ["-u", "list-sessions", "-F", "#{session_name}"])
+  }
+
+  @Test("既定サーバでは socket 名の検証対象が無い")
+  func skipsSocketNameValidationForUserDefaultServer() throws {
+    let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+
+    #expect(throws: Never.self) {
+      try makeRunner(server: .userDefault, processRunner: spy)
+    }
+  }
+
   @Test("解析クライアントへ選択した環境変数だけを渡す")
   func selectsClientEnvironment() async throws {
     let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
@@ -179,18 +199,18 @@ struct TmuxRunnerTests {
     let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
 
     #expect(throws: TmuxRunnerError.invalidSocketName("nested/socket")) {
-      try makeRunner(processRunner: spy, socketName: "nested/socket")
+      try makeRunner(server: .socketName("nested/socket"), processRunner: spy)
     }
   }
 
   private func makeRunner(
+    server: TmuxServer = .socketName("awt-test"),
     processRunner: any ProcessRunning,
-    socketName: String = "awt-test",
     executableCandidates: [URL]? = nil,
     isExecutableFile: @escaping @Sendable (URL) -> Bool = { _ in true }
   ) throws -> TmuxRunner {
     try TmuxRunner(
-      socketName: socketName,
+      server: server,
       processRunner: processRunner,
       executableCandidates: executableCandidates ?? [executableURL],
       parentEnvironment: parentEnvironment,

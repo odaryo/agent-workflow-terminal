@@ -104,6 +104,27 @@ orphan になり、手で片付けることもできなくなるためです。�
 この判断の結果です。
 2026-09-02 に tmux 3.4 で成功を確認しています。
 
+### git 統合テスト
+
+worktree 検出 (`GitWorktreeDetectorIntegrationTests`) は実際の `git` を起動します。tmux を使わない
+ので、tmux 統合テストとは別の環境変数で切り替えます。既定の `swift test` では走りません。
+
+```shell
+cd AgentWorkflowTerminal
+AWT_GIT_INTEGRATION=1 swift test --filter GitWorktreeDetectorIntegrationTests
+```
+
+repository は毎回 `/private/tmp/awt-git-<UUID>` に作り、`defer` で削除します。
+`NSTemporaryDirectory()` を使わないのは、返る `/var/...` を git が実体パス `/private/var/...` へ
+解決してしまい、`worktree list` の出力と作成時のパスが文字列として一致しなくなるためです。
+`GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` を `/dev/null` に向け、identity と `LC_ALL` を明示するのは
+**fixture を作るテスト側のヘルパー (`TestRepository.git`) だけ**です。被テスト側の `GitRunner` は
+この2つを設定せず `HOME` をそのまま子へ渡すので、ホストの `~/.gitconfig` を読みます
+(実測: `env -i LC_ALL=C HOME=<偽の HOME> PATH=/usr/bin:/bin git config --list --show-origin` に
+その `.gitconfig` の内容が出る)。出力形式に効く config は各 `GitReadCommand` が option で固定して
+いますが、統合テストはホストの git 設定から完全に隔離されてはいません。
+2026-09-05 に git 2.50.1 (Apple Git-155) で成功を確認しています。
+
 ## Lint / Format
 
 repository ルートの設定ファイルを使います。ツール本体はこのリポジトリでは配布していません。

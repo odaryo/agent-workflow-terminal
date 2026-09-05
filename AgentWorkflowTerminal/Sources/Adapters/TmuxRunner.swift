@@ -13,6 +13,12 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
 /// 同じ session へ入れること、つまりアプリが観測する実体とユーザーが自分の端末で見る実体が
 /// 一致することが製品の前提であるため (設計書 §4.1)。`socketName` は隔離 server を使う
 /// テストとスパイクのためにあり、こちらを選ぶとユーザー側は毎回 `-L` を要求される。
+///
+/// - Note: tmux 3.4 実測では、`TMUX_TMPDIR` は **`-L` を付けたときだけ** socket の親を変え、
+///   `-L` 無しの既定 server は `TMUX_TMPDIR` / `TMPDIR` を設定しても
+///   `/tmp/tmux-<uid>/default` のままだった。したがって、この型が子へ渡す `TMUX_TMPDIR` が
+///   `userDefault` の接続先を動かすことはない。socket 以外では、GUI 起動のアプリがシェル rc を
+///   経ていない環境を持つという差が残る。その環境をどう組み立てるかは Issue #61 の担当。
 public enum TmuxServer: Sendable, Hashable {
   case userDefault
   case socketName(String)

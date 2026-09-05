@@ -104,12 +104,110 @@ struct TmuxSessionOperationsIntegrationTests {
     }
   }
 
+  // MARK: - server が動いていない状態
+
+  /// `IsolatedTmuxServer` は常に生きた server を用意するので、この経路はそちらでは通らない。
+  /// socket ファイルを一度も作っていない状態は、tmux を使ったことがないユーザーの初回状態であり、
+  /// tmux 3.4 は `no server running on ` ではなく
+  /// `error connecting to <path> (No such file or directory)` を返す。
+  @Test("一度も起動していない server では存否が false、一覧が空になる")
+  func foldsNeverStartedServerIntoAbsence() async throws {
+    let socketName = uniqueSocketName("never-started")
+    let operations = TmuxSessionOperations(runner: try neverStartedRunner(socketName))
+
+    #expect(try await operations.exists(session: try sessionName()) == false)
+    #expect(try await operations.list().isEmpty)
+    #expect(FileManager.default.fileExists(atPath: socketPath(socketName)) == false)
+  }
+
+  @Test("一度も起動していない server では session を作らず、server も起動しない")
+  func doesNotStartTheServerFromCreate() async throws {
+    let socketName = uniqueSocketName("never-created")
+    let operations = TmuxSessionOperations(runner: try neverStartedRunner(socketName))
+
+    await #expect(throws: TmuxSessionOperationError.serverNotRunning) {
+      try await operations.create(session: try sessionName(), workingDirectory: "/private/tmp")
+    }
+    #expect(FileManager.default.fileExists(atPath: socketPath(socketName)) == false)
+  }
+
+  /// `IsolatedTmuxServer` を使わずに自分で起動・停止するのは、この経路が「server を止めた後の
+  /// socket ファイル」を必要とするためで、後片付けを他の仕組みに委ねると socket と server が
+  /// 残り得る。
+  @Test("起動後に終了して socket が残っている server も存否としては不在に畳む")
+  func foldsStoppedServerIntoAbsence() async throws {
+    let socketName = uniqueSocketName("stopped")
+    let runner = try neverStartedRunner(socketName)
+    _ = try await runner.run(
+      arguments: ["-f", "/dev/null", "new-session", "-d", "-s", "awt-temporary"])
+    _ = try await runner.run(arguments: ["kill-server"])
+    defer {
+      try? FileManager.default.removeItem(atPath: socketPath(socketName))
+    }
+
+    let operations = TmuxSessionOperations(runner: runner)
+    let socketRemains = FileManager.default.fileExists(atPath: socketPath(socketName))
+    let exists = try await operations.exists(session: sessionName())
+    let sessions = try await operations.list()
+
+    #expect(socketRemains)
+    #expect(exists == false)
+    #expect(sessions.isEmpty)
+  }
+
+  // MARK: - 途中失敗の後始末が依存している tmux の挙動
+
+  /// `create` の後始末は「`new-session` の後に失敗したら `$N` 指定で消せる」ことに依存している。
+  /// その前提を実サーバで固定する (`create` 自身は不正値を tmux へ渡す前に弾くので、この経路を
+  /// `create` 経由では起こせない)。
+  @Test("session ID 指定なら、途中失敗で残った session だけを消せる")
+  func sessionIDTargetsOnlyTheCreatedSession() async throws {
+    try await withServer("session-cleanup") { runner, workingDirectory in
+      let created = try await runner.run(
+        arguments: [
+          "new-session", "-d", "-s", "awt-leftover", "-c", workingDirectory,
+          "-P", "-F", "#{session_id}",
+        ])
+      let sessionID = created.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      #expect(sessionID.hasPrefix("$"))
+
+      // 設定の途中で失敗させる。history-limit の下限違反は tmux 側のエラー (実測)。
+      await #expect(throws: TmuxRunnerError.self) {
+        try await runner.run(
+          arguments: ["set-option", "-t", sessionID, "history-limit", "-1"])
+      }
+      #expect(
+        try await lines(runner, ["list-sessions", "-F", "#{session_name}"]).sorted()
+          == ["awt-leftover", "awt-operations"])
+
+      _ = try await runner.run(arguments: ["kill-session", "-t", sessionID])
+
+      #expect(
+        try await lines(runner, ["list-sessions", "-F", "#{session_name}"]) == ["awt-operations"])
+    }
+  }
+
   // MARK: - Helpers
 
   private func sessionName(
     _ identityPath: String = "/repo/.git/worktrees/feature-a"
   ) throws -> TmuxSessionName {
     TmuxSessionName(identity: try #require(WorktreeIdentity(rawValue: identityPath)))
+  }
+
+  /// server を起動しない runner。`IsolatedTmuxServer` を使わないので socket は作られない。
+  private func neverStartedRunner(_ socketName: String) throws -> TmuxRunner {
+    try TmuxRunner(
+      socketName: socketName,
+      processRunner: FoundationProcessRunner(),
+      executableCandidates: [try #require(IsolatedTmuxServer.executableURL())]
+    )
+  }
+
+  /// `IsolatedTmuxServer` が socket を消すときと同じ規則で組み立てる。
+  private func socketPath(_ socketName: String) -> String {
+    let parent = ProcessInfo.processInfo.environment["TMUX_TMPDIR"] ?? "/private/tmp"
+    return "\(parent)/tmux-\(getuid())/\(socketName)"
   }
 
   private func lines(_ runner: TmuxRunner, _ arguments: [String]) async throws -> [String] {

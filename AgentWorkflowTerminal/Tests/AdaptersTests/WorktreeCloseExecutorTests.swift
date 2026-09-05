@@ -171,11 +171,16 @@ struct WorktreeCloseExecutorTests {
   /// 後始末で `chmod -R u+rwX`): 管理ディレクトリ `.git/worktrees/p6` を `chmod 500` にすると
   /// `worktree remove --` は rc=255 / `error: failed to delete '<管理ディレクトリ>': Permission
   /// denied` で終わり、**作業ツリーは完全に消える**のに list には `prunable` 付きの record が残る。
-  @Test("prunable な record は「残っているが scan に載らない」として返す")
-  func reportsRetainedButNotScannableWhenTheRecordIsPrunable() async throws {
+  /// 一覧段が落とす条件は `prunable` と bare の2つで、答えは同じである。生の `-z` 出力を `cat -v`
+  /// で写した (`^@` が `\0`)。`worktree <path>^@HEAD <oid>^@branch refs/heads/p6^@prunable gitdir
+  /// file points to non-existent location^@^@` に対し、**bare な record は HEAD も branch も持たず**
+  /// `worktree <path>^@bare^@^@` だった。
+  @Test(
+    "prunable / bare な record は「残っているが scan に載らない」として返す",
+    arguments: [listedTargetAttributes + [prunableAttribute], ["bare"]])
+  func reportsRetainedButNotScannableWhenTheRecordIsPrunable(attributes: [String]) async throws {
     let stderr = "error: failed to delete '.git/worktrees/wt': Permission denied\n"
-    let listed = worktreeListOutput(
-      targetAttributes: ["prunable gitdir file points to non-existent location"])
+    let listed = worktreeListOutput(targetAttributes: attributes)
     let harness = try WorktreeCloseHarness(
       git: gitStub(
         removeWorktree: .init(exitCode: 255, stdout: "", stderr: stderr),
@@ -276,11 +281,9 @@ struct WorktreeCloseExecutorTests {
 
   @Test("消す worktree 自身を repository directory にはできない")
   func rejectsRepositoryDirectoryEqualToTheRemovedWorktree() throws {
-    #expect(
-      throws: WorktreeCloseExecutorError.repositoryDirectoryIsTheRemovedWorktree(
-        URL(fileURLWithPath: "/repo/wt"))
-    ) {
-      try WorktreeCloseHarness(repositoryDirectory: URL(fileURLWithPath: "/repo/wt"))
+    let path = URL(fileURLWithPath: "/repo/wt")
+    #expect(throws: WorktreeCloseExecutorError.repositoryDirectoryIsTheRemovedWorktree(path)) {
+      try WorktreeCloseHarness(repositoryDirectory: path)
     }
   }
 
@@ -357,6 +360,8 @@ struct WorktreeCloseExecutorTests {
 /// テストは代わりにならない (`arguments.last` の検査は timeout の変異を落とさない)。環境は
 /// `LC_ALL=C` と `HOME` / `PATH` だけを通す —— `HOME` は `core.excludesFile` 経由で
 /// 「何が ignored か」、つまり `--force` 無しで消えるものを変えるので、落としてはいけない。
+/// **`outputLimit` はこの規約の外にある** (stub が記録もしない)。足すのは Issue #139 でこの
+/// ファイルを分割するときで、いまは `file_length` の上限に張り付いていて行を増やせない。
 private func expectFixedGitInvocation(
   _ invocation: WorktreeCloseGitStub.Invocation,
   timeout: Duration,
@@ -383,18 +388,18 @@ private func refusedRemovalGitStub() -> WorktreeCloseGitStub {
     worktreeList: .init(exitCode: 0, stdout: worktreeListOutput(), stderr: ""))
 }
 
+private let listedHead = String(repeating: "e1", count: 20)
+private let listedTargetAttributes = ["HEAD \(listedHead)", "branch refs/heads/topic"]
+private let prunableAttribute = "prunable gitdir file points to non-existent location"
+
 /// `worktree list --porcelain -z` の出力。属性は `\0` 区切りで、record 間は空の属性で区切られる。
-/// `targetPath` が `nil` なら対象の record を置かない。属性の並びは git 2.50.1 の生の出力を
-/// `cat -v` で確認して写した (`^@` が `\0`): `worktree <path>^@HEAD <oid>^@branch
-/// refs/heads/p6^@prunable gitdir file points to non-existent location^@^@`
+/// `targetPath` が `nil` なら対象の record を置かない。生の出力は各テストの doc に写してある。
 private func worktreeListOutput(
-  targetPath: String? = "/repo/wt", targetAttributes: [String] = []
+  targetPath: String? = "/repo/wt", targetAttributes: [String] = listedTargetAttributes
 ) -> String {
-  let head = String(repeating: "e1", count: 20)
-  var output = "worktree /repo\0HEAD \(head)\0branch refs/heads/main\0\0"
+  var output = "worktree /repo\0HEAD \(listedHead)\0branch refs/heads/main\0\0"
   guard let targetPath else { return output }
-  output += "worktree \(targetPath)\0HEAD \(head)\0branch refs/heads/topic\0"
-  output += targetAttributes.map { $0 + "\0" }.joined() + "\0"
+  output += "worktree \(targetPath)\0" + targetAttributes.map { $0 + "\0" }.joined() + "\0"
   return output
 }
 
@@ -425,8 +430,7 @@ private struct WorktreeCloseHarness {
     tmux: TmuxSessionRunnerStub = .init(result: stubSuccess()),
     git: WorktreeCloseGitStub = gitStub(),
     repositoryDirectory: URL = URL(fileURLWithPath: "/repo"),
-    identity: String = "/repo/.git/worktrees/feature-a",
-    worktreePath: String = "/repo/wt",
+    identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
     parentEnvironment: [String: String] = [:]
   ) throws {
     let worktree = try Self.detected(identity: identity, worktreePath: worktreePath)
@@ -434,8 +438,7 @@ private struct WorktreeCloseHarness {
     self.git = git
     self.worktree = worktree
     self.executor = try WorktreeCloseExecutor(
-      repositoryDirectory: repositoryDirectory,
-      worktree: worktree,
+      repositoryDirectory: repositoryDirectory, worktree: worktree,
       sessionOperations: TmuxSessionOperations(
         runner: try TmuxRunner(
           socketName: "awt-test", processRunner: tmux,
@@ -446,25 +449,22 @@ private struct WorktreeCloseHarness {
   }
 
   func plan(
-    _ choice: WorktreeCloseChoice,
-    worktree: DetectedWorktree? = nil,
-    uncommitted: UncommittedChangesStatus = .absent,
-    merge: BranchMergeStatus = .unmerged,
+    _ choice: WorktreeCloseChoice, worktree: DetectedWorktree? = nil,
+    uncommitted: UncommittedChangesStatus = .absent, merge: BranchMergeStatus = .unmerged,
     continuation: WorktreeRemovalConfirmation.Continuation = .withoutForce
   ) throws -> WorktreeClosePlan {
     try planWorktreeClose(
       worktree: worktree ?? self.worktree, choice: choice,
-      defaultBranch: .originHead(branch: "main"),
       confirmation: WorktreeRemovalConfirmation(
+        worktree: (worktree ?? self.worktree).identity,
         inspection: .init(
           uncommittedChanges: uncommitted, ignoredFiles: .absent, unpushedCommits: .absent,
           branchMerge: merge),
-        continuation: continuation))
+        defaultBranch: .originHead(branch: "main"), continuation: continuation))
   }
 
   static func detected(
-    identity: String = "/repo/.git/worktrees/feature-a",
-    worktreePath: String = "/repo/wt",
+    identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
     branch: String? = "topic"
   ) throws -> DetectedWorktree {
     DetectedWorktree(

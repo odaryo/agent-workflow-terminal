@@ -17,11 +17,42 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
     case withoutForce
   }
 
+  /// どの worktree について確認したか。`planWorktreeClose` は対象と一致しない確認を拒否する。
+  ///
+  /// 持たないと、worktree A の Close に worktree B の検査から作った確認を渡して
+  /// `.removeWorktree(force: true)` を組める。**`--force` は git が拒否する唯一の条件を無効化する
+  /// フラグである** —— git 2.50.1 実測 (`mktemp -d` 配下の使い捨て repository): 未commit変更と
+  /// untracked ファイルを持つ worktree への `worktree remove -- <path>` は rc=128 /
+  /// `fatal: '<path>' contains modified or untracked files, use --force to delete it` で止まるが、
+  /// `--force` を足すと rc=0 で作業ツリーごと消え、未commit変更も untracked ファイルも残らなかった。
+  /// つまり A の未commit変更が、ユーザーが警告を一度も見ないまま消える。`.deleteBranch` 側は
+  /// `branch -d` が未merge branch を拒否するので同じ形の素通しにはならない。
+  ///
+  /// - Important: **担保できるのは「A について作られたと申告された確認であること」までである。**
+  ///   実際に A を検査した結果かどうかは確かめられない —— 上と同じ、public initializer を持つ
+  ///   値型としての限界である。
+  public let worktree: WorktreeIdentity
   public let inspection: WorktreeCloseInspection
+  /// `inspection.branchMerge` を計算した既定 branch。
+  ///
+  /// 検査結果と別々に渡せると、**`branchMerge` を計算した既定 branch と、選択肢4の可否
+  /// (`isBranchDeletionAvailable`) が問う既定 branch がずれ得る**。`main` に対して「マージ済み」と
+  /// 出た判定を「既定 branch は `develop`」という別の解決結果と組にすれば
+  /// `targetBranch != defaultBranch` も通り、`main` へのマージだけを根拠に `develop` 相当の
+  /// branch を消す計画が立つ。`Adapters` の検査器はこの2つを1つの答えとして返すので、
+  /// ここでも一組で持つ。
+  public let defaultBranch: DefaultBranchResolution
   public let continuation: Continuation
 
-  public init(inspection: WorktreeCloseInspection, continuation: Continuation) {
+  public init(
+    worktree: WorktreeIdentity,
+    inspection: WorktreeCloseInspection,
+    defaultBranch: DefaultBranchResolution,
+    continuation: Continuation
+  ) {
+    self.worktree = worktree
     self.inspection = inspection
+    self.defaultBranch = defaultBranch
     self.continuation = continuation
   }
 
@@ -83,6 +114,9 @@ public struct WorktreeClosePlan: Sendable, Hashable {
 public enum WorktreeClosePlanError: Error, Sendable, Hashable {
   /// 削除を伴う選択肢 (§3.4 の3・4) を、検査結果と続行確認なしに要求した。
   case removalNotConfirmed
+  /// 削除を伴う選択肢に、別の worktree について作られた確認を渡した
+  /// (`WorktreeRemovalConfirmation.worktree`)。
+  case confirmationIsForAnotherWorktree(confirmation: WorktreeIdentity, target: WorktreeIdentity)
   /// `isBranchDeletionAvailable` が許さない状態で選択肢4を要求した。選択肢3へ暗黙に格下げしない
   /// — 要求より少ない後始末を黙って行うのは、branch も消えたと信じている呼び出し側への嘘になる。
   case branchDeletionNotPermitted
@@ -112,11 +146,12 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
 ///   安定 ID と worktree B の branch 名を組にでき、計画と実行層の対象照合
 ///   (`WorktreeCloseExecutor.execute`) を通ったうえで **A の Close として B の branch が消える**。
 ///   同じ形の取り違えは実行層側 (作業ツリーのパス・tmux session 名) でも閉じてあり、規則は
-///   「`DetectedWorktree` から導ける値は別引数で受け取らない」の一つである。
+///   「`DetectedWorktree` から導ける値は別引数で受け取らない」の一つである。既定 branch を
+///   別引数で取らないのも同じ規則で、あれは検査結果と一組の値である
+///   (`WorktreeRemovalConfirmation.defaultBranch`)。
 public func planWorktreeClose(
   worktree: DetectedWorktree,
   choice: WorktreeCloseChoice,
-  defaultBranch: DefaultBranchResolution,
   confirmation: WorktreeRemovalConfirmation?
 ) throws(WorktreeClosePlanError) -> WorktreeClosePlan {
   guard !worktree.isProjectRoot else { throw .projectRootIsNotClosable }
@@ -128,6 +163,11 @@ public func planWorktreeClose(
     return WorktreeClosePlan(worktree: identity, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
     guard let confirmation else { throw .removalNotConfirmed }
+    // 対象の一致を問うのは確認を読むここだけである。§3.4 が検査と確認を課すのは選択肢3・4 だけで、
+    // 1・2 は確認そのものを要求しない。
+    guard confirmation.worktree == identity else {
+      throw .confirmationIsForAnotherWorktree(confirmation: confirmation.worktree, target: identity)
+    }
     var steps: [WorktreeCloseStep] = [
       .terminateSession, .removeWorktree(force: confirmation.forcesWorktreeRemoval),
     ]
@@ -137,7 +177,7 @@ public func planWorktreeClose(
     guard
       let branch = worktree.branch,
       isBranchDeletionAvailable(
-        targetBranch: branch, defaultBranch: defaultBranch,
+        targetBranch: branch, defaultBranch: confirmation.defaultBranch,
         merge: confirmation.inspection.branchMerge)
     else { throw .branchDeletionNotPermitted }
     steps.append(.deleteBranch(name: branch))

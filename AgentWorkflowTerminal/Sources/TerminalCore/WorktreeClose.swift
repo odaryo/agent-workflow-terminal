@@ -80,6 +80,18 @@ public struct WorktreeCloseInspection: Sendable, Hashable {
   }
 }
 
+/// §3.4 の選択肢4 (branch も削除する) を提供してよいか。
+///
+/// - Important: **3つの値が同じ worktree の同じ検査から来ていることは、ここでは確かめられない。**
+///   整合は呼び出し側の責務である —— `targetBranch` は対象の `DetectedWorktree.branch`、`merge` は
+///   その worktree の検査結果、`defaultBranch` はその `merge` を計算した既定 branch でなければ
+///   ならない。この3つを組にできる経路を閉じてあるのは `planWorktreeClose` の側で、あちらは
+///   `DetectedWorktree` と `WorktreeRemovalConfirmation` (安定 ID を持ち、検査結果と既定 branch を
+///   一組で持つ) だけを受け取り、3つとも自分で導く。UI が選択肢を出せるかを問うためにここを直接
+///   呼ぶ場合も、同じ2つの値から導くこと。
+///   誤った組で `true` になっても消えるところまでは行かない。`planWorktreeClose` が計画を組む前に
+///   同じ判定を自分の導いた3値でやり直すので、実行層へ渡る計画には載らない。誤るのは
+///   **提示する選択肢**だけである。
 public func isBranchDeletionAvailable(
   targetBranch: String?,
   defaultBranch: DefaultBranchResolution,

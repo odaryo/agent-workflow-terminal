@@ -193,6 +193,13 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 | 未push | 対象branchがupstreamを持たない、またはupstreamより先行している |
 | 未merge | 対象branchがProjectの既定branchへマージされていない |
 
+**Projectの既定branchは`git symbolic-ref refs/remotes/origin/HEAD`で決め、無ければmain worktreeが
+その時点でチェックアウトしているbranchを使う。** remoteがあってもなくても決まり、branch名を
+`main`／`master`などに決め打ちしない。`origin/HEAD`はcloneのときにしか書かれず、既定branchの改名に
+追従しないため陳腐化し得るが、そのときはmain worktree側へ落ちるのではなく`origin/HEAD`の値を使う。
+どちらの経路でも既定branchを特定できなければ、未mergeを「マージ済み」と誤って判定せず、
+**判定不能として削除前に警告する**。
+
 ### 3.5 安定IDとtmux session命名
 
 **worktreeの安定IDは、そのworktreeの管理ディレクトリの絶対パスとする。** 通常のworktreeでは`<git common dir>/worktrees/<name>`、Project Rootでは`<git common dir>`そのものである。
@@ -1610,6 +1617,7 @@ PR_READY
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
+- [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。特定できなければ判定不能として警告する
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割

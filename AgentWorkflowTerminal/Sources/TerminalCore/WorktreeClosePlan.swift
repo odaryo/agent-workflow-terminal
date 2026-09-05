@@ -31,6 +31,12 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   /// - Important: **担保できるのは「A について作られたと申告された確認であること」までである。**
   ///   実際に A を検査した結果かどうかは確かめられない —— 上と同じ、public initializer を持つ
   ///   値型としての限界である。
+  ///
+  ///   照合できるのは「どの worktree か」だけで、**「いつの検査か」は照合できない。** 同じ
+  ///   worktree の古い確認は通る。承諾の後にユーザーが新しく変更を加えれば、その変更について
+  ///   警告を一度も見ないまま `--force` が撃たれる。他の step には git 側の防波堤があり
+  ///   (`branch -d` は未merge を拒否する、終了する session は executor 自身の識別子から導出する)、
+  ///   **古さが実害になるのは `--force` だけである。** 確認を使い回さないのは呼び出し側の責務。
   public let worktree: WorktreeIdentity
   public let inspection: WorktreeCloseInspection
   /// `inspection.branchMerge` を計算した既定 branch。

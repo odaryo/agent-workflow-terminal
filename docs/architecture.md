@@ -190,13 +190,39 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 | 検査 | 判定 |
 |---|---|
 | 未commit変更 | 対象worktreeに変更またはuntrackedファイルがある |
+| ignoredファイル | 対象worktreeにgitignore済みのファイルがある |
 | 未push | 対象branchがupstreamを持たない、またはupstreamより先行している |
 | 未merge | 対象branchがProjectの既定branchへマージされていない |
 
-**Projectの既定branchは`git symbolic-ref refs/remotes/origin/HEAD`で決め、無ければmain worktreeが
-その時点でチェックアウトしているbranchを使う。** remoteがあってもなくても決まり、branch名を
-`main`／`master`などに決め打ちしない。`origin/HEAD`はcloneのときにしか書かれず、既定branchの改名に
-追従しないため陳腐化し得るが、そのときはmain worktree側へ落ちるのではなく`origin/HEAD`の値を使う。
+**ignoredファイルを独立した検査にするのは、`git worktree remove`が`--force`なしでこれらを消すため
+である。** 実測では、`.gitignore`済みの`.env`を持つworktreeが「変更なし」と判定され、
+`worktree remove`はrc=0で`.env`ごと削除した。task worktreeがper-worktreeの`.env`やローカル設定を
+持つのは普通の運用であり、「変更なし」と表示したまま消えるのは、この節が防ごうとしている事故
+そのものである。
+
+**upstream設定を持ちながら追跡refが失われている状態は、未pushともpush済みとも別の第三の状態として
+扱う。** 上流branchが削除されて`git fetch --prune`が走った直後、つまりPRがマージされてユーザーが
+Closeを押す最も普通のタイミングで起きる。git status porcelain v2はこのとき`# branch.upstream`を
+出しながら`# branch.ab`を出さないため、先行しているかを答えられない。これを検査の失敗として扱うと
+最も普通の経路で毎回「検査に失敗しました」を出すことになるので、確定した状態として表示し、警告の
+要否は追跡先が無いこと自体を根拠にする。
+
+**Projectの既定branchは`git symbolic-ref --quiet refs/remotes/origin/HEAD`で決め、得られなければ
+main worktreeがその時点でチェックアウトしているbranchを使う。** remoteがあってもなくても決まり、
+branch名を`main`／`master`などに決め打ちしない。`--quiet`を付けるのは、`origin/HEAD`が無いときに
+素の`symbolic-ref`が`fatal:`とrc=128を返し、通常の失敗と区別できないためである(実測:
+`--quiet`ではrc=1)。
+
+`origin/HEAD`はgit 2.46以降`git fetch`が作成・更新するため、cloneしていないremoteでも最初のfetchで
+生え、上流の既定branchの改名にも追従する(実測)。それでも陳腐化し得る経路は残るが、そのとき
+main worktree側へ落とすと、一時的に別branchをチェックアウトしているmain worktreeで判定がずれる。
+**`origin/HEAD`が値を返す限りその値を使い、main worktreeへは落とさない。**
+
+**フォールバックするのは`origin/HEAD`が「無い」ときだけで、「壊れている」ときはしない。**
+値が`refs/remotes/<remote>/`で始まらないなど解釈できない場合は、main worktreeへ落ちずに判定不能と
+する。壊れた値を黙って捨てて別の答えを出すと、既定branchの出どころがユーザーに見えないまま
+削除可否が決まる。
+
 どちらの経路でも既定branchを特定できなければ、未mergeを「マージ済み」と誤って判定せず、
 **判定不能として削除前に警告する**。
 
@@ -1617,7 +1643,8 @@ PR_READY
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
-- [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。特定できなければ判定不能として警告する
+- [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。壊れた値ではフォールバックせず、特定できなければ判定不能として警告する
+- [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割

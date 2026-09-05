@@ -13,9 +13,10 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// (`TmuxSessionOperations.isServerAbsent` に実測した文字列がある)。
   case serverNotRunning
   /// tmux は存在しないディレクトリを渡されても exit 0 で session を作り、pane の cwd は
-  /// `$HOME` へ落ちる (tmux 3.4 実測)。通常ファイルを渡した場合も同じ。
+  /// `$HOME` へ落ちる (tmux 3.4 実測)。通常ファイルと相対パスでも同じ場所へ落ちる。
   case workingDirectoryNotFound(String)
-  /// tmux の引数解釈で値が変わってしまう作業ディレクトリ (`TmuxSessionOperations.isSafeArgument`)。
+  /// pane がその値を得られないと分かっている作業ディレクトリ
+  /// (`TmuxSessionOperations.isSafeWorkingDirectory`)。
   case invalidWorkingDirectory(String)
   /// tmux が受け付けない `history-limit` (`TmuxSessionOperations.historyLimitRange`)。
   case invalidHistoryLimit(Int)
@@ -118,7 +119,14 @@ public struct TmuxSessionOperations: Sendable {
   ///   起動できないからではなく、起動してしまうと `TmuxRunner` が渡す限定環境
   ///   (`LC_ALL=C` と `HOME` / `PATH` / `TMUX_TMPDIR` だけ) がユーザーの既定 server の
   ///   global environment になり、ユーザー自身が素の端末で作る pane まで巻き込むからである。
-  ///   どんな環境で server を起動するかは Issue #61 が扱う。
+  ///   **この guard で塞げるのはそこまでで、作った session の環境は限定環境のままになる。**
+  ///   server が動いていても `update-environment` (既定8変数) は `new-session` のたびに
+  ///   クライアント環境を session environment へ写し、クライアントに無い変数は明示的に unset する。
+  ///   限定環境から作った session の `show-environment` は実測で `-DISPLAY` `-KRB5CCNAME`
+  ///   `-SSH_AGENT_PID` `-SSH_ASKPASS` `-SSH_AUTH_SOCK` `-SSH_CONNECTION` `-WINDOWID`
+  ///   `-XAUTHORITY` の8行だけを返し、pane には `SSH_AUTH_SOCK` が無い。同じ server に
+  ///   ユーザー自身が作った session には残る。agent pane からの `git push` が通らない害は
+  ///   この guard では消えていない。どの環境で server を起動し session へ何を渡すかは Issue #61。
   /// - Important: 探索から作成までの競合窓は残る。server の存在を確かめてから `new-session` を
   ///   撃つまでの間に server が落ちると、`new-session` が server を起動してしまう。連鎖の先頭に
   ///   `has-session` を置いても塞げないことは実測済み (server 不在の socket へ
@@ -127,6 +135,12 @@ public struct TmuxSessionOperations: Sendable {
   ///   後始末にも失敗したときだけ `leftoverSession` になる。
   /// - Note: 残る window の index は `base-index` に従う (既定 `0` なら 1、`base-index 1` なら 2。
   ///   いずれも実測)。指定は `<id>:^` と `<id>:` で行うので番号には依存しない。
+  /// - Note: `-s` の session 名も `-c` と同じ format 展開を通る (実測: `new-session -s 'awt-#{host}'`
+  ///   は `awt-RyotaronoMacBook-Pro-10_local` という名前の session を作った)。それでも escape も
+  ///   検証もしないのは、§3.5 の導出規則が `awt-` + `[A-Za-z0-9_-]` の slug + 16進 hash しか作らず、
+  ///   `#` が現れないためである。§3.5 が `#` を許す方向へ広がったら escape だけでは足りない
+  ///   — 名前は `-t "=<name>"` の完全一致指定と stderr の照合 (`mapFailure`) にも使うので、
+  ///   展開後の名前とこちらが持つ名前が食い違う。
   public func create(
     session: TmuxSessionName,
     workingDirectory: String,
@@ -136,7 +150,7 @@ public struct TmuxSessionOperations: Sendable {
     guard Self.historyLimitRange.contains(historyLimit) else {
       throw .invalidHistoryLimit(historyLimit)
     }
-    guard Self.isSafeArgument(workingDirectory) else {
+    guard Self.isSafeWorkingDirectory(workingDirectory) else {
       throw .invalidWorkingDirectory(workingDirectory)
     }
     guard directoryExists(workingDirectory) else {
@@ -146,9 +160,10 @@ public struct TmuxSessionOperations: Sendable {
       throw .sessionAlreadyExists(session)
     }
 
+    let directoryArgument = Self.formatEscaped(workingDirectory)
     let created = try await run(
       [
-        "new-session", "-d", "-s", session.rawValue, "-c", workingDirectory,
+        "new-session", "-d", "-s", session.rawValue, "-c", directoryArgument,
         "-P", "-F", "#{session_id}",
       ],
       session: session
@@ -171,7 +186,7 @@ public struct TmuxSessionOperations: Sendable {
       _ = try await run(
         [
           "set-option", "-t", sessionID, "history-limit", String(historyLimit),
-          ";", "new-window", "-d", "-t", sessionID, "-c", workingDirectory,
+          ";", "new-window", "-d", "-t", sessionID, "-c", directoryArgument,
           ";", "kill-window", "-t", "\(sessionID):^",
           ";", "set-option", "-w", "-t", "\(sessionID):", "window-size", windowSize.rawValue,
         ],
@@ -242,11 +257,14 @@ public struct TmuxSessionOperations: Sendable {
         messageTarget: Self.messageTarget(of: target)
       )
     } catch {
-      // 既に消えているなら後始末の目的は果たされている。
-      if case .sessionNotFound = error {
-        throw cause
+      // 対象が既に消えているのと、server ごと落ちて session も道連れになったのは、後始末の目的
+      // としては同じ。後者を `leftoverSession` にすると「§4.2 / §4.4 を満たさない session が
+      // 残っている」という嘘の申告になる (実測: server 停止後の `kill-session` は
+      // `no server running on <path>` / `error connecting to <path> (...)` を返し、session は無い)。
+      switch error {
+      case .sessionNotFound, .serverNotRunning: throw cause
+      default: throw .leftoverSession(session, cause: cause, cleanupFailure: error)
       }
-      throw .leftoverSession(session, cause: cause, cleanupFailure: error)
     }
     throw cause
   }
@@ -305,14 +323,41 @@ public struct TmuxSessionOperations: Sendable {
       && stderr.hasSuffix(" (No such file or directory)\n")
   }
 
-  /// tmux は argv をコマンド列として解釈するため、末尾が `;` の引数はそこでコマンドが切れて値から
-  /// 落ち、末尾が `\` の引数は escape として食われる。どちらも tmux 3.4 実測で、**単一コマンドでも
-  /// 起きる** (`-c "<dir>;"` は `<dir>` に、`-c "<dir>\"` は `$HOME` に pane を作って rc=0 を返した)。
-  /// 実在を検証したうえで別のディレクトリに pane を作り成功を返すのは、この検証が防ごうとしている
-  /// 「黙った成功」そのものなので、tmux へ渡す前に弾く。途中の `;` は値に残る (実測) ので弾かない。
-  private static func isSafeArgument(_ value: String) -> Bool {
-    guard let last = value.last else { return false }
-    return last != ";" && last != "\\"
+  /// `formatEscaped` を通しても pane が渡した値を得られない作業ディレクトリを、tmux へ渡す前に弾く。
+  /// 別のディレクトリに pane を作って rc=0 を返すのは、この検証が防ごうとしている「黙った成功」
+  /// そのものであるため。
+  ///
+  /// 判定は tmux 3.4 に対する実測で決めた。実在するディレクトリを作ってから `create` と同じ argv を
+  /// 撃ち、pane プロセスの cwd の inode と突き合わせている (`#{pane_current_path}` は値に含まれる
+  /// `$` の前へ `\` を足し、改行を含む値は行に割れるため、照合には使えない)。弾くのは3つ。
+  ///
+  /// - 空文字: rc=0 で session ができ、pane は **tmux クライアント (= このプロセス) の cwd** へ
+  ///   落ちる。`workingDirectoryNotFound` が捉える「存在しないディレクトリ」の `$HOME` 落ちとは
+  ///   別の落ち方をするので、同じ扱いにはできない。
+  /// - 末尾が `;`: argv がそこでコマンド列として切れる。`new-session` は exit 1 と
+  ///   `unknown command: -P` を返し、escape しても変わらない。値の途中の `;` は残るので弾かない。
+  /// - `#[` を含む: `formatEscaped` が効かない唯一の入力 (理由はそちらの doc コメント)。
+  ///
+  /// 末尾が `\` の値は弾かない。tmux は argv 要素の中の `\` を escape として扱わず、末尾 `\` の
+  /// ディレクトリを実在させて `create` と同じ argv で撃つと pane の cwd はその値のままだった。
+  private static func isSafeWorkingDirectory(_ value: String) -> Bool {
+    !value.isEmpty && !value.hasSuffix(";") && !value.contains("#[")
+  }
+
+  /// tmux は `-c` の値を format として展開するため、`#` を `##` へ二重化して渡す。
+  /// これは `man tmux` の FORMATS が定める escape であり、展開で値が変わる入力
+  /// (`#{...}` / `#(...)` / `##` / `#}` / `#,` / `#` + 英字) をすべて復旧する。`#` `[` `]` `{` `}`
+  /// `(` `)` `,` `:` `\` `$` `%` `.` `?` 空白と英数字だけで作った245個のディレクトリ名で
+  /// 実測し、不一致は0だった。
+  ///
+  /// 唯一 escape できないのが `#[` で、これは `isSafeWorkingDirectory` が弾く。`#` の連続の直後が
+  /// `[` のとき、tmux はその連続を style とみなして逐語のまま出力へ写すため
+  /// (`format.c` の `format_expand1`)、`#[fg=red]` は素で通る一方 `##[fg=red]` は `##[fg=red]` の
+  /// まま出て別のパスになる (実測)。逐語で写ることに寄りかかって `#[` だけ素通しする手もあるが、
+  /// それは文書化されていない内部挙動であり、変わったときに「別のディレクトリで rc=0」という、
+  /// ここが防ごうとしている失敗へ黙って戻る。
+  private static func formatEscaped(_ value: String) -> String {
+    value.replacingOccurrences(of: "#", with: "##")
   }
 
   /// 値の出どころは `#{session_id}` だけだが、`<id>:^` のような target 構文へ埋め込むため、

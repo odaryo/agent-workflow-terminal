@@ -41,6 +41,49 @@ struct TmuxSessionOperationsIntegrationTests {
     }
   }
 
+  @Test("tmux が加工しかねない文字を含む作業ディレクトリでも、pane はそのディレクトリへ落ちる")
+  func createdPaneLandsInDirectoriesWithTmuxMetacharacters() async throws {
+    try await withServer("session-meta") { runner, workingDirectory in
+      let operations = TmuxSessionOperations(runner: runner)
+      let components = ["#{session_name}", "#S", "a##b", "#(echo x)", "#", "wt\\", "mid;dir"]
+      for (index, component) in components.enumerated() {
+        let directory = "\(workingDirectory)/\(component)"
+        try FileManager.default.createDirectory(
+          atPath: directory, withIntermediateDirectories: false)
+        let name = try sessionName("/repo/.git/worktrees/meta-\(index)")
+
+        try await operations.create(session: name, workingDirectory: directory)
+
+        #expect(
+          try await lines(
+            runner,
+            ["list-panes", "-s", "-t", "=\(name.rawValue)", "-F", "#{pane_current_path}"])
+            == [directory])
+      }
+    }
+  }
+
+  /// `TmuxSessionOperations` が `#[` だけを弾く根拠を実サーバで固定する。`create` は tmux へ渡す
+  /// 前に弾くので、この経路を `create` 経由では起こせない。
+  @Test("`#[` を含むディレクトリは `##` へ二重化すると別の場所へ pane ができる")
+  func doublingCannotEscapeAStyleIntroducer() async throws {
+    try await withServer("session-style") { runner, workingDirectory in
+      let directory = "\(workingDirectory)/#[fg=red]"
+      try FileManager.default.createDirectory(
+        atPath: directory, withIntermediateDirectories: false)
+      let doubled = directory.replacingOccurrences(of: "#", with: "##")
+
+      for (session, argument) in [("awt-style-raw", directory), ("awt-style-esc", doubled)] {
+        _ = try await runner.run(
+          arguments: ["new-session", "-d", "-s", session, "-c", argument])
+
+        let panePath = try await lines(
+          runner, ["list-panes", "-s", "-t", "=\(session)", "-F", "#{pane_current_path}"])
+        #expect((panePath == [directory]) == (argument == directory))
+      }
+    }
+  }
+
   @Test("同名 session があるときは既存 session を変更せずに専用のエラーを返す")
   func duplicateCreateLeavesTheExistingSessionUntouched() async throws {
     try await withServer("session-dup") { runner, workingDirectory in

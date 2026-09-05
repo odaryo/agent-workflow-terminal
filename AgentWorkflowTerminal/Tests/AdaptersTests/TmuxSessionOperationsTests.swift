@@ -11,6 +11,13 @@ private let serverAbsentStderrs = [
   "error connecting to /private/tmp/tmux-501/default (No such file or directory)\n",
 ]
 
+private let stubSessionID = "$3"
+
+/// 後始末の `kill-session` が「対象はもう無い」と言う2通り (実測)。指定した session ID が
+/// 消えている場合と、server ごと落ちて session も道連れになった場合。
+private let cleanupTargetGoneStderrs =
+  ["can't find session: \(stubSessionID)\n"] + serverAbsentStderrs
+
 /// 同じ `error connecting to ` の前置きを持つが、server 不在ではない失敗 (実測)。
 /// socket 名を300文字にしたときと、socket の位置に通常ファイルを置いたときに採取。
 private let notServerAbsentStderrs = [
@@ -22,8 +29,12 @@ private let notServerAbsentStderrs = [
 struct TmuxSessionOperationsTests {
   private let executableURL = URL(fileURLWithPath: "/test/bin/tmux")
   private let prefix = ["-u", "-L", "awt-test"]
-  private let workingDirectory = "/repo/wt/feature-a"
-  private let sessionID = "$3"
+  /// `#` を含むのは、`-c` の値の format 展開への対処を全 argv の検証と同じ場所で押さえるため。
+  private let workingDirectory = "/repo/wt/#feature-a"
+  private let escapedWorkingDirectory = "/repo/wt/##feature-a"
+  private let sessionID = stubSessionID
+  /// tmux 3.4 が `history-limit -1` に返す stderr。設定の途中失敗を代表させる。
+  private static let configureStderr = "value is too small: -1\n"
 
   // MARK: - 存否確認
 
@@ -66,10 +77,7 @@ struct TmuxSessionOperationsTests {
     let stub = ProcessRunnerStub(result: failure(stderr: stderr))
     let operations = try makeOperations(stub)
 
-    await #expect(
-      throws: TmuxSessionOperationError.tmux(
-        .commandFailed(exitCode: 1, stdout: "", stderr: stderr))
-    ) {
+    await #expect(throws: tmuxFailure(stderr)) {
       try await operations.exists(session: try sessionName())
     }
   }
@@ -80,10 +88,7 @@ struct TmuxSessionOperationsTests {
     let stub = ProcessRunnerStub(result: failure(stderr: stderr))
     let operations = try makeOperations(stub)
 
-    await #expect(
-      throws: TmuxSessionOperationError.tmux(
-        .commandFailed(exitCode: 1, stdout: "", stderr: stderr))
-    ) {
+    await #expect(throws: tmuxFailure(stderr)) {
       try await operations.exists(session: try sessionName())
     }
   }
@@ -93,8 +98,10 @@ struct TmuxSessionOperationsTests {
   @Test("作成は server の存在を確かめてから、session ID を狙って設定する")
   func createsSessionWithProductDefaults() async throws {
     let name = try sessionName()
-    let stub = ProcessRunnerStub(handler: createHandler(name: name, sessionID: sessionID))
-    let operations = try makeOperations(stub)
+    let stub = ProcessRunnerStub(handler: createHandler(name: name))
+    // 実在確認は escape 前の値で行う。escape 後を渡していれば `workingDirectoryNotFound` で止まる。
+    let raw = workingDirectory
+    let operations = try makeOperations(stub, directoryExists: { $0 == raw })
 
     try await operations.create(session: name, workingDirectory: workingDirectory)
 
@@ -104,14 +111,14 @@ struct TmuxSessionOperationsTests {
     #expect(
       invocations[1]
         == prefix + [
-          "new-session", "-d", "-s", name.rawValue, "-c", workingDirectory,
+          "new-session", "-d", "-s", name.rawValue, "-c", escapedWorkingDirectory,
           "-P", "-F", "#{session_id}",
         ])
     #expect(
       invocations[2]
         == prefix + [
           "set-option", "-t", sessionID, "history-limit", "10000",
-          ";", "new-window", "-d", "-t", sessionID, "-c", workingDirectory,
+          ";", "new-window", "-d", "-t", sessionID, "-c", escapedWorkingDirectory,
           ";", "kill-window", "-t", "\(sessionID):^",
           ";", "set-option", "-w", "-t", "\(sessionID):", "window-size", "smallest",
         ])
@@ -120,7 +127,7 @@ struct TmuxSessionOperationsTests {
   @Test("履歴上限と window サイズは引数で上書きできる", arguments: TmuxWindowSize.allCases)
   func createsSessionWithOverriddenLimits(windowSize: TmuxWindowSize) async throws {
     let name = try sessionName()
-    let stub = ProcessRunnerStub(handler: createHandler(name: name, sessionID: sessionID))
+    let stub = ProcessRunnerStub(handler: createHandler(name: name))
     let operations = try makeOperations(stub)
 
     try await operations.create(
@@ -134,7 +141,7 @@ struct TmuxSessionOperationsTests {
       await stub.invocations.last?.arguments
         == prefix + [
           "set-option", "-t", sessionID, "history-limit", "500",
-          ";", "new-window", "-d", "-t", sessionID, "-c", workingDirectory,
+          ";", "new-window", "-d", "-t", sessionID, "-c", escapedWorkingDirectory,
           ";", "kill-window", "-t", "\(sessionID):^",
           ";", "set-option", "-w", "-t", "\(sessionID):", "window-size", windowSize.rawValue,
         ])
@@ -197,8 +204,8 @@ struct TmuxSessionOperationsTests {
   }
 
   @Test(
-    "tmux の引数解釈で値が変わる作業ディレクトリを tmux へ渡さない",
-    arguments: ["/repo/wt;", "/repo/wt\\", ""]
+    "pane が渡した値を得られない作業ディレクトリを tmux へ渡さない",
+    arguments: ["/repo/wt;", "", "/repo/wt/#[fg=red]", "/repo/#[", "/repo/wt/a##[b"]
   )
   func rejectsWorkingDirectoryAlteredByTmux(path: String) async throws {
     let stub = ProcessRunnerStub(result: success())
@@ -210,11 +217,13 @@ struct TmuxSessionOperationsTests {
     #expect(await stub.invocations.isEmpty)
   }
 
-  @Test("途中の `;` を含む作業ディレクトリは弾かない")
-  func allowsSemicolonInsideWorkingDirectory() async throws {
+  @Test(
+    "pane がそのまま受け取れる作業ディレクトリは弾かない",
+    arguments: ["/repo/mid;dir", "/repo/wt\\", "/repo/wt/a\\b", "/repo/wt/#", "/repo/wt/#123"]
+  )
+  func allowsWorkingDirectoryPreservedByTmux(path: String) async throws {
     let name = try sessionName()
-    let path = "/repo/mid;dir"
-    let stub = ProcessRunnerStub(handler: createHandler(name: name, sessionID: sessionID))
+    let stub = ProcessRunnerStub(handler: createHandler(name: name))
 
     try await makeOperations(stub).create(session: name, workingDirectory: path)
 
@@ -242,7 +251,7 @@ struct TmuxSessionOperationsTests {
   @Test("tmux が受け付ける範囲の端は通す", arguments: [0, 2_147_483_647])
   func acceptsHistoryLimitBounds(historyLimit: Int) async throws {
     let name = try sessionName()
-    let stub = ProcessRunnerStub(handler: createHandler(name: name, sessionID: sessionID))
+    let stub = ProcessRunnerStub(handler: createHandler(name: name))
 
     try await makeOperations(stub).create(
       session: name,
@@ -258,21 +267,12 @@ struct TmuxSessionOperationsTests {
   @Test("設定に失敗したら、作った session を session ID 指定で消してから原因を投げる")
   func cleansUpAfterConfigurationFailure() async throws {
     let name = try sessionName()
-    let stderr = "value is too small: -1\n"
-    let stub = ProcessRunnerStub { [sessionID] arguments in
-      if arguments.contains("has-session") {
-        return failure(stderr: "can't find session: \(name.rawValue)\n")
-      }
-      if arguments.contains("new-session") { return success(stdout: "\(sessionID)\n") }
-      if arguments.contains("set-option") { return failure(stderr: stderr) }
-      return success()
-    }
+    let stub = ProcessRunnerStub(
+      handler: createHandler(
+        name: name, killSession: success(), rest: failure(stderr: Self.configureStderr)))
     let operations = try makeOperations(stub)
 
-    await #expect(
-      throws: TmuxSessionOperationError.tmux(
-        .commandFailed(exitCode: 1, stdout: "", stderr: stderr))
-    ) {
+    await #expect(throws: tmuxFailure(Self.configureStderr)) {
       try await operations.create(session: name, workingDirectory: workingDirectory)
     }
     #expect(
@@ -282,50 +282,34 @@ struct TmuxSessionOperationsTests {
   @Test("後始末にも失敗したら、残った session と両方の原因を返す")
   func reportsLeftoverSessionWhenCleanupFails() async throws {
     let name = try sessionName()
-    let configureStderr = "value is too small: -1\n"
     let cleanupStderr = "server exited unexpectedly\n"
-    let stub = ProcessRunnerStub { [sessionID] arguments in
-      if arguments.contains("has-session") {
-        return failure(stderr: "can't find session: \(name.rawValue)\n")
-      }
-      if arguments.contains("new-session") { return success(stdout: "\(sessionID)\n") }
-      if arguments.contains("kill-session") { return failure(stderr: cleanupStderr) }
-      return failure(stderr: configureStderr)
-    }
-    let operations = try makeOperations(stub)
+    let stub = ProcessRunnerStub(
+      handler: createHandler(
+        name: name,
+        killSession: failure(stderr: cleanupStderr),
+        rest: failure(stderr: Self.configureStderr)))
 
     await #expect(
       throws: TmuxSessionOperationError.leftoverSession(
         name,
-        cause: .tmux(.commandFailed(exitCode: 1, stdout: "", stderr: configureStderr)),
-        cleanupFailure: .tmux(.commandFailed(exitCode: 1, stdout: "", stderr: cleanupStderr))
-      )
+        cause: tmuxFailure(Self.configureStderr),
+        cleanupFailure: tmuxFailure(cleanupStderr))
     ) {
-      try await operations.create(session: name, workingDirectory: workingDirectory)
+      try await makeOperations(stub).create(session: name, workingDirectory: workingDirectory)
     }
   }
 
-  @Test("後始末の対象が既に消えていれば、元の原因だけを投げる")
-  func reportsOriginalCauseWhenSessionAlreadyGone() async throws {
+  @Test("後始末の対象が既に無ければ、元の原因だけを投げる", arguments: cleanupTargetGoneStderrs)
+  func reportsOriginalCauseWhenCleanupTargetIsGone(cleanupStderr: String) async throws {
     let name = try sessionName()
-    let configureStderr = "value is too small: -1\n"
-    let stub = ProcessRunnerStub { [sessionID] arguments in
-      if arguments.contains("has-session") {
-        return failure(stderr: "can't find session: \(name.rawValue)\n")
-      }
-      if arguments.contains("new-session") { return success(stdout: "\(sessionID)\n") }
-      if arguments.contains("kill-session") {
-        return failure(stderr: "can't find session: \(sessionID)\n")
-      }
-      return failure(stderr: configureStderr)
-    }
-    let operations = try makeOperations(stub)
+    let stub = ProcessRunnerStub(
+      handler: createHandler(
+        name: name,
+        killSession: failure(stderr: cleanupStderr),
+        rest: failure(stderr: Self.configureStderr)))
 
-    await #expect(
-      throws: TmuxSessionOperationError.tmux(
-        .commandFailed(exitCode: 1, stdout: "", stderr: configureStderr))
-    ) {
-      try await operations.create(session: name, workingDirectory: workingDirectory)
+    await #expect(throws: tmuxFailure(Self.configureStderr)) {
+      try await makeOperations(stub).create(session: name, workingDirectory: workingDirectory)
     }
   }
 
@@ -335,13 +319,13 @@ struct TmuxSessionOperationsTests {
   )
   func cleansUpWhenSessionIDIsUnreadable(stdout: String) async throws {
     let name = try sessionName()
-    let stub = ProcessRunnerStub { arguments in
-      if arguments.contains("has-session") {
-        return failure(stderr: "can't find session: \(name.rawValue)\n")
-      }
-      if arguments.contains("new-session") { return success(stdout: stdout) }
-      return success()
-    }
+    // 後始末を「対象はもう無い」で終わらせる。tmux は `-t "=<name>"` の `=` を落とした名前で
+    // 返すので (実測)、こちらが `=` 付きのまま照合していると `leftoverSession` になる。
+    let stub = ProcessRunnerStub(
+      handler: createHandler(
+        name: name,
+        newSessionStdout: stdout,
+        killSession: failure(stderr: "can't find session: \(name.rawValue)\n")))
     let operations = try makeOperations(stub)
 
     await #expect(throws: TmuxSessionOperationError.unexpectedSessionIDOutput(stdout)) {
@@ -414,10 +398,7 @@ struct TmuxSessionOperationsTests {
     let stub = ProcessRunnerStub(result: failure(stderr: stderr))
     let operations = try makeOperations(stub)
 
-    await #expect(
-      throws: TmuxSessionOperationError.tmux(
-        .commandFailed(exitCode: 1, stdout: "", stderr: stderr))
-    ) {
+    await #expect(throws: tmuxFailure(stderr)) {
       try await operations.list()
     }
   }
@@ -430,15 +411,27 @@ struct TmuxSessionOperationsTests {
     TmuxSessionName(identity: try #require(WorktreeIdentity(rawValue: identityPath)))
   }
 
-  /// 存否確認は不在、`new-session` は `sessionID`、以降は成功を返す正常系のハンドラ。
-  private func createHandler(name: TmuxSessionName, sessionID: String) -> StubHandler {
-    { arguments in
+  /// 存否確認は不在、`new-session` は `newSessionStdout`、`kill-session` は `killSession`
+  /// (省略時は `rest`)、残りは `rest` を返す。
+  private func createHandler(
+    name: TmuxSessionName,
+    newSessionStdout: String? = nil,
+    killSession: StubResult? = nil,
+    rest: StubResult = success()
+  ) -> StubHandler {
+    let stdout = newSessionStdout ?? "\(sessionID)\n"
+    return { arguments in
       if arguments.contains("has-session") {
         return failure(stderr: "can't find session: \(name.rawValue)\n")
       }
-      if arguments.contains("new-session") { return success(stdout: "\(sessionID)\n") }
-      return success()
+      if arguments.contains("new-session") { return success(stdout: stdout) }
+      if let killSession, arguments.contains("kill-session") { return killSession }
+      return rest
     }
+  }
+
+  private func tmuxFailure(_ stderr: String) -> TmuxSessionOperationError {
+    .tmux(.commandFailed(exitCode: 1, stdout: "", stderr: stderr))
   }
 
   private func makeOperations(

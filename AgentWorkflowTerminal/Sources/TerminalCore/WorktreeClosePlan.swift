@@ -55,11 +55,21 @@ public enum WorktreeCloseStep: Sendable, Hashable {
 /// `planWorktreeClose` でしか作れない。任意の step 列を組み立てて実行層へ渡す経路があると、
 /// §3.4 が選択肢4へ課した「マージ済みであること」を実行層で迂回できてしまうため。
 public struct WorktreeClosePlan: Sendable, Hashable {
+  /// どの worktree の計画か。実行層はこれと自分の対象が一致しない計画を拒否する。
+  ///
+  /// 計画が対象を持たないと、worktree A の検査と続行確認から作った `--force` 付きの計画を
+  /// worktree B の実行層へ渡せてしまい、**B は検査されていないのに消える**。同じ計画の
+  /// `.deleteBranch` は B の Close として A の branch を消す。値そのものではなく、
+  /// 「計画と実行の対象が同じであること」を確かめられるようにするために持つ。
+  ///
+  /// - Note: 「いつの検査か」(検査から実行までの間に worktree が変わる) はこの値では扱えない。
+  public let worktree: WorktreeIdentity
   public let steps: [WorktreeCloseStep]
 
   // 明示的な access level が「検査を通っていない branch 削除を実行層へ渡せない」保証そのものになる。
   // swiftlint:disable:next unneeded_synthesized_initializer
-  init(steps: [WorktreeCloseStep]) {
+  init(worktree: WorktreeIdentity, steps: [WorktreeCloseStep]) {
+    self.worktree = worktree
     self.steps = steps
   }
 }
@@ -76,7 +86,14 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
 ///
 /// ここは Close の**計画**であり、tmux も git も撃たない (docs/coding-guidelines.md §2.2)。
 /// 実行は `Adapters` の `WorktreeCloseExecutor` が行う。
+///
+/// - Important: **Inactive 化 (§3.2 の `WorktreeActivation`) はこの計画に含まれない。**
+///   §3.4 の4択はどれも Inactive 化を伴うが、それは Terminal が持つ UI／運用状態の遷移であって
+///   tmux や git への操作ではないため、`WorktreeActivation` 側の責務として分けてある。
+///   したがって `.hideFromUI` が返す空の計画は「Close として何もしなくてよい」ではなく
+///   「外部プロセスへ撃つものが無い」の意味であり、呼び出し側は空の計画でも Inactive 化を行う。
 public func planWorktreeClose(
+  worktree: WorktreeIdentity,
   choice: WorktreeCloseChoice,
   branch: String?,
   defaultBranch: DefaultBranchResolution,
@@ -84,15 +101,17 @@ public func planWorktreeClose(
 ) throws(WorktreeClosePlanError) -> WorktreeClosePlan {
   switch choice {
   case .hideFromUI:
-    return WorktreeClosePlan(steps: [])
+    return WorktreeClosePlan(worktree: worktree, steps: [])
   case .terminateSession(.keepWorktree):
-    return WorktreeClosePlan(steps: [.terminateSession])
+    return WorktreeClosePlan(worktree: worktree, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
     guard let confirmation else { throw .removalNotConfirmed }
     var steps: [WorktreeCloseStep] = [
       .terminateSession, .removeWorktree(force: confirmation.forcesWorktreeRemoval),
     ]
-    guard afterRemoval == .deleteBranch else { return WorktreeClosePlan(steps: steps) }
+    guard afterRemoval == .deleteBranch else {
+      return WorktreeClosePlan(worktree: worktree, steps: steps)
+    }
     guard
       let branch,
       isBranchDeletionAvailable(
@@ -100,6 +119,6 @@ public func planWorktreeClose(
         merge: confirmation.inspection.branchMerge)
     else { throw .branchDeletionNotPermitted }
     steps.append(.deleteBranch(name: branch))
-    return WorktreeClosePlan(steps: steps)
+    return WorktreeClosePlan(worktree: worktree, steps: steps)
   }
 }

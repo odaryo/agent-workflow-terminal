@@ -103,6 +103,12 @@ public func isBranchDeletionAvailable(
   //
   // どちらも「この worktree の branch を消した」とは言えないので、契約が決まるまで選択肢4を
   // 提供しない。`feat/refs/x` のように途中に現れる分には影響が無いので前置だけを見る。
+  //
+  // この guard は偽陰性を伴う。git 2.50.1 実測では `git branch 'refs/x/y'` が rc=0 で通り、その
+  // branch を持つ worktree の `worktree list --porcelain` は `branch refs/heads/refs/x/y` を吐く。
+  // `refs/heads/` を剥がした値は `refs/x/y` になるので、**実在する正当な branch であっても
+  // 選択肢4が永久に提供されない**。安全側なのでこのまま留めるが、Issue #142 が契約を決めるときは
+  // 「値が短縮 local branch 名か」と「値が `refs/` 前置を持つか」が別物であることを前提にする。
   guard !targetBranch.hasPrefix("refs/") else { return false }
   return targetBranch != defaultBranch
 }

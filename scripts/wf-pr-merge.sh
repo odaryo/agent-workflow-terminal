@@ -75,7 +75,7 @@ IFS=$'\t' read -r pr_state pr_is_draft pr_base pr_mergeable pr_title pr_head pr_
 [[ "$pr_base" == "main" ]] || die "PR #$pr_number の base が main ではありません (base=$pr_base、stacked PR はベース変更後にマージする運用)"
 [[ "$pr_mergeable" != "CONFLICTING" ]] || die "PR #$pr_number はコンフリクトしています (mergeable=CONFLICTING)"
 # wf-pr-create.sh を通らず作られた PR もここで捕捉する (Issue #43)。
-require_conventional_title "$pr_title" "PR #$pr_number のタイトル (gh pr edit $pr_number --title で修正可)"
+require_conventional_title "$pr_title" "PR #$pr_number のタイトル (scripts/wf-pr-edit.sh $pr_number -t で修正可)"
 
 has_fail=0
 has_pending=0

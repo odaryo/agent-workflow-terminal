@@ -47,16 +47,7 @@ git fetch --prune origin
 
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 
-# squash マージではブランチ先端が origin/main の祖先にならないため、
-# `git branch --merged origin/main` はマージ済みブランチを検出できない
-# (squash-only 運用の本リポジトリでは削除候補が1件も出ない。Issue #45 で実測)。
-# 代わりにマージ済み PR の head を gh から取得し、ローカル/リモートの ref と突き合わせる。
-# 直近200件より古い PR のブランチは対象外だが、消しすぎ側には倒れない。
-# --base main は必須。base が main 以外の PR (stacked PR の子など) は、親が main に
-# 入らないまま閉じられると squash コミットが main から到達不能なままになるため。
-merged_head_tsv=$(gh pr list --state merged --limit 200 --base main --json headRefName,headRefOid \
-  --jq '.[] | .headRefName + "\t" + .headRefOid') \
-  || die "マージ済み PR の取得に失敗しました (gh pr list)"
+load_merged_pr_heads
 
 # 他の worktree が checkout 中のブランチは `git branch -D` が拒否する。一覧に出してから
 # 失敗させないよう事前に除外するが、これは best-effort — rebase が停止中の worktree は
@@ -87,9 +78,7 @@ while IFS= read -r name; do
   # 同名ブランチが複数 PR で使われた場合はいずれかの head と一致すればマージ済みとみなす。
   # どの head とも一致しない = マージ後に push されたコミットがあるということで、
   # 削除すると未マージの作業を失うためスキップする。
-  # `$1 ""` は文字列比較の強制。awk は -v 代入値が数値に見えると数値比較に切り替わり、
-  # `007` と `7` のようなブランチ名が一致してしまう。
-  merged_oids=$(awk -F '\t' -v name="$name" '$1 "" == name "" { print $2 }' <<<"$merged_head_tsv")
+  merged_oids=$(merged_pr_head_oids "$name")
   [[ -n "$merged_oids" ]] || continue
 
   # rev-parse を引数位置に置いているため失敗しても set -e は発火しないが、

@@ -31,6 +31,8 @@
       "Bash(scripts/wf-pr-comments.sh:*)",
       "Bash(scripts/wf-pr-reply.sh:*)",
       "Bash(scripts/wf-cleanup-branches.sh:*)",
+      "Bash(scripts/wf-worktree-create.sh:*)",
+      "Bash(scripts/wf-worktree-remove.sh:*)",
       "Bash(shellcheck:*)"
     ],
     "deny": []

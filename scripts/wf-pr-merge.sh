@@ -209,7 +209,7 @@ if [[ "$current_branch" == "$pr_head" ]]; then
       git -C "$main_worktree" merge --ff-only origin/main \
         || info "警告: '$main_worktree' の main を fast-forward できませんでした。その作業ツリーで手動で更新してください"
     fi
-    info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだら 'git worktree remove' と scripts/wf-cleanup-branches.sh --yes で掃除してください"
+    info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだら scripts/wf-worktree-remove.sh '$current_branch' で掃除してください"
   fi
 fi
 

@@ -62,6 +62,8 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Close a PR without merging | `scripts/wf-pr-close.sh` |
 | Read / reply to PR comments | `scripts/wf-pr-comments.sh` / `scripts/wf-pr-reply.sh` |
 | Clean up merged branches | `scripts/wf-cleanup-branches.sh` |
+| worktree を作成 | `scripts/wf-worktree-create.sh` |
+| worktree とローカルブランチを削除 | `scripts/wf-worktree-remove.sh` |
 
 Both agents and humans perform these operations through the scripts, never through raw `git`/`gh` write commands. If a request can't be expressed through a script, fix the script — don't route around it with a raw command.
 

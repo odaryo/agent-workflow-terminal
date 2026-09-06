@@ -37,7 +37,11 @@ struct Frame {
   let ts: Double
   let title: String
   let screen: String?
+  /// pane 配下のプロセス名。recorder の `descendants()` は pane_pid 自身を含まないため、
+  /// 製品の `TmuxAgentSignalSource.processTreeNames(of:rows:)` に合わせて
+  /// `pane_current_command` を呼び出し側で足す。
   let procNames: Set<String>
+  let paneCommand: String
   let dead: Bool
 }
 
@@ -51,7 +55,9 @@ func loadFrames(_ dir: URL) -> [Frame] {
     guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
       let ts = obj["ts"] as? Double
     else { continue }
-    let fmt = obj["fmt"] as? [String: Any] ?? [:]
+    // recorder が pane を観測できなかったフレーム (`{"ts":…, "error":…}`)。Agent の状態では
+    // なく記録側の失敗なので、観測が無かったものとして落とす。
+    guard let fmt = obj["fmt"] as? [String: Any] else { continue }
     var names: Set<String> = []
     for p in (obj["procs"] as? [[String: Any]] ?? []) {
       if let comm = p["comm"] as? String {
@@ -61,7 +67,8 @@ func loadFrames(_ dir: URL) -> [Frame] {
     frames.append(
       Frame(
         ts: ts, title: fmt["pane_title"] as? String ?? "", screen: obj["screen"] as? String,
-        procNames: names, dead: (fmt["pane_dead"] as? String) == "1"))
+        procNames: names, paneCommand: fmt["pane_current_command"] as? String ?? "",
+        dead: (fmt["pane_dead"] as? String) == "1"))
   }
   return frames
 }
@@ -69,10 +76,13 @@ func loadFrames(_ dir: URL) -> [Frame] {
 func adapter(for run: String) -> (any AgentAdapter)? {
   if run.hasPrefix("claude") { return ClaudeCodeAdapter() }
   if run.hasPrefix("codex") { return CodexAdapter() }
+  // fallback は pane プロセスそのものを Agent 扱いする。名前は記録上の
+  // `pane_current_command` の実測値 (python3 は "Python" と出る)。
   if run.hasPrefix("fallback") {
     if run.contains("bash") { return ProcessDetectionFallbackAdapter(processNames: ["bash"]) }
-    if run.contains("python3") { return ProcessDetectionFallbackAdapter(processNames: ["python3"]) }
+    if run.contains("python3") { return ProcessDetectionFallbackAdapter(processNames: ["Python"]) }
     if run.contains("top") { return ProcessDetectionFallbackAdapter(processNames: ["top"]) }
+    if run.contains("vim") { return ProcessDetectionFallbackAdapter(processNames: ["vim"]) }
   }
   return nil
 }
@@ -99,17 +109,26 @@ func replayRecords(run: String, dir: URL) -> [Observed] {
   var tracker = ScreenChange()
   var out: [Observed] = []
   for f in loadFrames(dir) {
+    let names = f.procNames.union([f.paneCommand])
     let liveness: AgentLiveness =
-      f.dead || f.procNames.isDisjoint(with: ad.processNames) ? .absent : .alive
+      f.dead || names.isDisjoint(with: ad.processNames) ? .absent : .alive
     if liveness == .absent {
       tracker.forget()
       // §5.2: Agent が居ない worktree の代表状態は Idle。
       out.append(Observed(ts: f.ts, category: .idle, state: .idle))
       continue
     }
+    // 画面を取れなかったフレームで "" を入れると画面が変化したことになり、復帰直後が
+    // working に化ける。実路は capture 失敗時に forget して nil を渡す。
+    var elapsed: TimeInterval?
+    if let screen = f.screen {
+      elapsed = tracker.observe(screen, at: f.ts)
+    } else {
+      tracker.forget()
+    }
     let signals = AgentSignals(
       paneTitle: f.title, screenText: f.screen,
-      secondsSinceScreenChange: tracker.observe(f.screen ?? "", at: f.ts),
+      secondsSinceScreenChange: elapsed,
       observedAt: Date(timeIntervalSince1970: f.ts))
     switch ad.classify(signals: signals, liveness: liveness) {
     case .absent: out.append(Observed(ts: f.ts, category: .idle, state: .idle))
@@ -178,7 +197,8 @@ func loadTSV(_ path: String) -> [(String, [Observed])] {
 // MARK: - 安定化と指標
 
 enum Rule { case asWritten, generalized }
-nonisolated(unsafe) var rule = Rule.asWritten
+/// 既定は確定した規則 (§12.2)。`Working` 起点だけに限る案は比較表でのみ使う。
+nonisolated(unsafe) var rule = Rule.generalized
 
 func isHeld(from: WorktreeStateCategory, to: WorktreeStateCategory) -> Bool {
   switch rule {
@@ -282,7 +302,7 @@ if shouldDump {
   print("書き出した: \(tsvPath)")
 }
 
-let candidates: [Double] = [0, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 15, 20, 30]
+let candidates: [Double] = [0, 0.5, 1, 2, 3, 4, 5, 6, 8, 9, 10, 15, 20, 30]
 var totalMinutes = 0.0
 var allGaps: [Double] = []
 var residual: [Double: Int] = [:]
@@ -320,11 +340,14 @@ print(
 print("8秒より長い中断: \(sorted.filter { $0 > 8 }.map { String(format: "%.2f", $0) })")
 print("昇格 (Needs Attention / Ready for Review) が保持で変化した回数: \(promotionMismatch)")
 
-print("\nhold_s\t表示遷移/min\t残る中断")
+print("\nhold_s\t表示遷移/min\t残る中断\tその長さ")
 for t in candidates {
+  var gaps: [Double] = []
+  for (_, obs) in dataset { gaps += workingInterruptions(stabilize(obs, hold: t)) }
+  let shown = gaps.sorted().suffix(8).map { String(format: "%.2f", $0) }
   print(
     "\(t)\t\(String(format: "%.2f", Double(transitions[t] ?? 0) / totalMinutes))\t"
-      + "\(residual[t] ?? 0)")
+      + "\(residual[t] ?? 0)\t\(shown)")
 }
 
 print("\n=== 保持の対象範囲の比較 (表示が5秒未満で入れ替わった idle / unknown の回数) ===")
@@ -332,7 +355,7 @@ print("rule\thold_s\t短い idle\t短い unknown\t表示遷移/min")
 for r in [Rule.asWritten, Rule.generalized] {
   rule = r
   let label = r == .asWritten ? "Working起点のみ" : "idle/unknownへ全部"
-  for t in [0.0, 5, 8, 10, 15] {
+  for t in [0.0, 5, 8, 9, 10, 15] {
     var shortIdle = 0
     var shortUnknown = 0
     var trans = 0

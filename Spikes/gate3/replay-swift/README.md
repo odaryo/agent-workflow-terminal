@@ -24,6 +24,21 @@ TSV は状態が変わったフレームだけを持ち、再生時に 250ms 格
 recorder の実際の間隔には揺らぎがあるため、**個々の時刻は最大 1 フレーム (250ms) ずれる**。
 表の結論 (どの保持時間で中断が何件残るか、昇格が遅れないか) は一致する。
 
+## 記録側と製品側のモデル差 (実測して合わせたもの)
+
+- **liveness に pane プロセス自身を含める。** recorder の `descendants()` は `children[pid]` から
+  辿るため pane_pid 自身を含まないが、製品の `TmuxAgentSignalSource.processTreeNames(of:rows:)` は
+  pane_pid 自身から辿る。fallback の 4 run は bash / Python / top / vim を pane プロセスとして
+  直接動かしており `procs` が常に空のため、合わせないと `ProcessDetectionFallbackAdapter` へ
+  1 フレームも届かない。集計値は変わらない (定数 run なので遷移を生まない) が、
+  「3 つの Adapter を当てた」が事実にならない。
+- **recorder のエラーフレームを落とす。** `codex-error-startup-r1` の 158 フレームのうち 132 は
+  `{"ts":…, "error":"can't find window: …"}` で、Agent の状態ではなく記録側の失敗。
+  観測が無かったものとして除く。
+- **画面を取れなかったフレームで空文字を入れない。** 実路は capture 失敗時に
+  `forget(paneID:)` して `secondsSinceScreenChange` を `nil` にする。空文字を入れると
+  「画面が変化した」ことになり、復帰直後のフレームが `working` に化ける。
+
 ## 何を測っているか
 
 - **working の中断**: `Working` 表示が `Idle` / `Unknown` に割り込まれて `Working` へ戻るまでの長さ。

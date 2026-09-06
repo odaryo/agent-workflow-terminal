@@ -285,7 +285,7 @@ codex-error-startup-r1	0.000	working	working
 codex-error-startup-r1	2.026	idle	idle
 codex-error-startup-r1	5.582	unknown	unknown
 codex-error-startup-r1	5.834	idle	idle
-codex-error-startup-r1	39.892	END	END
+codex-error-startup-r1	6.341	END	END
 codex-question-r1	0.000	idle	idle
 codex-question-r1	0.508	working	working
 codex-question-r1	1.521	idle	idle
@@ -293,9 +293,11 @@ codex-question-r1	15.502	unknown	unknown
 codex-question-r1	16.374	working	working
 codex-question-r1	19.160	completed	readyForReview
 codex-question-r1	89.828	END	END
-fallback-fb-bin-bash---	0.000	idle	idle
+fallback-fb-bin-bash---	0.000	unknown	unknown
 fallback-fb-bin-bash---	19.808	END	END
-fallback-fbpython3--q--	0.000	idle	idle
+fallback-fbpython3--q--	0.000	unknown	unknown
 fallback-fbpython3--q--	19.785	END	END
-fallback-fbtop--l-0-	0.000	idle	idle
+fallback-fbtop--l-0-	0.000	unknown	unknown
 fallback-fbtop--l-0-	19.798	END	END
+fallback-fbvim--u------	0.000	unknown	unknown
+fallback-fbvim--u------	19.869	END	END

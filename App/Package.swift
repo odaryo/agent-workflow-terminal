@@ -36,7 +36,11 @@ let package = Package(
     ),
     .executableTarget(
       name: "AgentWorkflowTerminalApp",
-      dependencies: ["GhosttyRenderer"],
+      dependencies: [
+        "GhosttyRenderer",
+        .product(name: "Adapters", package: "AgentWorkflowTerminal"),
+        .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
+      ],
       swiftSettings: commonSwiftSettings
     ),
   ],

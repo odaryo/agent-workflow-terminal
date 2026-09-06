@@ -114,6 +114,8 @@ Application
 
 Project登録時に、Project Root用の常設tmux sessionを作成する。
 
+ただし**bare repositoryをProject Rootに持つレイアウトでは、Project RootをP1の対象としない**。`repo.git`の周りにworktreeを並べる運用ではProject Rootに作業ツリーが存在せず、タブのcwdもtmux sessionの作業ディレクトリも決められないためである。bare entryを除外する根拠は「安定IDを引けない」ことではない — bare repositoryでも`rev-parse --git-dir --git-common-dir`はrc=0で使える安定IDを返す(実測)。この場合Projectは`projectRoot == nil`となり、上位レイヤはProject Rootタブを持たないProjectを正常系として扱う(§3.2)。bare Projectへ作業ディレクトリを与えるかどうかは、Project Rootの常設session自体を実装する段階で改めて決める。
+
 Project Rootは次の用途を持つ。
 
 - repository全体の調査
@@ -159,6 +161,11 @@ Dedicated tmux session and Task Tab become available
 - 既存・過去・別用途のworktreeはInactiveとして保持できる。
 - AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。
 - Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
+- 検出できたが作業ツリーへ到達できないworktreeは`到達不能`として保持する。
+
+**`到達不能`はActive/Inactiveと直交する第3の軸ではなく、表示上はInactive相当として扱う。** タブは一覧から消さずに残し、グレーアウトして選択不可とする。attach先の作業ディレクトリが実在しない以上Active化できないが、可搬ボリュームやネットワーク共有へ置いたworktreeを`git worktree lock`することはgit自身が推奨しており、作業ツリーが一時的に消える運用は異常系ではなく通常運用に現れるためである。
+
+**検出結果は「worktreeが消えた」と「今回は観測できなかった」を区別できる形で上位へ渡す。** 両者を同一視すると、ボリュームが戻ったときに同じworktreeが新規出現として扱われ、下記の自動Active化によってActive/Inactiveの区別が失われる。到達不能の間はTerminalが保持しているActive/Inactiveをそのまま保つ。
 
 **アプリが観測している間に新規出現したworktreeは自動的にActive化する。** Project登録後の初回スキャンで見つかったworktreeはすべてInactiveから始め、自動Active化の対象は「観測中に新しく現れたworktree」に限る。`+ New Task`からAgentが作ったworktreeを人が改めて選ぶ手間を無くしつつ、登録時点で既に存在していた過去のworktreeが一斉にタブ化する事故を防ぐためである。
 
@@ -1663,6 +1670,8 @@ PR_READY
 - [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は安定IDだけから導出する`awt-<slug>-<安定IDのSHA-256先頭8桁>`
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
+- [x] 作業ツリーへ到達できないworktreeは`到達不能`として保持し、タブは残すがグレーアウトして選択不可。検出結果は消失と未観測を区別してActive/Inactiveを保つ
+- [x] bare repositoryをProject Rootに持つレイアウトではProject Rootを持たない(`projectRoot == nil`を正常系として扱う)
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
 - [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。壊れた値ではフォールバックせず、特定できなければ判定不能として警告する
 - [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う

@@ -103,6 +103,7 @@ private struct AppDependencies: Sendable {
 
 @MainActor
 private final class AppModel: ObservableObject {
+  @Published private(set) var projectRoot: DetectedWorktree?
   @Published private(set) var worktrees: [TaskWorktree] = []
   @Published var selectedIdentity: WorktreeIdentity?
   @Published var openedIdentities: Set<WorktreeIdentity> = []
@@ -130,14 +131,17 @@ private final class AppModel: ObservableObject {
       for failure in scan.failures {
         NSLog("[app] worktree の検出に失敗: \(String(describing: failure))")
       }
-      worktrees =
-        reconcileDetectedWorktrees(detected: scan.detected, previous: nil)
-        .inventory.taskWorktrees
-      if let first = worktrees.first {
+      let inventory = reconcileDetectedWorktrees(detected: scan.detected, previous: nil).inventory
+      projectRoot = inventory.projectRoot
+      worktrees = inventory.taskWorktrees
+      if let projectRoot {
+        selectedIdentity = projectRoot.identity
+        openedIdentities.insert(projectRoot.identity)
+      } else if let first = worktrees.first {
         selectedIdentity = first.identity
         openedIdentities.insert(first.identity)
       } else if message == nil {
-        message = "タスク worktree がありません。"
+        message = "worktree がありません。"
       }
     } catch {
       let detail = "worktree を検出できません: \(error)"
@@ -150,6 +154,12 @@ private final class AppModel: ObservableObject {
     selectedIdentity = worktree.identity
     openedIdentities.insert(worktree.identity)
   }
+
+  func selectProjectRoot() {
+    guard let projectRoot else { return }
+    selectedIdentity = projectRoot.identity
+    openedIdentities.insert(projectRoot.identity)
+  }
 }
 
 private struct ProjectView: View {
@@ -157,9 +167,17 @@ private struct ProjectView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      if !model.worktrees.isEmpty {
+      if model.projectRoot != nil || !model.worktrees.isEmpty {
         ScrollView(.horizontal) {
           HStack(spacing: 4) {
+            if let projectRoot = model.projectRoot {
+              ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
+                model.selectProjectRoot()
+              }
+              if !model.worktrees.isEmpty {
+                Divider().frame(height: 22).padding(.horizontal, 2)
+              }
+            }
             ForEach(model.worktrees, id: \.identity) { worktree in
               WorktreeTab(
                 worktree: worktree,
@@ -182,9 +200,16 @@ private struct ProjectView: View {
           description: Text(message))
       } else {
         ZStack {
+          if let projectRoot = model.projectRoot,
+            model.openedIdentities.contains(projectRoot.identity)
+          {
+            TerminalTabContent(worktree: projectRoot, tmuxExecutable: model.tmuxExecutable)
+              .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
+              .allowsHitTesting(model.selectedIdentity == projectRoot.identity)
+          }
           ForEach(model.worktrees, id: \.identity) { worktree in
             if model.openedIdentities.contains(worktree.identity) {
-              TerminalTabContent(worktree: worktree, tmuxExecutable: model.tmuxExecutable)
+              TerminalTabContent(worktree: worktree.detected, tmuxExecutable: model.tmuxExecutable)
                 .opacity(model.selectedIdentity == worktree.identity ? 1 : 0)
                 .allowsHitTesting(model.selectedIdentity == worktree.identity)
             }
@@ -193,6 +218,23 @@ private struct ProjectView: View {
       }
     }
     .task { await model.load() }
+  }
+}
+
+private struct ProjectRootTab: View {
+  let selected: Bool
+  let action: () -> Void
+
+  var body: some View {
+    Button(action: action) {
+      Label("Project Root", systemImage: "shippingbox")
+        .fontWeight(.medium)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(selected ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 6))
+    }
+    .buttonStyle(.plain)
   }
 }
 
@@ -253,7 +295,7 @@ private struct WorktreeTab: View {
 }
 
 private struct TerminalTabContent: View {
-  let worktree: TaskWorktree
+  let worktree: DetectedWorktree
   let tmuxExecutable: URL?
 
   var body: some View {
@@ -262,9 +304,9 @@ private struct TerminalTabContent: View {
         command: [
           tmuxExecutable.path, "-u", "new-session", "-A", "-s",
           TmuxSessionName(identity: worktree.identity).rawValue,
-          "-c", worktree.detected.worktreePath,
+          "-c", worktree.worktreePath,
         ],
-        workingDirectory: worktree.detected.worktreePath
+        workingDirectory: worktree.worktreePath
       )
     } else {
       ContentUnavailableView("tmux を利用できません", systemImage: "terminal")

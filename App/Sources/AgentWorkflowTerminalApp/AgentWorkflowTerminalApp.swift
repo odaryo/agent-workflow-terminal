@@ -151,8 +151,8 @@ private final class AppModel: ObservableObject {
   }
 
   /// 到達不能な worktree を開かないのは、`tmux new-session -c <存在しないディレクトリ>` が
-  /// エラーにならず client の cwd ($HOME) へ黙って落ちるためである (tmux 3.4 実測: exit 0 で
-  /// session ができ、`pane_current_path` が `$HOME` になる)。そこで agent を走らせると、
+  /// エラーにならず `$HOME` へ黙って落ちるためである (tmux 3.4 実測: client の cwd が
+  /// `/private/tmp` でも exit 0 で session ができ、`pane_current_path` は `$HOME` になる)。そこで agent を走らせると、
   /// worktree の名前を持つタブが実際には別のディレクトリで作業することになる。しかも
   /// `new-session -A` なので、その誤った session に以後ずっと再 attach され続ける。
   func select(_ worktree: TaskWorktree) {

@@ -12,6 +12,8 @@ public struct DetectedWorktree: Sendable, Hashable {
   /// main worktree であること。Project Root は Task worktree と別枠であり (§2.3)、
   /// Active/Inactive の対象にしない。
   public let isProjectRoot: Bool
+  /// `false` の間も安定 ID と Active/Inactive は保持する (設計書 §3.2)。
+  ///
   /// - Important: `false` は「作業ツリーが実在しない」ことの証明ではない。観測側の判定は
   ///   作業ツリーのパスの metadata 読み取りに依存しており、macOS 26.5 実測では MAC ポリシーが
   ///   metadata の読み取りだけを拒否すると、`access(X_OK)` と `chdir` は成功する実在の worktree

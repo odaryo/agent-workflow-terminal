@@ -49,7 +49,15 @@ nwo() {
 
 # squash マージは PR タイトルがそのまま main のコミットログになるため、
 # commit と PR の両方に同じ形式を課す (Issue #43)。
-WF_CONVENTIONAL_PATTERN='^(feat|fix|docs|refactor|test|chore|ci|build|perf|style)(\([^)]+\))?!?: .+'
+WF_CONVENTIONAL_TYPES='feat|fix|docs|refactor|test|chore|ci|build|perf|style'
+WF_CONVENTIONAL_PATTERN="^(${WF_CONVENTIONAL_TYPES})(\\([^)]+\\))?!?: .+"
+# spike は Conventional Commits の type ではないが、検証作業用ブランチで使用する
+# (実績: spike/issue-18-gate3-plan)。
+WF_WORKTREE_BRANCH_PATTERN="^(${WF_CONVENTIONAL_TYPES}|spike)/[^/]+$"
+require_worktree_branch() {
+  [[ "$1" =~ $WF_WORKTREE_BRANCH_PATTERN ]] \
+    || die "ブランチ名は <type>/<slug> 形式で指定してください: $1"
+}
 require_conventional_title() {
   [[ "$1" =~ $WF_CONVENTIONAL_PATTERN ]] \
     || die "$2が Conventional Commits 形式ではありません: $1"

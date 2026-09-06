@@ -209,7 +209,9 @@ if [[ "$current_branch" == "$pr_head" ]]; then
       git -C "$main_worktree" merge --ff-only origin/main \
         || info "警告: '$main_worktree' の main を fast-forward できませんでした。その作業ツリーで手動で更新してください"
     fi
-    info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだら scripts/wf-worktree-remove.sh '$current_branch' で掃除してください"
+    main_worktree_path=$(git rev-parse --path-format=absolute --git-common-dir)
+    main_worktree_path=$(cd -- "$(dirname -- "$main_worktree_path")" && pwd -P)
+    info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだら cd '$main_worktree_path' && scripts/wf-worktree-remove.sh '$current_branch' で掃除してください"
   fi
 fi
 
@@ -229,7 +231,7 @@ if [[ "$delete_local" -eq 1 ]]; then
       # checkout 中のブランチは git が削除を拒否する (rc=1、副作用なし。実測)。
       # main と同じ理由でここも事前判定せず、失敗を検出手段として使う。
       git branch -D "$pr_head" \
-        || info "警告: ローカルブランチ '$pr_head' を削除できませんでした。作業ツリーが checkout 中の可能性があります (その作業ツリーを削除してから scripts/wf-cleanup-branches.sh --yes)"
+        || info "警告: ローカルブランチ '$pr_head' を削除できませんでした。作業ツリーが checkout 中の可能性があります (メイン作業ツリーから scripts/wf-worktree-remove.sh '$pr_head')"
     else
       info "警告: ローカルブランチ '$pr_head' はマージした PR の head と一致しないため削除をスキップしました (local=$local_head_oid, pr_head=$pr_head_oid)"
     fi

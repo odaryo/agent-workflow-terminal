@@ -19,11 +19,19 @@ EOF
 branch=""
 base="origin/main"
 dry_run=0
+end_options=0
 
 while [[ $# -gt 0 ]]; do
+  if [[ "$end_options" -eq 1 ]]; then
+    [[ -z "$branch" ]] || die "引数が多すぎます: $1"
+    branch="$1"
+    shift
+    continue
+  fi
   case "$1" in
     --base)
       require_value "--base" "$#"
+      [[ "$2" != -* ]] || die "--base の値を指定してください: $2"
       base="$2"
       shift 2
       ;;
@@ -35,6 +43,11 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
+    --)
+      end_options=1
+      shift
+      ;;
+    -*) die "不明な引数です: $1" ;;
     *)
       [[ -z "$branch" ]] || die "引数が多すぎます: $1"
       branch="$1"
@@ -47,8 +60,7 @@ repo_root_cd
 require_cmd git
 
 [[ -n "$branch" ]] || die "ブランチ名を指定してください"
-[[ "$branch" =~ ^(feat|fix|docs|refactor|test|chore|ci|build|perf|style|spike)/[^/]+$ ]] \
-  || die "ブランチ名は <type>/<slug> 形式で指定してください: $branch"
+require_worktree_branch "$branch"
 
 main_worktree=$(git rev-parse --path-format=absolute --git-common-dir)
 main_worktree=$(cd -- "$(dirname -- "$main_worktree")" && pwd -P)
@@ -63,13 +75,17 @@ git show-ref --verify --quiet "refs/remotes/origin/$branch" \
 [[ ! -e "$target" && ! -L "$target" ]] || die "対象ディレクトリが既に存在します: $target"
 
 if [[ "$dry_run" -eq 1 ]]; then
+  git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+    || die "作成元 ref を解決できません: $base"
   info "[dry-run] git fetch --prune origin"
-  info "[dry-run] git worktree add -b $branch $target $base"
+  info "[dry-run] git worktree add --no-track -b $branch $target $base"
   exit 0
 fi
 
 git fetch --prune origin
+git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+  || die "作成元 ref を解決できません: $base"
 git show-ref --verify --quiet "refs/remotes/origin/$branch" \
   && die "同名のリモートブランチが既に存在します: origin/$branch"
-git worktree add -b "$branch" "$target" "$base" >&2
+git worktree add --no-track -b "$branch" "$target" "$base" >&2
 printf '%s\n' "$target"

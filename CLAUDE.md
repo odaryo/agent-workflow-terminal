@@ -62,12 +62,16 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Close a PR without merging | `scripts/wf-pr-close.sh` |
 | Read / reply to PR comments | `scripts/wf-pr-comments.sh` / `scripts/wf-pr-reply.sh` |
 | Clean up merged branches | `scripts/wf-cleanup-branches.sh` |
-| worktree を作成 | `scripts/wf-worktree-create.sh` |
-| worktree とローカルブランチを削除 | `scripts/wf-worktree-remove.sh` |
+| Create a worktree | `scripts/wf-worktree-create.sh` |
+| Remove a worktree and its local branch | `scripts/wf-worktree-remove.sh` |
 
 Both agents and humans perform these operations through the scripts, never through raw `git`/`gh` write commands. If a request can't be expressed through a script, fix the script — don't route around it with a raw command.
 
 Always invoke these from the repository root as `scripts/wf-*.sh <args>` — the `.claude/settings.json` allow rules are defined against that exact string form.
+
+Task worktrees live at `<main-worktree-parent>/awt-worktrees/<slug>` by default; set
+`AWT_WORKTREES_DIR` to override the parent directory. `wf-worktree-create.sh` writes only the created
+path and a newline to stdout so callers can use it for `cd`; diagnostics go to stderr.
 
 Merging is squash-only, with commit title `<PR title> (#N)` — so PR titles follow Conventional Commits too (`wf-pr-create.sh` and `wf-pr-merge.sh` both enforce this); `scripts/wf-pr-merge.sh` enforces checks-GREEN before it will merge.
 

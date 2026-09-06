@@ -8,7 +8,7 @@ import Testing
 struct GitCloseSafetyInspectorTests {
   @Test("public 初期化子の検査 report は検査対象の identity を返す")
   func publicInitializerReportUsesTargetIdentity() async throws {
-    let inspectedTarget = try target(identity: "/repo/.git/worktrees/public", branch: nil)
+    let inspectedTarget = try target(identity: "/repo/.git/worktrees/public", branch: "topic")
     let stub = CloseInspectionProcessStub { _ in
       .success(
         .init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head (detached)\0", stderr: ""))

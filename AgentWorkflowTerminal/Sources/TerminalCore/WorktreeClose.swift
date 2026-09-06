@@ -86,9 +86,8 @@ public struct WorktreeCloseInspection: Sendable, Hashable {
 ///   整合は呼び出し側の責務である —— `targetBranch` は対象の `DetectedWorktree.branch`、`merge` は
 ///   その worktree の検査結果、`defaultBranch` はその `merge` を計算した既定 branch でなければ
 ///   ならない。この3つを組にできる経路を閉じてあるのは `planWorktreeClose` の側で、あちらは
-///   `DetectedWorktree` と `WorktreeRemovalConfirmation` (検査器が同じ対象から作った安定 ID・
-///   検査結果・既定 branch の report だけから作れる) だけを受け取り、3つとも自分で導く。
-///   UI が選択肢を出せるかを問うためにここを直接
+///   `DetectedWorktree` と `WorktreeRemovalConfirmation` (安定 ID を持ち、検査結果と既定 branch を
+///   一組で持つ) だけを受け取り、3つとも自分で導く。UI が選択肢を出せるかを問うためにここを直接
 ///   呼ぶ場合も、同じ2つの値から導くこと。
 ///   誤った組で `true` になっても消えるところまでは行かない。`planWorktreeClose` が計画を組む前に
 ///   同じ判定を自分の導いた3値でやり直すので、実行層へ渡る計画には載らない。誤るのは

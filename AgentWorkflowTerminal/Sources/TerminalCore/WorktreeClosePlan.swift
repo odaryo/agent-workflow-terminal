@@ -1,10 +1,33 @@
+public struct WorktreeCloseInspectionReport: Sendable, Hashable {
+  public let worktree: WorktreeIdentity
+  public let inspection: WorktreeCloseInspection
+  /// `inspection.branchMerge` を計算した既定 branch。
+  public let defaultBranch: DefaultBranchResolution
+
+  /// identity を直接受け取る公開初期化子を設けると、検査結果へ別の worktree の identity を
+  /// 詰め替えられるため、検査対象からだけ導く。
+  ///
+  /// - Important: `WorktreeCloseInspection` は public initializer を持つ値型なので、実際に検査を
+  ///   実行したかまでは担保しない。閉じるのは、実在する検査結果へ別の identity を組み合わせる経路
+  ///   だけである。
+  public init(
+    target: DetectedWorktree,
+    inspection: WorktreeCloseInspection,
+    defaultBranch: DefaultBranchResolution
+  ) {
+    self.worktree = target.identity
+    self.inspection = inspection
+    self.defaultBranch = defaultBranch
+  }
+}
+
 /// 検査結果を見たうえで続行を選んだ、という事実 (設計書 §3.4)。
 ///
 /// §3.4 の検査結果は「実行を機械的に禁止する条件」ではなく「確認のうえ続行できる警告」である。
 /// その確認をこの型が担い、削除を伴う計画 (`planWorktreeClose`) はこの値を必ず要求する。
 /// したがって**検査結果を手にせずに `--force` を組み立てる経路は無い**。
 ///
-/// - Important: 型で担保できるのはここまでである。`WorktreeCloseInspection` は public な
+/// - Important: 型で担保できるのはここまでである。`WorktreeCloseInspectionReport` は public な
 ///   initializer を持つ値型なので、「本当に検査を実行したか」までは確かめられない。検査器だけが
 ///   作れる型にすればそこまで担保できるが、検査器は `Adapters` にあり、`TerminalCore` から
 ///   参照できない (docs/coding-guidelines.md §2.2 の依存方向)。
@@ -28,9 +51,9 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   /// つまり A の未commit変更が、ユーザーが警告を一度も見ないまま消える。`.deleteBranch` 側は
   /// `branch -d` が未merge branch を拒否するので同じ形の素通しにはならない。
   ///
-  /// - Important: **担保できるのは「A について作られたと申告された確認であること」までである。**
-  ///   実際に A を検査した結果かどうかは確かめられない —— 上と同じ、public initializer を持つ
-  ///   値型としての限界である。
+  /// - Important: **担保できるのは report の identity が検査対象から導かれたことまでである。**
+  ///   実際にその対象を検査した結果かどうかは確かめられない —— 上と同じ、public initializer を
+  ///   持つ値型としての限界である。
   ///
   ///   照合できるのは「どの worktree か」だけで、**「いつの検査か」は照合できない。** 同じ
   ///   worktree の古い確認は通る。承諾の後にユーザーが新しく変更を加えれば、その変更について
@@ -50,15 +73,12 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   public let defaultBranch: DefaultBranchResolution
   public let continuation: Continuation
 
-  public init(
-    worktree: WorktreeIdentity,
-    inspection: WorktreeCloseInspection,
-    defaultBranch: DefaultBranchResolution,
-    continuation: Continuation
-  ) {
-    self.worktree = worktree
-    self.inspection = inspection
-    self.defaultBranch = defaultBranch
+  /// report の各要素を別引数で受け取る公開初期化子を設けると、検査結果へ別の worktree の identity を
+  /// 詰め替えられるため、一組の report からだけ確認を作る。この初期化子がコンパイル時の保証の本体。
+  public init(report: WorktreeCloseInspectionReport, continuation: Continuation) {
+    self.worktree = report.worktree
+    self.inspection = report.inspection
+    self.defaultBranch = report.defaultBranch
     self.continuation = continuation
   }
 

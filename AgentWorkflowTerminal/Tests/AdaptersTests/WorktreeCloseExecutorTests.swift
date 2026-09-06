@@ -455,14 +455,15 @@ private struct WorktreeCloseHarness {
   ) throws -> WorktreeClosePlan {
     try planWorktreeClose(
       worktree: worktree ?? self.worktree, choice: choice,
-      confirmation: WorktreeRemovalConfirmation(
-        worktree: (worktree ?? self.worktree).identity,
-        inspection: .init(
-          uncommittedChanges: uncommitted, ignoredFiles: .absent, unpushedCommits: .absent,
-          branchMerge: merge),
-        defaultBranch: .originHead(branch: "main"), continuation: continuation))
+      confirmation: .init(
+        report: .init(
+          target: worktree ?? self.worktree,
+          inspection: .init(
+            uncommittedChanges: uncommitted, ignoredFiles: .absent, unpushedCommits: .absent,
+            branchMerge: merge),
+          defaultBranch: .originHead(branch: "main")),
+        continuation: continuation))
   }
-
   static func detected(
     identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
     branch: String? = "topic"

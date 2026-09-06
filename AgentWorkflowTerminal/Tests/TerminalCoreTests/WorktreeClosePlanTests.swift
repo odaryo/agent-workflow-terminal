@@ -3,6 +3,34 @@ import Testing
 
 @Suite("Close の実行計画 (設計書 §3.4)")
 struct WorktreeClosePlanTests {
+  @Test("検査 report の identity は検査対象から導く")
+  func inspectionReportUsesTargetIdentity() throws {
+    let target = try worktree()
+    let report = WorktreeCloseInspectionReport(
+      target: target,
+      inspection: WorktreeCloseInspection(
+        uncommittedChanges: .absent, ignoredFiles: .absent, unpushedCommits: .absent,
+        branchMerge: .unmerged),
+      defaultBranch: .originHead(branch: "main"))
+
+    #expect(report.worktree == target.identity)
+  }
+
+  @Test("削除確認の identity は検査 report から導く")
+  func confirmationUsesReportIdentity() throws {
+    let target = try worktree()
+    let report = WorktreeCloseInspectionReport(
+      target: target,
+      inspection: WorktreeCloseInspection(
+        uncommittedChanges: .absent, ignoredFiles: .absent, unpushedCommits: .absent,
+        branchMerge: .unmerged),
+      defaultBranch: .originHead(branch: "main"))
+
+    let confirmation = WorktreeRemovalConfirmation(report: report, continuation: .withoutForce)
+
+    #expect(confirmation.worktree == report.worktree)
+  }
+
   @Test("UI だけの Close は何も実行しない")
   func planForHideFromUIHasNoStep() throws {
     let plan = try planWorktreeClose(
@@ -296,11 +324,12 @@ struct WorktreeClosePlanTests {
     defaultBranch: DefaultBranchResolution = .originHead(branch: "main"),
     continuation: WorktreeRemovalConfirmation.Continuation = .withoutForce
   ) -> WorktreeRemovalConfirmation {
-    WorktreeRemovalConfirmation(
-      worktree: worktree.identity,
+    let report = WorktreeCloseInspectionReport(
+      target: worktree,
       inspection: WorktreeCloseInspection(
         uncommittedChanges: uncommitted, ignoredFiles: ignored, unpushedCommits: .absent,
         branchMerge: merge),
-      defaultBranch: defaultBranch, continuation: continuation)
+      defaultBranch: defaultBranch)
+    return WorktreeRemovalConfirmation(report: report, continuation: continuation)
   }
 }

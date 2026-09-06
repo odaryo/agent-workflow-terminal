@@ -85,8 +85,32 @@ struct GitWorktreeDetectorTests {
 
   /// `locked` が付いた worktree には、作業ツリーが消えても `prunable` が付かない (git 2.50.1
   /// 実測)。失敗させると Project Root を含む全 worktree の検出が止まる。
-  @Test("到達できない作業ツリーの entry は、スキャンを失敗させずに除外する")
-  func skipsUnreachableWorkingTreeWithoutFailingTheScan() async throws {
+  @Test("到達できない作業ツリーの entry は、admin 側の安定 ID とともに検出結果へ載せる")
+  func detectsUnreachableWorkingTreeFromAdministrativeDirectory() async throws {
+    let listOutput = singleWorktreeList + "worktree /wt/locked\0branch refs/heads/locked\0\0"
+    let stub = ProcessRunnerStub(
+      handler: listThenGitDirectories(listOutput, failingIn: "/wt/locked"))
+
+    let result = try await makeDetector(
+      stub,
+      unreachable: ["/wt/locked"],
+      administrativeDirectories: [
+        "/wt/locked": "\(commonDirectory)/worktrees/locked-admin"
+      ]
+    ).scan()
+
+    #expect(result.detected.map(\.worktreePath) == ["/wt/alpha", "/wt/locked"])
+    #expect(
+      result.detected.map(\.identity.rawValue) == [
+        "\(commonDirectory)/worktrees/alpha", "\(commonDirectory)/worktrees/locked-admin",
+      ])
+    #expect(result.detected.map(\.isReachable) == [true, false])
+    #expect(result.detected.map(\.branch) == ["alpha", "locked"])
+    #expect(result.failures.isEmpty)
+  }
+
+  @Test("到達不能 entry の admin 側安定 ID を特定できなければ、ID を推測せず失敗として返す")
+  func reportsMissingAdministrativeDirectoryForUnreachableWorkingTree() async throws {
     let listOutput = singleWorktreeList + "worktree /wt/locked\0branch refs/heads/locked\0\0"
     let stub = ProcessRunnerStub(
       handler: listThenGitDirectories(listOutput, failingIn: "/wt/locked"))
@@ -94,7 +118,7 @@ struct GitWorktreeDetectorTests {
     let result = try await makeDetector(stub, unreachable: ["/wt/locked"]).scan()
 
     #expect(result.detected.map(\.worktreePath) == ["/wt/alpha"])
-    #expect(result.failures.isEmpty)
+    #expect(result.failures.map(\.worktreePath) == ["/wt/locked"])
   }
 
   /// 置き換わった先の repository でも `rev-parse` は exit 0 で、その repository の git
@@ -332,14 +356,18 @@ struct GitWorktreeDetectorTests {
   /// 既定で全 entry を到達可能として扱い、単体テストをファイルシステムから切り離す。
   private func makeDetector(
     _ stub: ProcessRunnerStub,
-    unreachable: Set<String> = []
+    unreachable: Set<String> = [],
+    administrativeDirectories: [String: String] = [:]
   ) throws -> GitWorktreeDetector {
     GitWorktreeDetector(
       projectRunner: try testGitRunner(directory: projectDirectory, processRunner: stub),
       makeRunner: { directory throws(GitRunnerError) in
         try testGitRunner(directory: directory.path, processRunner: stub)
       },
-      isWorktreeReachable: { !unreachable.contains($0) }
+      isWorktreeReachable: { !unreachable.contains($0) },
+      findAdministrativeDirectory: { worktreePath, _ in
+        administrativeDirectories[worktreePath].flatMap(WorktreeIdentity.init(rawValue:))
+      }
     )
   }
 

@@ -12,17 +12,21 @@ public struct DetectedWorktree: Sendable, Hashable {
   /// main worktree であること。Project Root は Task worktree と別枠であり (§2.3)、
   /// Active/Inactive の対象にしない。
   public let isProjectRoot: Bool
+  /// `false` の間も安定 ID と Active/Inactive は保持する (設計書 §3.2)。
+  public let isReachable: Bool
 
   public init(
     identity: WorktreeIdentity,
     worktreePath: String,
     branch: String?,
-    isProjectRoot: Bool
+    isProjectRoot: Bool,
+    isReachable: Bool = true
   ) {
     self.identity = identity
     self.worktreePath = worktreePath
     self.branch = branch
     self.isProjectRoot = isProjectRoot
+    self.isReachable = isReachable
   }
 }
 
@@ -98,6 +102,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   `WorktreeInventory` (前回は1件も無かった) とは区別する。初回スキャンでは検出された
 ///   Task worktree をすべて `.inactive` から始め、新規出現として数えない。Project 登録時点で
 ///   既に存在していた過去の worktree が一斉にタブ化する事故を防ぐため。
+///   初回から到達不能な Task worktree も `.inactive` で保持する。安定 ID は観測できているため一覧から
+///   捨てる理由はなく、利用できないタブを Active にする理由もない。
 ///   **永続化層がまだ無いため、アプリを再起動すると毎回この初回スキャンになり、
 ///   前回 Active だった worktree も Inactive へ戻る。**
 /// - Note: 同じ安定 ID が複数回渡された場合は最初の1件だけを採る。git の一覧出力の順序が
@@ -132,9 +138,11 @@ public func reconcileDetectedWorktrees(
         activation = previousActivation
       } else if previous.projectRoot?.identity == candidate.identity {
         activation = .inactive
-      } else {
+      } else if candidate.isReachable {
         activation = .active
         appeared.append(candidate.identity)
+      } else {
+        activation = .inactive
       }
     } else {
       activation = .inactive

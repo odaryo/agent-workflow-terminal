@@ -87,8 +87,8 @@ struct GitWorktreeDetectorIntegrationTests {
   /// lock を外すまで Project Root を含む全 worktree が検出できなくなる。
   ///
   /// 公開 init が使う到達可能性の述語を、注入で置き換えずに通す3経路のうちの1つ (消失)。
-  @Test("locked な worktree の作業ツリーが消えても、他の worktree の検出は止まらない")
-  func lockedWorktreeWithMissingWorkingTreeDoesNotFailTheScan() async throws {
+  @Test("locked な worktree の作業ツリーが消えても、admin 側の安定 ID で到達不能として検出する")
+  func lockedWorktreeWithMissingWorkingTreeIsDetectedAsUnreachable() async throws {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-lock", "../wt-lock"])
@@ -99,8 +99,15 @@ struct GitWorktreeDetectorIntegrationTests {
       let result = try await repository.detector().scan()
 
       #expect(
-        result.detected.map(\.worktreePath)
-          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+        result.detected.map(\.worktreePath) == [
+          repository.mainWorktree.path,
+          "\(repository.root.path)/wt-keep",
+          "\(repository.root.path)/wt-lock",
+        ])
+      let locked = try #require(result.detected.first { $0.worktreePath.hasSuffix("/wt-lock") })
+      #expect(locked.identity.rawValue.hasSuffix("/.git/worktrees/wt-lock"))
+      #expect(!locked.isReachable)
+      #expect(locked.branch == "wt-lock")
       #expect(result.detected.filter(\.isProjectRoot).count == 1)
       #expect(result.failures.isEmpty)
     }
@@ -109,8 +116,8 @@ struct GitWorktreeDetectorIntegrationTests {
   /// 述語の3経路のうちの1つ (作業ツリーのパスが通常ファイル)。実行ビットを立てるのは、
   /// 立てないと `isExecutableFile` だけで除外されてしまい、「ディレクトリか」を見る判定が
   /// 効いていることを固定できないためである (macOS 26.5 実測)。
-  @Test("作業ツリーのパスが通常ファイルに置き換わっても、他の worktree の検出は止まらない")
-  func regularFileAtWorkingTreePathDoesNotFailTheScan() async throws {
+  @Test("作業ツリーのパスが通常ファイルに置き換わった entry も到達不能として検出する")
+  func regularFileAtWorkingTreePathIsDetectedAsUnreachable() async throws {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-file", "../wt-file"])
@@ -124,16 +131,20 @@ struct GitWorktreeDetectorIntegrationTests {
       let result = try await repository.detector().scan()
 
       #expect(
-        result.detected.map(\.worktreePath)
-          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+        result.detected.map(\.worktreePath) == [
+          repository.mainWorktree.path,
+          "\(repository.root.path)/wt-file",
+          "\(repository.root.path)/wt-keep",
+        ])
+      #expect(result.detected.first { $0.worktreePath == replaced.path }?.isReachable == false)
       #expect(result.failures.isEmpty)
     }
   }
 
   /// 述語の3経路のうちの1つ (探索権限が無い)。root で走らせるとパーミッションが効かないため、
   /// この経路は再現しない。
-  @Test("作業ツリーを探索できなくなっても、他の worktree の検出は止まらない")
-  func unsearchableWorkingTreeDoesNotFailTheScan() async throws {
+  @Test("作業ツリーを探索できなくなった entry も到達不能として検出する")
+  func unsearchableWorkingTreeIsDetectedAsUnreachable() async throws {
     try await withRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-locked", "../wt-locked"])
@@ -151,8 +162,12 @@ struct GitWorktreeDetectorIntegrationTests {
       let result = try await repository.detector().scan()
 
       #expect(
-        result.detected.map(\.worktreePath)
-          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+        result.detected.map(\.worktreePath) == [
+          repository.mainWorktree.path,
+          "\(repository.root.path)/wt-keep",
+          "\(repository.root.path)/wt-locked",
+        ])
+      #expect(result.detected.first { $0.worktreePath == unsearchable.path }?.isReachable == false)
       #expect(result.failures.isEmpty)
     }
   }

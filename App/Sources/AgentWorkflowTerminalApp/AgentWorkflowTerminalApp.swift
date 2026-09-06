@@ -59,7 +59,7 @@ private struct AppDependencies: Sendable {
         projectError: project.error,
         tmuxExecutable: executable,
         tmuxError: nil,
-        paneStates: makeTemporaryPaneStatesFeed(runner: runner, signalSource: signalSource)
+        paneStates: makeWorktreePaneStatesFeed(runner: runner, signalSource: signalSource)
       )
     } catch {
       return Self(

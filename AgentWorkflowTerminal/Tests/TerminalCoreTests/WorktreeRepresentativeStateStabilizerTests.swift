@@ -3,7 +3,9 @@ import TerminalCore
 import Testing
 
 @Suite("worktree代表状態の安定化 (設計書 §12.2)")
-struct RepresentativeStateStabilizerTests {
+// 他13個のテストファイルと同様に型名を対象ファイル名へ合わせると、既定の上限を超える。
+// swiftlint:disable:next type_name
+struct WorktreeRepresentativeStateStabilizerTests {
   private let clock = ContinuousClock()
 
   @Test("規則1: Needs Attention と Ready for Review は即時反映する")
@@ -22,18 +24,22 @@ struct RepresentativeStateStabilizerTests {
     )
   }
 
-  @Test("規則2・8: Working から Idle は10秒未満で保持し境界ちょうどで反映する")
+  @Test("規則2・8: Working から Idle は既定の9秒未満で保持し境界ちょうどで反映する")
   func idleIsHeldThroughBoundary() {
     let now = clock.now
     var stabilizer = WorktreeRepresentativeStateStabilizer()
 
     #expect(stabilizer.observe(state: state(.working), at: now) == state(.working))
     #expect(
-      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(9)))
+      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(1)))
         == state(.working)
     )
     #expect(
-      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(19)))
+      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(5)))
+        == state(.working)
+    )
+    #expect(
+      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(10)))
         == state(.idle)
     )
   }
@@ -72,11 +78,11 @@ struct RepresentativeStateStabilizerTests {
         == state(.working)
     )
     #expect(
-      stabilizer.observe(state: state(.working), at: now.advanced(by: .seconds(9)))
+      stabilizer.observe(state: state(.working), at: now.advanced(by: .seconds(2)))
         == state(.working)
     )
     #expect(
-      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(10)))
+      stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(11)))
         == state(.working)
     )
   }
@@ -127,6 +133,45 @@ struct RepresentativeStateStabilizerTests {
     #expect(
       stabilizer.observe(state: permission, at: now.advanced(by: .seconds(1))) == permission
     )
+  }
+
+  @Test("規則6: 分類と状態が同じなら paneID だけの変化を即時反映する")
+  func paneIDOnlyChangeIsImmediate() {
+    let now = clock.now
+    var stabilizer = WorktreeRepresentativeStateStabilizer()
+    let nextPane = state(.working, paneID: "%1")
+
+    #expect(
+      stabilizer.observe(state: state(.working, paneID: "%0"), at: now)?.paneID.rawValue
+        == "%0"
+    )
+    #expect(
+      stabilizer.observe(state: nextPane, at: now.advanced(by: .seconds(1))) == nextPane
+    )
+  }
+
+  @Test("満了予定時刻は起点を保ち、保持破棄と満了で nil に戻る")
+  func pendingTransitionDeadlineLifecycle() {
+    let now = clock.now
+    var stabilizer = WorktreeRepresentativeStateStabilizer()
+
+    _ = stabilizer.observe(state: state(.working), at: now)
+    #expect(stabilizer.pendingTransitionDeadline == nil)
+
+    _ = stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(1)))
+    #expect(stabilizer.pendingTransitionDeadline == now.advanced(by: .seconds(10)))
+
+    _ = stabilizer.observe(state: state(.unknown), at: now.advanced(by: .seconds(5)))
+    #expect(stabilizer.pendingTransitionDeadline == now.advanced(by: .seconds(10)))
+
+    _ = stabilizer.observe(state: state(.working), at: now.advanced(by: .seconds(6)))
+    #expect(stabilizer.pendingTransitionDeadline == nil)
+
+    _ = stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(7)))
+    #expect(stabilizer.pendingTransitionDeadline == now.advanced(by: .seconds(16)))
+
+    _ = stabilizer.observe(state: state(.idle), at: now.advanced(by: .seconds(16)))
+    #expect(stabilizer.pendingTransitionDeadline == nil)
   }
 
   @Test("規則7: 初回観測は Idle・Unknown・nil を含め即時反映する")

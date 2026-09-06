@@ -1,3 +1,5 @@
+/// 保持は自律的に満了しない。上位レイヤは `pendingTransitionDeadline` に再観測し、
+/// 表示へ反映する義務がある (設計書 §12.2)。
 public struct WorktreeRepresentativeStateStabilizer: Sendable {
   private struct PendingTransition: Sendable {
     var state: WorktreeRepresentativeState?
@@ -9,11 +11,17 @@ public struct WorktreeRepresentativeStateStabilizer: Sendable {
   private var displayedState: WorktreeRepresentativeState?
   private var pendingTransition: PendingTransition?
 
+  public var pendingTransitionDeadline: ContinuousClock.Instant? {
+    pendingTransition?.startedAt.advanced(by: holdDuration)
+  }
+
   /// 既定の保持時間は設計書 §12.2 による。
-  public init(holdDuration: Duration = .seconds(10)) {
+  public init(holdDuration: Duration = .seconds(9)) {
     self.holdDuration = holdDuration
   }
 
+  /// この呼び出しがない限り保持は満了しない。上位レイヤは設計書 §12.2 の時刻どおりに
+  /// 反映するため、`pendingTransitionDeadline` に再度呼ぶ義務がある。
   public mutating func observe(
     state observedState: WorktreeRepresentativeState?,
     at observedAt: ContinuousClock.Instant

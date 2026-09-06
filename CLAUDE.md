@@ -53,6 +53,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Commit | `scripts/wf-commit.sh` |
 | Publish the prebuilt GhosttyKit Release asset | `scripts/wf-ghostty-publish.sh` |
 | Push | `scripts/wf-push.sh` |
+| Sync `main` into a work branch | `scripts/wf-sync-main.sh` |
 | Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
 | Create an Issue | `scripts/wf-issue-create.sh` |
 | Comment on an Issue | `scripts/wf-issue-comment.sh` |

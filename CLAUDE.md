@@ -60,6 +60,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Create / close a milestone, assign Issues to one | `scripts/wf-milestone.sh` |
 | Add / remove Issue labels | `scripts/wf-issue-label.sh` |
 | Create a PR | `scripts/wf-pr-create.sh` |
+| Edit a PR body or title | `scripts/wf-pr-edit.sh` |
 | Merge a PR | `scripts/wf-pr-merge.sh` |
 | Close a PR without merging | `scripts/wf-pr-close.sh` |
 | Read / reply to PR comments | `scripts/wf-pr-comments.sh` / `scripts/wf-pr-reply.sh` |

@@ -133,11 +133,11 @@ private final class AppModel: ObservableObject {
       worktrees =
         reconcileDetectedWorktrees(detected: scan.detected, previous: nil)
         .inventory.taskWorktrees
-      if let first = worktrees.first {
+      if let first = worktrees.first(where: \.detected.isReachable) {
         selectedIdentity = first.identity
         openedIdentities.insert(first.identity)
       } else if message == nil {
-        message = "タスク worktree がありません。"
+        message = worktrees.isEmpty ? "タスク worktree がありません。" : "到達できる worktree がありません。"
       }
     } catch {
       let detail = "worktree を検出できません: \(error)"
@@ -146,7 +146,13 @@ private final class AppModel: ObservableObject {
     }
   }
 
+  /// 到達不能な worktree を開かないのは、`tmux new-session -c <存在しないディレクトリ>` が
+  /// エラーにならず client の cwd ($HOME) へ黙って落ちるためである (tmux 3.4 実測: exit 0 で
+  /// session ができ、`pane_current_path` が `$HOME` になる)。そこで agent を走らせると、
+  /// worktree の名前を持つタブが実際には別のディレクトリで作業することになる。しかも
+  /// `new-session -A` なので、その誤った session に以後ずっと再 attach され続ける。
   func select(_ worktree: TaskWorktree) {
+    guard worktree.detected.isReachable else { return }
     selectedIdentity = worktree.identity
     openedIdentities.insert(worktree.identity)
   }
@@ -218,8 +224,12 @@ private struct WorktreeTab: View {
       .clipShape(.rect(cornerRadius: 6))
     }
     .buttonStyle(.plain)
+    // 到達不能な worktree は一覧から消さずに残す (設計書 §3.2)。消すと安定 ID が消失に見え、
+    // 復帰したときにユーザーが意図した Active/Inactive が失われる。
+    .disabled(!worktree.detected.isReachable)
+    .opacity(worktree.detected.isReachable ? 1 : 0.4)
     .task(id: worktree.identity) {
-      guard let paneStates else { return }
+      guard worktree.detected.isReachable, let paneStates else { return }
       let states = WorktreeRepresentativeStateFeed().states(from: paneStates(worktree))
       for await state in states {
         representativeState = state
@@ -228,6 +238,9 @@ private struct WorktreeTab: View {
   }
 
   private var stateLabel: String {
+    // 到達不能な worktree では pane を観測していない。`Idle` と出すと観測できていない状態を
+    // 観測した状態に丸めることになる (設計書 §12.3 の `Unknown` と同じ理由)。
+    guard worktree.detected.isReachable else { return "到達不能" }
     guard let representativeState else { return "Idle" }
     return switch representativeState.state {
     case .working: "Working"

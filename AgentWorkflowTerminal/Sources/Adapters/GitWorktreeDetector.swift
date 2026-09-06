@@ -252,14 +252,15 @@ public struct GitWorktreeDetector: Sendable {
     entry.prunableReason == nil && !entry.isBare
   }
 
-  /// - Returns: `.absent` になるのは、common dir がこの Project のものでない entry だけ。
+  /// - Returns: `.absent` になるのは、common dir がこの Project のものでない entry (下記の2つ目)
+  ///   だけ。到達できない作業ツリー (1つ目) は `isReachable == false` の `.detected` になる。
   ///   それ以外の失敗は `.failed` で返し、黙って落とさない。
   ///   - 作業ツリーへ到達できない: `locked` で `prunable` が抑止された entry がここへ来る。
   ///     stderr の文言ではなく作業ツリーの到達可能性で判定するのは、git のメッセージが版と
   ///     locale で変わるためである。到達可能性を確かめるのは git が exit code を返した失敗
   ///     (`commandFailed`) に限る。git が終了しなかった失敗は不在の証拠にならず、述語が
-  ///     打ち切れない FS 呼び出しに入る (`isReachableWorkingTree`)。確かめなかった失敗も
-  ///     到達できた作業ツリーでの失敗は `GitWorktreeEntryFailure.Reason.gitDirectory` に回す。
+  ///     打ち切れない FS 呼び出しに入る (`isReachableWorkingTree`)。確かめなかった失敗も、
+  ///     到達できた作業ツリーでの失敗も `GitWorktreeEntryFailure.Reason.gitDirectory` に回す。
   ///     到達不能なら common dir 配下の `worktrees/*/gitdir` と作業ツリーパスを照合し、対応した
   ///     admin ディレクトリを安定 ID として返す。対応を特定できなければ ID を推測しない。
   ///   - common dir がこの Project のものでない: 登録済み worktree のディレクトリが別の
@@ -325,6 +326,32 @@ public struct GitWorktreeDetector: Sendable {
       ))
   }
 
+  /// `<common>/worktrees/<作業ツリー名>` を文字列連結せずに列挙して照合するのは、git が管理
+  /// ディレクトリ名をサニタイズするためである (git 2.50.1 実測: `wt2 with space` →
+  /// `worktrees/wt2-with-space`)。名前から組み立てた文字列は実際の安定 ID と一致しない。
+  ///
+  /// 照合に失敗したとき作業ツリーパスを代替 ID にしないのは、それが `git worktree move` で変わる
+  /// 値だからである (`WorktreeIdentity`)。推測した ID を配ると、復帰したときに同じ worktree だと
+  /// 判定できず、`reconcileDetectedWorktrees` から見て消失 → 新規出現になる。
+  ///
+  /// 作業ツリーへ chdir できなくてもこの経路が成立するのは、読むのが Project Root 側の common dir
+  /// 配下だけだからである (git 2.50.1 実測: lock 済みで作業ツリーを消した worktree でも
+  /// `<common>/worktrees/<name>/gitdir` はそのまま読める)。
+  ///
+  /// - Important: 返す安定 ID を正規化せず、`contentsOfDirectory` が返した URL の `path` を
+  ///   そのまま渡す。`standardizedFileURL` は結果が実在パスになるときに `/private` 接頭辞を
+  ///   落とすため (macOS 26.5 実測: 実在する `/private/tmp/x/.git/worktrees/w` →
+  ///   `/tmp/x/.git/worktrees/w`、実在しない同名パスはそのまま)、到達可能なときに
+  ///   `rev-parse --path-format=absolute --git-dir` が返す `/private/...` とバイト列が食い違い、
+  ///   同じ worktree が2つの ID・2つの tmux session 名を持つ。`URL(fileURLWithPath:)` を通し直す
+  ///   のも同じ理由で不可で、macOS 26.5 実測では NFC の `café` が NFD (`caf` + U+0301) へ
+  ///   正規化される一方、git は NFC のまま返す。照合側の `standardizedFileURL` は両辺へ等しく
+  ///   効くので残す。
+  /// - Note: `isReachableWorkingTree` と同じく、打ち切る手段の無い同期 FS I/O をここでも行う。
+  ///   `contentsOfDirectory` と `Data(contentsOf:)` はどちらも timeout も cancellation も取らない。
+  ///   撃つのは git が exit code を返し、かつ作業ツリーへ到達できないと分かった entry に限られるが、
+  ///   読む先は Project Root 側であって作業ツリーではないので、応答しないマウント上の作業ツリーで
+  ///   ここが詰まることは無い。
   private static func administrativeDirectory(
     worktreePath: String,
     commonDirectory: WorktreeIdentity
@@ -343,14 +370,34 @@ public struct GitWorktreeDetector: Sendable {
     for candidate in candidates {
       let gitdir = candidate.appending(path: "gitdir", directoryHint: .notDirectory)
       guard let data = try? Data(contentsOf: gitdir) else { continue }
-      let output = String(decoding: data, as: UTF8.self)
-      guard let firstLine = output.split(separator: "\n", maxSplits: 1).first else { continue }
-      let recordedPath = URL(fileURLWithPath: String(firstLine)).deletingLastPathComponent()
-        .standardizedFileURL.path
+      // 改行までを1行目とする。`split` は空要素を落とすため、先頭が空行だと2行目を拾ってしまう。
+      // 作業ツリーのパス自体が改行を含む場合はここで切れて照合が外れるが、それは
+      // `administrativeDirectoryNotFound` になるだけで、誤った ID は配らない。
+      let recorded = String(decoding: data, as: UTF8.self).prefix { $0 != "\n" }
+      guard !recorded.isEmpty else { continue }
+      let recordedPath = Self.resolve(gitdirEntry: String(recorded), from: candidate)
       guard recordedPath == expectedPath else { continue }
-      return WorktreeIdentity(rawValue: candidate.standardizedFileURL.path)
+      return WorktreeIdentity(rawValue: candidate.path)
     }
     return nil
+  }
+
+  /// `worktree.useRelativePaths=true` / `worktree add --relative-paths` で作った worktree では、
+  /// `gitdir` の中身は管理ディレクトリからの相対パスになる (git 2.50.1 実測:
+  /// `../../../../rel1/.git`)。基準を与えずに `URL(fileURLWithPath:)` へ渡すとプロセスの cwd で
+  /// 解決され、照合が必ず外れる。
+  ///
+  /// 相対の解決に `relativeTo:` ではなく `appending(path:)` を使うのは、前者が基準 URL の
+  /// ディレクトリ扱いに依存し、`hasDirectoryPath` が false の基準では最後の要素を捨てて
+  /// 静かに別のパスを返すためである (macOS 26.5 実測: 同じパスから作った基準でも、
+  /// `isDirectory: false` だと `/tmp/x/.git/worktrees/rel1` 基準の `../../../../rel1/.git` が
+  /// `/private/tmp/rel1` になる)。
+  private static func resolve(gitdirEntry: String, from administrativeDirectory: URL) -> String {
+    let gitDirectory =
+      gitdirEntry.hasPrefix("/")
+      ? URL(fileURLWithPath: gitdirEntry)
+      : administrativeDirectory.appending(path: gitdirEntry)
+    return gitDirectory.deletingLastPathComponent().standardizedFileURL.path
   }
 
   private func projectCommonDirectory() async throws(GitWorktreeScanError) -> WorktreeIdentity {

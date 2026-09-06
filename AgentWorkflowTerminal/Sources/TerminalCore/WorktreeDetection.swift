@@ -12,7 +12,10 @@ public struct DetectedWorktree: Sendable, Hashable {
   /// main worktree であること。Project Root は Task worktree と別枠であり (§2.3)、
   /// Active/Inactive の対象にしない。
   public let isProjectRoot: Bool
-  /// `false` の間も安定 ID と Active/Inactive は保持する (設計書 §3.2)。
+  /// - Important: `false` は「作業ツリーが実在しない」ことの証明ではない。観測側の判定は
+  ///   作業ツリーのパスの metadata 読み取りに依存しており、macOS 26.5 実測では MAC ポリシーが
+  ///   metadata の読み取りだけを拒否すると、`access(X_OK)` と `chdir` は成功する実在の worktree
+  ///   でも `fileExists` が `false` になり、git も exit 128 になる。
   public let isReachable: Bool
 
   public init(
@@ -132,23 +135,11 @@ public func reconcileDetectedWorktrees(
       continue
     }
 
-    let activation: WorktreeActivation
-    if let previous {
-      if let previousActivation = previous.activation(of: candidate.identity) {
-        activation = previousActivation
-      } else if previous.projectRoot?.identity == candidate.identity {
-        activation = .inactive
-      } else if candidate.isReachable {
-        activation = .active
-        appeared.append(candidate.identity)
-      } else {
-        activation = .inactive
-      }
-    } else {
-      activation = .inactive
+    let initial = initialActivation(of: candidate, previous: previous)
+    if initial.isNewlyAppeared {
+      appeared.append(candidate.identity)
     }
-
-    taskWorktrees.append(TaskWorktree(detected: candidate, activation: activation))
+    taskWorktrees.append(TaskWorktree(detected: candidate, activation: initial.activation))
   }
 
   var disappeared: [WorktreeIdentity] = []
@@ -172,4 +163,21 @@ public func reconcileDetectedWorktrees(
     appeared: appeared,
     disappeared: disappeared
   )
+}
+
+/// 自動 Active 化の対象を「観測中に新しく現れ、かつ到達できた worktree」に限る規則
+/// (設計書 §3.2)。到達不能なまま初めて現れた worktree を Active にしないのは、開けないタブを
+/// Active にする理由が無いためで、復帰しても既知の ID なので新規出現には数え直さない。
+private func initialActivation(
+  of candidate: DetectedWorktree,
+  previous: WorktreeInventory?
+) -> (activation: WorktreeActivation, isNewlyAppeared: Bool) {
+  guard let previous else { return (.inactive, false) }
+  if let previousActivation = previous.activation(of: candidate.identity) {
+    return (previousActivation, false)
+  }
+  if previous.projectRoot?.identity == candidate.identity {
+    return (.inactive, false)
+  }
+  return candidate.isReachable ? (.active, true) : (.inactive, false)
 }

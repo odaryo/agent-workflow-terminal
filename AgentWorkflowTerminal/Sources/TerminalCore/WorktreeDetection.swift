@@ -12,17 +12,26 @@ public struct DetectedWorktree: Sendable, Hashable {
   /// main worktree であること。Project Root は Task worktree と別枠であり (§2.3)、
   /// Active/Inactive の対象にしない。
   public let isProjectRoot: Bool
+  /// `false` の間も安定 ID と Active/Inactive は保持する (設計書 §3.2)。
+  ///
+  /// - Important: `false` は「作業ツリーが実在しない」ことの証明ではない。観測側の判定は
+  ///   作業ツリーのパスの metadata 読み取りに依存しており、macOS 26.5 実測では MAC ポリシーが
+  ///   metadata の読み取りだけを拒否すると、`access(X_OK)` と `chdir` は成功する実在の worktree
+  ///   でも `fileExists` が `false` になり、git も exit 128 になる。
+  public let isReachable: Bool
 
   public init(
     identity: WorktreeIdentity,
     worktreePath: String,
     branch: String?,
-    isProjectRoot: Bool
+    isProjectRoot: Bool,
+    isReachable: Bool = true
   ) {
     self.identity = identity
     self.worktreePath = worktreePath
     self.branch = branch
     self.isProjectRoot = isProjectRoot
+    self.isReachable = isReachable
   }
 }
 
@@ -98,6 +107,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   `WorktreeInventory` (前回は1件も無かった) とは区別する。初回スキャンでは検出された
 ///   Task worktree をすべて `.inactive` から始め、新規出現として数えない。Project 登録時点で
 ///   既に存在していた過去の worktree が一斉にタブ化する事故を防ぐため。
+///   初回から到達不能な Task worktree も `.inactive` で保持する。安定 ID は観測できているため一覧から
+///   捨てる理由はなく、利用できないタブを Active にする理由もない。
 ///   **永続化層がまだ無いため、アプリを再起動すると毎回この初回スキャンになり、
 ///   前回 Active だった worktree も Inactive へ戻る。**
 /// - Note: 同じ安定 ID が複数回渡された場合は最初の1件だけを採る。git の一覧出力の順序が
@@ -126,21 +137,11 @@ public func reconcileDetectedWorktrees(
       continue
     }
 
-    let activation: WorktreeActivation
-    if let previous {
-      if let previousActivation = previous.activation(of: candidate.identity) {
-        activation = previousActivation
-      } else if previous.projectRoot?.identity == candidate.identity {
-        activation = .inactive
-      } else {
-        activation = .active
-        appeared.append(candidate.identity)
-      }
-    } else {
-      activation = .inactive
+    let initial = initialActivation(of: candidate, previous: previous)
+    if initial.isNewlyAppeared {
+      appeared.append(candidate.identity)
     }
-
-    taskWorktrees.append(TaskWorktree(detected: candidate, activation: activation))
+    taskWorktrees.append(TaskWorktree(detected: candidate, activation: initial.activation))
   }
 
   var disappeared: [WorktreeIdentity] = []
@@ -164,4 +165,21 @@ public func reconcileDetectedWorktrees(
     appeared: appeared,
     disappeared: disappeared
   )
+}
+
+/// 自動 Active 化の対象を「観測中に新しく現れ、かつ到達できた worktree」に限る規則
+/// (設計書 §3.2)。到達不能なまま初めて現れた worktree を Active にしないのは、開けないタブを
+/// Active にする理由が無いためで、復帰しても既知の ID なので新規出現には数え直さない。
+private func initialActivation(
+  of candidate: DetectedWorktree,
+  previous: WorktreeInventory?
+) -> (activation: WorktreeActivation, isNewlyAppeared: Bool) {
+  guard let previous else { return (.inactive, false) }
+  if let previousActivation = previous.activation(of: candidate.identity) {
+    return (previousActivation, false)
+  }
+  if previous.projectRoot?.identity == candidate.identity {
+    return (.inactive, false)
+  }
+  return candidate.isReachable ? (.active, true) : (.inactive, false)
 }

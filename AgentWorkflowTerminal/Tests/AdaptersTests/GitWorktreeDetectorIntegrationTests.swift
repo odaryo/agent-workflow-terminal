@@ -17,7 +17,7 @@ struct GitWorktreeDetectorIntegrationTests {
 
   @Test("linked worktree の安定 ID は <common>/worktrees/<name> になり、Project Root は1件だけ")
   func detectsProjectRootAndLinkedWorktrees() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
 
       let result = try await repository.detector().scan()
@@ -38,7 +38,7 @@ struct GitWorktreeDetectorIntegrationTests {
 
   @Test("branch を切り替えても安定 ID は変わらない")
   func stableIdentitySurvivesBranchSwitch() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
       let before = try await repository.detector().scan().detected
 
@@ -52,7 +52,7 @@ struct GitWorktreeDetectorIntegrationTests {
 
   @Test("git worktree move の後も安定 ID は変わらない")
   func stableIdentitySurvivesWorktreeMove() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
       let before = try await repository.detector().scan().detected
 
@@ -70,7 +70,7 @@ struct GitWorktreeDetectorIntegrationTests {
 
   @Test("作業ツリーを消した worktree は検出結果に現れず、スキャンも失敗しない")
   func prunableWorktreeIsSkippedWithoutFailingTheScan() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-gone", "../wt-gone"])
       try FileManager.default.removeItem(at: repository.root.appending(path: "wt-gone"))
 
@@ -87,9 +87,9 @@ struct GitWorktreeDetectorIntegrationTests {
   /// lock を外すまで Project Root を含む全 worktree が検出できなくなる。
   ///
   /// 公開 init が使う到達可能性の述語を、注入で置き換えずに通す3経路のうちの1つ (消失)。
-  @Test("locked な worktree の作業ツリーが消えても、他の worktree の検出は止まらない")
-  func lockedWorktreeWithMissingWorkingTreeDoesNotFailTheScan() async throws {
-    try await withRepository { repository in
+  @Test("locked な worktree の作業ツリーが消えても、admin 側の安定 ID で到達不能として検出する")
+  func lockedWorktreeWithMissingWorkingTreeIsDetectedAsUnreachable() async throws {
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-lock", "../wt-lock"])
       try await repository.git(
@@ -99,8 +99,17 @@ struct GitWorktreeDetectorIntegrationTests {
       let result = try await repository.detector().scan()
 
       #expect(
-        result.detected.map(\.worktreePath)
-          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+        result.detected.map(\.worktreePath) == [
+          repository.mainWorktree.path,
+          "\(repository.root.path)/wt-keep",
+          "\(repository.root.path)/wt-lock",
+        ])
+      let locked = try #require(result.detected.first { $0.worktreePath.hasSuffix("/wt-lock") })
+      #expect(
+        locked.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-lock".utf8))
+      #expect(!locked.isReachable)
+      #expect(locked.branch == "wt-lock")
       #expect(result.detected.filter(\.isProjectRoot).count == 1)
       #expect(result.failures.isEmpty)
     }
@@ -109,9 +118,9 @@ struct GitWorktreeDetectorIntegrationTests {
   /// 述語の3経路のうちの1つ (作業ツリーのパスが通常ファイル)。実行ビットを立てるのは、
   /// 立てないと `isExecutableFile` だけで除外されてしまい、「ディレクトリか」を見る判定が
   /// 効いていることを固定できないためである (macOS 26.5 実測)。
-  @Test("作業ツリーのパスが通常ファイルに置き換わっても、他の worktree の検出は止まらない")
-  func regularFileAtWorkingTreePathDoesNotFailTheScan() async throws {
-    try await withRepository { repository in
+  @Test("作業ツリーのパスが通常ファイルに置き換わった entry も到達不能として検出する")
+  func regularFileAtWorkingTreePathIsDetectedAsUnreachable() async throws {
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-file", "../wt-file"])
       try await repository.git(
@@ -124,17 +133,25 @@ struct GitWorktreeDetectorIntegrationTests {
       let result = try await repository.detector().scan()
 
       #expect(
-        result.detected.map(\.worktreePath)
-          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+        result.detected.map(\.worktreePath) == [
+          repository.mainWorktree.path,
+          "\(repository.root.path)/wt-file",
+          "\(repository.root.path)/wt-keep",
+        ])
+      let unreachable = try #require(result.detected.first { $0.worktreePath == replaced.path })
+      #expect(!unreachable.isReachable)
+      #expect(
+        unreachable.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-file".utf8))
       #expect(result.failures.isEmpty)
     }
   }
 
   /// 述語の3経路のうちの1つ (探索権限が無い)。root で走らせるとパーミッションが効かないため、
   /// この経路は再現しない。
-  @Test("作業ツリーを探索できなくなっても、他の worktree の検出は止まらない")
-  func unsearchableWorkingTreeDoesNotFailTheScan() async throws {
-    try await withRepository { repository in
+  @Test("作業ツリーを探索できなくなった entry も到達不能として検出する")
+  func unsearchableWorkingTreeIsDetectedAsUnreachable() async throws {
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-locked", "../wt-locked"])
       try await repository.git(
@@ -151,9 +168,176 @@ struct GitWorktreeDetectorIntegrationTests {
       let result = try await repository.detector().scan()
 
       #expect(
-        result.detected.map(\.worktreePath)
-          == [repository.mainWorktree.path, "\(repository.root.path)/wt-keep"])
+        result.detected.map(\.worktreePath) == [
+          repository.mainWorktree.path,
+          "\(repository.root.path)/wt-keep",
+          "\(repository.root.path)/wt-locked",
+        ])
+      let blocked = try #require(result.detected.first { $0.worktreePath == unsearchable.path })
+      #expect(!blocked.isReachable)
+      #expect(
+        blocked.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-locked".utf8))
       #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// 到達不能な間の安定 ID が、到達可能なときに git から得られる ID と**バイト単位で**同一でないと、
+  /// 到達不能になった瞬間に消失・復帰した瞬間に新規出現になり、ユーザーが意図した Active/Inactive が
+  /// 失われる (Issue #160)。`hasSuffix` では固定できない。
+  @Test("到達可能 → 到達不能 → 復帰 の3回で安定 ID がバイト単位で変わらず、消失にも新規出現にもならない")
+  func stableIdentityIsUnchangedAcrossAnOutage() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-lock", "../wt-lock"])
+      try await repository.git(
+        ["worktree", "lock", "\(repository.root.path)/wt-lock", "--reason", "removable volume"])
+      let workingTree = repository.root.appending(path: "wt-lock")
+      let detached = repository.root.appending(path: "detached-volume")
+
+      let detector = try repository.detector()
+      let reachable = try await detector.scan()
+      try FileManager.default.moveItem(at: workingTree, to: detached)
+      let unreachable = try await detector.scan()
+      try FileManager.default.moveItem(at: detached, to: workingTree)
+      let recovered = try await detector.scan()
+
+      let expected = Array("\(repository.mainWorktree.path)/.git/worktrees/wt-lock".utf8)
+      let scans = [reachable, unreachable, recovered]
+      #expect(
+        scans.map { $0.detected.map(\.isReachable) } == [
+          [true, true], [true, false], [true, true],
+        ])
+      #expect(
+        scans.map { scan in scan.detected.filter { !$0.isProjectRoot }.map(\.identity.utf8Bytes) }
+          == Array(repeating: [expected], count: 3))
+      #expect(scans.allSatisfy { $0.failures.isEmpty })
+
+      var previous: WorktreeInventory?
+      for scan in scans {
+        let reconciled = reconcileDetectedWorktrees(detected: scan.detected, previous: previous)
+        #expect(reconciled.appeared.isEmpty)
+        #expect(reconciled.disappeared.isEmpty)
+        #expect(reconciled.inventory.taskWorktrees.map(\.activation) == [.inactive])
+        previous = reconciled.inventory
+      }
+    }
+  }
+
+  /// `worktree.useRelativePaths` は可搬 repository のための正規の機能で、この機能が狙っている運用
+  /// そのものである。このとき `gitdir` の中身は管理ディレクトリからの相対パスになる
+  /// (git 2.50.1 実測: `../../../../wt-lock/.git`) ので、cwd 基準で解決すると照合が必ず外れる。
+  @Test("gitdir が相対パスで記録された worktree でも、到達不能時に admin 側の安定 ID を引ける")
+  func resolvesRelativeGitdirAgainstTheAdministrativeDirectory() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(
+        ["worktree", "add", "--relative-paths", "-q", "-b", "wt-lock", "../wt-lock"])
+      let gitdir = repository.mainWorktree.appending(path: ".git/worktrees/wt-lock/gitdir")
+      try #require(String(contentsOf: gitdir, encoding: .utf8).hasPrefix("."))
+      try await repository.git(
+        ["worktree", "lock", "\(repository.root.path)/wt-lock", "--reason", "removable volume"])
+      try FileManager.default.removeItem(at: repository.root.appending(path: "wt-lock"))
+
+      let result = try await repository.detector().scan()
+
+      let locked = try #require(result.detected.first { !$0.isProjectRoot })
+      #expect(!locked.isReachable)
+      #expect(
+        locked.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-lock".utf8))
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// git は管理ディレクトリ名をサニタイズするので (git 2.50.1 実測: `wt lock` →
+  /// `worktrees/wt-lock`)、名前から `<common>/worktrees/<name>` を組み立てる実装はここで壊れる。
+  /// 非 ASCII を混ぜているのは、`URL(fileURLWithPath:)` を通すと NFC が NFD へ正規化される一方
+  /// git は NFC のまま返すため (macOS 26.5 実測)、ASCII 名だけではバイト単位の同一性を
+  /// 固定できないからである。
+  @Test(
+    "作業ツリー名に空白や非 ASCII があっても、到達不能時の安定 ID は git の返す admin パスと一致する",
+    arguments: ["wt lock", "wt-caf\u{00E9}"]
+  )
+  func stableIdentityMatchesGitForSanitizedAdministrativeNames(name: String) async throws {
+    try await withGitRepository { repository in
+      let workingTree = repository.root.appending(path: name)
+      // branch 名に空白は使えないので detached にする。ここで見たいのは admin 名のサニタイズだけ。
+      try await repository.git(["worktree", "add", "-q", "--detach", workingTree.path])
+      let reachable = try await repository.detector().scan()
+      let before = try #require(reachable.detected.first { !$0.isProjectRoot })
+
+      try await repository.git(
+        ["worktree", "lock", workingTree.path, "--reason", "removable volume"])
+      try FileManager.default.removeItem(at: workingTree)
+      let result = try await repository.detector().scan()
+
+      let after = try #require(result.detected.first { !$0.isProjectRoot })
+      #expect(!after.isReachable)
+      #expect(after.identity.utf8Bytes == before.identity.utf8Bytes)
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// `git worktree move` は `gitdir` の中身だけを書き換え、管理ディレクトリ名は作成時のまま残す
+  /// (git 2.50.1 実測)。名前ではなく `gitdir` の中身で照合していることを、両者がずれた状態で固定する。
+  @Test("git worktree move の後に到達不能になっても、移動前と同じ安定 ID で検出する")
+  func stableIdentityIsUnchangedWhenAMovedWorktreeBecomesUnreachable() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-feat", "../wt-feat"])
+      let before = try await repository.detector().scan()
+      let moved = repository.root.appending(path: "wt-moved")
+      try await repository.git(
+        ["worktree", "move", "\(repository.root.path)/wt-feat", moved.path])
+      try await repository.git(["worktree", "lock", moved.path, "--reason", "removable volume"])
+      try FileManager.default.removeItem(at: moved)
+
+      let result = try await repository.detector().scan()
+
+      let after = try #require(result.detected.first { !$0.isProjectRoot })
+      #expect(after.worktreePath == moved.path)
+      #expect(!after.isReachable)
+      #expect(
+        after.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-feat".utf8))
+      #expect(after.identity.utf8Bytes == (try #require(before.detected.last).identity.utf8Bytes))
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// 到達不能な entry と組み合わせた形は作れない。その entry には linked worktree が要る一方、
+  /// `worktrees` を読めなくすると git 自身が `worktree list` からその entry を落とすためである
+  /// (git 2.50.1 実測: 管理ディレクトリを `chmod 000` にしても exit 0 のまま entry だけが消える)。
+  @Test("<common>/worktrees が無い repository でも、Project Root だけを失敗なく検出する")
+  func scansRepositoryWithoutAnyLinkedWorktree() async throws {
+    try await withGitRepository { repository in
+      let worktrees = repository.mainWorktree.appending(path: ".git/worktrees")
+      #expect(!FileManager.default.fileExists(atPath: worktrees.path))
+
+      let result = try await repository.detector().scan()
+
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.detected.map(\.isProjectRoot) == [true])
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  /// 作業ツリーのパスに改行が含まれると `gitdir` の中身が複数行になり、1行目しか読まないこの実装は
+  /// 照合に失敗する。誤った ID を配るよりは安全なのでそれでよい (`administrativeDirectory`)。実 git で
+  /// この失敗を起こせる唯一の形でもある — 他の壊し方 (`gitdir` の削除・0 バイト化・`chmod 000`) では
+  /// git 自身が `worktree list` から entry を落としてしまう (git 2.50.1 実測)。
+  @Test("到達不能な entry の admin ディレクトリを特定できなければ、ID を推測せず失敗として返す")
+  func reportsMissingAdministrativeDirectoryForUnreachableWorkingTree() async throws {
+    try await withGitRepository { repository in
+      let workingTree = repository.root.appending(path: "wt\nnl")
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-nl", workingTree.path])
+      try await repository.git(
+        ["worktree", "lock", workingTree.path, "--reason", "removable volume"])
+      try FileManager.default.removeItem(at: workingTree)
+
+      let result = try await repository.detector().scan()
+
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.failures.map(\.worktreePath) == [workingTree.path])
+      #expect(result.failures.map(\.reason) == [.administrativeDirectoryNotFound])
     }
   }
 
@@ -162,7 +346,7 @@ struct GitWorktreeDetectorIntegrationTests {
   /// 中断した書き込みや sync で起こる形なので、ここで throw すると Project 全体の検出が止まる。
   @Test("作業ツリーは開けるのに rev-parse が失敗する worktree は、失敗として返して他は検出する")
   func brokenGitFileIsReportedAsAnEntryFailure() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-keep", "../wt-keep"])
       try await repository.git(["worktree", "add", "-q", "-b", "wt-broken", "../wt-broken"])
       let broken = repository.root.appending(path: "wt-broken")
@@ -192,7 +376,7 @@ struct GitWorktreeDetectorIntegrationTests {
   /// 逆にしてあるので作成順を保つ実装では通らない。
   @Test("同じスキャンで2件の entry が失敗しても、両方を検出順で返す")
   func reportsEveryEntryFailureFromOneScan() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       for name in ["wt-keep", "wt-broken-b", "wt-broken-a"] {
         try await repository.git(["worktree", "add", "-q", "-b", name, "../\(name)"])
       }
@@ -215,7 +399,7 @@ struct GitWorktreeDetectorIntegrationTests {
   /// 無関係な repository の `.git` が安定 ID として通り、Project Root が2件になる。
   @Test("別 repository に置き換わった worktree は検出結果に含めない")
   func worktreeReplacedByAnotherRepositoryIsExcluded() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "-b", "wt-swap", "../wt-swap"])
       let swapped = repository.root.appending(path: "wt-swap")
       try FileManager.default.removeItem(at: swapped)
@@ -232,7 +416,7 @@ struct GitWorktreeDetectorIntegrationTests {
 
   @Test("detached HEAD の worktree では branch が nil になる")
   func detachedWorktreeHasNoBranch() async throws {
-    try await withRepository { repository in
+    try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "--detach", "../wt-detached"])
 
       let detected = try await repository.detector().scan().detected
@@ -242,76 +426,4 @@ struct GitWorktreeDetectorIntegrationTests {
       #expect(detached.worktreePath == "\(repository.root.path)/wt-detached")
     }
   }
-
-  // MARK: - Helpers
-
-  /// `/private/tmp` の下に作るのは、`NSTemporaryDirectory()` が返す `/var/...` を git が
-  /// 実体パス (`/private/var/...`) へ解決してしまい、`worktree list` の出力と作成時のパスが
-  /// 文字列として一致しなくなるためである。テスト終了時に必ず消す。
-  private func withRepository(_ body: (TestRepository) async throws -> Void) async throws {
-    let root = URL(fileURLWithPath: "/private/tmp")
-      .appending(path: "awt-git-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: root) }
-
-    let repository = try TestRepository(root: root)
-    try await repository.initialize()
-    try await body(repository)
-  }
-}
-
-private struct TestRepository {
-  let root: URL
-  let mainWorktree: URL
-  private let executableURL: URL
-  private let processRunner = FoundationProcessRunner()
-
-  init(root: URL) throws {
-    self.root = root
-    self.mainWorktree = root.appending(path: "main")
-    self.executableURL = try #require(
-      GitRunner.defaultExecutableCandidates.first {
-        FileManager.default.isExecutableFile(atPath: $0.path)
-      })
-  }
-
-  func initialize() async throws {
-    try FileManager.default.createDirectory(at: mainWorktree, withIntermediateDirectories: true)
-    try await git(["init", "-q", "-b", "main"])
-    try await git(["commit", "-q", "--allow-empty", "-m", "init"])
-  }
-
-  func detector() throws -> GitWorktreeDetector {
-    try GitWorktreeDetector(
-      projectDirectory: mainWorktree,
-      processRunner: processRunner,
-      executableCandidates: [executableURL]
-    )
-  }
-
-  /// 既定は main worktree での実行。`in:` に `root` からの相対名を渡すと別の作業ツリーで走る。
-  func git(_ arguments: [String], in worktreeName: String? = nil) async throws {
-    let directory = worktreeName.map { root.appending(path: $0) } ?? mainWorktree
-    let result = try await processRunner.run(
-      executableURL: executableURL,
-      arguments: ["-C", directory.path] + arguments,
-      // ホストの設定を読ませない。commit には identity が要るので環境変数で与える。
-      environment: [
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-        "GIT_AUTHOR_NAME": "awt", "GIT_AUTHOR_EMAIL": "awt@example.invalid",
-        "GIT_COMMITTER_NAME": "awt", "GIT_COMMITTER_EMAIL": "awt@example.invalid",
-        "LC_ALL": "C",
-        "PATH": "/usr/bin:/bin",
-      ],
-      timeout: .seconds(30)
-    )
-    guard result.exitCode == 0 else {
-      throw TestRepositoryError.commandFailed(arguments: arguments, stderr: result.stderr)
-    }
-  }
-}
-
-private enum TestRepositoryError: Error {
-  case commandFailed(arguments: [String], stderr: String)
 }

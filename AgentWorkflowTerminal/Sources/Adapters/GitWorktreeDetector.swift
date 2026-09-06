@@ -66,6 +66,9 @@ public struct GitWorktreeEntryFailure: Sendable, Equatable {
     /// この Project のものかを判定する2行目が絶対パスでなかった。`invalidGitDirectoryPath` と
     /// 分けているのは、壊れているのが ID なのか判定基準なのかで呼び出し側の打ち手が変わるためである。
     case invalidCommonDirectoryPath(commonDirectory: String)
+    /// 到達不能な作業ツリーと対応する admin ディレクトリを Project Root 側で特定できなかった。
+    /// 作業ツリーのパスを代替 ID にすると復帰時に同一性を保証できないため、検出結果へは載せない。
+    case administrativeDirectoryNotFound
   }
 }
 
@@ -144,7 +147,7 @@ public struct GitWorktreeDetector: Sendable {
     return FileManager.default.isExecutableFile(atPath: path)
   }
 
-  /// entry 1件の帰結。「不在として除外した」と「失敗した」を `nil` に潰すと、後者を黙って
+  /// entry 1件の帰結。「対象外として除外した」と「失敗した」を `nil` に潰すと、後者を黙って
   /// 落とすコードが書けてしまう。
   private enum EntryOutcome {
     case detected(DetectedWorktree)
@@ -160,6 +163,7 @@ public struct GitWorktreeDetector: Sendable {
   /// worktree ごとに `-C <作業ツリー>` を変えて git を実行するため、`GitRunner` は entry ごとに作る。
   private let makeRunner: @Sendable (URL) throws(GitRunnerError) -> GitRunner
   private let isWorktreeReachable: @Sendable (String) -> Bool
+  private let findAdministrativeDirectory: @Sendable (String, WorktreeIdentity) -> WorktreeIdentity?
 
   public init(
     projectDirectory: URL,
@@ -179,19 +183,24 @@ public struct GitWorktreeDetector: Sendable {
       )
     }
     self.isWorktreeReachable = Self.isReachableWorkingTree
+    self.findAdministrativeDirectory = Self.administrativeDirectory
   }
 
   init(
     projectRunner: GitRunner,
     makeRunner: @escaping @Sendable (URL) throws(GitRunnerError) -> GitRunner,
-    isWorktreeReachable: @escaping @Sendable (String) -> Bool = Self.isReachableWorkingTree
+    isWorktreeReachable: @escaping @Sendable (String) -> Bool = Self.isReachableWorkingTree,
+    findAdministrativeDirectory:
+      @escaping @Sendable (String, WorktreeIdentity) -> WorktreeIdentity? =
+      Self.administrativeDirectory
   ) {
     self.projectRunner = projectRunner
     self.makeRunner = makeRunner
     self.isWorktreeReachable = isWorktreeReachable
+    self.findAdministrativeDirectory = findAdministrativeDirectory
   }
 
-  /// - Returns: 不在として除外した entry はどちらの配列にも載せず、除外したこと自体も
+  /// - Returns: 対象外として除外した entry はどちらの配列にも載せず、除外したこと自体も
   ///   呼び出し側へ伝えない (`isScannable` / `describe`)。
   public func scan() async throws(GitWorktreeScanError) -> GitWorktreeScanResult {
     let output: String
@@ -223,9 +232,8 @@ public struct GitWorktreeDetector: Sendable {
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。
   ///
-  /// - `prunable`: 安定 ID を引けない (`rev-parse` が exit 128。git 2.50.1 実測)。§3.2 には
-  ///   「検出したが使えない worktree」という状態が無く、ここで返すと設計書に無い状態を
-  ///   発明することになる。`git worktree prune` は書き込み操作であり §17.2 で Agent へ委譲済み。
+  /// - `prunable`: 安定 ID を引けない (`rev-parse` が exit 128。git 2.50.1 実測)。
+  ///   `git worktree prune` は書き込み操作であり §17.2 で Agent へ委譲済み。
   ///   **作業ツリーが実在しないことは根拠にできない。** `.git` ファイルが消えるだけで
   ///   `prunable gitdir file points to non-existent location` が付き、作業ツリーもユーザーの
   ///   未コミットの変更もそのまま残る (git 2.50.1 実測)。つまりここでは、cwd としては完全に
@@ -236,33 +244,25 @@ public struct GitWorktreeDetector: Sendable {
   ///   作業ディレクトリにも使えない。結果として bare repository の Project は
   ///   `projectRoot == nil` になる。これは設計書 §2.3 で正常系として確定済みで、
   ///   Project Root タブを持たない Project を上位レイヤが扱う。
-  ///
-  /// - Important: 除外の代償として、作業ツリーが一時的に失われた (ボリュームを外した等) worktree は
-  ///   `reconcileDetectedWorktrees` から消失扱いになり、Active/Inactive を失う。戻ってきたときは
-  ///   新規出現として自動 Active 化され、アプリからは新しく現れた worktree と区別できない。
-  ///   ここを「失敗」にすると Project 全体の検出が止まるので不在として扱っており、この代償を
-  ///   どう埋めるかは Issue #137 の担当。
   /// - Note: `locked` が付いた worktree には、作業ツリーが実在しなくても git は `prunable` を
   ///   付けない (git 2.50.1 実測)。可搬ボリューム上の worktree を lock するのは
-  ///   `git worktree --help` が勧める運用なので異常系ではない。到達できない作業ツリーの除外は
-  ///   ここではなく `describe` が行う。
+  ///   `git worktree --help` が勧める運用なので異常系ではない。到達できない作業ツリーは
+  ///   `describe` が Project Root 側の admin ディレクトリと照合して検出結果へ残す。
   private static func isScannable(_ entry: GitWorktreeEntry) -> Bool {
     entry.prunableReason == nil && !entry.isBare
   }
 
-  /// - Returns: `.absent` になるのは、この実装がこの Project の作業ツリーではないとして除外する
-  ///   次の2つだけ。どちらも `isScannable` の除外と同じ代償を負う (消失扱い → 復帰時に自動
-  ///   Active 化。Issue #137)。それ以外の失敗は `.failed` で返し、黙って落とさない。ただし前者は
-  ///   実在しないことの証明ではない。macOS 26.5 実測では、MAC ポリシーで対象の metadata 読み取りを
-  ///   拒否すると、`access(X_OK)` と `chdir` は成功する実在 worktree でも `fileExists` は `false`、
-  ///   git は exit 128 になり、`.absent` へ入る。
+  /// - Returns: `.absent` になるのは、common dir がこの Project のものでない entry (下記の2つ目)
+  ///   だけ。到達できない作業ツリー (1つ目) は `isReachable == false` の `.detected` になる。
+  ///   それ以外の失敗は `.failed` で返し、黙って落とさない。
   ///   - 作業ツリーへ到達できない: `locked` で `prunable` が抑止された entry がここへ来る。
   ///     stderr の文言ではなく作業ツリーの到達可能性で判定するのは、git のメッセージが版と
   ///     locale で変わるためである。到達可能性を確かめるのは git が exit code を返した失敗
   ///     (`commandFailed`) に限る。git が終了しなかった失敗は不在の証拠にならず、述語が
-  ///     打ち切れない FS 呼び出しに入る (`isReachableWorkingTree`)。確かめなかった失敗も
+  ///     打ち切れない FS 呼び出しに入る (`isReachableWorkingTree`)。確かめなかった失敗も、
   ///     到達できた作業ツリーでの失敗も `GitWorktreeEntryFailure.Reason.gitDirectory` に回す。
-  ///     壊れているのが git ディレクトリ側か作業ツリー側かは、そこでも区別していない。
+  ///     到達不能なら common dir 配下の `worktrees/*/gitdir` と作業ツリーパスを照合し、対応した
+  ///     admin ディレクトリを安定 ID として返す。対応を特定できなければ ID を推測しない。
   ///   - common dir がこの Project のものでない: 登録済み worktree のディレクトリが別の
   ///     repository に置き換わると、git は `prunable` を付けず、`rev-parse` も exit 0 で
   ///     **その別 repository の** git ディレクトリを返す (git 2.50.1 実測)。そのまま通すと
@@ -286,7 +286,19 @@ public struct GitWorktreeDetector: Sendable {
       // 注入させないためである (§17.2)。
       stdout = try await runner.run(GitReadCommand(arguments: Self.gitDirectoryArguments)).stdout
     } catch {
-      if case .commandFailed = error, !isWorktreeReachable(entry.path) { return .absent }
+      if case .commandFailed = error, !isWorktreeReachable(entry.path) {
+        guard let identity = findAdministrativeDirectory(entry.path, projectCommonDirectory) else {
+          return .failed(entry.path, .administrativeDirectoryNotFound)
+        }
+        return .detected(
+          DetectedWorktree(
+            identity: identity,
+            worktreePath: entry.path,
+            branch: entry.branch.map(Self.shortBranchName),
+            isProjectRoot: false,
+            isReachable: false
+          ))
+      }
       return .failed(entry.path, .gitDirectory(error))
     }
 
@@ -309,8 +321,83 @@ public struct GitWorktreeDetector: Sendable {
         identity: identity,
         worktreePath: entry.path,
         branch: entry.branch.map(Self.shortBranchName),
-        isProjectRoot: identity == commonDirectory
+        isProjectRoot: identity == commonDirectory,
+        isReachable: true
       ))
+  }
+
+  /// `<common>/worktrees/<作業ツリー名>` を文字列連結せずに列挙して照合するのは、git が管理
+  /// ディレクトリ名をサニタイズするためである (git 2.50.1 実測: `wt2 with space` →
+  /// `worktrees/wt2-with-space`)。名前から組み立てた文字列は実際の安定 ID と一致しない。
+  ///
+  /// 照合に失敗したとき作業ツリーパスを代替 ID にしないのは、それが `git worktree move` で変わる
+  /// 値だからである (`WorktreeIdentity`)。推測した ID を配ると、復帰したときに同じ worktree だと
+  /// 判定できず、`reconcileDetectedWorktrees` から見て消失 → 新規出現になる。
+  ///
+  /// 作業ツリーへ chdir できなくてもこの経路が成立するのは、読むのが Project Root 側の common dir
+  /// 配下だけだからである (git 2.50.1 実測: lock 済みで作業ツリーを消した worktree でも
+  /// `<common>/worktrees/<name>/gitdir` はそのまま読める)。
+  ///
+  /// - Important: 返す安定 ID を正規化せず、`contentsOfDirectory` が返した URL の `path` を
+  ///   そのまま渡す。`standardizedFileURL` は結果が実在パスになるときに `/private` 接頭辞を
+  ///   落とすため (macOS 26.5 実測: 実在する `/private/tmp/x/.git/worktrees/w` →
+  ///   `/tmp/x/.git/worktrees/w`、実在しない同名パスはそのまま)、到達可能なときに
+  ///   `rev-parse --path-format=absolute --git-dir` が返す `/private/...` とバイト列が食い違い、
+  ///   同じ worktree が2つの ID・2つの tmux session 名を持つ。`URL(fileURLWithPath:)` を通し直す
+  ///   のも同じ理由で不可で、macOS 26.5 実測では NFC の `café` が NFD (`caf` + U+0301) へ
+  ///   正規化される一方、git は NFC のまま返す。照合側の `standardizedFileURL` は両辺へ等しく
+  ///   効くので残す。
+  /// - Note: `isReachableWorkingTree` と同じく、打ち切る手段の無い同期 FS I/O をここでも行う。
+  ///   `contentsOfDirectory` と `Data(contentsOf:)` はどちらも timeout も cancellation も取らない。
+  ///   撃つのは git が exit code を返し、かつ作業ツリーへ到達できないと分かった entry に限られるが、
+  ///   読む先は Project Root 側であって作業ツリーではないので、応答しないマウント上の作業ツリーで
+  ///   ここが詰まることは無い。
+  private static func administrativeDirectory(
+    worktreePath: String,
+    commonDirectory: WorktreeIdentity
+  ) -> WorktreeIdentity? {
+    let worktreesDirectory = URL(fileURLWithPath: commonDirectory.rawValue)
+      .appending(path: "worktrees", directoryHint: .isDirectory)
+    guard
+      let candidates = try? FileManager.default.contentsOfDirectory(
+        at: worktreesDirectory,
+        includingPropertiesForKeys: nil,
+        options: []
+      )
+    else { return nil }
+
+    let expectedPath = URL(fileURLWithPath: worktreePath).standardizedFileURL.path
+    for candidate in candidates {
+      let gitdir = candidate.appending(path: "gitdir", directoryHint: .notDirectory)
+      guard let data = try? Data(contentsOf: gitdir) else { continue }
+      // 改行までを1行目とする。`split` は空要素を落とすため、先頭が空行だと2行目を拾ってしまう。
+      // 作業ツリーのパス自体が改行を含む場合はここで切れて照合が外れるが、それは
+      // `administrativeDirectoryNotFound` になるだけで、誤った ID は配らない。
+      let recorded = String(decoding: data, as: UTF8.self).prefix { $0 != "\n" }
+      guard !recorded.isEmpty else { continue }
+      let recordedPath = Self.resolve(gitdirEntry: String(recorded), from: candidate)
+      guard recordedPath == expectedPath else { continue }
+      return WorktreeIdentity(rawValue: candidate.path)
+    }
+    return nil
+  }
+
+  /// `worktree.useRelativePaths=true` / `worktree add --relative-paths` で作った worktree では、
+  /// `gitdir` の中身は管理ディレクトリからの相対パスになる (git 2.50.1 実測:
+  /// `../../../../rel1/.git`)。基準を与えずに `URL(fileURLWithPath:)` へ渡すとプロセスの cwd で
+  /// 解決され、照合が必ず外れる。
+  ///
+  /// 相対の解決に `relativeTo:` ではなく `appending(path:)` を使うのは、前者が基準 URL の
+  /// ディレクトリ扱いに依存し、`hasDirectoryPath` が false の基準では最後の要素を捨てて
+  /// 静かに別のパスを返すためである (macOS 26.5 実測: 同じパスから作った基準でも、
+  /// `isDirectory: false` だと `/tmp/x/.git/worktrees/rel1` 基準の `../../../../rel1/.git` が
+  /// `/private/tmp/rel1` になる)。
+  private static func resolve(gitdirEntry: String, from administrativeDirectory: URL) -> String {
+    let gitDirectory =
+      gitdirEntry.hasPrefix("/")
+      ? URL(fileURLWithPath: gitdirEntry)
+      : administrativeDirectory.appending(path: gitdirEntry)
+    return gitDirectory.deletingLastPathComponent().standardizedFileURL.path
   }
 
   private func projectCommonDirectory() async throws(GitWorktreeScanError) -> WorktreeIdentity {

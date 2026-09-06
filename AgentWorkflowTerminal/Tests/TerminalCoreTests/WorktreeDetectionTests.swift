@@ -9,14 +9,16 @@ struct WorktreeDetectionTests {
   private func detected(
     _ name: String,
     branch: String? = nil,
-    isProjectRoot: Bool = false
+    isProjectRoot: Bool = false,
+    isReachable: Bool = true
   ) throws -> DetectedWorktree {
     let path = isProjectRoot ? "/repo/.git" : "/repo/.git/worktrees/\(name)"
     return DetectedWorktree(
       identity: try #require(WorktreeIdentity(rawValue: path)),
       worktreePath: isProjectRoot ? "/repo" : "/wt/\(name)",
       branch: branch,
-      isProjectRoot: isProjectRoot
+      isProjectRoot: isProjectRoot,
+      isReachable: isReachable
     )
   }
 
@@ -59,6 +61,18 @@ struct WorktreeDetectionTests {
     #expect(firstScan.appeared.isEmpty)
     #expect(afterEmpty.inventory.taskWorktrees.map(\.activation) == [.active])
     #expect(afterEmpty.appeared == [alpha.identity])
+  }
+
+  @Test("初回スキャンで到達不能なworktreeはInactiveから始め、新規出現に数えない")
+  func firstScanStartsUnreachableWorktreeInactive() throws {
+    let alpha = try detected("alpha", isReachable: false)
+
+    let result = reconcileDetectedWorktrees(detected: [alpha], previous: nil)
+
+    #expect(result.inventory.taskWorktrees.map(\.activation) == [.inactive])
+    #expect(result.inventory.taskWorktrees.map(\.detected.isReachable) == [false])
+    #expect(result.appeared.isEmpty)
+    #expect(result.disappeared.isEmpty)
   }
 
   // MARK: - Project Root (§2.3)
@@ -157,6 +171,56 @@ struct WorktreeDetectionTests {
 
     #expect(result.inventory.taskWorktrees.map(\.activation) == [activation])
     #expect(result.appeared.isEmpty)
+  }
+
+  @Test(
+    "到達不能の間も前回のActive/Inactiveを維持し、消失に数えない",
+    arguments: [WorktreeActivation.active, .inactive]
+  )
+  func unreachableWorktreeKeepsItsActivation(activation: WorktreeActivation) throws {
+    let before = try detected("alpha")
+    let unreachable = try detected("alpha", isReachable: false)
+
+    let result = reconcileDetectedWorktrees(
+      detected: [unreachable],
+      previous: inventory([(before, activation)])
+    )
+
+    #expect(result.inventory.taskWorktrees.map(\.activation) == [activation])
+    #expect(result.inventory.taskWorktrees.map(\.detected.isReachable) == [false])
+    #expect(result.appeared.isEmpty)
+    #expect(result.disappeared.isEmpty)
+  }
+
+  @Test("到達不能で初めて観測したworktreeはInactiveにし、新規出現に数えない")
+  func newlyObservedUnreachableWorktreeStartsInactive() throws {
+    let alpha = try detected("alpha", isReachable: false)
+
+    let result = reconcileDetectedWorktrees(detected: [alpha], previous: inventory([]))
+
+    #expect(result.inventory.taskWorktrees.map(\.activation) == [.inactive])
+    #expect(result.appeared.isEmpty)
+    #expect(result.disappeared.isEmpty)
+  }
+
+  @Test("到達不能から復帰してもActive/Inactiveを維持し、新規出現に数えない")
+  func recoveredWorktreeKeepsItsActivation() throws {
+    let reachable = try detected("alpha")
+    let unreachable = try detected("alpha", isReachable: false)
+    let duringOutage = reconcileDetectedWorktrees(
+      detected: [unreachable],
+      previous: inventory([(reachable, .inactive)])
+    )
+
+    let recovered = reconcileDetectedWorktrees(
+      detected: [reachable],
+      previous: duringOutage.inventory
+    )
+
+    #expect(recovered.inventory.taskWorktrees.map(\.activation) == [.inactive])
+    #expect(recovered.inventory.taskWorktrees.map(\.detected.isReachable) == [true])
+    #expect(recovered.appeared.isEmpty)
+    #expect(recovered.disappeared.isEmpty)
   }
 
   /// 前回状態は上位が組み立てるので、同じ identity が重複した一覧を渡され得る。どちらの

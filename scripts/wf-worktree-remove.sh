@@ -12,8 +12,9 @@ usage() {
 worktree を削除し、安全に削除できる場合はローカルブランチも削除する。
 target はパス、worktree ディレクトリ名、またはブランチ名で指定できる。
   --force     安全確認の警告を承知して worktree の削除を続行する
-              locked worktree を削除する場合は2回指定する
+              2回指定すると locked worktree も削除できる
   --dry-run   安全確認後、実行するはずの内容を表示する
+  --           以降を target として扱う (後ろにフラグは指定できない)
   -h, --help  このヘルプを表示
 EOF
 }
@@ -105,7 +106,8 @@ while [[ "$i" -lt "${#paths[@]}" ]]; do
   i=$((i + 1))
 done
 
-[[ ${#matches[@]} -gt 0 ]] || die "一致する worktree が見つかりません: $target_arg"
+[[ ${#matches[@]} -gt 0 ]] \
+  || die "一致する worktree が見つかりません: $target_arg (detached HEAD の場合はパスまたは worktree ディレクトリ名で指定してください)"
 [[ ${#matches[@]} -eq 1 ]] || die "複数の worktree に一致しました: $target_arg"
 match=${matches[0]}
 target_path=${canonical_paths[$match]}
@@ -135,7 +137,18 @@ else
 fi
 
 merged_oids=""
-if [[ -n "$branch" ]]; then
+local_head_oid=""
+delete_branch=0
+worktree_has_unique_commits() {
+  if git merge-base --is-ancestor "$1" origin/main 2>/dev/null; then
+    return 1
+  fi
+  return 0
+}
+
+if ! worktree_has_unique_commits "$head_oid"; then
+  [[ -z "$branch" ]] || delete_branch=1
+elif [[ -n "$branch" ]]; then
   load_merged_pr_heads
   merged_oids=$(merged_pr_head_oids "$branch")
   local_head_oid=$(git rev-parse "refs/heads/$branch") \
@@ -148,19 +161,18 @@ if [[ -n "$branch" ]]; then
   fi
   if [[ "$remote_head_oid" != "$local_head_oid" ]] \
     && { [[ -z "$merged_oids" ]] || ! grep -qxF "$local_head_oid" <<<"$merged_oids"; }; then
-    warnings+=("ローカルにしか無いコミットがあります")
+    warnings+=("ローカル head が origin/$branch およびマージ済み PR の head と一致しません")
   fi
 
   # squash-only 運用ではブランチ先端が origin/main の祖先にならないため、
   # `git merge-base --is-ancestor` ではなくマージ済み PR の head OID と照合する。
   if [[ -z "$merged_oids" ]] || ! grep -qxF "$local_head_oid" <<<"$merged_oids"; then
     warnings+=("マージ済み PR の head と一致しません")
+  else
+    delete_branch=1
   fi
 else
-  local_head_oid=""
-  if ! git merge-base --is-ancestor "$head_oid" origin/main 2>/dev/null; then
-    warnings+=("detached HEAD に origin/main から到達できないコミットがあります")
-  fi
+  warnings+=("detached HEAD に origin/main から到達できないコミットがあります")
 fi
 
 if [[ ${#warnings[@]} -gt 0 ]]; then
@@ -180,8 +192,7 @@ done
 remove_command+=(-- "$target_path")
 if [[ "$dry_run" -eq 1 ]]; then
   info "[dry-run] ${remove_command[*]}"
-  if [[ -n "$branch" && -n "$merged_oids" ]] \
-    && grep -qxF "$local_head_oid" <<<"$merged_oids"; then
+  if [[ "$delete_branch" -eq 1 ]]; then
     info "[dry-run] git branch -D $branch"
   else
     info "ローカルブランチは安全に削除できないため残します: ${branch:-detached HEAD}"
@@ -201,11 +212,14 @@ if ! remove_error=$("${remove_command[@]}" 2>&1); then
     END { if (current == path) printf "%s", text }
   ' <<<"$refreshed")
   if [[ -z "$record" ]]; then
-    die "対象の登録は消えています (ファイルが残っている可能性があります): $target_path"
+    if [[ -n "$branch" ]]; then
+      die "worktree 登録は既に消えているため、このスクリプトでは以後扱えません。残っているのは '$target_path' のディレクトリだけです。失敗原因 (権限など) を解消してから、そのディレクトリを手で削除してください。ローカルブランチ '$branch' は残っています。マージ済みなら scripts/wf-cleanup-branches.sh --yes で削除できます"
+    fi
+    die "worktree 登録は既に消えているため、このスクリプトでは以後扱えません。残っているのは '$target_path' のディレクトリだけです。失敗原因 (権限など) を解消してから、そのディレクトリを手で削除してください。detached HEAD のためローカルブランチはありません"
   elif grep -Eq '^locked( |$)' <<<"$record"; then
     die "対象は locked worktree です。削除するには --force を2回指定してください: $target_path"
   elif grep -Eq '^(prunable|bare)( |$)' <<<"$record"; then
-    die "対象の登録は残っていますが prunable / bare のため手当てが必要です: $target_path"
+    die "対象の登録は prunable / bare のまま残っています。原因を解消して同じコマンドを再実行すれば片付けられます: $target_path"
   else
     die "対象の登録は残っているため、問題を解消してやり直せます: $target_path"
   fi
@@ -213,8 +227,7 @@ fi
 [[ -z "$remove_error" ]] || info "$remove_error"
 info "worktree を削除しました: $target_path"
 
-if [[ -n "$branch" && -n "$merged_oids" ]] \
-  && grep -qxF "$local_head_oid" <<<"$merged_oids"; then
+if [[ "$delete_branch" -eq 1 ]]; then
   branch_delete_error=""
   if ! branch_delete_error=$(git branch -D "$branch" 2>&1); then
     die "worktree は削除済みですが、ローカルブランチ '$branch' の削除に失敗しました: $branch_delete_error"

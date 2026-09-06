@@ -21,6 +21,9 @@ public struct WorktreePaneAgentStateFeed: Sendable {
     self.paneListInterval = paneListInterval
   }
 
+  /// `.absent` の pane は、非 Agent process を代表状態へ昇格させないため出力に含めない
+  /// (設計書 §5.2)。空配列は Agent pane が1つも無いことを表し、代表状態の `nil` を Idle 表示へ
+  /// 変換する規則は表示層に留める。
   public func states(
     of worktree: WorktreeIdentity,
     panes paneSource: any WorktreePaneSource,
@@ -61,7 +64,7 @@ public struct WorktreePaneAgentStateFeed: Sendable {
   }
 }
 
-private actor WorktreePaneFeedCoordinator {
+actor WorktreePaneFeedCoordinator {
   private struct PaneEntry {
     var snapshot: PaneSnapshot
     var result: AgentObservationResult?
@@ -117,8 +120,10 @@ private actor WorktreePaneFeedCoordinator {
       if let entry = entries[pane.id] {
         if needsReselection(previous: entry.snapshot, current: pane) {
           entry.task?.cancel()
+          // pane も Agent も生きている間に観測できないことを「不在」として報告しない。
+          // 本当の不在は新しい adapter の `.absent` で確定する (設計書 §12.3 / §12.4.2)。
           entries[pane.id] = PaneEntry(
-            snapshot: pane, result: nil, task: nil, generation: entry.generation + 1)
+            snapshot: pane, result: entry.result, task: nil, generation: entry.generation + 1)
           await startObservation(for: pane)
         } else {
           entries[pane.id]?.snapshot = pane

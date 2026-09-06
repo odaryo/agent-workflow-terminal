@@ -49,8 +49,37 @@ nwo() {
 
 # squash マージは PR タイトルがそのまま main のコミットログになるため、
 # commit と PR の両方に同じ形式を課す (Issue #43)。
-WF_CONVENTIONAL_PATTERN='^(feat|fix|docs|refactor|test|chore|ci|build|perf|style)(\([^)]+\))?!?: .+'
+WF_CONVENTIONAL_TYPES='feat|fix|docs|refactor|test|chore|ci|build|perf|style'
+WF_CONVENTIONAL_PATTERN="^(${WF_CONVENTIONAL_TYPES})(\\([^)]+\\))?!?: .+"
+# spike は Conventional Commits の type ではないが、検証作業用ブランチで使用する
+# (実績: spike/issue-18-gate3-plan)。
+WF_WORKTREE_BRANCH_PATTERN="^(${WF_CONVENTIONAL_TYPES}|spike)/[^/]+$"
+require_worktree_branch() {
+  [[ "$1" =~ $WF_WORKTREE_BRANCH_PATTERN ]] \
+    || die "ブランチ名は <type>/<slug> 形式で指定してください: $1"
+}
 require_conventional_title() {
   [[ "$1" =~ $WF_CONVENTIONAL_PATTERN ]] \
     || die "$2が Conventional Commits 形式ではありません: $1"
+}
+
+WF_MERGED_HEAD_TSV=""
+load_merged_pr_heads() {
+  # squash マージではブランチ先端が origin/main の祖先にならないため、
+  # `git branch --merged origin/main` はマージ済みブランチを検出できない
+  # (squash-only 運用の本リポジトリでは削除候補が1件も出ない。Issue #45 で実測)。
+  # 代わりにマージ済み PR の head を gh から取得し、ローカル/リモートの ref と突き合わせる。
+  # 直近200件より古い PR のブランチは対象外だが、消しすぎ側には倒れない。
+  # --base main は必須。base が main 以外の PR (stacked PR の子など) は、親が main に
+  # 入らないまま閉じられると squash コミットが main から到達不能なままになるため。
+  WF_MERGED_HEAD_TSV=$(gh pr list --state merged --limit 200 --base main \
+    --json headRefName,headRefOid \
+    --jq '.[] | .headRefName + "\t" + .headRefOid') \
+    || die "マージ済み PR の取得に失敗しました (gh pr list)"
+}
+
+merged_pr_head_oids() {
+  # `$1 ""` は文字列比較の強制。awk は -v 代入値が数値に見えると数値比較に切り替わり、
+  # `007` と `7` のようなブランチ名が一致してしまう。
+  awk -F '\t' -v name="$1" '$1 "" == name "" { print $2 }' <<<"$WF_MERGED_HEAD_TSV"
 }

@@ -1,5 +1,7 @@
-import Foundation
+import os
 
+/// 実装体はキャンセル時に throw し、過去の期限には即座に戻ること。タイマーの失敗は
+/// 出力へ伝播できないため、キャンセル以外で throw すると保持も stream 終了も止まる。
 public protocol ContinuousTimeSource: Sendable {
   var now: ContinuousClock.Instant { get }
   func sleep(until deadline: ContinuousClock.Instant) async throws
@@ -18,10 +20,12 @@ public struct SystemContinuousTimeSource: ContinuousTimeSource {
 }
 
 public struct WorktreeRepresentativeStateFeed: Sendable {
-  private let holdDuration: Duration
+  private let stabilizer: WorktreeRepresentativeStateStabilizer
 
-  public init(holdDuration: Duration = .seconds(9)) {
-    self.holdDuration = holdDuration
+  public init(
+    stabilizer: WorktreeRepresentativeStateStabilizer = WorktreeRepresentativeStateStabilizer()
+  ) {
+    self.stabilizer = stabilizer
   }
 
   public func states<Updates>(
@@ -34,24 +38,55 @@ public struct WorktreeRepresentativeStateFeed: Sendable {
   {
     AsyncStream { continuation in
       let coordinator = FeedCoordinator(
-        holdDuration: holdDuration,
+        stabilizer: stabilizer,
         timeSource: timeSource,
         continuation: continuation
       )
-      let inputTask = Task {
-        do {
-          for try await panes in updates {
-            guard !Task.isCancelled else { break }
-            await coordinator.receive(panes)
-          }
-        } catch {}
-        await coordinator.inputFinished(cancelled: Task.isCancelled)
-      }
+      let inputTask = FeedInputTask()
       continuation.onTermination = { _ in
         inputTask.cancel()
         Task { await coordinator.cancel() }
       }
+      inputTask.start(
+        Task {
+          do {
+            for try await panes in updates {
+              guard !Task.isCancelled else { break }
+              await coordinator.receive(panes)
+            }
+          } catch {
+            // `Failure == Never` は macOS 15 以降に限られるため、非 throwing の出力では
+            // 入力失敗を正常終了と同じ扱いにする。
+          }
+          await coordinator.inputFinished(cancelled: Task.isCancelled)
+        }
+      )
     }
+  }
+}
+
+private final class FeedInputTask: Sendable {
+  private struct State {
+    var task: Task<Void, Never>?
+    var isCancelled = false
+  }
+
+  private let state = OSAllocatedUnfairLock(initialState: State())
+
+  func start(_ task: Task<Void, Never>) {
+    let shouldCancel = state.withLock { state in
+      state.task = task
+      return state.isCancelled
+    }
+    if shouldCancel { task.cancel() }
+  }
+
+  func cancel() {
+    let task = state.withLock { state in
+      state.isCancelled = true
+      return state.task
+    }
+    task?.cancel()
   }
 }
 
@@ -68,13 +103,13 @@ private actor FeedCoordinator {
   private var isCancelled = false
 
   init(
-    holdDuration: Duration,
+    stabilizer: WorktreeRepresentativeStateStabilizer,
     timeSource: any ContinuousTimeSource,
     continuation: AsyncStream<WorktreeRepresentativeState?>.Continuation
   ) {
     self.timeSource = timeSource
     self.continuation = continuation
-    self.stabilizer = WorktreeRepresentativeStateStabilizer(holdDuration: holdDuration)
+    self.stabilizer = stabilizer
   }
 
   func receive(_ panes: [PaneAgentState]) {
@@ -121,6 +156,7 @@ private actor FeedCoordinator {
       finish()
       return
     }
+    // 保持の起点をリセットしない設計書 §12.2 の不変条件により、同じ期限は再登録しない。
     guard deadline != scheduledDeadline else { return }
     timerTask?.cancel()
     timerTask = nil

@@ -6,6 +6,37 @@ import Testing
 
 @Suite("Close 前の git 安全確認 (設計書 §3.4)")
 struct GitCloseSafetyInspectorTests {
+  @Test("public 初期化子の検査 report は検査対象の identity を返す")
+  func publicInitializerReportUsesTargetIdentity() async throws {
+    let inspectedTarget = try target(identity: "/repo/.git/worktrees/public", branch: "topic")
+    let stub = CloseInspectionProcessStub { _ in
+      .success(
+        .init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head (detached)\0", stderr: ""))
+    }
+    let inspector = try GitCloseSafetyInspector(
+      target: inspectedTarget, processRunner: stub,
+      executableCandidates: [URL(fileURLWithPath: "/usr/bin/git")])
+
+    let result = await inspector.inspect(projectRootBranch: "main")
+
+    #expect(result.report.worktree == inspectedTarget.identity)
+  }
+
+  @Test("internal 初期化子の検査 report は検査対象の identity を返す")
+  func internalInitializerReportUsesTargetIdentity() async throws {
+    let inspectedTarget = try target(identity: "/repo/.git/worktrees/internal", branch: nil)
+    let stub = CloseInspectionProcessStub { _ in
+      .success(
+        .init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head (detached)\0", stderr: ""))
+    }
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(stub), target: inspectedTarget)
+
+    let result = await inspector.inspect(projectRootBranch: "main")
+
+    #expect(result.report.worktree == inspectedTarget.identity)
+  }
+
   @Test("完全修飾された local branch ref を revision として受け付ける")
   func acceptsFullyQualifiedBranchRevision() {
     #expect(GitRevision("refs/heads/x")?.rawValue == "refs/heads/x")
@@ -28,12 +59,12 @@ struct GitCloseSafetyInspectorTests {
       }
     }
     let inspector = GitCloseSafetyInspector(
-      runner: try runner(stub), targetBranch: "refs/foo")
+      runner: try runner(stub), target: try target(branch: "refs/foo"))
 
     let result = await inspector.inspect(projectRootBranch: "main")
 
-    #expect(result.defaultBranch == .projectRoot(branch: "main"))
-    #expect(result.inspection.branchMerge == .unmerged)
+    #expect(result.report.defaultBranch == .projectRoot(branch: "main"))
+    #expect(result.report.inspection.branchMerge == .unmerged)
     #expect(result.failures.isEmpty)
   }
 
@@ -54,11 +85,11 @@ struct GitCloseSafetyInspectorTests {
       }
     }
     let inspector = GitCloseSafetyInspector(
-      runner: try runner(stub), targetBranch: "refs/heads/x")
+      runner: try runner(stub), target: try target(branch: "refs/heads/x"))
 
     let result = await inspector.inspect(projectRootBranch: "main")
 
-    #expect(result.inspection.branchMerge == .unmerged)
+    #expect(result.report.inspection.branchMerge == .unmerged)
     #expect(result.failures.isEmpty)
   }
 
@@ -80,15 +111,16 @@ struct GitCloseSafetyInspectorTests {
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
       }
     }
-    let inspector = GitCloseSafetyInspector(runner: try runner(stub), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(stub), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: nil)
 
-    #expect(result.inspection.uncommittedChanges == .present)
-    #expect(result.inspection.ignoredFiles == .absent)
-    #expect(result.inspection.unpushedCommits == .present)
-    #expect(result.inspection.branchMerge == .merged)
-    #expect(result.defaultBranch == .originHead(branch: "main"))
+    #expect(result.report.inspection.uncommittedChanges == .present)
+    #expect(result.report.inspection.ignoredFiles == .absent)
+    #expect(result.report.inspection.unpushedCommits == .present)
+    #expect(result.report.inspection.branchMerge == .merged)
+    #expect(result.report.defaultBranch == .originHead(branch: "main"))
     #expect(result.failures.isEmpty)
   }
 
@@ -111,15 +143,16 @@ struct GitCloseSafetyInspectorTests {
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
       }
     }
-    let inspector = GitCloseSafetyInspector(runner: try runner(stub), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(stub), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: "main")
 
-    #expect(result.inspection.uncommittedChanges == .absent)
-    #expect(result.inspection.ignoredFiles == .absent)
-    #expect(result.inspection.unpushedCommits == .absent)
-    #expect(result.inspection.branchMerge == .unmerged)
-    #expect(result.defaultBranch == .projectRoot(branch: "main"))
+    #expect(result.report.inspection.uncommittedChanges == .absent)
+    #expect(result.report.inspection.ignoredFiles == .absent)
+    #expect(result.report.inspection.unpushedCommits == .absent)
+    #expect(result.report.inspection.branchMerge == .unmerged)
+    #expect(result.report.defaultBranch == .projectRoot(branch: "main"))
     #expect(result.failures.isEmpty)
   }
 
@@ -133,15 +166,16 @@ struct GitCloseSafetyInspectorTests {
         .init(
           exitCode: 0, stdout: "# branch.oid abc\0# branch.head (detached)\0", stderr: ""))
     }
-    let inspector = GitCloseSafetyInspector(runner: try runner(stub), targetBranch: nil)
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(stub), target: try target(branch: nil))
 
     let result = await inspector.inspect(projectRootBranch: "main")
 
-    #expect(result.inspection.uncommittedChanges == .absent)
-    #expect(result.inspection.ignoredFiles == .absent)
-    #expect(result.inspection.unpushedCommits == .notApplicable)
-    #expect(result.inspection.branchMerge == .notApplicable)
-    #expect(result.defaultBranch == .unresolved(reason: .notNeededForDetachedHead))
+    #expect(result.report.inspection.uncommittedChanges == .absent)
+    #expect(result.report.inspection.ignoredFiles == .absent)
+    #expect(result.report.inspection.unpushedCommits == .notApplicable)
+    #expect(result.report.inspection.branchMerge == .notApplicable)
+    #expect(result.report.defaultBranch == .unresolved(reason: .notNeededForDetachedHead))
     #expect(result.failures.isEmpty)
   }
 
@@ -162,15 +196,16 @@ struct GitCloseSafetyInspectorTests {
           stderr: "")),
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
-    let inspector = GitCloseSafetyInspector(runner: try runner(results), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(results), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: nil)
 
-    #expect(result.inspection.uncommittedChanges == .absent)
-    #expect(result.inspection.ignoredFiles == .present)
-    #expect(result.inspection.unpushedCommits == .present)
-    #expect(result.inspection.branchMerge == .unknown)
-    #expect(result.defaultBranch == .unresolved(reason: .originHeadMissing))
+    #expect(result.report.inspection.uncommittedChanges == .absent)
+    #expect(result.report.inspection.ignoredFiles == .present)
+    #expect(result.report.inspection.unpushedCommits == .present)
+    #expect(result.report.inspection.branchMerge == .unknown)
+    #expect(result.report.defaultBranch == .unresolved(reason: .originHeadMissing))
   }
 
   @Test("ignored 側の出力上限超過を他の3検査へ波及させない")
@@ -194,14 +229,15 @@ struct GitCloseSafetyInspectorTests {
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
       }
     }
-    let inspector = GitCloseSafetyInspector(runner: try runner(stub), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(stub), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: nil)
 
-    #expect(result.inspection.uncommittedChanges == .absent)
-    #expect(result.inspection.ignoredFiles == .unknown)
-    #expect(result.inspection.unpushedCommits == .absent)
-    #expect(result.inspection.branchMerge == .merged)
+    #expect(result.report.inspection.uncommittedChanges == .absent)
+    #expect(result.report.inspection.ignoredFiles == .unknown)
+    #expect(result.report.inspection.unpushedCommits == .absent)
+    #expect(result.report.inspection.branchMerge == .merged)
     #expect(result.failures.map(\.check) == [.ignoredFiles])
   }
 
@@ -222,11 +258,12 @@ struct GitCloseSafetyInspectorTests {
           stderr: "")),
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
-    let inspector = GitCloseSafetyInspector(runner: try runner(results), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(results), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: nil)
 
-    #expect(result.inspection.unpushedCommits == .aheadUnknownWithoutTrackingReference)
+    #expect(result.report.inspection.unpushedCommits == .aheadUnknownWithoutTrackingReference)
     #expect(result.failures.isEmpty)
   }
 
@@ -246,17 +283,18 @@ struct GitCloseSafetyInspectorTests {
       .success(.init(exitCode: 128, stdout: "", stderr: "fatal: broken ref\n")),
       .success(.init(exitCode: 0, stdout: "", stderr: "")),
     ])
-    let inspector = GitCloseSafetyInspector(runner: try runner(results), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(results), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: "main")
 
-    #expect(result.defaultBranch == .unresolved(reason: .lookupFailed))
-    #expect(result.inspection.branchMerge == .unknown)
+    #expect(result.report.defaultBranch == .unresolved(reason: .lookupFailed))
+    #expect(result.report.inspection.branchMerge == .unknown)
     #expect(result.failures.map(\.check) == [.branchMerge])
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: result.defaultBranch,
-        merge: result.inspection.branchMerge))
+        targetBranch: "topic", defaultBranch: result.report.defaultBranch,
+        merge: result.report.inspection.branchMerge))
   }
 
   @Test("解釈不能な origin/HEAD の値では Project Root へフォールバックしない")
@@ -275,19 +313,20 @@ struct GitCloseSafetyInspectorTests {
       .success(.init(exitCode: 0, stdout: "refs/heads/main\n", stderr: "")),
       .success(.init(exitCode: 0, stdout: "", stderr: "")),
     ])
-    let inspector = GitCloseSafetyInspector(runner: try runner(results), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(results), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: "main")
 
     #expect(
-      result.defaultBranch
+      result.report.defaultBranch
         == .unresolved(reason: .invalidOriginHead("refs/heads/main")))
-    #expect(result.inspection.branchMerge == .unknown)
+    #expect(result.report.inspection.branchMerge == .unknown)
     #expect(result.failures.isEmpty)
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "topic", defaultBranch: result.defaultBranch,
-        merge: result.inspection.branchMerge))
+        targetBranch: "topic", defaultBranch: result.report.defaultBranch,
+        merge: result.report.inspection.branchMerge))
   }
 
   @Test("実在する `(detached)` branch を upstream 無しとして警告する")
@@ -302,11 +341,11 @@ struct GitCloseSafetyInspectorTests {
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
     let inspector = GitCloseSafetyInspector(
-      runner: try runner(results), targetBranch: "(detached)")
+      runner: try runner(results), target: try target(branch: "(detached)"))
 
     let result = await inspector.inspect(projectRootBranch: nil)
 
-    #expect(result.inspection.unpushedCommits == .present)
+    #expect(result.report.inspection.unpushedCommits == .present)
   }
 
   @Test("status の失敗後も merge 検査を返す")
@@ -326,14 +365,15 @@ struct GitCloseSafetyInspectorTests {
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
       }
     }
-    let inspector = GitCloseSafetyInspector(runner: try runner(stub), targetBranch: "topic")
+    let inspector = GitCloseSafetyInspector(
+      runner: try runner(stub), target: try target(branch: "topic"))
 
     let result = await inspector.inspect(projectRootBranch: nil)
 
-    #expect(result.inspection.uncommittedChanges == .unknown)
-    #expect(result.inspection.ignoredFiles == .absent)
-    #expect(result.inspection.unpushedCommits == .unknown)
-    #expect(result.inspection.branchMerge == .merged)
+    #expect(result.report.inspection.uncommittedChanges == .unknown)
+    #expect(result.report.inspection.ignoredFiles == .absent)
+    #expect(result.report.inspection.unpushedCommits == .unknown)
+    #expect(result.report.inspection.branchMerge == .merged)
     #expect(
       result.failures.map(\.check) == [.uncommittedChanges, .unpushedCommits])
   }
@@ -355,10 +395,11 @@ struct GitCloseSafetyInspectorTests {
           stderr: "")),
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
-    let noDefault = GitCloseSafetyInspector(runner: try runner(results), targetBranch: "topic")
+    let noDefault = GitCloseSafetyInspector(
+      runner: try runner(results), target: try target(branch: "topic"))
     let unknown = await noDefault.inspect(projectRootBranch: nil)
-    #expect(unknown.inspection.branchMerge == .unknown)
-    #expect(unknown.defaultBranch == .unresolved(reason: .originHeadMissing))
+    #expect(unknown.report.inspection.branchMerge == .unknown)
+    #expect(unknown.report.defaultBranch == .unresolved(reason: .originHeadMissing))
     #expect(unknown.failures.isEmpty)
 
     let mergeFailure = CloseInspectionResultQueue([
@@ -378,9 +419,9 @@ struct GitCloseSafetyInspectorTests {
       .success(.init(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n")),
     ])
     let failedMerge = await GitCloseSafetyInspector(
-      runner: try runner(mergeFailure), targetBranch: "topic"
+      runner: try runner(mergeFailure), target: try target(branch: "topic")
     ).inspect(projectRootBranch: nil)
-    #expect(failedMerge.inspection.branchMerge == .unknown)
+    #expect(failedMerge.report.inspection.branchMerge == .unknown)
     #expect(failedMerge.failures.map(\.check) == [.branchMerge])
   }
 
@@ -389,6 +430,14 @@ struct GitCloseSafetyInspectorTests {
       repositoryDirectory: URL(fileURLWithPath: "/repo"), processRunner: processRunner,
       executableCandidates: [URL(fileURLWithPath: "/test/bin/git")], parentEnvironment: [:],
       isExecutableFile: { _ in true })
+  }
+
+  private func target(
+    identity: String = "/repo/.git/worktrees/topic", branch: String?
+  ) throws -> DetectedWorktree {
+    DetectedWorktree(
+      identity: try #require(WorktreeIdentity(rawValue: identity)), worktreePath: "/repo/wt",
+      branch: branch, isProjectRoot: false)
   }
 
 }

@@ -21,14 +21,13 @@ public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
 }
 
 public struct GitCloseSafetyInspectionResult: Sendable, Equatable {
-  public let inspection: WorktreeCloseInspection
-  public let defaultBranch: DefaultBranchResolution
+  public let report: WorktreeCloseInspectionReport
   public let failures: [GitCloseSafetyInspectionFailure]
 }
 
 public struct GitCloseSafetyInspector: Sendable {
   private let runner: GitRunner
-  private let targetBranch: String?
+  private let target: DetectedWorktree
 
   public init(
     target: DetectedWorktree,
@@ -39,17 +38,18 @@ public struct GitCloseSafetyInspector: Sendable {
       repositoryDirectory: URL(fileURLWithPath: target.worktreePath),
       processRunner: processRunner,
       executableCandidates: executableCandidates)
-    self.targetBranch = target.branch
+    self.target = target
   }
 
-  init(runner: GitRunner, targetBranch: String?) {
+  init(runner: GitRunner, target: DetectedWorktree) {
     self.runner = runner
-    self.targetBranch = targetBranch
+    self.target = target
   }
 
   /// `projectRootBranch` は `GitWorktreeDetector` と同じく `refs/heads/` を除いた短縮名だけを受け取る。
   public func inspect(projectRootBranch: String?) async -> GitCloseSafetyInspectionResult {
     var failures: [GitCloseSafetyInspectionFailure] = []
+    let targetBranch = target.branch
     let statusChecks = await inspectStatus(targetBranch: targetBranch)
     let ignoredCheck = await inspectIgnoredStatus()
     failures += statusChecks.failures
@@ -58,12 +58,14 @@ public struct GitCloseSafetyInspector: Sendable {
     guard let targetBranch else {
       // branch が無ければ未mergeを問えないので、既定branchの問い合わせ自体を省く。
       return .init(
-        inspection: .init(
-          uncommittedChanges: statusChecks.uncommittedChanges,
-          ignoredFiles: ignoredCheck.status,
-          unpushedCommits: .notApplicable,
-          branchMerge: .notApplicable),
-        defaultBranch: .unresolved(reason: .notNeededForDetachedHead),
+        report: .init(
+          target: target,
+          inspection: .init(
+            uncommittedChanges: statusChecks.uncommittedChanges,
+            ignoredFiles: ignoredCheck.status,
+            unpushedCommits: .notApplicable,
+            branchMerge: .notApplicable),
+          defaultBranch: .unresolved(reason: .notNeededForDetachedHead)),
         failures: failures)
     }
 
@@ -80,12 +82,14 @@ public struct GitCloseSafetyInspector: Sendable {
     }
 
     return .init(
-      inspection: .init(
-        uncommittedChanges: statusChecks.uncommittedChanges,
-        ignoredFiles: ignoredCheck.status,
-        unpushedCommits: statusChecks.unpushedCommits,
-        branchMerge: branchMerge),
-      defaultBranch: defaultBranchResult.resolution,
+      report: .init(
+        target: target,
+        inspection: .init(
+          uncommittedChanges: statusChecks.uncommittedChanges,
+          ignoredFiles: ignoredCheck.status,
+          unpushedCommits: statusChecks.unpushedCommits,
+          branchMerge: branchMerge),
+        defaultBranch: defaultBranchResult.resolution),
       failures: failures)
   }
 

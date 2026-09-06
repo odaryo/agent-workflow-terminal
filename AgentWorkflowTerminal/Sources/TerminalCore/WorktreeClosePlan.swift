@@ -1,13 +1,35 @@
+public struct WorktreeCloseInspectionReport: Sendable, Hashable {
+  public let worktree: WorktreeIdentity
+  public let inspection: WorktreeCloseInspection
+  /// `inspection.branchMerge` を計算した既定 branch。
+  public let defaultBranch: DefaultBranchResolution
+
+  /// `internal` では `Adapters` の検査器から作れず、`public` では別パッケージである `App` の糊が
+  /// 検査結果へ別の worktree を詰め替えられる。検査器は作れて UI の糊は作れない境界が SwiftPM
+  /// パッケージ境界と一致するため、`package` に限定する。
+  ///
+  /// - Important: 同じパッケージの `Adapters` 内部では詰め替えられ、`WorktreeCloseInspection` も
+  ///   public initializer を持つ値型なので、実際に検査を実行したかまでは担保しない。
+  package init(
+    target: DetectedWorktree,
+    inspection: WorktreeCloseInspection,
+    defaultBranch: DefaultBranchResolution
+  ) {
+    self.worktree = target.identity
+    self.inspection = inspection
+    self.defaultBranch = defaultBranch
+  }
+}
+
 /// 検査結果を見たうえで続行を選んだ、という事実 (設計書 §3.4)。
 ///
 /// §3.4 の検査結果は「実行を機械的に禁止する条件」ではなく「確認のうえ続行できる警告」である。
 /// その確認をこの型が担い、削除を伴う計画 (`planWorktreeClose`) はこの値を必ず要求する。
 /// したがって**検査結果を手にせずに `--force` を組み立てる経路は無い**。
 ///
-/// - Important: 型で担保できるのはここまでである。`WorktreeCloseInspection` は public な
-///   initializer を持つ値型なので、「本当に検査を実行したか」までは確かめられない。検査器だけが
-///   作れる型にすればそこまで担保できるが、検査器は `Adapters` にあり、`TerminalCore` から
-///   参照できない (docs/coding-guidelines.md §2.2 の依存方向)。
+/// - Important: 型で担保できるのは `App` から検査済み report の要素を別の worktree と
+///   組み直せないことまでである。同じ SwiftPM パッケージの `Adapters` 内部では組み直せ、
+///   「本当に検査を実行したか」も確かめられない。
 public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   /// 警告を見たユーザーの選択。
   public enum Continuation: Sendable, Hashable {
@@ -28,9 +50,9 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   /// つまり A の未commit変更が、ユーザーが警告を一度も見ないまま消える。`.deleteBranch` 側は
   /// `branch -d` が未merge branch を拒否するので同じ形の素通しにはならない。
   ///
-  /// - Important: **担保できるのは「A について作られたと申告された確認であること」までである。**
-  ///   実際に A を検査した結果かどうかは確かめられない —— 上と同じ、public initializer を持つ
-  ///   値型としての限界である。
+  /// - Important: **担保できるのは report を作るときに渡された `DetectedWorktree` から identity が
+  ///   導かれたことまでである。** 実際にその対象を検査した結果かどうかは確かめられず、同じ
+  ///   SwiftPM パッケージの `Adapters` 内部では別の worktree と組み直せる。
   ///
   ///   照合できるのは「どの worktree か」だけで、**「いつの検査か」は照合できない。** 同じ
   ///   worktree の古い確認は通る。承諾の後にユーザーが新しく変更を加えれば、その変更について
@@ -50,15 +72,12 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   public let defaultBranch: DefaultBranchResolution
   public let continuation: Continuation
 
-  public init(
-    worktree: WorktreeIdentity,
-    inspection: WorktreeCloseInspection,
-    defaultBranch: DefaultBranchResolution,
-    continuation: Continuation
-  ) {
-    self.worktree = worktree
-    self.inspection = inspection
-    self.defaultBranch = defaultBranch
+  /// report の各要素を別引数で受け取る公開初期化子を設けると、`App` が検査結果へ別の worktree の
+  /// identity を詰め替えられるため、一組の report からだけ確認を作る。
+  public init(report: WorktreeCloseInspectionReport, continuation: Continuation) {
+    self.worktree = report.worktree
+    self.inspection = report.inspection
+    self.defaultBranch = report.defaultBranch
     self.continuation = continuation
   }
 

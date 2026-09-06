@@ -27,6 +27,7 @@
       "Bash(scripts/wf-issue-label.sh:*)",
       "Bash(scripts/wf-milestone.sh:*)",
       "Bash(scripts/wf-pr-create.sh:*)",
+      "Bash(scripts/wf-pr-edit.sh:*)",
       "Bash(scripts/wf-pr-merge.sh:*)",
       "Bash(scripts/wf-pr-close.sh:*)",
       "Bash(scripts/wf-pr-comments.sh:*)",

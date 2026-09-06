@@ -234,7 +234,8 @@ public struct GitWorktreeDetector: Sendable {
   ///   実測: `--git-dir` も `--git-common-dir` も bare ディレクトリ自身)、`worktreePath` が
   ///   指すのは git ディレクトリであって checkout ではないため、タブの cwd にも tmux session の
   ///   作業ディレクトリにも使えない。結果として bare repository の Project は
-  ///   `projectRoot == nil` になる。その可否は Issue #138 で決める。
+  ///   `projectRoot == nil` になる。これは設計書 §2.3 で正常系として確定済みで、
+  ///   Project Root タブを持たない Project を上位レイヤが扱う。
   ///
   /// - Important: 除外の代償として、作業ツリーが一時的に失われた (ボリュームを外した等) worktree は
   ///   `reconcileDetectedWorktrees` から消失扱いになり、Active/Inactive を失う。戻ってきたときは

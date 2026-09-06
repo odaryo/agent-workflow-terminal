@@ -10,7 +10,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `Spikes/gate1/` — the PoC Gate 1 spike (SwiftUI + libghostty + PTY + tmux). Throwaway code: excluded from lint, format, tests, and CI. Read it as a reference implementation; never copy code out of it.
 - `AgentWorkflowTerminal/` — the SwiftPM package. Targets: `TerminalCore` (domain model, no UI/process deps) ← `Adapters` (external-world boundary, placeholder only). Each has a Swift Testing test target. Swift 6 language mode, strict concurrency.
 - `App/` — the separate macOS SwiftPM package for the app and libghostty renderer. CI compiles it with a prebuilt `GhosttyKit.xcframework` downloaded from a Release asset; CI does not build the xcframework itself. There is no Xcode project. See `App/README.md`.
-- **Tasks live in GitHub Issues — Issues are the single source of truth.** Never keep TODO lists in files, docs, or code comments; file an Issue instead.
+- **Tasks live in GitHub Issues — Issues are the single source of truth for *what* to do.** Never keep TODO lists in files, docs, or code comments; file an Issue instead.
+- **Phase progress lives in `docs/roadmap.md`** — which phase is in progress, which Issue numbers remain to close it, and what is in flight. It is the only file that may reference Issues by number as a plan; it never restates Issue bodies or per-Issue status. GitHub milestones (`P1`〜`P5`, managed by `scripts/wf-milestone.sh`) are a mirror of the roadmap's phases for filtering Issues, not a second source. Update the roadmap when a phase closes, when a phase's Issue set changes, or when the in-flight Issue changes.
 
 ### Build / test / lint
 
@@ -56,6 +57,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Create an Issue | `scripts/wf-issue-create.sh` |
 | Comment on an Issue | `scripts/wf-issue-comment.sh` |
 | Update Issue Project status | `scripts/wf-project-status.sh` |
+| Create / close a milestone, assign Issues to one | `scripts/wf-milestone.sh` |
 | Add / remove Issue labels | `scripts/wf-issue-label.sh` |
 | Create a PR | `scripts/wf-pr-create.sh` |
 | Merge a PR | `scripts/wf-pr-merge.sh` |
@@ -123,7 +125,9 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **Merge authority.** GREEN + no Critical remaining **is** the merge condition, and the Director acts on it — `scripts/wf-pr-merge.sh <PR>` **without waiting for the user's judgment**. The script mechanically verifies the rest (OPEN / non-draft / base=main / not CONFLICTING / checks complete and green), so the Director's own judgment reduces to one question: did an adversarial review run, and did it leave no Critical? For changes that skip the pipeline (below), GREEN alone is the condition. Escalate instead of merging when a Critical is unresolved, when no review was run on a change that needed one, when a design decision is still open, or when the user has said to hold that specific PR.
 
-**When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop.
+**When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop. **UI wiring in `App/` is reviewed by running it, not by the reviewer**: the layer is not unit-testable and measurement-based adversarial review has little to measure there, so the implementer attaches a manual-run check (screenshot in the PR) and only the `TerminalCore` / `Adapters` side of the change goes to the reviewer.
+
+**Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the `P3 バグ改修` milestone (the parking lot) and do **not** count against the current phase — they are promoted into P1 / P2 only when dogfooding shows the symptom. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; this rule is what stops that.
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
 
@@ -154,7 +158,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 ## Task tracking (GitHub Projects)
 
-Issues are the single source of truth (see Repository state); [Project #6](https://github.com/users/odaryo/projects/6) is the board over them. One Issue = one worktree = one PR = one task tab.
+Issues are the single source of truth for tasks (see Repository state); [Project #6](https://github.com/users/odaryo/projects/6) is the board over them, and `docs/roadmap.md` holds phase progress (which phase, which Issues remain). One Issue = one worktree = one PR = one task tab. Milestones `P1`〜`P5` mirror the roadmap's phases; use them to filter, not to plan.
 
 | Status | Meaning | Transition |
 | --- | --- | --- |

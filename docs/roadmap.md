@@ -29,7 +29,7 @@ P1〜P3 を通してから P4 に入る。P3 は「P2 まで使ってみた結�
 コアパッケージ側 (worktree 検出・tmux 操作・AgentAdapter・代表状態) は実装済みで、アプリが
 `$SHELL` を1枚表示するだけの状態から、それらを縦に1本つなぐ。技術リスクは Gate 1 spike で潰れている。
 
-- 着手中: #151 (代表状態の保持タイマー)
+- 着手中: なし
 - 残り: #153 (pane 集合の束ね層) → #154 (アプリ配線の縦スライス) → #25 (タブ UI + 代表状態)
 - 決定待ち (`設計判断`): #137 (使えない worktree の扱い) / #138 (bare repo の Project Root)。
   推奨は最小案 — 使えない worktree は Inactive 扱いで選択不可、bare repo は P1 では Project Root を持たない

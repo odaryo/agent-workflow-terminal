@@ -688,10 +688,19 @@ Agent完了は`Needs Attention`ではなく`Ready for Review`に分類する。
 **代表状態の表示は安定化する。** Adapterの観測をそのままタブへ出すと、通常の作業中とアイドル中に表示が入れ替わり続ける(Gate 3記録のreplay実測: idle区間で11〜13回/分の`Idle`↔`Working`、working区間で19〜33回/分の`Working`↔`Unknown`)。この振動は**許容しない**。
 
 - `Needs Attention`(`Question`／`Permission`／`Error`)および`Ready for Review`への遷移は**即時反映する**。人の対応が要る通知を遅らせない。
-- `Working`から`Idle`／`Unknown`への降格だけ、一定時間の保持を挟んでから反映する。
+- `Idle`／`Unknown`へ**分類が変わって**入る遷移は、遷移元を問わず**9秒**保持してから反映する。保持中に、保持の対象でない分類(`Idle`／`Unknown`以外)または表示中の分類が観測されたら、保持を破棄してその観測を即時反映する。
+- 保持の起点は、表示中の分類から離れた最初の観測時刻とする。保持中に`Idle`↔`Unknown`のように下位分類の間で値が変わっても**起点はリセットしない**(最後に観測した値を、最初の起点からの経過で反映する)。分類が変わらない変化(`Question`→`Permission`など)と`paneID`だけの変化は即時反映する。
+- pane が1つも無い状態は、§5.2により表示上は`Idle`である。安定化でも`Idle`と同じ分類として扱う。別扱いにすると両者の往復がこの振動として表示に出る。
 - 安定化は**UIへ出す代表状態にのみ適用**し、Adapterのevent stream(§12.4.1)が配信する観測そのものは加工しない。
 
-保持時間の具体値は未確定(§25)。
+9秒の根拠は、Gate 3の**生記録**57.4分(24 run)を実装済みAdapterへreplayした実測(2026-09-06、`Spikes/gate3/replay-swift/`)。生記録は容量のため追跡していないため、追跡している遷移列から再現すると時刻の量子化で一部の件数が1件ずれる(同ディレクトリのREADME)。分類器を書き直すと本物のAdapterと乖離するため、`ClaudeCodeAdapter`／`CodexAdapter`／`ProcessDetectionFallbackAdapter`をそのまま記録へ当てている。
+
+- ちらつきの実体である`Working`の中断は、長さが0.25〜7.90秒に集中する(70件中64件)。次に長い中断は9.89秒で、**7.90〜9.89秒は空白帯**である。9.89秒以上の6件はcodexのターン間の実在のidle(約25秒)や画面が読めない区間(61.9秒)であり、潰してはならない。9秒は空白帯の内側に置いた値で、上下の余裕がほぼ均等(+1.10／-0.89秒)になる。
+- 保持8.0／8.5／9.0／9.5秒は**いずれも表示遷移1.83回/分・実在の中断6件をすべて保持**で成績が変わらない。10秒にすると1.79回/分へわずかに下がる代わりに9.89秒のidleを潰すため、空白帯の外へ出す理由が無い。
+- 9秒保持で表示遷移は4.43→1.83回/分になる。
+- 保持時間を0〜30秒のどの値にしても、`Needs Attention`／`Ready for Review`の遷移時刻は保持なしの場合と一致する。保持時間を延ばしても人の対応が要る通知は遅れない。
+- 数字は記録の250msサンプリング上のもので、**表示遷移の頻度は製品の予測値ではない**。Gate 3 §7.5は250msのpollingが成立しないと結論しており、`AgentObservationIntervals.signals`はこれより粗くなる。中断70件のうち55件が0.77秒以下なので、この粗さはベースライン側を大きく動かす。一方、閾値の根拠であるテール(7.90秒と9.89秒)はサンプリング間隔に対して頑健である。
+- 保持を`Working`からの降格だけに限ると、`Idle`表示中に`Unknown`が一瞬入る往復が残る(5秒未満で入れ替わる`Idle`／`Unknown`表示が9秒保持で28回)。遷移元を問わない形にすると14回へ減る。これが遷移元を限定しない理由である。残る14回の大半は各runの先頭フレームで、画面の変化量を測る比較対象がまだ無く`Unknown`から始まることによる。
 
 ### 12.3 Unknown
 
@@ -753,7 +762,6 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 - `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーが未計測であることを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
-- 代表状態の降格を反映するまでの保持時間の具体値(方針は§12.2で確定)
 - false positive／false negativeの許容条件(表示の振動を許容しないことは§12.2で決着済み)
 
 process fallbackについては、**process観測だけでは`Working`と`Idle`を区別できない**ことがGate 3で実測された。fallbackは推測せず`Unknown`を返す(§12.3)。
@@ -1399,7 +1407,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Agent
 
 - 各Adapterが採用するsignalの組み合わせ(個々の信号の採用基準は§12.5で確定。どう合成して7状態へ落とすかは実装時に決める)
-- 代表状態の降格を反映するまでの保持時間の具体値(§12.2)
 - false positive／false negativeの許容条件(振動の可否は§12.2で決着済み)
 - 質問fallbackのデータ交換形式
 - `Ask Agent`実行時に使用するAgent CLIの選択方法
@@ -1687,7 +1694,7 @@ PR_READY
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容
 - [x] `scrollback-limit` 10MBと`history-limit` 10000を製品既定として明示(tmux側はsession単位)
-- [x] 代表状態はNeeds Attention／Ready for Reviewへ即時反映、Workingからの降格のみ保持
+- [x] 代表状態はNeeds Attention／Ready for Reviewへ即時反映、`Idle`／`Unknown`へ入る遷移は遷移元を問わず9秒保持
 - [x] Adapterが使う信号はGate 3の混同行列に数字が残るものに限る
 - [x] tmuxコマンドの組み立てと実行を分離し、ローカル実行の型はhost platformに限定
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー

@@ -302,7 +302,7 @@ if shouldDump {
   print("書き出した: \(tsvPath)")
 }
 
-let candidates: [Double] = [0, 0.5, 1, 2, 3, 4, 5, 6, 8, 9, 10, 15, 20, 30]
+let candidates: [Double] = [0, 0.5, 1, 2, 3, 4, 5, 6, 8, 8.5, 9, 9.5, 10, 15, 20, 30]
 var totalMinutes = 0.0
 var allGaps: [Double] = []
 var residual: [Double: Int] = [:]

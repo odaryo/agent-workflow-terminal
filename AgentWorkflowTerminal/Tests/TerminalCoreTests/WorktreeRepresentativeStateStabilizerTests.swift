@@ -3,7 +3,7 @@ import TerminalCore
 import Testing
 
 @Suite("worktree代表状態の安定化 (設計書 §12.2)")
-// 他13個のテストファイルと同様に型名を対象ファイル名へ合わせると、既定の上限を超える。
+// 型名を対象ファイル名へ合わせると、既定の上限を超える。
 // swiftlint:disable:next type_name
 struct WorktreeRepresentativeStateStabilizerTests {
   private let clock = ContinuousClock()

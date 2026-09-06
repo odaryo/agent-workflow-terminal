@@ -22,6 +22,8 @@ public struct WorktreeRepresentativeStateStabilizer: Sendable {
 
   /// この呼び出しがない限り保持は満了しない。上位レイヤは設計書 §12.2 の時刻どおりに
   /// 反映するため、`pendingTransitionDeadline` に再度呼ぶ義務がある。
+  /// 常に最後に観測した代表状態を渡し、新しい観測が無ければ戻り値ではなく前回の入力を再度渡す。
+  /// `nil` は pane が1つも無いことを表し、「新しい観測が無い」という意味ではない。
   public mutating func observe(
     state observedState: WorktreeRepresentativeState?,
     at observedAt: ContinuousClock.Instant

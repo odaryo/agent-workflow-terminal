@@ -186,6 +186,20 @@ Dedicated tmux session and Task Tab become available
 
 この自動Active化は新規出現だけに適用する。既存Inactive worktreeの再利用は上記のとおり人が選択する。
 
+#### 3.2.1 アプリ停止中の増減
+
+Active/Inactiveはアプリの再起動を跨いで復元する。復元した状態と起動直後のスキャン結果が食い違う場合、
+**アプリが停止していた間は「観測中」に含めない**という一点から次の2つが決まる。
+
+- 停止中に現れた (= 保存済み状態に無く、起動時のスキャンに在る) worktreeは`Inactive`から始める。
+  自動Active化の対象は観測中の新規出現だけで、停止中の出現はそれに当たらない。
+- 停止中に消えた (= 保存済み状態に在り、起動時のスキャンに無い) worktreeは保存済み状態から落とさず、
+  `到達不能`として保持する。起動直後の1回目のスキャンは前回の観測を持たないため「削除された」と
+  「一時的に到達できない」を区別できず、区別できないものをユーザーのActive指定を捨てる側へ倒さない。
+
+到達不能として保持したworktreeは、以後の観測で再び見つかればそのときのActive/Inactiveをそのまま回復する
+(§3.2の到達不能の規則と同じで、新規出現としては扱わない)。
+
 ### 3.3 Active化とtmux
 
 Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
@@ -558,7 +572,31 @@ ripgrepが未導入の場合は検索だけが使えず、他の機能は動く�
 2. **Base Diff** — base branchとの差分
 3. **Branch Diff** — 指定した任意branchとの差分
 
-base branchの自動判定方法、merge-baseの使い方、未commit変更をどのDiffへ含めるかは未確定。
+#### 9.1.1 base branchの決定
+
+Base Diffのbase branchは次の順で決める。決めた結果はタスクタブごとに記憶し、次にDiffを開いたときは再判定しない。
+
+1. そのworktreeのbranchのupstream (`@{upstream}`)
+2. `origin/HEAD`が指す既定branch
+3. どちらも解決できなければユーザーが選ぶ。判定不能をmainへ丸めない
+
+ユーザーはいつでも明示的にbase branchを選び直せる。選び直した値が上の自動判定より優先される。
+
+#### 9.1.2 Diff rangeの定義
+
+Base Diffのrangeは**merge-base起点**とする。`git diff $(git merge-base <base> HEAD) HEAD`に相当し、
+base branchが進んでもそのworktreeの変更だけが出る。base branch自身の進行分をレビュー範囲へ混ぜない。
+
+Branch Diffも同じ定義に従う。Commit Diffは指定commitとその親の差分で、この規則の対象外。
+
+#### 9.1.3 未commit変更の扱い
+
+Base DiffとBranch Diffは、commit済みの変更に加えて**working tree・staged・untrackedをすべて含む**。
+Agentが作業中の差分こそレビュー対象であり、含めなければこの機能の主用途が抜けるため。
+
+snapshot内では出所を区別して表示する。区別はcommit済み／staged／unstaged／untrackedの4種で、
+untrackedは新規ファイルとして全行追加で表示する。ignoredファイルは含めない
+(§7.1のFile Browserがignoredを列挙することとは別の判断で、Diffは対象外)。
 
 ### 9.2 コメント
 
@@ -566,6 +604,11 @@ base branchの自動判定方法、merge-baseの使い方、未commit変更を�
 - コメント単体でAgentへ送信できる。
 - 複数コメントをReview batchとしてまとめてAgentへ送信できる。
 - GitHub PR reviewへの直接投稿は行わない。
+
+コメントのanchorは`(snapshot ID, ファイルパス, 側 (old／new), 行範囲, 対象行のテキストハッシュ)`で表す。
+snapshotは§9.3のとおり不変なので行番号だけでも一意に定まるが、テキストハッシュを併せ持つことで
+Agentへ送る文面へ元コードを添える際にsnapshot本体を引かずに済み、記録が後から壊れていないことも検証できる。
+ハッシュは新しいsnapshotへコメントを推測追従させるためのものではない (§9.3の禁止は維持する)。
 
 コメントの送信先は、そのworktreeの**実装Agent pane**とする。Consultation paneへは送らず、相談機能とレビュー修正依頼の役割を分離する。
 
@@ -1315,6 +1358,10 @@ SQLite候補テーブル:
 
 これは論理候補であり、schema、migration、ID、foreign key、retentionは未確定。
 
+SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/Inactiveのように再起動を跨いで
+復元する必要がある状態は、Application Support配下のJSONファイルへ暫定的に保存する。GRDB採用時に
+移行する前提の暫定措置であり、この暫定保存をもってschemaやmigrationの方針を決めたことにはしない。
+
 なお`device_ui_states`はhost Mac自身のUI stateを保存する用途とする。iPhone/iPadのUI stateは§19の端末独立原則に従い各デバイスのローカル保存とし、host DBへは同期しない。
 
 ### 22.2 保存原則
@@ -1498,11 +1545,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### Git／Diff
 
-- base branchの決定方法
-- Diff rangeの厳密な定義
-- working tree／staged／untrackedの扱い
 - rename、binary Diff、submodule、LFS
-- comment anchor schema
 - テキスト注入の制約1(受け側次第で本文が実行され得ること)をユーザーへ事前に示すUIの要否(§9.2.1)
 
 ### Mobile／remote
@@ -1753,6 +1796,8 @@ PR_READY
 - [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は安定IDだけから導出する`awt-<slug>-<安定IDのSHA-256先頭8桁>`
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
+- [x] Active/Inactiveは再起動を跨いで復元する。停止中に現れたworktreeはInactiveから始め、停止中に消えたworktreeは落とさず到達不能として保持する
+- [x] GRDB正式採用までの再起動を跨ぐ状態はApplication Support配下のJSONへ暫定保存する(schema／migrationの決定とはしない)
 - [x] 作業ツリーへ到達できないworktreeは`到達不能`として保持し、タブは残すがグレーアウトして選択不可。検出結果は消失と未観測を区別してActive/Inactiveを保つ
 - [x] bare repositoryをProject Rootに持つレイアウトではProject Rootを持たない(`projectRoot == nil`を正常系として扱う)
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
@@ -1771,6 +1816,10 @@ PR_READY
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Diffはsnapshot、Refreshで新snapshot
+- [x] Base branchはupstream→`origin/HEAD`の既定branch→ユーザー選択の順で決め、結果をタスクタブごとに記憶する
+- [x] Base／Branch Diffのrangeはmerge-base起点 (base branchの進行分をレビュー範囲へ混ぜない)
+- [x] Base／Branch Diffはworking tree・staged・untrackedを含め、出所を4種で区別表示する (ignoredは含めない)
+- [x] コメントのanchorは`(snapshot ID, パス, old／new, 行範囲, 行テキストのハッシュ)`、新snapshotへの推測追従はしない
 - [x] Diffコメントは単体／batchでAgentへ送信
 - [x] GitHub PR review連携はしない
 - [x] Consultationはfresh contextが基本、paneは再利用

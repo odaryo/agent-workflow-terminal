@@ -430,6 +430,7 @@ Code、Diff、Evidenceは常設せず、必要時にViewer Drawerとして開く
 - 通常はAgent領域を縮めて並べる。
 - 必要ならDrawerをAgent上へのOverlayに切り替えられる。
 - ViewerだけをFullscreen表示できる。
+- Drawerを閉じた時点がOverlayなら次回もOverlayで開き、InlineまたはFullscreenなら次回はInlineで開く。
 - iPhoneでは基本的にFullscreen sheetとして表示する。
 - Drawer内部は最大2分割とする。
 - 2分割は左右または上下を選び、Code／Diff／Evidenceを任意に組み合わせる。
@@ -1679,6 +1680,7 @@ PR_READY
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割
 - [x] Code／Diff／Evidenceを必要時だけ表示
+- [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
 - [x] File Browserはignoredを含む全ファイル、lazy load
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種

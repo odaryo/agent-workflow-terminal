@@ -66,7 +66,7 @@ struct RipgrepRunnerTests {
         ])
   }
 
-  @Test("全ファイル scope でも .git/ は常に除く")
+  @Test("全ファイル scope でも .git は常に除く")
   func buildsAllFilesSearchCommand() throws {
     #expect(
       RipgrepCommand.search(
@@ -74,7 +74,7 @@ struct RipgrepRunnerTests {
         worktreeRoot: fixtureRoot, perFileLimit: 100
       ).arguments == [
         "--json", "--no-config", "--smart-case", "--max-count", "101", "--no-ignore", "--hidden",
-        "--glob", "!.git/", "--", "foo", "/tmp/awt-rg-fixture",
+        "--glob", "!.git", "--", "foo", "/tmp/awt-rg-fixture",
       ])
   }
 
@@ -93,7 +93,7 @@ struct RipgrepRunnerTests {
     #expect(
       RipgrepCommand.listFiles(scope: .allFiles, worktreeRoot: fixtureRoot).arguments
         == [
-          "--files", "--null", "--no-config", "--no-ignore", "--hidden", "--glob", "!.git/",
+          "--files", "--null", "--no-config", "--no-ignore", "--hidden", "--glob", "!.git",
           "--", "/tmp/awt-rg-fixture",
         ])
   }
@@ -107,6 +107,23 @@ struct RipgrepRunnerTests {
     #expect(call.environment == ["LC_ALL": "C", "HOME": "/home", "PATH": "/bin"])
     #expect(call.timeout == .seconds(15))
     #expect(call.outputLimit == RipgrepRunner.defaultOutputLimit)
+  }
+
+  // 既定の 8 MiB は1文字クエリ (実測 7.0 MB / 全ファイル scope 43.5 MB) で尽きる。
+  // 超えると部分出力ごと捨てるので、1,000 件上限が効くべき場面で 0 件になる。
+  @Test("検索とファイル一覧は既定より広い出力上限で実行する")
+  func usesWiderOutputLimitForSearch() async throws {
+    let spy = RipgrepProcessSpy(
+      results: [
+        .success(.init(exitCode: 1, stdout: "", stderr: "")),
+        .success(.init(exitCode: 0, stdout: "/tmp/awt-rg-fixture/a.txt\0", stderr: "")),
+      ])
+    let search = RipgrepSearch(runner: try makeRunner(spy: spy))
+    _ = try await search.search(try query("foo"))
+    _ = try await search.listFiles(scope: .respectingGitignore)
+    let limits = await spy.calls.map(\.outputLimit)
+    #expect(limits == [RipgrepRunner.searchOutputLimit, RipgrepRunner.searchOutputLimit])
+    #expect(RipgrepRunner.searchOutputLimit > ProcessRunLimits.defaultOutputBytes)
   }
 
   @Test("終了コードはエラーにしない — 2 でも stdout が揃っていることがある")
@@ -225,9 +242,54 @@ struct RipgrepSearchTests {
     let report = try await makeSearch(spy: spy).listFiles(scope: .respectingGitignore)
     #expect(
       report.paths.map(\.value).sorted() == [
-        "a.txt", "bin.dat", "long.txt", "many.txt", "mb.txt", "nonutf8.txt", "sub/b.txt",
+        "a.txt", "bin.dat", "crlf.txt", "long.txt", "many.txt", "mb.txt", "nonutf8.txt",
+        "seed.txt", "sub/b.txt",
       ])
     #expect(report.discardedOutOfScopeCount == 1)
+  }
+
+  // fixture は実 `git worktree add` で作った worktree に対する出力なので、`.git` は
+  // ディレクトリではなくファイル。`--glob '!.git/'` へ戻すとこのテストが落ちる。
+  @Test("全ファイル scope のファイル一覧に worktree の .git が現れない")
+  func fileListingExcludesWorktreeGitFile() async throws {
+    let spy = RipgrepProcessSpy(
+      results: [
+        .success(
+          .init(
+            exitCode: 0, stdout: try fixture("rg-15.2.0-files-null-all-files.txt"), stderr: ""))
+      ])
+    let report = try await makeSearch(spy: spy).listFiles(scope: .allFiles)
+    #expect(!report.paths.map(\.value).contains(".git"))
+    // ignored / hidden は拾えていること — 空振りで通っていないことの担保。
+    #expect(report.paths.map(\.value).contains("ignored.txt"))
+    #expect(report.paths.map(\.value).contains(".hidden.txt"))
+  }
+
+  @Test("全ファイル scope の全文検索に worktree の .git が現れない")
+  func searchExcludesWorktreeGitFile() async throws {
+    let report = try await search(stdout: try fixture("rg-15.2.0-json-all-files-scope.jsonl"))
+    let paths = report.outcome.matches.map(\.path.value)
+    #expect(!paths.contains(".git"))
+    #expect(paths.contains("ignored.txt"))
+    #expect(paths.contains(".hidden.txt"))
+  }
+
+  @Test("CRLF の行でも行末 CR まで届いたマッチ範囲を保つ")
+  func keepsMatchesOnCarriageReturnLines() async throws {
+    let report = try await search(stdout: try fixture("rg-15.2.0-json-crlf-regex.jsonl"))
+    let match = try #require(report.outcome.matches.first { $0.lineNumber == 1 })
+    #expect(match.line.text == "crlf hello world")
+    let range = try #require(match.line.matches.first)
+    #expect(String(match.line.text[range]) == "hello world")
+  }
+
+  @Test("不正な正規表現の stderr がそのまま利用者へ届く")
+  func surfacesBadRegularExpressionStderr() async throws {
+    let stderr = try fixture("rg-15.2.0-bad-regex-stderr.txt")
+    await #expect(throws: RipgrepRunnerError.commandFailed(exitCode: 2, stderr: stderr)) {
+      try await search(
+        stdout: try fixture("rg-15.2.0-json-bad-regex-stdout.jsonl"), exitCode: 2, stderr: stderr)
+    }
   }
 
   @Test("ファイル一覧が1件も取れない失敗は commandFailed になる")

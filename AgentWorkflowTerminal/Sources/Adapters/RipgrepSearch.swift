@@ -46,7 +46,8 @@ public struct RipgrepSearch: Sendable {
     timeout: Duration? = nil
   ) async throws(RipgrepRunnerError) -> RipgrepSearchReport {
     let result = try await runner.run(
-      .search(query, worktreeRoot: runner.root, perFileLimit: perFileLimit), timeout: timeout)
+      .search(query, worktreeRoot: runner.root, perFileLimit: perFileLimit), timeout: timeout,
+      outputLimit: RipgrepRunner.searchOutputLimit)
     let parsed = RipgrepJSONOutputParser.parse(result.stdout, perFileLimit: perFileLimit)
     // 探索が始まってすらいない (不正な正規表現など) 場合だけをエラーにする。
     guard parsed.didFinish || result.exitCode <= 1 else {
@@ -86,7 +87,8 @@ public struct RipgrepSearch: Sendable {
     timeout: Duration? = nil
   ) async throws(RipgrepRunnerError) -> RipgrepFileListReport {
     let result = try await runner.run(
-      .listFiles(scope: scope, worktreeRoot: runner.root), timeout: timeout)
+      .listFiles(scope: scope, worktreeRoot: runner.root), timeout: timeout,
+      outputLimit: RipgrepRunner.searchOutputLimit)
     // `--files` には `summary` に相当する完了の印が無い。1件も出ていない失敗だけを
     // エラーにし、一部だけ読めた場合は警告として返す。
     guard result.exitCode <= 1 || !result.stdout.isEmpty else {

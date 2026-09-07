@@ -36,10 +36,16 @@ struct WorktreeSearchQueryTests {
 
 @Suite("§8.2 既定値")
 struct WorktreeSearchLimitsTests {
-  @Test("Director が決めた既定値")
-  func defaults() {
-    #expect(WorktreeSearchLimits.maximumResultCount == 1_000)
-    #expect(WorktreeSearchLimits.maximumMatchesPerFile == 100)
-    #expect(WorktreeSearchLimits.maximumDisplayedColumns == 500)
+  @Test("既定の全体上限が引数なしでも適用される")
+  func appliesDefaultResultLimit() throws {
+    let path = try #require(WorktreeRelativePath("a.txt"))
+    let line = try #require(WorktreeSearchLine(text: "hello", matches: [], isTruncated: false))
+    let matches = try (1...(WorktreeSearchLimits.maximumResultCount + 1)).map { number in
+      try #require(WorktreeSearchMatch(path: path, lineNumber: number, line: line))
+    }
+    let outcome = WorktreeSearchOutcome.applyingResultLimit(
+      to: matches, filesReachingPerFileLimit: [])
+    #expect(outcome.matches.count == WorktreeSearchLimits.maximumResultCount)
+    #expect(outcome.truncation.reachedResultLimit)
   }
 }

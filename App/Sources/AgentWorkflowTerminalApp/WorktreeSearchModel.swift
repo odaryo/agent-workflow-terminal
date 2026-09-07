@@ -80,35 +80,36 @@ final class WorktreeSearchModel: ObservableObject {
     state = .idle
   }
 
-  /// rg の起動と待ち合わせを MainActor に載せない。
-  private static func execute(
+  /// Why not `Task.detached`: detached task は新しい root なので、`searchTask.cancel()` が
+  /// 中まで届かない。`FoundationProcessRunner` の `withTaskCancellationHandler` が発火せず、
+  /// 捨てたはずの rg がタイムアウトか出力上限まで走り続ける (実測: 再実行から 1.35 秒、
+  /// 前回の rg が新しい rg と同時に生きていた)。`nonisolated` な async 関数は
+  /// global executor で走るので、キャンセルを繋いだまま MainActor から降りられる。
+  nonisolated private static func execute(
     query: WorktreeSearchQuery,
     worktreeRoot: URL
   ) async -> Result<State, RipgrepRunnerError> {
-    await Task.detached(priority: .userInitiated) {
-      do {
-        let search = try RipgrepSearch(
-          worktreeRoot: worktreeRoot, processRunner: FoundationProcessRunner())
-        switch query.target {
-        case .fullText:
-          return .success(.fullText(try await search.search(query)))
-        case .fileName:
-          let listing = try await search.listFiles(scope: query.scope)
-          let matched = WorktreeFileNameSearch.matches(term: query.term, in: listing.paths)
-          let limit = WorktreeSearchLimits.maximumResultCount
-          return .success(
-            .fileNames(
-              FileNameResults(
-                matches: Array(matched.prefix(limit)),
-                reachedResultLimit: matched.count > limit,
-                warnings: listing.warnings,
-                discardedOutOfScopeCount: listing.discardedOutOfScopeCount)))
-        }
-      } catch let error as RipgrepRunnerError {
-        return .failure(error)
-      } catch {
-        return .failure(.cancelled)
+    do {
+      let search = try RipgrepSearch(
+        worktreeRoot: worktreeRoot, processRunner: FoundationProcessRunner())
+      switch query.target {
+      case .fullText:
+        return .success(.fullText(try await search.search(query)))
+      case .fileName:
+        let listing = try await search.listFiles(scope: query.scope)
+        let matched = WorktreeFileNameSearch.matches(term: query.term, in: listing.paths)
+        let limit = WorktreeSearchLimits.maximumResultCount
+        return .success(
+          .fileNames(
+            FileNameResults(
+              matches: Array(matched.prefix(limit)),
+              reachedResultLimit: matched.count > limit,
+              warnings: listing.warnings,
+              discardedOutOfScopeCount: listing.discardedOutOfScopeCount)))
       }
-    }.value
+    } catch {
+      // `RipgrepSearch` は typed throws なので、ここへ来るのは `RipgrepRunnerError` だけ。
+      return .failure(error)
+    }
   }
 }

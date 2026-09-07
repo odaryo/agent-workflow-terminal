@@ -51,8 +51,11 @@ public struct RipgrepCommand: Sendable, Equatable {
       // rg の既定は `.gitignore` を尊重し `.git/` も除く (実測 15.2.0)。
       []
     case .allFiles:
-      // `.git/` の中身は作業ツリーではないので、`--no-ignore --hidden` でも常に除く。
-      ["--no-ignore", "--hidden", "--glob", "!.git/"]
+      // 末尾スラッシュを付けない。`!.git/` はディレクトリにしかマッチせず、git worktree の
+      // `.git` は `gitdir:` を書いた正規ファイルなので素通りする (実測 15.2.0: 実 worktree で
+      // `--glob '!.git/'` を付けても `.git` が `--files` と全文検索の両方に現れる)。
+      // 1タスク = 1 worktree (§2.1) なので、こちらが通常の実行環境。
+      ["--no-ignore", "--hidden", "--glob", "!.git"]
     }
   }
 }
@@ -64,6 +67,13 @@ public struct RipgrepRunner: Sendable {
   ]
   // 3.5 GB / 79,095 ファイルの木を rg 15.2.0 が 2.9 秒で走り切った実測に対する余裕。
   public static let defaultTimeout = Duration.seconds(15)
+  // `--json` の1一致は実測で平均 483 バイト (このリポジトリで 373〜506 B、`e` の 14,519 一致で
+  // 484.5 B)。既定の 8 MiB は約 1.7 万一致で尽き、1文字クエリが実際に超える (gitignore scope で
+  // 7.0 MB、全ファイル scope で 43.5 MB)。上限超過は部分出力を丸ごと捨てるため、
+  // §8.2 の 1,000 件上限が効くはずの「一致が多すぎる」場面で 0 件になる。64 MiB は同じ見積りで
+  // 約 13.9 万一致にあたり、上の全ファイル scope の実測も収まる。`--files` にも同じ上限を使う
+  // (79,123 ファイルの木で 7.1 MB = 既定の 89% と、こちらも 8 MiB では足りない)。
+  public static let searchOutputLimit = 64 << 20
   public static let defaultOutputLimit = ProcessRunLimits.defaultOutputBytes
 
   private let worktreeRoot: URL

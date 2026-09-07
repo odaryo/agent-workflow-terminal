@@ -33,9 +33,12 @@ public enum RipgrepLineText {
 
     var matches: [Range<String.Index>] = []
     for range in submatchByteRanges {
-      guard range.lowerBound >= 0, range.upperBound <= content.count else { continue }
+      guard range.lowerBound >= 0, range.lowerBound <= content.count else { continue }
+      // 落とした行末へ食い込む範囲は弾かずに切り詰める。`.*` 系は CRLF ファイルの行末 CR まで
+      // 一致するため (実測 15.2.0: `hello world\r\n` の 13 バイトに対し end = 12)、
+      // 弾くと CRLF のファイルではハイライトが常に消える。
       let lower = decodedOffset(range.lowerBound)
-      let upper = decodedOffset(range.upperBound)
+      let upper = decodedOffset(min(range.upperBound, content.count))
       // 表示幅で落とした側にあるマッチは、表示している文字列の上に位置を持たない。
       guard lower <= upper, upper <= displayUTF8Count else { continue }
       guard let start = index(in: text, utf8Offset: lower),

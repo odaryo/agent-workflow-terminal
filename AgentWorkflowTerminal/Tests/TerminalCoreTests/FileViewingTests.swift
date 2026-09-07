@@ -7,6 +7,7 @@ struct FileViewingTests {
   func defaultThresholds() {
     #expect(FileViewThresholds.default.maximumByteCount == 1_048_576)
     #expect(FileViewThresholds.default.maximumLineCount == 50_000)
+    #expect(FileViewThresholds.default.absoluteMaximumByteCount == 16_777_216)
   }
 
   @Test("先頭 8 KiB に NUL があればバイナリと判定する")

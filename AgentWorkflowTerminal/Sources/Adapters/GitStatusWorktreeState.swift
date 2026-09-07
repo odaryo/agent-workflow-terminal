@@ -38,10 +38,34 @@ public struct WorktreeGitStateReader: Sendable {
     let output = try await runner.run(.status(includeIgnored: true)).stdout
     let parsed = GitStatusPorcelainV2.parse(output: output)
     let converted = parsed.status.worktreeStateEntries()
+    let submodules = GitIndexSubmodules.parse(
+      output: try await runner.run(.listFilesStage()).stdout)
     return WorktreeGitStateReadResult(
-      entries: converted.entries,
+      entries: converted.entries + submodules.entries,
       statusParseFailures: parsed.failures,
-      conversionFailures: converted.failures)
+      conversionFailures: converted.failures + submodules.failures)
+  }
+}
+
+public enum GitIndexSubmodules {
+  /// index の mode。gitlink 以外の行は File Browser の状態に使わない。
+  private static let gitlinkMode = "160000"
+
+  /// `ls-files --stage -z` の1レコードは `<mode> <object> <stage>\t<path>`。
+  public static func parse(output: String) -> GitStatusWorktreeStateResult {
+    var result = GitStatusWorktreeStateAccumulator()
+    for record in output.split(separator: "\0", omittingEmptySubsequences: true) {
+      guard let tab = record.firstIndex(of: "\t"),
+        record[record.startIndex..<tab].hasPrefix(gitlinkMode + " ")
+      else { continue }
+      let path = String(record[record.index(after: tab)...])
+      guard let relativePath = WorktreeRelativePath(path) else {
+        result.failures.append(.invalidPath(path))
+        continue
+      }
+      result.entries.append(.submodule(path: relativePath))
+    }
+    return GitStatusWorktreeStateResult(entries: result.entries, failures: result.failures)
   }
 }
 
@@ -131,7 +155,7 @@ extension GitStatus {
   }
 }
 
-private struct GitStatusWorktreeStateAccumulator {
+struct GitStatusWorktreeStateAccumulator {
   var entries: [WorktreeGitStateEntry] = []
   var failures: [GitStatusWorktreeStateFailure] = []
 }

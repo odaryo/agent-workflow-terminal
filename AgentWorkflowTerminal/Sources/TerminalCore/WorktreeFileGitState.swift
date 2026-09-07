@@ -1,12 +1,18 @@
+import Foundation
+
 public struct WorktreeRelativePath: Sendable, Hashable {
   public let value: String
 
   /// git が返す正規化済みの worktree 相対パスを受け取る。`?` / `!` の末尾 `/` は呼び出し側が除く。
+  /// 保持する値は NFC へ正規化する: macOS の git は `core.precomposeunicode` 既定で NFC を出すのに対し、
+  /// ファイルシステム上のバイト列は NFD であり得るため、両者を同じ表記へ寄せないと状態を引けない。
+  /// 表示名としては使わないこと — UI に出す名前は列挙時にファイルシステムから得たものを使う。
   public init?(_ value: String) {
-    let scalars = value.unicodeScalars
+    let normalized = value.precomposedStringWithCanonicalMapping
+    let scalars = normalized.unicodeScalars
     let components = scalars.split(omittingEmptySubsequences: false) { $0.value == 0x2F }
     guard
-      !value.isEmpty,
+      !normalized.isEmpty,
       scalars.first?.value != 0x2F,
       scalars.last?.value != 0x2F,
       components.allSatisfy({ component in
@@ -15,7 +21,18 @@ public struct WorktreeRelativePath: Sendable, Hashable {
           && !(component.count == 2 && component.allSatisfy { $0.value == 0x2E })
       })
     else { return nil }
-    self.value = value
+    self.value = normalized
+  }
+
+  // `String ==` は canonical equivalence なので、前方一致・深さと等価規則が食い違う。
+  // 型の中の比較をすべて正規化済みのスカラ列の上に置く。
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.value.unicodeScalars.elementsEqual(rhs.value.unicodeScalars) { $0.value == $1.value }
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    for scalar in value.unicodeScalars { hasher.combine(scalar.value) }
+    hasher.combine(value.unicodeScalars.count)
   }
 
   fileprivate var depth: Int {
@@ -28,7 +45,7 @@ public struct WorktreeRelativePath: Sendable, Hashable {
     if self == directory { return true }
     let query = value.unicodeScalars
     let prefix = directory.value.unicodeScalars
-    guard query.starts(with: prefix) else { return false }
+    guard query.starts(with: prefix, by: { $0.value == $1.value }) else { return false }
     return query.dropFirst(prefix.count).first?.value == 0x2F
   }
 }
@@ -96,6 +113,9 @@ public enum WorktreeGitStateEntry: Sendable, Hashable {
   )
   case untracked(path: WorktreeRelativePath, scope: WorktreeGitPathScope)
   case ignored(path: WorktreeRelativePath, scope: WorktreeGitPathScope)
+  /// index の gitlink (mode 160000)。`git status` はサブモジュールの中を一切報告せず、
+  /// 変更の無いサブモジュールは status に現れないため、出どころは index でなければならない。
+  case submodule(path: WorktreeRelativePath)
 }
 
 private struct WorktreeGitOverlayCandidate {
@@ -128,6 +148,8 @@ public struct WorktreeFileGitStateOverlay: Sendable, Hashable {
     if let tracked = entries.compactMap({ $0.trackedStatus(for: path) }).first {
       return .tracked(tracked)
     }
+    // サブモジュール自身と配下は観測できないので、既定規則の「変更なし」を主張させない (§12.3)。
+    if entries.contains(where: { $0.submodulePath.map(path.isWithin) == true }) { return nil }
 
     let bestMatch =
       entries.compactMap(\.overlayCandidate).reduce(nil) { current, candidate in
@@ -147,14 +169,19 @@ extension WorktreeGitStateEntry {
       .unmerged(let path, let index, let worktree):
       guard path == query else { return nil }
       return WorktreeTrackedFileStatus(index: index, worktree: worktree)
-    case .untracked, .ignored:
+    case .untracked, .ignored, .submodule:
       return nil
     }
   }
 
+  fileprivate var submodulePath: WorktreeRelativePath? {
+    if case .submodule(let path) = self { return path }
+    return nil
+  }
+
   fileprivate var overlayCandidate: WorktreeGitOverlayCandidate? {
     switch self {
-    case .changed, .unmerged:
+    case .changed, .unmerged, .submodule:
       nil
     case .untracked(let path, let scope):
       WorktreeGitOverlayCandidate(path: path, scope: scope, state: .untracked)

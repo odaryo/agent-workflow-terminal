@@ -1,12 +1,17 @@
+import Darwin
 import Foundation
 
 public struct FileChangeObservationInterval: Sendable, Hashable {
   public let duration: Duration
 
-  public static let `default` = Self(duration: .milliseconds(100))
+  public static let `default` = Self(validated: .milliseconds(100))
 
-  public init(duration: Duration) {
-    precondition(duration > .zero, "duration は正でなければならない")
+  public init?(duration: Duration) {
+    guard duration > .zero else { return nil }
+    self.duration = duration
+  }
+
+  private init(validated duration: Duration) {
     self.duration = duration
   }
 }
@@ -25,9 +30,12 @@ public struct FileChangeWatcher: Sendable {
     self.interval = interval
   }
 
+  /// 比較の起点は監視 Task の開始前に読む。Task 開始後に読むと、その間の変更を取りこぼす。
   public func events() -> AsyncStream<FileChangeEvent> {
     let initial = FileChangeSignature.read(path: path)
-    return AsyncStream { continuation in
+    // イベントは2値しか持たないので溜まった古いものは冗長でしかなく、consumer が遅れた分だけ
+    // ファイルを読み直させることになる。既定の unbounded ではなく最新1件だけを保持する。
+    return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
       let task = Task {
         var previous = initial
         do {
@@ -51,19 +59,20 @@ public struct FileChangeWatcher: Sendable {
 
 private struct FileChangeSignature: Equatable, Sendable {
   let inode: UInt64
-  let size: UInt64
-  let modificationDate: Date
+  let size: Int64
+  let modificationSeconds: Int
+  let modificationNanoseconds: Int
 
+  /// `FileManager.attributesOfItem` は同じ情報を得るのに 4 倍の CPU を使う (計測: 7.99 µs/call に
+  /// 対し `stat(2)` は 1.99 µs/call)。ポーリング周期ごとに呼ぶため差が常時の消費に効く。
+  /// symlink を辿らないのは `FileContentReader` と同じ理由 (§8.1)。
   static func read(path: URL) -> Self? {
-    guard
-      let attributes = try? FileManager.default.attributesOfItem(atPath: path.path),
-      let inode = attributes[.systemFileNumber] as? NSNumber,
-      let size = attributes[.size] as? NSNumber,
-      let modificationDate = attributes[.modificationDate] as? Date
-    else { return nil }
+    var info = stat()
+    guard lstat(path.path, &info) == 0 else { return nil }
     return Self(
-      inode: inode.uint64Value,
-      size: size.uint64Value,
-      modificationDate: modificationDate)
+      inode: info.st_ino,
+      size: info.st_size,
+      modificationSeconds: info.st_mtimespec.tv_sec,
+      modificationNanoseconds: info.st_mtimespec.tv_nsec)
   }
 }

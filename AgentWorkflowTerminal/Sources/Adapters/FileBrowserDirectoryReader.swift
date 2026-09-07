@@ -36,7 +36,12 @@ public struct FileBrowserDirectoryReader: Sendable {
         at: directory,
         includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
         options: [])
-      return try urls.map { url in
+      return try urls.filter { url in
+        // worktree root 直下の `.git` は git の内部保管庫であって作業ツリーのファイルではなく、
+        // git status も中身を報告しないため列挙から外す。worktree では file である点に注意。
+        // 深い階層の同名ファイルはユーザーのものなので隠さない。
+        relativeDirectory != nil || url.lastPathComponent != ".git"
+      }.map { url in
         let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         // symlink 先を辿ると loop や worktree 外への脱出が起きるため、リンク自体は file とする。
         let kind: FileBrowserChildKind =

@@ -22,6 +22,21 @@ struct FileBrowserDirectoryReaderTests {
     }
   }
 
+  @Test("worktree root 直下の .git だけを列挙から外す")
+  func hidesOnlyTheRootGitEntry() throws {
+    try withTemporaryDirectory { root in
+      // worktree では .git はディレクトリではなくファイル (`gitdir: ...`)。
+      try Data("gitdir: /elsewhere\n".utf8).write(to: root.appending(path: ".git"))
+      try FileManager.default.createDirectory(
+        at: root.appending(path: "docs"), withIntermediateDirectories: false)
+      try Data().write(to: root.appending(path: "docs/.git"))
+      let reader = FileBrowserDirectoryReader(worktreeRoot: root)
+
+      #expect(try reader.children(in: nil).map(\.name) == ["docs"])
+      #expect(try reader.children(in: path("docs")).map(\.name) == [".git"])
+    }
+  }
+
   @Test("ディレクトリへの symlink をファイルとして扱い、辿らない")
   func doesNotFollowDirectorySymbolicLink() throws {
     try withTemporaryDirectory { root in
@@ -44,7 +59,7 @@ struct FileBrowserDirectoryReaderTests {
     }
   }
 
-  @Test("空ディレクトリと読めないディレクトリを区別する")
+  @Test("空ディレクトリと読めないディレクトリを別の失敗として区別する")
   func distinguishesEmptyAndUnreadableDirectories() throws {
     try withTemporaryDirectory { root in
       let empty = root.appending(path: "empty")
@@ -56,7 +71,7 @@ struct FileBrowserDirectoryReaderTests {
       let reader = FileBrowserDirectoryReader(worktreeRoot: root)
 
       #expect(try reader.children(in: path("empty")).isEmpty)
-      #expect(throws: (any Error).self) {
+      #expect(throws: FileBrowserDirectoryReaderError.unreadable(unreadable.path)) {
         _ = try reader.children(in: path("unreadable"))
       }
     }

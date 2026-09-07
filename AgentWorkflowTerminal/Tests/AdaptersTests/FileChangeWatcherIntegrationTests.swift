@@ -1,4 +1,5 @@
 import Adapters
+import Darwin
 import Foundation
 import Testing
 
@@ -6,53 +7,137 @@ import Testing
 struct FileChangeWatcherIntegrationTests {
   @Test("上書き、追記、atomic save、削除をパスの変化として通知する", .timeLimit(.minutes(1)))
   func observesPathChanges() async throws {
+    try await withWatchedFile { file, watcher in
+      let stream = watcher.events()
+      let received = EventRecorder()
+      let task = Task {
+        for await event in stream { await received.append(event) }
+      }
+      defer { task.cancel() }
+
+      try Data("bb".utf8).write(to: file)
+      try await waitForEventCount(1, recorder: received)
+      let handle = try FileHandle(forWritingTo: file)
+      try handle.seekToEnd()
+      try handle.write(contentsOf: Data("c".utf8))
+      try handle.close()
+      try await waitForEventCount(2, recorder: received)
+      try Data("dd".utf8).write(to: file, options: .atomic)
+      try await waitForEventCount(3, recorder: received)
+      try FileManager.default.removeItem(at: file)
+      try await waitForEventCount(4, recorder: received)
+
+      #expect(await received.values.prefix(3).allSatisfy { $0 == .modified })
+      #expect(await received.values.last == .deleted)
+    }
+  }
+
+  @Test("削除の後に作り直した場合も順序どおり通知する", .timeLimit(.minutes(1)))
+  func keepsDeleteThenCreateOrder() async throws {
+    try await withWatchedFile { file, watcher in
+      let stream = watcher.events()
+      let received = EventRecorder()
+      let task = Task {
+        for await event in stream { await received.append(event) }
+      }
+      defer { task.cancel() }
+
+      try FileManager.default.removeItem(at: file)
+      try await waitForEventCount(1, recorder: received)
+      try Data("again".utf8).write(to: file)
+      try await waitForEventCount(2, recorder: received)
+
+      #expect(await received.values == [.deleted, .modified])
+    }
+  }
+
+  @Test("変更が無ければ通知しない", .timeLimit(.minutes(1)))
+  func staysSilentWithoutChanges() async throws {
+    try await withWatchedFile { _, watcher in
+      let stream = watcher.events()
+      let received = EventRecorder()
+      let task = Task {
+        for await event in stream { await received.append(event) }
+      }
+      defer { task.cancel() }
+
+      try await ContinuousClock().sleep(for: .milliseconds(200))
+      #expect(await received.values.isEmpty)
+    }
+  }
+
+  @Test("キャンセル後は周期を跨いでも通知しない", .timeLimit(.minutes(1)))
+  func stopsOnCancellation() async throws {
+    try await withWatchedFile { file, watcher in
+      let stream = watcher.events()
+      let received = EventRecorder()
+      let task = Task {
+        for await event in stream { await received.append(event) }
+      }
+
+      task.cancel()
+      await task.value
+      for index in 0..<5 {
+        try Data("after \(index)".utf8).write(to: file)
+        try await ContinuousClock().sleep(for: .milliseconds(30))
+      }
+      #expect(await received.values.isEmpty)
+    }
+  }
+
+  /// キャンセルで監視が本当に止まったことは、イベントが来ないことだけでは示せない
+  /// (consumer が死んでいるだけでも成立する)。ポーリングの CPU 消費で確かめる。
+  @Test("キャンセルでポーリングが解放される", .timeLimit(.minutes(1)))
+  func releasesPollingOnCancellation() async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
     let file = root.appending(path: "target.txt")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
     try Data("aa".utf8).write(to: file)
-    let watcher = FileChangeWatcher(path: file, interval: .init(duration: .milliseconds(10)))
-    let stream = watcher.events()
-    let received = EventRecorder()
-    let task = Task {
-      for await event in stream { await received.append(event) }
+    let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(1)))
+
+    var tasks: [Task<Void, Never>] = []
+    for _ in 0..<200 {
+      let stream = FileChangeWatcher(path: file, interval: interval).events()
+      tasks.append(Task { for await _ in stream {} })
     }
-    defer { task.cancel() }
+    let activeCPU = try await processCPUTime(over: .milliseconds(500))
+    for task in tasks { task.cancel() }
+    try await ContinuousClock().sleep(for: .milliseconds(200))
+    let idleCPU = try await processCPUTime(over: .milliseconds(500))
 
-    try Data("bb".utf8).write(to: file)
-    try await waitForEventCount(1, recorder: received)
-    let handle = try FileHandle(forWritingTo: file)
-    try handle.seekToEnd()
-    try handle.write(contentsOf: Data("c".utf8))
-    try handle.close()
-    try await waitForEventCount(2, recorder: received)
-    try Data("dd".utf8).write(to: file, options: .atomic)
-    try await waitForEventCount(3, recorder: received)
-    try FileManager.default.removeItem(at: file)
-    try await waitForEventCount(4, recorder: received)
-
-    #expect(await received.values.prefix(3).allSatisfy { $0 == .modified })
-    #expect(await received.values.last == .deleted)
+    #expect(idleCPU < activeCPU / 8, "active=\(activeCPU)s idle=\(idleCPU)s")
   }
 
-  @Test("キャンセル後は変更を通知せず stream を終了する", .timeLimit(.minutes(1)))
-  func stopsOnCancellation() async throws {
+  @Test("正でない周期を拒否する", arguments: [Duration.zero, .milliseconds(-1)])
+  func rejectsNonPositiveInterval(_ duration: Duration) {
+    #expect(FileChangeObservationInterval(duration: duration) == nil)
+  }
+
+  private func withWatchedFile(
+    _ body: (URL, FileChangeWatcher) async throws -> Void
+  ) async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
     let file = root.appending(path: "target.txt")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
-    try Data("before".utf8).write(to: file)
-    let watcher = FileChangeWatcher(path: file, interval: .init(duration: .milliseconds(10)))
-    let stream = watcher.events()
-    let received = EventRecorder()
-    let task = Task {
-      for await event in stream { await received.append(event) }
-    }
+    try Data("aa".utf8).write(to: file)
+    let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(10)))
+    try await body(file, FileChangeWatcher(path: file, interval: interval))
+  }
 
-    task.cancel()
-    await task.value
-    try Data("after".utf8).write(to: file)
-    #expect(await received.values.isEmpty)
+  private func processCPUTime(over duration: Duration) async throws -> Double {
+    let before = try consumedCPUSeconds()
+    try await ContinuousClock().sleep(for: duration)
+    return try consumedCPUSeconds() - before
+  }
+
+  private func consumedCPUSeconds() throws -> Double {
+    var usage = rusage()
+    try #require(getrusage(RUSAGE_SELF, &usage) == 0)
+    return [usage.ru_utime, usage.ru_stime].reduce(0.0) {
+      $0 + Double($1.tv_sec) + Double($1.tv_usec) / 1_000_000
+    }
   }
 
   private func waitForEventCount(_ count: Int, recorder: EventRecorder) async throws {

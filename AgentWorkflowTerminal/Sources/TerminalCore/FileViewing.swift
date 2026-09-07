@@ -1,16 +1,32 @@
 public struct FileViewThresholds: Sendable, Hashable {
+  public static let defaultAbsoluteMaximumByteCount = 16_777_216
+
   public let maximumByteCount: Int
   public let maximumLineCount: Int
+  /// 確認後でもここまでしか読まない上限。§7.3 が v1 で Editor engine を作らないと決めているため、
+  /// 上限を超えるファイルは先頭だけを読み、打ち切ったことを読み取り結果に出す。
+  public let absoluteMaximumByteCount: Int
 
   public static let `default` = Self(
     maximumByteCount: 1_048_576,
     maximumLineCount: 50_000
   )
 
-  public init(maximumByteCount: Int, maximumLineCount: Int) {
+  public init(
+    maximumByteCount: Int,
+    maximumLineCount: Int,
+    absoluteMaximumByteCount: Int = Self.defaultAbsoluteMaximumByteCount
+  ) {
     self.maximumByteCount = maximumByteCount
     self.maximumLineCount = maximumLineCount
+    self.absoluteMaximumByteCount = absoluteMaximumByteCount
   }
+}
+
+/// `FileOpenDecision.confirm` に対してユーザーが `Open anyway` を選んだかどうか。
+public enum FileOpenConfirmation: Sendable, Hashable {
+  case notConfirmed
+  case confirmed
 }
 
 public enum BinaryFileDetection {

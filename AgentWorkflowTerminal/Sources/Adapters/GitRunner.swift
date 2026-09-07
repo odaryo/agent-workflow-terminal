@@ -84,6 +84,12 @@ public struct GitReadCommand: Sendable, Equatable {
     return Self(arguments: arguments)
   }
 
+  /// サブモジュールの所在は index が正本。変更の無いサブモジュールは `status` に一切現れない。
+  public static func listFilesStage() -> Self {
+    // -z は status と同じ理由 — パス名の quoting を避ける。
+    Self(arguments: ["ls-files", "--stage", "-z"])
+  }
+
   public static func worktreeList() -> Self {
     Self(arguments: ["worktree", "list", "--porcelain", "-z"])
   }

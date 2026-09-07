@@ -139,6 +139,45 @@ struct WorktreeFileGitStateTests {
     #expect(overlay.state(for: try path("foo/\u{0301}start.txt"), kind: .file) == .ignored)
   }
 
+  @Test("サブモジュール自身と配下は状態なしにする")
+  func submodulePathsHaveNoState() throws {
+    let overlay = WorktreeFileGitStateOverlay(entries: [
+      .submodule(path: try path("sub"))
+    ])
+
+    #expect(overlay.state(for: try path("sub"), kind: .directory) == nil)
+    #expect(overlay.state(for: try path("sub/s.txt"), kind: .file) == nil)
+    #expect(overlay.state(for: try path("sub/deep/x.txt"), kind: .file) == nil)
+    #expect(overlay.state(for: try path("subtle.txt"), kind: .file) == .tracked(.unchanged))
+  }
+
+  @Test("サブモジュール自身が status に現れたときはその状態を使う")
+  func reportedSubmoduleKeepsItsStatus() throws {
+    let overlay = WorktreeFileGitStateOverlay(entries: [
+      .changed(path: try path("sub"), indexStatus: .unchanged, worktreeStatus: .modified),
+      .submodule(path: try path("sub")),
+    ])
+
+    #expect(
+      overlay.state(for: try path("sub"), kind: .directory)
+        == .tracked(.init(index: .unchanged, worktree: .modified)))
+    #expect(overlay.state(for: try path("sub/s.txt"), kind: .file) == nil)
+  }
+
+  @Test("NFD で与えたパスは NFC の git 出力と同じキーになる")
+  func normalizesToPrecomposedForm() throws {
+    let decomposed = try path("e\u{0301}dir")
+    let precomposed = try path("\u{00E9}dir")
+    #expect(decomposed == precomposed)
+    #expect(decomposed.hashValue == precomposed.hashValue)
+    #expect(Array(decomposed.value.utf8) == Array("\u{00E9}dir".utf8))
+
+    let overlay = WorktreeFileGitStateOverlay(entries: [
+      .untracked(path: precomposed, scope: .directory)
+    ])
+    #expect(overlay.state(for: try path("e\u{0301}dir/f.txt"), kind: .file) == .untracked)
+  }
+
   @Test(
     "正規化されていない相対パスを拒否する",
     arguments: ["", "/foo", "./foo", "foo/", "foo//bar", "foo/./bar", "foo/../bar"]

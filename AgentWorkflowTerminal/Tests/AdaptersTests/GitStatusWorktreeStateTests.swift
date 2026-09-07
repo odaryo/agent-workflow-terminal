@@ -6,13 +6,24 @@ import Testing
 
 @Suite("§7.1 Git status の File Browser 状態変換")
 struct GitStatusWorktreeStateTests {
-  @Test("git の8状態と index／worktree の2軸を損失なく変換する")
-  func convertsEveryStatusCode() {
-    let statuses: [GitFileStatusCode] = [
-      .unchanged, .modified, .typeChanged, .added, .deleted, .renamed, .copied, .unmerged,
-    ]
-    #expect(statuses.compactMap(\.worktreeStatus).count == statuses.count)
+  @Test(
+    "git の8つの状態コードを1対1で変換する",
+    arguments: [
+      (GitFileStatusCode.unchanged, WorktreeGitFileStatus.unchanged),
+      (.modified, .modified),
+      (.typeChanged, .typeChanged),
+      (.added, .added),
+      (.deleted, .deleted),
+      (.renamed, .renamed),
+      (.copied, .copied),
+      (.unmerged, .unmerged),
+    ])
+  func convertsEveryStatusCode(_ code: GitFileStatusCode, _ expected: WorktreeGitFileStatus) {
+    #expect(code.worktreeStatus == expected)
+  }
 
+  @Test("1パスに付く index と worktree の2軸を潰さない")
+  func keepsBothAxes() {
     let parsed = GitStatusPorcelainV2.parse(
       output:
         "1 .T N... 100644 100644 120000 a b f.txt\0"
@@ -82,10 +93,24 @@ struct GitStatusWorktreeStateTests {
     #expect(converted.failures == [.invalidPath("../outside")])
   }
 
-  @Test("状態取得は ignored=matching を指定し、パース失敗と変換失敗を保持する")
-  func readsStatusIncludingIgnored() async throws {
+  @Test("index の gitlink 行だけをサブモジュールとして取り出す")
+  func parsesGitlinkRowsOnly() {
+    let parsed = GitIndexSubmodules.parse(
+      output:
+        "100644 1bd30cc0000000000000000000000000000000ab 0\t.gitmodules\0"
+        + "160000 721194b0000000000000000000000000000000cd 0\tsub\0"
+        + "100644 721194b0000000000000000000000000000000ef 0\tp.txt\0"
+        + "160000 721194b00000000000000000000000000000ab12 0\t../escape\0")
+
+    #expect(parsed.entries == [.submodule(path: path("sub"))])
+    #expect(parsed.failures == [.invalidPath("../escape")])
+  }
+
+  @Test("状態取得は status と index の両方を読み、失敗を保持する")
+  func readsStatusAndIndex() async throws {
     let spy = WorktreeStatusProcessSpy(
-      output: "x unknown\0? generated/\0! ../invalid\0")
+      statusOutput: "x unknown\0? generated/\0! ../invalid\0",
+      listFilesOutput: "160000 721194b0000000000000000000000000000000cd 0\tsub\0")
     let runner = try GitRunner(
       repositoryDirectory: URL(fileURLWithPath: "/repo"),
       processRunner: spy,
@@ -95,8 +120,13 @@ struct GitStatusWorktreeStateTests {
 
     let result = try await WorktreeGitStateReader(runner: runner).read()
 
-    #expect(await spy.arguments.last == "--ignored=matching")
-    #expect(result.entries == [.untracked(path: path("generated"), scope: .directory)])
+    #expect(await spy.invocations.contains { $0.contains("--ignored=matching") })
+    #expect(await spy.invocations.contains { $0.contains("ls-files") && $0.contains("--stage") })
+    #expect(
+      result.entries == [
+        .untracked(path: path("generated"), scope: .directory),
+        .submodule(path: path("sub")),
+      ])
     #expect(result.statusParseFailures.count == 1)
     #expect(result.conversionFailures == [.invalidPath("../invalid")])
   }
@@ -110,10 +140,14 @@ struct GitStatusWorktreeStateTests {
 }
 
 private actor WorktreeStatusProcessSpy: ProcessRunning {
-  private(set) var arguments: [String] = []
-  let output: String
+  private(set) var invocations: [[String]] = []
+  let statusOutput: String
+  let listFilesOutput: String
 
-  init(output: String) { self.output = output }
+  init(statusOutput: String, listFilesOutput: String) {
+    self.statusOutput = statusOutput
+    self.listFilesOutput = listFilesOutput
+  }
 
   func run(
     executableURL: URL,
@@ -122,7 +156,10 @@ private actor WorktreeStatusProcessSpy: ProcessRunning {
     timeout: Duration,
     outputLimit: Int
   ) throws(ProcessRunnerError) -> ProcessRunResult {
-    self.arguments = arguments
-    return ProcessRunResult(exitCode: 0, stdout: output, stderr: "")
+    invocations.append(arguments)
+    return ProcessRunResult(
+      exitCode: 0,
+      stdout: arguments.contains("ls-files") ? listFilesOutput : statusOutput,
+      stderr: "")
   }
 }

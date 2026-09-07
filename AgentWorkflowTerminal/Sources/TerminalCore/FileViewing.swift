@@ -16,21 +16,41 @@ public struct FileViewThresholds: Sendable, Hashable {
 public enum BinaryFileDetection {
   public static let sampleByteCount = 8_192
 
-  public static func isBinary<Bytes: Collection>(sample: Bytes) -> Bool
-  where Bytes.Element == UInt8 {
-    sample.prefix(sampleByteCount).contains(0)
+  public static func isBinary(sample: BinaryFileSample) -> Bool {
+    sample.bytes.contains(0)
   }
 }
 
-public struct FileViewObservation: Sendable, Hashable {
-  public let byteCount: Int
-  public let isBinary: Bool
-  public let lineCount: Int?
+public struct BinaryFileSample: Sendable, Hashable {
+  fileprivate let bytes: [UInt8]
 
-  public init(byteCount: Int, isBinary: Bool, lineCount: Int?) {
-    self.byteCount = byteCount
-    self.isBinary = isBinary
-    self.lineCount = lineCount
+  /// 呼び出し側はファイル先頭から `min(fileByteCount, 8_192)` バイトを読み切って渡す。
+  public init?(bytes: [UInt8], fileByteCount: Int) {
+    guard fileByteCount >= 0, bytes.count == min(fileByteCount, BinaryFileDetection.sampleByteCount)
+    else { return nil }
+    self.bytes = bytes
+  }
+}
+
+public enum FileViewObservation: Sendable, Hashable {
+  case binary(byteCount: Int)
+  case text(byteCount: Int, lineCount: Int?)
+
+  fileprivate var byteCount: Int {
+    switch self {
+    case .binary(let byteCount), .text(let byteCount, _):
+      byteCount
+    }
+  }
+
+  fileprivate var isBinary: Bool {
+    if case .binary = self { return true }
+    return false
+  }
+
+  fileprivate var lineCount: Int? {
+    if case .text(_, let lineCount) = self { return lineCount }
+    return nil
   }
 }
 

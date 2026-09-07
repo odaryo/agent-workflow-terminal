@@ -22,4 +22,14 @@ struct FileBrowserSortingTests {
         FileBrowserChild(name: "beta.swift", kind: .file),
       ])
   }
+
+  @Test("大小文字だけが異なる名前は入力順によらず大文字を先にする")
+  func breaksCaseInsensitiveTies() {
+    let entries = [
+      FileBrowserChild(name: "alpha.swift", kind: .file),
+      FileBrowserChild(name: "Alpha.swift", kind: .file),
+    ]
+
+    #expect(entries.fileBrowserSorted().map(\.name) == ["Alpha.swift", "alpha.swift"])
+  }
 }

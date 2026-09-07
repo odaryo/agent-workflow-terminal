@@ -9,6 +9,11 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
   public let id = AgentAdapterID(rawValue: "claude-code")
   public let processNames: Set<String> = ["claude"]
+  // idle 区間の画面変化は 1 行に収まる。Gate 3 の再採点 (Spikes/gate3/README.md §13) を
+  // 250ms 分解能で数えると、独立した画面変化は idle 10 件が全件 1 行、working は 180 件中
+  // 99 件が 2 行以上で、2 が実測上の分離点。2.0 秒 polling の 97/98・422/441 は 8 位相の
+  // 合算値で、独立事象数ではない。記録で測れているのは起動後 25 秒の idle 区間だけである。
+  public let minimumChangedLinesForScreenActivity = 2
   public init() {}
 
   public func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {

@@ -43,6 +43,15 @@ let package = Package(
       resources: [.copy("Fixtures")],
       swiftSettings: commonSwiftSettings
     ),
+    // 経過時間 (ContinuousClock) とプロセス全体の CPU (getrusage(RUSAGE_SELF)) を主張に使う
+    // テストだけを分けている。Swift Testing は同一プロセス内でテストを並行実行するため、
+    // AdaptersTests に置いたままでは同時に走る他テストの負荷が観測値へ混ざり、主張の真偽と
+    // 無関係に落ちる。CI はこのターゲットだけを --no-parallel で走らせる。
+    .testTarget(
+      name: "AdaptersSerialTimingTests",
+      dependencies: ["Adapters"],
+      swiftSettings: commonSwiftSettings
+    ),
   ],
   swiftLanguageModes: [.v6]
 )

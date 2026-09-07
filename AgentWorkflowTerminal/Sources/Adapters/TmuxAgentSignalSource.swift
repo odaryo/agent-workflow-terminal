@@ -54,7 +54,9 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     self.processExecutableURL = processExecutableURL
   }
 
-  public func signals(for pane: PaneSnapshot) async throws -> AgentSignals {
+  public func signals(
+    for pane: PaneSnapshot, minimumChangedLines: Int
+  ) async throws -> AgentSignals {
     guard TmuxCapturePane.isWellFormed(pane.id) else {
       throw TmuxAgentSignalSourceError.capture(.invalidPaneID(pane.id))
     }
@@ -95,7 +97,8 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let capturedAt = ContinuousClock().now
     let observedAt = Date()
     let secondsSinceScreenChange = screen.flatMap {
-      screenChangeTracker.observe(screen: $0, paneID: pane.id, at: capturedAt)
+      screenChangeTracker.observe(
+        screen: $0, paneID: pane.id, at: capturedAt, minimumChangedLines: minimumChangedLines)
     }
     return AgentSignals(
       paneTitle: status.title, screenText: screen,

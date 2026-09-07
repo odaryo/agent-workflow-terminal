@@ -460,3 +460,152 @@ python3 Spikes/gate3/scripts/analyze.py Spikes/gate3/evidence/runs/*-composite-r
 
 `G3_WORK` で作業ディレクトリを、`G3_SOCKET` で tmux socket を差し替えられる。
 Agent を 2 種同時に回す場合は `G3_WORK` を分けること(hook ログと成果物が衝突する)。
+
+---
+
+## 13. 画面変化の「量」で待機中の書き換えを除く (Issue #203)
+
+§3.4 の出力鮮度をそのまま使うと、**idle 真値区間の 78% で `Working` が表示された**
+(2.0 秒 polling、保持 9 秒、§13.3)。画面が変化した = 出力があった、が成り立たない。
+
+### 13.0 何が画面を変えていたか (機序)
+
+250ms 分解能で idle 真値区間の独立した画面変化を数え直すと、**5 run 合計 10 件、すべて 1 行**
+(GUARD 1.0s。GUARD を外すと 14 件で、増える 4 件は各 run の開始 0.5 秒後に
+`/rc connecting…` → `/rc` とステータス行が落ち着くもの)。周期的な入れ替えではなく、
+**起動直後に一回限りで起きる遷移**が run あたり 2 件あるだけである。実際の差分:
+
+```
+t+ 9.2s  変化 1 行 (39 行目)
+  - '                    ● high · /effort'
+  + "  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach …"
+t+17.1s  変化 1 行 (39 行目)
+  - "  tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach …"
+  + ''
+```
+
+重要な限界と、そこから読める事実:
+
+- **`completed-left` (ターン後の放置、55 秒 × 5 run) の画面変化は 0 件である。**
+  放置中の `Ready for Review` は元から正しく表示できていた。この Issue が直すのは
+  放置ではなく、フッター 1 行が動く区間の表示である。
+- **claude の `idle` 真値区間は起動後 25 秒の 1 本しか存在しない** (5 run で 25.0 秒 × 5)。
+  日常の長い待機はこの記録では測れていない。§13.2 以降の数字はすべて
+  「起動直後の 25 秒」についてのものであり、それを超えて一般化しない。
+
+### 13.1 変化行数の分布
+
+対策は**変化の量を見る**こと。`AgentScreenChangeTracker` が出力とみなす条件を
+「直前の観測と **index 単位で比較して k 行以上違う**」に変えた。行位置で数えるのは、
+`capture-pane -p` が pane の高さぶんの行を毎回同じ順で返すため (tmux 3.4 で実測)。
+比較対象は常に**1 回前の観測**で、「最後に出力と認めた画面」ではない。後者と比べると
+1 行ずつの書き換えが積み上がっていずれ k を超え、静止した画面が出力に化ける。
+
+**250ms 分解能 (= 独立した画面変化イベントの数、GUARD 1.0s):**
+
+| 真値 | n | 1行 | 内訳 |
+|---|---|---|---|
+| idle | 10 | 10 (1.000) | 1行:10 |
+| working | 180 | 81 (0.450) | 1行:81 2行:91 3行:7 4行:1 |
+| completed | 5 | 5 (1.000) | 1行:5 |
+| permission | 0 | — | (区間内に画面変化なし) |
+| completed-left | 0 | — | (区間内に画面変化なし) |
+
+**2.0 秒 polling (製品の観測間隔。位相 8 通りの合算なので n は最大 8 倍に膨らむ):**
+
+| 真値 | n | 1行 | 内訳 |
+|---|---|---|---|
+| idle | 98 | 97 (0.990) | 1行:97 6行:1 |
+| working | 441 | 19 (0.043) | 1行:19 2行:80 3行:223 4行:88 5行:27 44行:4 |
+| completed | 86 | 46 (0.535) | 1行:46 3行:17 4行:2 5行:1 37行:20 |
+| permission | 20 | 0 (0.000) | 41行:20 |
+
+**n を独立事象数として読まないこと。** 98 も 441 も 8 位相の合算値であり、
+実体は上の 10 件 / 180 件である。位相合算は k を比べるための標本数であって、
+「idle 中に 98 回画面が変わった」ではない。
+
+どちらの分解能でも**idle 側の画面変化は 1 行に閉じ、working 側は 2 行以上が過半**
+(250ms で 99/180、2.0 秒で 422/441)。k = 2 は推測ではなく、この分離点である。
+
+### 13.2 k を振ったときの成績
+
+採点は `analyze.py` ではなく `replay-swift` で行った。製品の `AgentAdapter` をそのまま
+当てるハーネスであり、§12.2 の保持時間もこのハーネスの数字で確定しているため
+(変化行数の分布だけは真値の非対称の都合で `scripts/changed-lines.py`、§13.4)。
+
+| k | idle recall | working recall | permission 危険率 | completed recall |
+|---|---|---|---|---|
+| 1 (従来) | 0.763 | 0.995 | 0.000 | 0.953 |
+| **2 (採用)** | **0.976** | 0.953 | **0.000** | 0.978 |
+| 3 | 0.976 | 0.772 | 0.000 | 0.978 |
+
+`permission` recall は k によらず 1.000、危険な誤判定 (Needs Attention の取りこぼし) は
+0.000 のまま増えていない。k=2 の代償は working recall 0.995→0.953 で、21 フレームが
+`completed` へ寄る危険側でない誤り。k=3 は working recall を 0.772 まで壊すので採らない。
+
+### 13.3 保持 9 秒 (§12.2) を当てた「表示」
+
+`replay-swift --score` の後段が出す表から、idle 区間 (直す対象) と working 区間 (代償) の
+両方を転記する。秒数は 5 run × 8 位相の合算である。
+
+連続時間は両向きを出す。**悪い側が真値によって逆**だからである — idle 区間では
+`Working` が出続けるのが症状で、working 区間では `Working` が消えるのが代償になる。
+
+| 真値区間 (合計秒) | k | 表示=working | 表示=idle | 表示=その他 | 最長 working 連続 | 最長 非working 連続 |
+|---|---|---|---|---|---|---|
+| idle (990.0 s) | 1 (従来) | 770.0 s (78%) | 0.0 s | 220.0 s | **24.0 s** | 10.0 s |
+| idle (990.0 s) | **2 (採用)** | **12.0 s (1.2%)** | **528.0 s** | 450.0 s | **12.0 s** | 26.0 s |
+| working (1084.0 s) | 1 (従来) | 1080.0 s | 0.0 s | 4.0 s | 24.0 s | **2.0 s** |
+| working (1084.0 s) | **2 (採用)** | 1024.0 s | 0.0 s | **60.0 s** | 24.0 s | **4.0 s** |
+| completed-left (2170.0 s) | 1 / 2 | 0.0 s | 0.0 s | 2170.0 s | 0.0 s | 56.0 s |
+
+- 直したいもの: idle 区間で `Working` を出す時間が 770.0 → 12.0 秒、その最長の連続が
+  24.0 → 12.0 秒。
+- 払った代償: working 区間で `Working` を出せない時間が 4.0 → 60.0 秒 (1084.0 秒の 5.5%)。
+  ただし**その最長の連続は 2.0 → 4.0 秒**で、2.0 秒 polling の 2 回分しか続かない。
+  行き先は `Ready for Review` 側で、危険側ではない。
+- `completed-left` は k によらず表示が動かない (区間全体が `Ready for Review`)。
+  放置中の表示は元から正しい (§13.0)。
+
+保持時間も保持の対象範囲も変えずに、idle 側の症状が消える。
+
+### 13.4 Codex には適用しない
+
+同じ計測を codex の記録で取ると、codex の working は**1 行だけの変化が過半を占める**
+(spinner のコマ送り)。k=2 を共有すると working の検出が壊れる。
+
+| 分解能 | working n | うち 1 行 |
+|---|---|---|
+| 250ms (独立イベント) | 196 | 95 (0.485) |
+| 2.0 秒 (8 位相合算) | 486 | 183 (0.377) |
+
+しきい値は `AgentAdapter.minimumChangedLinesForScreenActivity` として Adapter が宣言し、
+既定は 1 (従来の挙動)。2 を返すのは `ClaudeCodeAdapter` だけ。
+
+codex 側は `replay-swift` では採点していない。`replay-swift` の `truthIntervals` は
+「`analyze.py` の claude 側だけの移植」で、codex の working / permission の境界は
+pane_title から切る必要がある (`analyze.py` の `truth_intervals` 冒頭の注記)。
+codex を通すと成績が捏造されるため、数えるのは `scripts/changed-lines.py` の役目にした。
+
+### 13.5 再現手順
+
+```shell
+# 13.0 の機序 (idle 区間で実際に何が変わったか)
+python3 Spikes/gate3/scripts/changed-lines.py claude --diffs idle
+
+# 13.1 の分布。--poll 既定 0.25 が独立イベント、2.0 が位相合算
+python3 Spikes/gate3/scripts/changed-lines.py claude
+python3 Spikes/gate3/scripts/changed-lines.py claude --poll 2.0
+# 13.4 の codex 側 (同じスクリプト・同じ真値定義)
+python3 Spikes/gate3/scripts/changed-lines.py codex
+python3 Spikes/gate3/scripts/changed-lines.py codex --poll 2.0
+
+cd Spikes/gate3/replay-swift
+# Adapter の宣言値 (claude=2) での 13.2 / 13.3
+swift run -c release replay-swift --score --records ../evidence/runs --poll 2.0
+# k を振る (13.2 / 13.3 の各行)
+swift run -c release replay-swift --score --records ../evidence/runs --poll 2.0 --min-changed-lines 1
+swift run -c release replay-swift --score --records ../evidence/runs --poll 2.0 --min-changed-lines 3
+```
+
+生記録 (`evidence/runs`) は容量のため追跡していない。`--records` で記録のある場所を指す。

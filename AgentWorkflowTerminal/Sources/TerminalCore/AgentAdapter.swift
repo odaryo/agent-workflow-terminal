@@ -86,6 +86,9 @@ public struct AgentSignals: Sendable, Hashable, Codable {
 /// 画面の変化が Agent の出力とは限らないため、単独で状態を確定する信号にはできない。
 public struct AgentScreenChangeTracker: Sendable {
   private struct Entry: Sendable {
+    /// 直前の**観測**画面であって「最後に出力と認めた画面」ではない。後者と比較すると
+    /// 1行ずつの書き換えが積み上がっていずれ閾値を超え、静止した画面が出力に化ける。
+    /// Spikes/gate3/README.md §13 の再採点もこの定義で取っている。
     let screen: String
     let changedAt: ContinuousClock.Instant
   }
@@ -94,19 +97,37 @@ public struct AgentScreenChangeTracker: Sendable {
 
   public init() {}
 
+  /// `minimumChangedLines` は出力とみなす最小の変化行数で、1 なら差が1文字でも出力。
+  /// Agent ごとの値は `AgentAdapter.minimumChangedLinesForScreenActivity` が持つ。
+  /// 0 以下は 1 と同じに扱う (どんな観測も変化になり、経過が常に 0 へ潰れるため)。
   public mutating func observe(
-    screen: String, paneID: PaneID, at observedAt: ContinuousClock.Instant
+    screen: String, paneID: PaneID, at observedAt: ContinuousClock.Instant,
+    minimumChangedLines: Int = 1
   ) -> TimeInterval? {
     guard let previous = entries[paneID] else {
       entries[paneID] = Entry(screen: screen, changedAt: observedAt)
       return nil
     }
-    if previous.screen != screen {
-      entries[paneID] = Entry(screen: screen, changedAt: observedAt)
-      return 0
-    }
+    let isOutput = Self.changedLineCount(previous.screen, screen) >= max(1, minimumChangedLines)
+    entries[paneID] = Entry(screen: screen, changedAt: isOutput ? observedAt : previous.changedAt)
+    guard !isOutput else { return 0 }
     let elapsed = previous.changedAt.duration(to: observedAt).components
     return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+  }
+
+  /// index 単位で数え、行数が違えば短い側を空行で埋める。`capture-pane -p` は pane の高さぶんの
+  /// 行を毎回同じ順で返す (tmux 3.4 で実測) ため、行集合の差分ではなく行位置の一致で数えると
+  /// 画面の書き換え量に対応する。
+  static func changedLineCount(_ lhs: String, _ rhs: String) -> Int {
+    let left = lhs.split(separator: "\n", omittingEmptySubsequences: false)
+    let right = rhs.split(separator: "\n", omittingEmptySubsequences: false)
+    var changed = 0
+    for index in 0..<max(left.count, right.count) {
+      let leftLine: Substring = index < left.count ? left[index] : ""
+      let rightLine: Substring = index < right.count ? right[index] : ""
+      if leftLine != rightLine { changed += 1 }
+    }
+    return changed
   }
 
   public mutating func forget(paneID: PaneID) {
@@ -115,7 +136,10 @@ public struct AgentScreenChangeTracker: Sendable {
 }
 
 public protocol AgentSignalSource: Sendable {
-  func signals(for pane: PaneSnapshot) async throws -> AgentSignals
+  /// `minimumChangedLines` は `AgentScreenChangeTracker.observe` へそのまま渡す。
+  /// 既定値を与えていないのは、呼び出し側が渡し忘れたときに Agent 固有のしきい値が
+  /// 黙って 1 へ戻り、idle が working に見える不具合が再発するため。
+  func signals(for pane: PaneSnapshot, minimumChangedLines: Int) async throws -> AgentSignals
   func liveness(for pane: PaneSnapshot, matchingProcessNames: Set<String>) async -> AgentLiveness
   func forget(_ pane: PaneSnapshot) async
 }
@@ -176,6 +200,11 @@ public enum AgentObservationResult: Sendable, Hashable, Codable {
 public protocol AgentAdapter: Sendable {
   var id: AgentAdapterID { get }
   var processNames: Set<String> { get }
+  /// `secondsSinceScreenChange` が 0 に戻る (= 出力があった) とみなす最小の変化行数。
+  /// 待機中と実行中で画面が何行動くかは Agent 固有 (claude は分離するが、codex は spinner の
+  /// コマ送りで working 中も 1 行しか動かない) なので、既定 1 のまま据え置くか上げるかは
+  /// 実装体が決める (Spikes/gate3/README.md §13)。
+  var minimumChangedLinesForScreenActivity: Int { get }
   func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult
   func observations(
     of pane: PaneSnapshot, from source: any AgentSignalSource,
@@ -184,6 +213,8 @@ public protocol AgentAdapter: Sendable {
 }
 
 extension AgentAdapter {
+  public var minimumChangedLinesForScreenActivity: Int { 1 }
+
   public func observations(
     of pane: PaneSnapshot, from source: any AgentSignalSource,
     intervals: AgentObservationIntervals
@@ -208,7 +239,9 @@ extension AgentAdapter {
           } else {
             do {
               let classified = classify(
-                signals: try await source.signals(for: pane), liveness: liveness
+                signals: try await source.signals(
+                  for: pane, minimumChangedLines: minimumChangedLinesForScreenActivity),
+                liveness: liveness
               )
               result = Self.withLastKnownAt(classified, previous: &lastKnownAt)
             } catch {

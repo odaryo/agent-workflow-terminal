@@ -44,10 +44,13 @@ main のビルドからアプリを起動し、次の4点を実測で確認し�
 
 - Viewer Drawer の中身: #29 / #30 (+#33 G5 snapshot はここに畳む) / #31
 - #136 (Active 状態の永続化)、#92 (Working 検出の遅延)
-- 着手中: なし
+- 着手中: #29 (ファイルブラウザ + コードビューア)
+
+#29 は §7 全体では1つの worktree に対して大きすぎたため、§7.3 のファイル別 Git 履歴・過去 commit
+時点のコード・blame を #183 へ切り出した。#183 はどのフェーズにも入れていない。
 
 閉じた Issue: #171 (Project Root の永続 tmux セッション) / #160 (到達不能 worktree の保持) /
-#28 (Viewer Drawer の枠組み)。
+#28 (Viewer Drawer の枠組み) / #177 (Viewer Drawer の表示方法の寿命)。
 
 ## P3 バグ改修
 

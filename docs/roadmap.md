@@ -42,11 +42,12 @@ main のビルドからアプリを起動し、次の4点を実測で確認し�
 
 ## P2 基本機能を試せる (進行中)
 
-- Viewer Drawer 一式: #28 → #29 / #30 (+#33 G5 snapshot はここに畳む) / #31
+- Viewer Drawer の中身: #29 / #30 (+#33 G5 snapshot はここに畳む) / #31
 - #136 (Active 状態の永続化)、#92 (Working 検出の遅延)
 - 着手中: なし
 
-閉じた Issue: #171 (Project Root の永続 tmux セッション) / #160 (到達不能 worktree の保持)。
+閉じた Issue: #171 (Project Root の永続 tmux セッション) / #160 (到達不能 worktree の保持) /
+#28 (Viewer Drawer の枠組み)。
 
 ## P3 バグ改修
 

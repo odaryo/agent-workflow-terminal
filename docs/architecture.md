@@ -1103,6 +1103,7 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 | Large binary storage | filesystem |
 | Search | ripgrep CLI |
 | Code Viewer | TextKit／SwiftUIベースのread-only viewer |
+| Syntax highlighting (macOS) | HighlighterSwift（MIT。同梱するhighlight.jsはBSD-3）。採用は**確定**。JavaScriptCoreで動くため、上限を超える本文はハイライトせず素で表示する |
 | Syntax highlight | v1は軽量実装。必要なら後でTree-sitter |
 | Mobile data access | SSH上の別channelでHost Core CLIを呼ぶ案 |
 
@@ -1214,7 +1215,7 @@ libghosttyの配布方法と固定versionの方針は**未確定**(§25)。Gate 
 | libgit2 | v1不採用 | 実Gitとの挙動差と依存増を避ける |
 | 独自Remote Terminal protocol | 不採用 | SSH + tmuxで代替できる |
 | Mosh組み込み | 回避 | copyleft／App Store配布上の検討をプロジェクトへ持ち込まない |
-| Tree-sitter | v1後回し | read-only Code Viewerに対して初期スコープが大きい |
+| Tree-sitter | v1不採用 | read-only Code Viewerに対して初期スコープが大きい。言語ごとにC依存を個別に足すことになり、§7.3の「v1でEditor engineを作らない」に対して過剰 |
 | 独立Host Core daemon(launchd常駐) | 不採用 | Host Coreはアプリプロセス内に置く。構造化データ提供はアプリ起動中のみで十分とし、プロセス間通信の複雑さを避ける |
 
 ## 22. Local data architecture

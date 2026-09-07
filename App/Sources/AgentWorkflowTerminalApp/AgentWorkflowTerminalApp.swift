@@ -107,6 +107,7 @@ private final class AppModel: ObservableObject {
   @Published private(set) var worktrees: [TaskWorktree] = []
   @Published var selectedIdentity: WorktreeIdentity?
   @Published var openedIdentities: Set<WorktreeIdentity> = []
+  @Published var viewerDrawerLayout = ViewerDrawerLayout.closed
   @Published private(set) var message: String?
 
   let tmuxExecutable: URL?
@@ -174,29 +175,33 @@ private struct ProjectView: View {
   var body: some View {
     VStack(spacing: 0) {
       if model.projectRoot != nil || !model.worktrees.isEmpty {
-        ScrollView(.horizontal) {
-          HStack(spacing: 4) {
-            if let projectRoot = model.projectRoot {
-              ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
-                model.selectProjectRoot()
+        HStack(spacing: 0) {
+          ScrollView(.horizontal) {
+            HStack(spacing: 4) {
+              if let projectRoot = model.projectRoot {
+                ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
+                  model.selectProjectRoot()
+                }
+                if !model.worktrees.isEmpty {
+                  Divider().frame(height: 22).padding(.horizontal, 2)
+                }
               }
-              if !model.worktrees.isEmpty {
-                Divider().frame(height: 22).padding(.horizontal, 2)
+              ForEach(model.worktrees, id: \.identity) { worktree in
+                WorktreeTab(
+                  worktree: worktree,
+                  selected: model.selectedIdentity == worktree.identity,
+                  paneStates: model.paneStates
+                ) {
+                  model.select(worktree)
+                }
               }
             }
-            ForEach(model.worktrees, id: \.identity) { worktree in
-              WorktreeTab(
-                worktree: worktree,
-                selected: model.selectedIdentity == worktree.identity,
-                paneStates: model.paneStates
-              ) {
-                model.select(worktree)
-              }
-            }
+            .padding(6)
           }
-          .padding(6)
+          .scrollIndicators(.hidden)
+          ViewerDrawerToolbar(layout: $model.viewerDrawerLayout)
+            .padding(.trailing, 6)
         }
-        .scrollIndicators(.hidden)
         Divider()
       }
 
@@ -205,25 +210,84 @@ private struct ProjectView: View {
           "Agent Workflow Terminal", systemImage: "exclamationmark.triangle",
           description: Text(message))
       } else {
-        ZStack {
-          if let projectRoot = model.projectRoot,
-            model.openedIdentities.contains(projectRoot.identity)
-          {
-            TerminalTabContent(worktree: projectRoot, tmuxExecutable: model.tmuxExecutable)
-              .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
-              .allowsHitTesting(model.selectedIdentity == projectRoot.identity)
-          }
-          ForEach(model.worktrees, id: \.identity) { worktree in
-            if model.openedIdentities.contains(worktree.identity) {
-              TerminalTabContent(worktree: worktree.detected, tmuxExecutable: model.tmuxExecutable)
-                .opacity(model.selectedIdentity == worktree.identity ? 1 : 0)
-                .allowsHitTesting(model.selectedIdentity == worktree.identity)
-            }
-          }
+        ViewerDrawerView(layout: $model.viewerDrawerLayout) {
+          TerminalTabs(model: model)
         }
       }
     }
     .task { await model.load() }
+  }
+}
+
+private struct ViewerDrawerToolbar: View {
+  @Binding var layout: ViewerDrawerLayout
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Menu("Viewer", systemImage: "sidebar.right") {
+        ForEach(ViewerContent.allCases, id: \.self) { content in
+          Button(content.toolbarTitle) { layout.openPrimary(content) }
+        }
+      }
+      .menuStyle(.borderlessButton)
+
+      if layout.isOpen {
+        Menu("ペインを追加", systemImage: "rectangle.split.2x1") {
+          ForEach(ViewerContent.allCases, id: \.self) { content in
+            Button(content.toolbarTitle) { layout.openSecondary(content) }
+          }
+        }
+        .menuStyle(.borderlessButton)
+
+        Menu("表示方法", systemImage: "rectangle.on.rectangle") {
+          Button("並べて表示") { layout.setPresentation(.inline) }
+          Button("オーバーレイ") { layout.setPresentation(.overlay) }
+          Button("フルスクリーン") { layout.setPresentation(.fullscreen) }
+          Divider()
+          Button("分割方向を切り替え") { layout.toggleSplitAxis() }
+          Button("主と副を入れ替え") { layout.swapPanes() }
+            .disabled(layout.secondary == nil)
+        }
+        .menuStyle(.borderlessButton)
+
+        Button("Viewer を閉じる", systemImage: "xmark") { layout.closeAll() }
+          .labelStyle(.iconOnly)
+          .buttonStyle(.borderless)
+      }
+    }
+  }
+}
+
+private extension ViewerContent {
+  var toolbarTitle: String {
+    switch self {
+    case .code: "Code"
+    case .diff: "Diff"
+    case .evidence: "Evidence"
+    }
+  }
+}
+
+private struct TerminalTabs: View {
+  @ObservedObject var model: AppModel
+
+  var body: some View {
+    ZStack {
+      if let projectRoot = model.projectRoot,
+        model.openedIdentities.contains(projectRoot.identity)
+      {
+        TerminalTabContent(worktree: projectRoot, tmuxExecutable: model.tmuxExecutable)
+          .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
+          .allowsHitTesting(model.selectedIdentity == projectRoot.identity)
+      }
+      ForEach(model.worktrees, id: \.identity) { worktree in
+        if model.openedIdentities.contains(worktree.identity) {
+          TerminalTabContent(worktree: worktree.detected, tmuxExecutable: model.tmuxExecutable)
+            .opacity(model.selectedIdentity == worktree.identity ? 1 : 0)
+            .allowsHitTesting(model.selectedIdentity == worktree.identity)
+        }
+      }
+    }
   }
 }
 

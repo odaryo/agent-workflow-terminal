@@ -461,6 +461,8 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - modified／added／deleted等のGit状態を表示
 - `node_modules`、`vendor`、build成果物、ログもアクセス可能
 - 巨大ディレクトリの性能を守るため、ディレクトリはlazy loadする
+- trackedファイルのGit状態はindex側とworktree側を分け、gitが返す状態を損失なく保持する。単一badgeではworktree側を優先し、worktree側が変更なしの場合だけindex側を表示する
+- gitはディレクトリを追跡しないため、untracked／ignoredのdirectory entryに一致しないディレクトリはGit状態なしとする。配下の状態はディレクトリへ集約しない
 
 ### 7.2 大容量／バイナリファイル
 
@@ -1682,6 +1684,7 @@ PR_READY
 - [x] Code／Diff／Evidenceを必要時だけ表示
 - [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
 - [x] File Browserはignoredを含む全ファイル、lazy load
+- [x] trackedファイルのGit状態はindex／worktreeの2軸を保持し、ディレクトリへ配下の状態を集約しない
 - [x] 大容量ファイルのデフォルト閾値は1 MiB／50,000行、バイナリは先頭8 KiBのNULバイトで判定
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種

@@ -167,6 +167,17 @@ private final class AppModel: ObservableObject {
     selectedIdentity = projectRoot.identity
     openedIdentities.insert(projectRoot.identity)
   }
+
+  var selectedWorktreeRoot: URL? {
+    guard let selectedIdentity else { return nil }
+    if let projectRoot, projectRoot.identity == selectedIdentity {
+      return URL(fileURLWithPath: projectRoot.worktreePath)
+    }
+    guard let worktree = worktrees.first(where: { $0.identity == selectedIdentity }) else {
+      return nil
+    }
+    return URL(fileURLWithPath: worktree.detected.worktreePath)
+  }
 }
 
 private struct ProjectView: View {
@@ -210,7 +221,10 @@ private struct ProjectView: View {
           "Agent Workflow Terminal", systemImage: "exclamationmark.triangle",
           description: Text(message))
       } else {
-        ViewerDrawerView(layout: $model.viewerDrawerLayout) {
+        ViewerDrawerView(
+          layout: $model.viewerDrawerLayout,
+          worktreeRoot: model.selectedWorktreeRoot
+        ) {
           TerminalTabs(model: model)
         }
       }

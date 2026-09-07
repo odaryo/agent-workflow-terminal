@@ -461,13 +461,20 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - modified／added／deleted等のGit状態を表示
 - `node_modules`、`vendor`、build成果物、ログもアクセス可能
 - 巨大ディレクトリの性能を守るため、ディレクトリはlazy loadする
+- trackedファイルのGit状態はindex側とworktree側を分け、gitが返す状態を損失なく保持する。単一badgeではworktree側を優先し、worktree側が変更なしの場合だけindex側を表示する
+- gitはディレクトリを追跡しないため、untracked／ignoredのdirectory entryに一致しないディレクトリはGit状態なしとする。配下の状態はディレクトリへ集約しない
+- worktree root直下の`.git`は列挙しない。gitの内部保管庫であり作業ツリーのファイルではない（worktreeでは`.git`はディレクトリではなくファイル）。深い階層の`.git`という名前のユーザーファイルは隠さない
+- サブモジュール配下はGit状態なしとする。`git status`はサブモジュールの中身を一切報告しないため、変更なしと主張できない（§12.3）。サブモジュールの所在はindexが正本なので`ls-files`のgitlinkから得る
 
 ### 7.2 大容量／バイナリファイル
 
 - バイナリまたは大容量ファイルは、クリック直後に本文を展開しない。
 - サイズ、行数、バイナリ判定を示し、`Open anyway`の確認を出す。
 - 警告対象となるサイズ／行数は設定可能にする。
-- デフォルト閾値は未確定。
+- デフォルト閾値は1 MiB／50,000行とする。バイナリは先頭8 KiBにNULバイトが1つでもあれば該当する。
+- `Open anyway`を通しても先頭からの絶対上限までしか読まない。デフォルトは16 MiBとし、警告閾値と同じく設定可能にする。
+- 絶対上限で打ち切った場合は、打ち切ったことを表示する。全文を表示していると誤認させない（§12.3）。
+- バイナリは`Open anyway`を通しても本文を表示しない。v1でhexビューアは作らない。
 
 ### 7.3 Code Viewer
 
@@ -1096,6 +1103,7 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 | Large binary storage | filesystem |
 | Search | ripgrep CLI |
 | Code Viewer | TextKit／SwiftUIベースのread-only viewer |
+| Syntax highlighting (macOS) | HighlighterSwift（MIT。同梱するhighlight.jsはBSD-3）。採用は**確定**。JavaScriptCoreで動くため、上限を超える本文はハイライトせず素で表示する |
 | Syntax highlight | v1は軽量実装。必要なら後でTree-sitter |
 | Mobile data access | SSH上の別channelでHost Core CLIを呼ぶ案 |
 
@@ -1207,7 +1215,7 @@ libghosttyの配布方法と固定versionの方針は**未確定**(§25)。Gate 
 | libgit2 | v1不採用 | 実Gitとの挙動差と依存増を避ける |
 | 独自Remote Terminal protocol | 不採用 | SSH + tmuxで代替できる |
 | Mosh組み込み | 回避 | copyleft／App Store配布上の検討をプロジェクトへ持ち込まない |
-| Tree-sitter | v1後回し | read-only Code Viewerに対して初期スコープが大きい |
+| Tree-sitter | v1不採用 | read-only Code Viewerに対して初期スコープが大きい。言語ごとにC依存を個別に足すことになり、§7.3の「v1でEditor engineを作らない」に対して過剰 |
 | 独立Host Core daemon(launchd常駐) | 不採用 | Host Coreはアプリプロセス内に置く。構造化データ提供はアプリ起動中のみで十分とし、プロセス間通信の複雑さを避ける |
 
 ## 22. Local data architecture
@@ -1682,6 +1690,10 @@ PR_READY
 - [x] Code／Diff／Evidenceを必要時だけ表示
 - [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
 - [x] File Browserはignoredを含む全ファイル、lazy load
+- [x] trackedファイルのGit状態はindex／worktreeの2軸を保持し、ディレクトリへ配下の状態を集約しない
+- [x] 大容量ファイルのデフォルト閾値は1 MiB／50,000行、バイナリは先頭8 KiBのNULバイトで判定
+- [x] `Open anyway`後も絶対上限（デフォルト16 MiB）までで打ち切り、打ち切りを表示する。バイナリは確認後も本文を出さない
+- [x] worktree root直下の`.git`は列挙しない。サブモジュール配下はGit状態なし
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Diffはsnapshot、Refreshで新snapshot

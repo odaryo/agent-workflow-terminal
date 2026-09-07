@@ -84,6 +84,12 @@ public struct GitReadCommand: Sendable, Equatable {
     return Self(arguments: arguments)
   }
 
+  /// サブモジュールの所在は index が正本。変更の無いサブモジュールは `status` に一切現れない。
+  public static func listFilesStage() -> Self {
+    // -z は status と同じ理由 — パス名の quoting を避ける。
+    Self(arguments: ["ls-files", "--stage", "-z"])
+  }
+
   public static func worktreeList() -> Self {
     Self(arguments: ["worktree", "list", "--porcelain", "-z"])
   }
@@ -150,6 +156,10 @@ public struct GitRunner: Sendable {
   // 大規模 repository の log / diff は I/O 律速で秒単位になり得るため tmux より長く待つ。
   public static let defaultTimeout = Duration.seconds(30)
   public static let defaultOutputLimit = ProcessRunLimits.defaultOutputBytes
+  // `ls-files --stage -z` の出力量は変更集合ではなく index の大きさに比例する。1 entry は
+  // 計測で 51 バイト + パス長 (パス 29 文字なら 80 バイト) なので、既定の 8 MiB は約 10 万 entry で
+  // 尽きる。64 MiB は同じ見積りで約 80 万 entry にあたる。
+  public static let indexListingOutputLimit = 64 << 20
 
   private let repositoryDirectory: URL
   private let processRunner: any ProcessRunning

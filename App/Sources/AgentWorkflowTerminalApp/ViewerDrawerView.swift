@@ -9,6 +9,8 @@ import TerminalCore
 /// 見た目の差は frame / offset / opacity で表す。
 struct ViewerDrawerView<Terminal: View>: View {
   @Binding var layout: ViewerDrawerLayout
+  /// `.code` ペインが列挙の起点にする worktree。選択中のタブが無い間は `nil`。
+  let worktreeRoot: URL?
   @ViewBuilder let terminal: () -> Terminal
 
   @State private var requestedInlineDrawerWidth = ViewerDrawerMetrics.defaultDrawerWidth
@@ -111,12 +113,32 @@ struct ViewerDrawerView<Terminal: View>: View {
       }
       .padding(8)
       Divider()
-      // Why not VStack への maxHeight: ContentUnavailableView は固有サイズを返すため、
-      // VStack 側に maxHeight を付けても中身が中央に寄るだけで上端に揃わない。
-      ContentUnavailableView(content.title, systemImage: content.systemImage)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+      paneContent(content)
     }
     .frame(minWidth: 160, minHeight: 160)
+  }
+
+  @ViewBuilder
+  private func paneContent(_ content: ViewerContent) -> some View {
+    switch content {
+    case .code:
+      if let worktreeRoot {
+        // worktree を切り替えたら別の木になるので、状態ごと作り直す。
+        CodeViewerPane(worktreeRoot: worktreeRoot)
+          .id(worktreeRoot)
+      } else {
+        unavailable(content)
+      }
+    case .diff, .evidence:
+      unavailable(content)
+    }
+  }
+
+  // Why not VStack への maxHeight: ContentUnavailableView は固有サイズを返すため、
+  // VStack 側に maxHeight を付けても中身が中央に寄るだけで上端に揃わない。
+  private func unavailable(_ content: ViewerContent) -> some View {
+    ContentUnavailableView(content.title, systemImage: content.systemImage)
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
   }
 }
 

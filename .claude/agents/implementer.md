@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Codex (`codex exec`) が usage limit / 不在を返したことを計測で確認した場合**のみ**使うフォールバックの実装役。Director が書いた spec (背景 / 要求 / スコープ / 完了条件) を受けて実装する。小さな追い修正でも、Codex が生きている限り `codex exec resume --last` を使うこと。
+description: 標準の実装役。Director が書いた spec (背景 / 要求 / スコープ / 完了条件) を受けて実装する。ファイルの編集だけを行い、コミットと push は行わない (Director が検証してコミットする)。小さな追い修正も、新しいエージェントを立てず SendMessage で同じエージェントへ返すこと。
 model: opus
 tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch, Skill
 ---
@@ -15,6 +15,8 @@ tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch, Skill
 
 spec の **完了条件** に挙がった GREEN コマンドは自分で実行し、その結果を報告に含める。実行していないコマンドを「通るはず」と report してはならない。
 
-## Codex との契約の違い
+## コミットしない
 
-git commit / push は行わない。変更の検証とコミットは Director の担当であり、書き込み系スクリプト (`scripts/wf-*.sh`) の実行も禁止。標準ワークフローの実装役である Codex はコミットまで行うが、あなたは行わない。
+git commit / push は行わない。変更の検証とコミットは Director の担当であり、書き込み系スクリプト (`scripts/wf-*.sh`) の実行も禁止。作業ツリーは変更したまま (dirty のまま) 返すこと。
+
+spec に「`scripts/wf-commit.sh` でコミットせよ」と書かれていたら、それは spec の欠陥。回避策を実装せず、その旨を報告すること。

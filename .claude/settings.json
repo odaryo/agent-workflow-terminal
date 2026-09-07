@@ -36,6 +36,8 @@
       "Bash(scripts/wf-cleanup-branches.sh:*)",
       "Bash(scripts/wf-worktree-create.sh:*)",
       "Bash(scripts/wf-worktree-remove.sh:*)",
+      "Bash(open -a:*)",
+      "Bash(screencapture:*)",
       "Bash(shellcheck:*)"
     ],
     "deny": []

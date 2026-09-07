@@ -9,6 +9,9 @@ struct AppDependencies: Sendable {
   let tmuxExecutable: URL?
   let tmuxError: String?
   let paneStates: WorktreePaneStatesFeed?
+  /// メインpaneの候補列挙とテキスト注入 (設計書 §9.2 / §12.7) が使う。tmux を起動できない
+  /// 起動では `nil` で、その間は送信操作そのものが成立しない。
+  let tmuxRunner: TmuxRunner?
   /// `~/Library/Application Support` に当たるディレクトリ。引けなかった場合は `nil` で、
   /// その起動では Active/Inactive を保存できない。
   let applicationSupportDirectory: URL?
@@ -31,6 +34,7 @@ struct AppDependencies: Sendable {
         tmuxExecutable: nil,
         tmuxError: "tmux 実行ファイルが見つかりません。tmux をインストールしてください。",
         paneStates: nil,
+        tmuxRunner: nil,
         applicationSupportDirectory: applicationSupport
       )
     }
@@ -51,6 +55,7 @@ struct AppDependencies: Sendable {
         tmuxExecutable: executable,
         tmuxError: nil,
         paneStates: makeWorktreePaneStatesFeed(runner: runner, signalSource: signalSource),
+        tmuxRunner: runner,
         applicationSupportDirectory: applicationSupport
       )
     } catch {
@@ -60,6 +65,7 @@ struct AppDependencies: Sendable {
         tmuxExecutable: nil,
         tmuxError: "tmux を利用できません: \(error)",
         paneStates: nil,
+        tmuxRunner: nil,
         applicationSupportDirectory: applicationSupport
       )
     }
@@ -110,6 +116,7 @@ final class AppModel: ObservableObject {
   let tmuxExecutable: URL?
   let paneStates: WorktreePaneStatesFeed?
   let diffModels = DiffViewerModelStore()
+  let mainPanes: MainPaneCoordinator
   private let projectDirectory: URL?
   private let applicationSupportDirectory: URL?
   private var store: WorktreeInventoryStore?
@@ -128,6 +135,7 @@ final class AppModel: ObservableObject {
     applicationSupportDirectory = dependencies.applicationSupportDirectory
     tmuxExecutable = dependencies.tmuxExecutable
     paneStates = dependencies.paneStates
+    mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
     message = dependencies.projectError ?? dependencies.tmuxError
   }
 
@@ -296,14 +304,18 @@ final class AppModel: ObservableObject {
     openedIdentities.insert(projectRoot.identity)
   }
 
-  var selectedWorktreeRoot: URL? {
+  var selectedWorktree: DetectedWorktree? {
     guard let selectedIdentity else { return nil }
-    if let projectRoot, projectRoot.identity == selectedIdentity {
-      return URL(fileURLWithPath: projectRoot.worktreePath)
-    }
-    guard let worktree = worktrees.first(where: { $0.identity == selectedIdentity }) else {
-      return nil
-    }
-    return URL(fileURLWithPath: worktree.detected.worktreePath)
+    if let projectRoot, projectRoot.identity == selectedIdentity { return projectRoot }
+    return worktrees.first { $0.identity == selectedIdentity }?.detected
+  }
+
+  /// Agent と判定済みの pane を候補一覧の印にするための観測経路 (設計書 §12.7)。Project Root は
+  /// `TaskWorktree` ではないので `nil` になり、その場合は印の無い候補一覧になる。
+  func agentPaneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
+    guard let paneStates, let worktree = worktrees.first(where: { $0.identity == identity }),
+      worktree.detected.isReachable
+    else { return nil }
+    return paneStates(worktree)
   }
 }

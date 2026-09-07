@@ -150,16 +150,6 @@ public enum DiffLineSide: Sendable, Equatable, Hashable {
   case new
 }
 
-/// #208 のコメント anchor が張る先。snapshot が不変なので、この組で行が一意に定まる (§9.2)。
-public struct DiffLineAnchor: Sendable, Equatable, Hashable {
-  public let snapshotID: DiffSnapshotID
-  public let origin: DiffChangeOrigin
-  public let path: String
-  public let side: DiffLineSide
-  public let lineNumber: Int
-  public let text: String
-}
-
 public struct DiffSnapshot: Sendable, Equatable, Identifiable {
   public let id: DiffSnapshotID
   public let subject: DiffSubject
@@ -191,32 +181,15 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
     sections.first { $0.origin == origin }
   }
 
+  /// パスの一致は UTF-8 バイト列で見る。`String` の `==` は正準等価な別表記 (NFC / NFD) を
+  /// 等しいと答えるため、`==` のままだと NFD のパスで引いた anchor が NFC のファイルの行を掴み、
+  /// **文面には NFD のパスを載せたまま別ファイルの元コードを送る** (実測: 同じ出所に両表記を
+  /// 置いた snapshot で、NFD の問い合わせが NFC の行テキストを返した)。`DiffSnapshot.verify` も
+  /// 同じ引き方をするため `.intact` になり、テキストハッシュではこの取り違えを検出できない。
+  /// git は同一 tree に現れた両表記をそのまま出力する一方、APFS は正規化非依存なので、
+  /// これは commit 済み区分で起こる。比較の粒度は `WorktreeIdentity` と同じ理由でバイト列へ揃える。
   public func file(origin: DiffChangeOrigin, path: String) -> UnifiedDiffFile? {
-    section(origin)?.files.first { $0.path == path }
-  }
-
-  /// context 行は old / new の両側に存在するため、両方の anchor を返す。
-  public func anchors(origin: DiffChangeOrigin, path: String) -> [DiffLineAnchor] {
-    guard let file = file(origin: origin, path: path) else { return [] }
-    return file.hunks.flatMap { hunk in
-      hunk.lines.flatMap { line -> [DiffLineAnchor] in
-        var anchors: [DiffLineAnchor] = []
-        if let number = line.oldLineNumber {
-          anchors.append(anchor(origin: origin, path: path, side: .old, number: number, line: line))
-        }
-        if let number = line.newLineNumber {
-          anchors.append(anchor(origin: origin, path: path, side: .new, number: number, line: line))
-        }
-        return anchors
-      }
-    }
-  }
-
-  private func anchor(
-    origin: DiffChangeOrigin, path: String, side: DiffLineSide, number: Int, line: UnifiedDiffLine
-  ) -> DiffLineAnchor {
-    DiffLineAnchor(
-      snapshotID: id, origin: origin, path: path, side: side, lineNumber: number, text: line.text)
+    section(origin)?.files.first { DiffFilePath.isSame($0.path, path) }
   }
 }
 

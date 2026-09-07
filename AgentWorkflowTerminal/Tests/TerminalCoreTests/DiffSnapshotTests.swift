@@ -87,18 +87,6 @@ struct DiffSnapshotTests {
       ).head == .unknown)
   }
 
-  @Test("#208 が張れるよう (snapshot ID・パス・側・行番号・行テキスト) を読み取れる")
-  func exposesLineAnchors() throws {
-    let snapshot = makeSnapshot()
-    let anchors = snapshot.anchors(origin: .unstaged, path: "a.txt")
-    #expect(anchors.allSatisfy { $0.snapshotID == snapshotID })
-    #expect(
-      anchors.map { ($0.side, $0.lineNumber, $0.text) }.map { "\($0.0)-\($0.1)-\($0.2)" } == [
-        "old-1-keep", "new-1-keep", "old-2-before", "new-2-after",
-      ])
-    #expect(snapshot.anchors(origin: .committed, path: "a.txt").isEmpty)
-  }
-
   @Test("出所ごとに引ける")
   func looksUpBySection() {
     let snapshot = makeSnapshot()

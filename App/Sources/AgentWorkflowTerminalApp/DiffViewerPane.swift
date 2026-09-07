@@ -2,9 +2,16 @@ import Adapters
 import SwiftUI
 import TerminalCore
 
-/// Viewer Drawer の `.diff` ペイン (設計書 §9)。行選択・コメント入力・送信は持たない (Issue #208)。
+/// Viewer Drawer の `.diff` ペイン (設計書 §9)。
 struct DiffViewerPane: View {
   @ObservedObject var model: DiffViewerModel
+  @ObservedObject var mainPane: MainPaneCoordinator
+  let worktree: WorktreeIdentity
+  /// Agent と判定された pane を候補一覧の**印**にするためだけの観測 (§12.7)。Project Root の
+  /// ように観測経路が無ければ `nil` で、その場合は印の無い候補一覧になる。
+  let agentPaneStates: () -> AsyncStream<[PaneAgentState]>?
+
+  @State private var agentPaneIDs: Set<PaneID> = []
 
   var body: some View {
     VStack(spacing: 0) {
@@ -23,6 +30,19 @@ struct DiffViewerPane: View {
         try? await Task.sleep(for: DiffViewerModel.changeCheckInterval)
         guard !Task.isCancelled else { return }
         await model.checkForChanges()
+      }
+    }
+    .task {
+      guard let states = agentPaneStates() else { return }
+      for await panes in states {
+        agentPaneIDs = Set(panes.map(\.id))
+      }
+    }
+    .sheet(item: $model.paneSelectionRequest) { request in
+      MainPanePicker(request: request) { pane in
+        Task { await model.choose(pane, for: request, mainPane: mainPane) }
+      } cancel: {
+        model.paneSelectionRequest = nil
       }
     }
   }
@@ -60,9 +80,42 @@ struct DiffViewerPane: View {
           }
           Spacer()
         }
+        sendControls
       }
     }
     .padding(8)
+  }
+
+  /// 登録済みの送信先を見せ、いつでも選び直せるようにする (§12.7)。
+  @ViewBuilder
+  private var sendControls: some View {
+    HStack(spacing: 8) {
+      Text(destinationLabel)
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      Button("送信先を選ぶ") {
+        Task {
+          await model.requestMainPaneSelection(
+            worktree: worktree, mainPane: mainPane, agentPaneIDs: agentPaneIDs)
+        }
+      }
+      .buttonStyle(.link)
+      .disabled(model.isSending)
+      Spacer()
+      Button("Review batch を送信 (\(model.currentSnapshotComments.count))") {
+        Task {
+          await model.requestSend(
+            .batch(model.currentSnapshotComments.map(\.id)),
+            worktree: worktree, mainPane: mainPane, agentPaneIDs: agentPaneIDs)
+        }
+      }
+      .disabled(model.currentSnapshotComments.isEmpty || model.isSending)
+    }
+  }
+
+  private var destinationLabel: String {
+    guard let pane = mainPane.registeredPane(for: worktree) else { return "送信先: 未登録" }
+    return "送信先: pane \(pane.rawValue)"
   }
 
   private func reviewStateBinding(_ snapshot: DiffSnapshot) -> Binding<DiffReviewState> {
@@ -152,6 +205,12 @@ struct DiffViewerPane: View {
       ForEach(model.notices, id: \.self) { notice in
         banner(notice, icon: "exclamationmark.triangle")
       }
+      if let error = model.commentError {
+        banner(error, icon: "exclamationmark.octagon")
+      }
+      if let report = model.sendReport {
+        banner(report, icon: "doc.on.clipboard")
+      }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
   }
@@ -183,8 +242,13 @@ struct DiffViewerPane: View {
         DiffFileList(model: model, snapshot: snapshot)
           .frame(width: 240)
         Divider()
-        DiffHunkView(file: selectedFile(in: snapshot), selection: model.selection)
+        DiffHunkView(model: model, file: selectedFile(in: snapshot))
           .frame(minWidth: 200, maxWidth: .infinity)
+        Divider()
+        DiffCommentPanel(model: model, mainPane: mainPane, worktree: worktree) {
+          agentPaneIDs
+        }
+        .frame(width: 260)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if model.isLoading {
@@ -246,119 +310,6 @@ private struct DiffFileList: View {
   }
 }
 
-private struct DiffHunkView: View {
-  let file: UnifiedDiffFile?
-  let selection: DiffViewerModel.FileSelection?
-
-  var body: some View {
-    if let file {
-      VStack(alignment: .leading, spacing: 0) {
-        header(file)
-        Divider()
-        content(of: file)
-      }
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    } else {
-      ContentUnavailableView("ファイルを選択してください", systemImage: "doc.text")
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-  }
-
-  private func header(_ file: UnifiedDiffFile) -> some View {
-    VStack(alignment: .leading, spacing: 2) {
-      Text(file.path).font(.callout.monospaced()).lineLimit(1).truncationMode(.middle)
-      if let origin = selection?.origin {
-        Text("出所: \(origin.label)").font(.caption2).foregroundStyle(.secondary)
-      }
-      if case .renamed(let from, let similarity) = file.changeKind {
-        Text("rename: \(from) → \(file.path)\(similarity.map { " (\($0)%)" } ?? "")")
-          .font(.caption2).foregroundStyle(.secondary)
-      }
-      if file.isSubmodule {
-        Text("submodule (gitlink) の差分です").font(.caption2).foregroundStyle(.secondary)
-      }
-    }
-    .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(6)
-  }
-
-  @ViewBuilder
-  private func content(of file: UnifiedDiffFile) -> some View {
-    switch file.content {
-    case .binary:
-      note("binary ファイルのため差分行はありません")
-    case .noContentChange:
-      note("差分行はありません (mode 変更または rename のみ)")
-    case .unreadable(let reason):
-      note(reason.message)
-    case .hunks(let hunks):
-      // Why not ScrollView へ直接 frame: 両軸スクロールでは内容が viewport より小さいとき
-      // 右下へ寄る (実測)。viewport の大きさを下限として内容側へ与え、左上に固定する。
-      GeometryReader { proxy in
-        ScrollView([.vertical, .horizontal]) {
-          LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(hunks.enumerated()), id: \.offset) { index, hunk in
-              hunkHeader(hunk)
-              ForEach(Array(hunk.lines.enumerated()), id: \.offset) { _, line in
-                DiffLineRow(line: line)
-              }
-              if index < hunks.count - 1 { Divider() }
-            }
-          }
-          .padding(.vertical, 4)
-          .frame(
-            minWidth: proxy.size.width, minHeight: proxy.size.height, alignment: .topLeading)
-        }
-      }
-    }
-  }
-
-  private func hunkHeader(_ hunk: UnifiedDiffHunk) -> some View {
-    Text(
-      "@@ -\(hunk.oldStart),\(hunk.oldCount) +\(hunk.newStart),\(hunk.newCount) @@ \(hunk.section)"
-    )
-    .font(.caption2.monospaced())
-    .foregroundStyle(.secondary)
-    .padding(.horizontal, 6)
-    .padding(.vertical, 2)
-  }
-
-  private func note(_ message: String) -> some View {
-    Text(message)
-      .font(.caption)
-      .foregroundStyle(.secondary)
-      .padding(8)
-      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-  }
-}
-
-private struct DiffLineRow: View {
-  let line: UnifiedDiffLine
-
-  var body: some View {
-    HStack(spacing: 0) {
-      number(line.oldLineNumber)
-      number(line.newLineNumber)
-      // 横スクロール中の行なので、幅を親いっぱいへ広げず本文の長さのままにする。
-      Text(line.kind.sign + line.text + (line.isMissingTrailingNewline ? " (改行なし)" : ""))
-        .font(.system(.caption, design: .monospaced))
-        .textSelection(.enabled)
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(.leading, 4)
-      Spacer(minLength: 0)
-    }
-    .background(line.kind.background)
-  }
-
-  private func number(_ value: Int?) -> some View {
-    Text(value.map(String.init) ?? "")
-      .font(.system(.caption2, design: .monospaced))
-      .foregroundStyle(.secondary)
-      .frame(width: 34, alignment: .trailing)
-      .padding(.trailing, 2)
-  }
-}
-
 extension DiffChangeOrigin {
   var label: String {
     switch self {
@@ -366,24 +317,6 @@ extension DiffChangeOrigin {
     case .staged: "staged"
     case .unstaged: "unstaged"
     case .untracked: "untracked"
-    }
-  }
-}
-
-extension UnifiedDiffLineKind {
-  fileprivate var sign: String {
-    switch self {
-    case .context: " "
-    case .added: "+"
-    case .removed: "-"
-    }
-  }
-
-  fileprivate var background: Color {
-    switch self {
-    case .context: .clear
-    case .added: .green.opacity(0.15)
-    case .removed: .red.opacity(0.15)
     }
   }
 }
@@ -404,16 +337,6 @@ extension UnifiedDiffChangeKind {
     case .deleted: .red
     case .added: .green
     default: .blue
-    }
-  }
-}
-
-extension UnifiedDiffUnreadableReason {
-  fileprivate var message: String {
-    switch self {
-    case .binary(let byteCount): "binary と判定したため中身を読んでいません (\(byteCount) バイト)"
-    case .tooLarge(let byteCount): "大きすぎるため中身を読んでいません (\(byteCount) バイト)"
-    case .notReadable: "中身を読み取れませんでした"
     }
   }
 }

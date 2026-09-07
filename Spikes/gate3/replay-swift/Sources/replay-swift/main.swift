@@ -9,6 +9,8 @@ import TerminalCore
 //   swift run -c release replay-swift                       # 遷移列 TSV から再計算 (既定)
 //   swift run -c release replay-swift --records <runs dir>  # 生記録 (.gitignore) から計算
 //   swift run -c release replay-swift --records <dir> --dump # 遷移列 TSV を書き出す
+//   swift run -c release replay-swift --score --records <runs dir> [--poll 2.0]
+//                                                           # 真値区間との混同行列 (生記録が要る)
 //
 // 生記録 (evidence/runs) は容量のため追跡していない。追跡しているのは
 // evidence/replay-observations.tsv (Adapter の分類結果の遷移列) で、
@@ -105,10 +107,16 @@ struct ScreenChange {
 }
 
 func replayRecords(run: String, dir: URL) -> [Observed] {
+  replay(run: run, frames: loadFrames(dir))
+}
+
+/// フレーム列は呼び出し側が間引ける。`secondsSinceScreenChange` は前回**観測**との差なので、
+/// polling を粗くしたときの成績は分類結果を間引くのではなく、入力を間引いて再生しないと合わない。
+func replay(run: String, frames: [Frame]) -> [Observed] {
   guard let ad = adapter(for: run) else { return [] }
   var tracker = ScreenChange()
   var out: [Observed] = []
-  for f in loadFrames(dir) {
+  for f in frames {
     let names = f.procNames.union([f.paneCommand])
     let liveness: AgentLiveness =
       f.dead || names.isDisjoint(with: ad.processNames) ? .absent : .alive
@@ -268,7 +276,168 @@ func collapse(_ obs: [Observed]) -> [Observed] {
   return out
 }
 
+// MARK: - --score: 真値区間との突き合わせ
+
+/// `scripts/analyze.py` の `TRUTH_MARKERS["claude"]` と同じ。版数依存の文言なので変えない。
+struct Pattern {
+  private let regex: NSRegularExpression
+  init(_ pattern: String) {
+    regex = try! NSRegularExpression(pattern: pattern)
+  }
+  func count(in text: String) -> Int {
+    regex.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+  }
+  func matches(_ text: String) -> Bool { count(in: text) > 0 }
+}
+let donePattern = Pattern(#"·\s*done\s+\d"#)
+let permissionPattern = Pattern(#"Do you want to |❯ 1\. Yes"#)
+
+func truthEvents(_ dir: URL) -> [String: Double] {
+  guard
+    let text = try? String(
+      contentsOf: dir.appendingPathComponent("truth.jsonl"), encoding: .utf8)
+  else { return [:] }
+  var out: [String: Double] = [:]
+  for line in text.split(separator: "\n") {
+    guard let obj = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+      let event = obj["event"] as? String, let ts = obj["ts"] as? Double
+    else { continue }
+    if out[event] == nil { out[event] = ts }
+  }
+  return out
+}
+
+/// `analyze.py` の `truth_intervals()` の claude 側だけの移植。
+/// ターン終了は完了マーカーの**出現回数が増えた**最初のフレーム。直前ターンのマーカーが
+/// 画面に残るため、有無では境界を切れない。
+func truthIntervals(events: [String: Double], frames: [Frame]) -> [(Double, Double, String)] {
+  func window(after: Double, before: Double?) -> [Frame] {
+    frames.filter { frame in frame.ts >= after && (before.map { frame.ts < $0 } ?? true) }
+  }
+  func turnEnd(after: Double, before: Double?) -> Double? {
+    let seq = window(after: after, before: before)
+    guard let first = seq.first else { return nil }
+    let base = donePattern.count(in: first.screen ?? "")
+    return seq.dropFirst().first { donePattern.count(in: $0.screen ?? "") > base }?.ts
+  }
+  func permissionStart(after: Double, before: Double?) -> Double? {
+    window(after: after, before: before).first { permissionPattern.matches($0.screen ?? "") }?.ts
+  }
+
+  guard let idleBegin = events["idle_begin"], let longSent = events["prompt_long_sent"],
+    let permSent = events["prompt_perm_sent"], let approveSent = events["approve_sent"]
+  else { return [] }
+  var out: [(Double, Double, String)] = [(idleBegin, longSent, "idle")]
+  if let done1 = turnEnd(after: longSent, before: permSent) {
+    out.append((longSent, done1, "working"))
+    out.append((done1, permSent, "completed"))
+  }
+  if let perm = permissionStart(after: permSent, before: approveSent) {
+    out.append((permSent, perm, "working"))
+    out.append((perm, approveSent, "permission"))
+    if let done2 = turnEnd(after: approveSent, before: events["quiesce"]) {
+      out.append((approveSent, done2, "working"))
+      if let quiesce = events["quiesce"] { out.append((done2, quiesce, "completed")) }
+    }
+  }
+  if let quiesce = events["quiesce"], let runEnd = events["run_end"] {
+    out.append((quiesce, runEnd, "completed-left"))
+  }
+  return out
+}
+
+/// 境界前後は判定不能として集計から外す (`analyze.py` の `GUARD`、単位は秒)。
+let scoreGuard = 1.0
+/// `analyze.py` の `NEEDS_ATTENTION`。真値がこれらのとき、丸め先が安全かどうかを測る。
+let needsAttentionTruth: Set<String> = ["question", "permission", "error"]
+/// `analyze.py` の `SAFE_FOR_ATTENTION`。"attention" は種別不明の注意状態 (§12.4.3)。
+let safeForAttention = needsAttentionTruth.union(["unknown", "attention"])
+
+func predictionLabel(_ observed: Observed) -> String {
+  observed.state == .unknown && observed.category == .needsAttention
+    ? "attention" : observed.state.rawValue
+}
+
+func runScore(recordsDir: String, poll: Double) {
+  let root = URL(fileURLWithPath: recordsDir)
+  let runs = ((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [])
+    .filter { $0.hasPrefix("claude-composite-r") }.sorted()
+  guard !runs.isEmpty else {
+    FileHandle.standardError.write(Data("claude-composite-r* が無い\n".utf8))
+    exit(1)
+  }
+  // 位相 1 つでは標本が 1/step になり、当たり外れが数字を支配する。全位相を合算する。
+  let step = max(1, Int((poll / framePeriod).rounded()))
+  var dist: [String: [String: Int]] = [:]
+  var scored = 0
+  var excluded = 0
+
+  for run in runs {
+    let dir = root.appendingPathComponent(run)
+    let frames = loadFrames(dir)
+    let intervals = truthIntervals(events: truthEvents(dir), frames: frames)
+    for phase in 0..<step {
+      let sampled = stride(from: phase, to: frames.count, by: step).map { frames[$0] }
+      for observed in replay(run: run, frames: sampled) {
+        guard let interval = intervals.first(where: { observed.ts >= $0.0 && observed.ts < $0.1 })
+        else { continue }
+        if observed.ts - interval.0 < scoreGuard || interval.1 - observed.ts < scoreGuard {
+          excluded += 1
+          continue
+        }
+        scored += 1
+        dist[interval.2, default: [:]][predictionLabel(observed), default: 0] += 1
+      }
+    }
+  }
+
+  print("run: \(runs.count) 本 (\(runs.joined(separator: ", ")))")
+  print(
+    "poll: \(String(format: "%.2f", Double(step) * framePeriod))s = \(step) フレーム間引き / "
+      + "位相 \(step) 通りを合算")
+  print("採点 \(scored) フレーム / GUARD \(scoreGuard)s で除外 \(excluded) フレーム")
+  print("\n真値\tn\trecall\t危険率\t予測の内訳")
+  for (truth, counts) in dist.sorted(by: { $0.key < $1.key }) {
+    let n = counts.values.reduce(0, +)
+    let hit = counts[truth.replacingOccurrences(of: "-left", with: "")] ?? 0
+    // 真値が Needs Attention でない区間に「危険な誤判定」は定義されない。0.000 と書くと
+    // 計測値に見えるので、測っていないことを "—" で示す。
+    let danger =
+      needsAttentionTruth.contains(truth)
+      ? String(
+        format: "%.3f",
+        Double(counts.filter { !safeForAttention.contains($0.key) }.values.reduce(0, +))
+          / Double(n)) : "—"
+    let breakdown = counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+      .map { "\($0.key)=\($0.value)" }.joined(separator: " ")
+    print(
+      "\(truth)\t\(n)\t\(String(format: "%.3f", Double(hit) / Double(n)))\t"
+        + "\(danger)\t\(breakdown)")
+  }
+}
+
 // MARK: - 実行
+
+if args.contains("--score") {
+  guard let recordsDir else {
+    FileHandle.standardError.write(Data("--score には --records が要る\n".utf8))
+    exit(1)
+  }
+  var poll = framePeriod
+  if let text = option("--poll") {
+    // 黙って丸めると、第三者が「表示された値で再現した」つもりで別の間隔を測ることになる。
+    guard let value = Double(text), value >= framePeriod,
+      abs((value / framePeriod).rounded() * framePeriod - value) < 1e-9
+    else {
+      FileHandle.standardError.write(
+        Data("--poll は記録間隔 \(framePeriod)s 以上のその倍数で指定する (例: 0.25, 0.5, 2.0)\n".utf8))
+      exit(1)
+    }
+    poll = value
+  }
+  runScore(recordsDir: recordsDir, poll: poll)
+  exit(0)
+}
 
 var dataset: [(String, [Observed])]
 if let recordsDir {

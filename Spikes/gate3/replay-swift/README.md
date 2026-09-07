@@ -11,7 +11,39 @@
 swift run -c release replay-swift                        # 追跡済みの遷移列 TSV から再計算
 swift run -c release replay-swift --records ../evidence/runs        # 生記録から計算
 swift run -c release replay-swift --records ../evidence/runs --dump # 遷移列 TSV を作り直す
+swift run -c release replay-swift --score --records ../evidence/runs --poll 2.0  # 混同行列
 ```
+
+## `--score` — 真値区間との突き合わせ
+
+`scripts/analyze.py` は Python で書き直した分類器を採点するが、`--score` は**実装済みの
+`ClaudeCodeAdapter` をそのまま**記録へ当てて混同行列を出す。対象は真値イベント
+(`truth.jsonl`) を持つ `claude-composite-r1`〜`r5`。真値区間は `analyze.py` の
+`truth_intervals()` の claude 側の移植 (ターン終了は完了マーカー `·\s*done\s+\d` の
+**出現回数が増えた**最初のフレーム。直前ターンのマーカーが画面に残るため有無では切れない)、
+境界前後 1.0 秒 (`GUARD`) は集計から外す。生記録が要るため `--records` は必須。
+
+`--poll <秒>` (既定 0.25) は評価するポーリング間隔。記録間隔 0.25 秒の倍数だけを受け付ける
+(黙って丸めると、表示された値で再現したつもりが別の間隔になる)。**間引くのは分類結果ではなく
+入力**で、`secondsSinceScreenChange` は前回観測との差なので、粗い polling では
+「2 秒前の画面と違うか」になる。0.25 以外では位相を 0.25 秒刻みでずらした `poll/0.25` 通りを
+合算する (2.0s なら 8 位相)。位相 1 つでは標本が 1/8 になり、位相の当たり外れが数字を支配する。
+
+実測 (2026-09-07、5 run・GUARD 除外後の 4548 フレーム)。危険率は真値が Needs Attention
+(`question` / `permission` / `error`) の区間にしか定義が無いので、他の行は `—`:
+
+| 真値 | n | recall (0.25s) | recall (2.0s) | 危険率 (両方) |
+| --- | --- | --- | --- | --- |
+| working | 443 | 0.867 (取りこぼしは全て `unknown`) | **0.995** (誤判定は `completed` 2 フレーム) | — |
+| permission | 770 | 1.000 | 1.000 | 0.000 |
+| completed | 1835 | 0.986 | 0.953 | — |
+| completed-left | 1045 | 1.000 | 1.000 | — |
+| idle | 455 | 0.892 | **0.763** (98 フレームが `working`) | — |
+
+製品の `AgentObservationIntervals.signals` は 2.0 秒側。working の recall が粗い polling で
+**上がる**のは、画面鮮度が「前回の観測から画面が変わったか」であり、間隔が広いほど
+変化を捉えやすいため。**同じ理由で idle の recall は下がる**。設計書 §12.2 は working 側の
+残差 (443 中 2 フレーム) を許容範囲として記録し、idle 側の低下も併記している。
 
 ## 生記録と遷移列 TSV
 

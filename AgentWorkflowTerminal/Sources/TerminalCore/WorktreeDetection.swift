@@ -109,8 +109,12 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   既に存在していた過去の worktree が一斉にタブ化する事故を防ぐため。
 ///   初回から到達不能な Task worktree も `.inactive` で保持する。安定 ID は観測できているため一覧から
 ///   捨てる理由はなく、利用できないタブを Active にする理由もない。
-///   **永続化層がまだ無いため、アプリを再起動すると毎回この初回スキャンになり、
-///   前回 Active だった worktree も Inactive へ戻る。**
+/// - Important: **アプリ再起動後の1回目のスキャンにこの関数を使わない。** 保存された状態があるなら
+///   `restoreWorktreeInventory(detected:saved:)` を使う。「渡されなかった安定 ID は存在しない」という
+///   解釈が権威的なのは観測が途切れていない間だけで、アプリが止まっていた間の増減には成り立たない
+///   (削除と一時的な不可視を区別できない)。保存を `previous` として渡すと、停止中に消えていた
+///   worktree が `disappeared` になり、停止中に現れた worktree が観測中の新規出現として
+///   自動 Active 化される。
 /// - Note: 同じ安定 ID が複数回渡された場合は最初の1件だけを採る。git の一覧出力の順序が
 ///   安定であることに合わせ、結果を決定的にするための規則であり、後勝ちにする理由が無い。
 ///   `isProjectRoot` が複数あった場合も最初の1件だけを Project Root とし、残りは捨てる

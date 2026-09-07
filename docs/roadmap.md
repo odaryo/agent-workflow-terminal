@@ -42,9 +42,10 @@ main のビルドからアプリを起動し、次の4点を実測で確認し�
 
 ## P2 基本機能を試せる (進行中)
 
-- Viewer Drawer の中身: #30 (+#33 G5 snapshot はここに畳む) / #31
+- Viewer Drawer の中身: #30 (+#33 G5 snapshot はここに畳む)
 - #136 (Active 状態の永続化)、#92 (Working 検出の遅延)
-- 着手中: #31 (ripgrep 検索)
+- 着手中: なし。#30 は §25 の Git/Diff 未確定 (base branch の決定方法、Diff range の定義、
+  working tree/staged/untracked の扱い、comment anchor schema) を決めるまで着手できない
 
 #29 は §7 全体では1つの worktree に対して大きすぎたため、§7.3 のファイル別 Git 履歴・過去 commit
 時点のコード・blame を #183 へ切り出した。#183 はどのフェーズにも入れていない。
@@ -55,7 +56,7 @@ main のビルドからアプリを起動し、次の4点を実測で確認し�
 
 閉じた Issue: #171 (Project Root の永続 tmux セッション) / #160 (到達不能 worktree の保持) /
 #28 (Viewer Drawer の枠組み) / #177 (Viewer Drawer の表示方法の寿命) /
-#29 (ファイルブラウザ + コードビューア)。
+#29 (ファイルブラウザ + コードビューア) / #31 (ripgrep 検索)。
 
 ## P3 セッション把握と判断待ち
 

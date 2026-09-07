@@ -467,7 +467,7 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - バイナリまたは大容量ファイルは、クリック直後に本文を展開しない。
 - サイズ、行数、バイナリ判定を示し、`Open anyway`の確認を出す。
 - 警告対象となるサイズ／行数は設定可能にする。
-- デフォルト閾値は未確定。
+- デフォルト閾値は1 MiB／50,000行とする。バイナリは先頭8 KiBにNULバイトが1つでもあれば該当する。
 
 ### 7.3 Code Viewer
 
@@ -1682,6 +1682,7 @@ PR_READY
 - [x] Code／Diff／Evidenceを必要時だけ表示
 - [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
 - [x] File Browserはignoredを含む全ファイル、lazy load
+- [x] 大容量ファイルのデフォルト閾値は1 MiB／50,000行、バイナリは先頭8 KiBのNULバイトで判定
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Diffはsnapshot、Refreshで新snapshot

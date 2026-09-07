@@ -14,36 +14,71 @@ public struct WorktreeGitStateReadResult: Sendable, Equatable {
   public let entries: [WorktreeGitStateEntry]
   public let statusParseFailures: [GitStatusParseFailure]
   public let conversionFailures: [GitStatusWorktreeStateFailure]
+  /// 非 `nil` は、サブモジュールの所在だけが取れなかったことを意味する。`entries` は
+  /// `status` の分だけを含み、サブモジュール配下は「状態なし」ではなく既定規則に落ちる。
+  public let submoduleListingFailure: GitRunnerError?
 }
 
 public struct WorktreeGitStateReader: Sendable {
   private let runner: GitRunner
+  private let indexListingOutputLimit: Int
 
   public init(
     repositoryDirectory: URL,
     processRunner: any ProcessRunning,
     executableCandidates: [URL] = GitRunner.defaultExecutableCandidates
   ) throws(GitRunnerError) {
+    try self.init(
+      repositoryDirectory: repositoryDirectory,
+      processRunner: processRunner,
+      executableCandidates: executableCandidates,
+      indexListingOutputLimit: GitRunner.indexListingOutputLimit)
+  }
+
+  init(
+    repositoryDirectory: URL,
+    processRunner: any ProcessRunning,
+    executableCandidates: [URL],
+    indexListingOutputLimit: Int
+  ) throws(GitRunnerError) {
     runner = try GitRunner(
       repositoryDirectory: repositoryDirectory,
       processRunner: processRunner,
       executableCandidates: executableCandidates)
+    self.indexListingOutputLimit = indexListingOutputLimit
   }
 
-  init(runner: GitRunner) {
+  init(runner: GitRunner, indexListingOutputLimit: Int = GitRunner.indexListingOutputLimit) {
     self.runner = runner
+    self.indexListingOutputLimit = indexListingOutputLimit
   }
 
+  /// サブモジュールの所在の問い合わせは補助でしかないので、失敗しても `status` の結果は返す。
+  /// 出力量が index の大きさに比例する `ls-files` を道連れにすると、大きな repository で
+  /// File Browser が状態を一切出せなくなる。
   public func read() async throws(GitRunnerError) -> WorktreeGitStateReadResult {
     let output = try await runner.run(.status(includeIgnored: true)).stdout
     let parsed = GitStatusPorcelainV2.parse(output: output)
     let converted = parsed.status.worktreeStateEntries()
-    let submodules = GitIndexSubmodules.parse(
-      output: try await runner.run(.listFilesStage()).stdout)
+
+    let submodules: GitStatusWorktreeStateResult
+    let submoduleListingFailure: GitRunnerError?
+    do {
+      submodules = GitIndexSubmodules.parse(
+        output: try await runner.run(
+          .listFilesStage(), outputLimit: indexListingOutputLimit
+        ).stdout)
+      submoduleListingFailure = nil
+    } catch {
+      submodules = GitStatusWorktreeStateResult(entries: [], failures: [])
+      submoduleListingFailure = error
+    }
+
     return WorktreeGitStateReadResult(
       entries: converted.entries + submodules.entries,
       statusParseFailures: parsed.failures,
-      conversionFailures: converted.failures + submodules.failures)
+      conversionFailures: converted.failures + submodules.failures,
+      submoduleListingFailure: submoduleListingFailure)
   }
 }
 

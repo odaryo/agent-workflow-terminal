@@ -51,6 +51,70 @@ struct FileChangeWatcherIntegrationTests {
     }
   }
 
+  /// 消費が遅れた分だけ古いイベントが溜まると、UI は溜まった数だけファイルを読み直すことになる。
+  /// 保持しているのが最新1件だけであることは、遅い consumer に対してしか観測できない。
+  @Test("遅い consumer には溜まった数ではなく最新のイベントだけが届く", .timeLimit(.minutes(1)))
+  func keepsOnlyNewestEventForSlowConsumer() async throws {
+    let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
+    let file = root.appending(path: "target.txt")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("aa".utf8).write(to: file)
+    let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(5)))
+
+    let stream = FileChangeWatcher(path: file, interval: interval).events()
+    let received = EventRecorder()
+    let task = Task {
+      for await event in stream {
+        await received.append(event)
+        try? await ContinuousClock().sleep(for: .milliseconds(400))
+      }
+    }
+    defer { task.cancel() }
+
+    for index in 0..<20 {
+      try Data(repeating: 97, count: index + 1).write(to: file)
+      try await ContinuousClock().sleep(for: .milliseconds(10))
+    }
+    try FileManager.default.removeItem(at: file)
+
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(3))
+    while await received.values.last != .deleted, clock.now < deadline {
+      try await clock.sleep(for: .milliseconds(10))
+    }
+    let values = await received.values
+    #expect(values.last == .deleted, "受信 \(values.count) 件: \(values)")
+    #expect(values.count <= 4, "受信 \(values.count) 件: \(values)")
+  }
+
+  /// 監視対象が symlink のとき、リンク先の変更を通知しない (`FileContentReader` と同じく
+  /// リンクを辿らない。§8.1)。
+  @Test("symlink はリンク自身の変化だけを見る", .timeLimit(.minutes(1)))
+  func doesNotFollowSymbolicLink() async throws {
+    let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let target = root.appending(path: "target.txt")
+    let link = root.appending(path: "link.txt")
+    try Data("aa".utf8).write(to: target)
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+    let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(10)))
+
+    let stream = FileChangeWatcher(path: link, interval: interval).events()
+    let received = EventRecorder()
+    let task = Task { for await event in stream { await received.append(event) } }
+    defer { task.cancel() }
+
+    try Data("bbbbbbbb".utf8).write(to: target)
+    try await ContinuousClock().sleep(for: .milliseconds(200))
+    #expect(await received.values.isEmpty)
+
+    try FileManager.default.removeItem(at: link)
+    try await waitForEventCount(1, recorder: received)
+    #expect(await received.values == [.deleted])
+  }
+
   @Test("変更が無ければ通知しない", .timeLimit(.minutes(1)))
   func staysSilentWithoutChanges() async throws {
     try await withWatchedFile { _, watcher in

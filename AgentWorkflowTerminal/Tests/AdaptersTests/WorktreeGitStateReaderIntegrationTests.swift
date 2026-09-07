@@ -1,7 +1,8 @@
-import Adapters
 import Foundation
 import TerminalCore
 import Testing
+
+@testable import Adapters
 
 @Suite("§7.1 実 git と実ファイルシステムでの状態重ね合わせ")
 struct WorktreeGitStateReaderIntegrationTests {
@@ -52,6 +53,38 @@ struct WorktreeGitStateReaderIntegrationTests {
       #expect(
         overlay.state(for: try #require(WorktreeRelativePath("p.txt")), kind: .file)
           == .tracked(.unchanged))
+    }
+  }
+
+  @Test("index の列挙に失敗しても status の結果は返し、失敗を呼び出し側へ知らせる")
+  func degradesWhenIndexListingExceedsOutputLimit() async throws {
+    try await withGitRepository { repository in
+      try Data("p\n".utf8).write(to: repository.mainWorktree.appending(path: "p.txt"))
+      try await repository.git(["add", "p.txt"])
+      try Data("u\n".utf8).write(to: repository.mainWorktree.appending(path: "u.txt"))
+      let reader = try WorktreeGitStateReader(
+        repositoryDirectory: repository.mainWorktree,
+        processRunner: FoundationProcessRunner(),
+        executableCandidates: GitRunner.defaultExecutableCandidates,
+        indexListingOutputLimit: 1)
+
+      let result = try await reader.read()
+
+      #expect(result.submoduleListingFailure == .process(.outputLimitExceeded(limit: 1)))
+      #expect(
+        WorktreeFileGitStateOverlay(entries: result.entries)
+          .state(for: try #require(WorktreeRelativePath("u.txt")), kind: .file) == .untracked)
+    }
+  }
+
+  @Test("index を列挙できたときは失敗を報告しない", .timeLimit(.minutes(1)))
+  func reportsNoFailureWhenIndexListingSucceeds() async throws {
+    try await withGitRepository { repository in
+      let reader = try WorktreeGitStateReader(
+        repositoryDirectory: repository.mainWorktree,
+        processRunner: FoundationProcessRunner())
+
+      #expect(try await reader.read().submoduleListingFailure == nil)
     }
   }
 

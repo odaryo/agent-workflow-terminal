@@ -131,7 +131,7 @@ struct FileContentReaderTests {
   @Test("読んでいる途中でサイズが変わったら本文を返さず報告する")
   func reportsFileChangedDuringRead() throws {
     try withContentFile(Data("0123456789".utf8)) { url in
-      let reader = FileContentReader(byteCountOfRegularFile: { _ in 3 })
+      let reader = FileContentReader(openRegularFile: openReportingThreeBytes)
       #expect(throws: FileContentReaderError.fileChanged(expected: 3, actual: 10)) {
         _ = try reader.read(url: url)
       }
@@ -139,7 +139,7 @@ struct FileContentReaderTests {
   }
 
   @Test("通常ファイル以外は開かず種別を名指しする", .timeLimit(.minutes(1)))
-  func rejectsNonRegularFiles() throws {
+  func rejectsNonRegularFiles() async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-content-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
     defer { try? FileManager.default.removeItem(at: root) }
@@ -151,24 +151,61 @@ struct FileContentReaderTests {
     #expect(mkfifo(fifo.path, 0o644) == 0)
     let missing = root.appending(path: "nope")
 
-    let reader = FileContentReader()
-    #expect(throws: FileContentReaderError.notRegularFile(path: link.path, kind: .symbolicLink)) {
-      _ = try reader.read(url: link)
-    }
-    #expect(throws: FileContentReaderError.notRegularFile(path: fifo.path, kind: .fifo)) {
-      _ = try reader.read(url: fifo)
-    }
-    #expect(throws: FileContentReaderError.notRegularFile(path: root.path, kind: .directory)) {
-      _ = try reader.read(url: root)
-    }
     #expect(
-      throws: FileContentReaderError.notRegularFile(path: "/dev/null", kind: .characterDevice)
-    ) {
-      _ = try reader.read(url: URL(fileURLWithPath: "/dev/null"))
+      await readOutcome(of: link) == .failed(.notRegularFile(path: link.path, kind: .symbolicLink)))
+    #expect(await readOutcome(of: fifo) == .failed(.notRegularFile(path: fifo.path, kind: .fifo)))
+    #expect(
+      await readOutcome(of: root) == .failed(.notRegularFile(path: root.path, kind: .directory)))
+    #expect(
+      await readOutcome(of: URL(fileURLWithPath: "/dev/null"))
+        == .failed(.notRegularFile(path: "/dev/null", kind: .characterDevice)))
+    #expect(
+      await readOutcome(of: missing) == .failed(.statFailed(path: missing.path, code: ENOENT)))
+  }
+}
+
+private enum ReadOutcome: Equatable, Sendable {
+  case timedOut
+  case failed(FileContentReaderError)
+  case failedOtherwise(String)
+  case succeeded
+}
+
+private func openReportingThreeBytes(
+  _ url: URL
+) throws(FileContentReaderError) -> OpenedRegularFile {
+  OpenedRegularFile(handle: try FileContentReader.openRegularFile(at: url).handle, byteCount: 3)
+}
+
+/// `open(2)` は同期でキャンセルできないため、種別ガードが壊れると `.timeLimit` も `Task` の
+/// キャンセルも効かず、テストプロセスごと止まる (計測: 変異を当てたテストが 23 分生き残り、
+/// `defer` が走らず一時ディレクトリが残った)。別スレッドで読み、期限内に戻らないことを失敗にする。
+private func readOutcome(of url: URL, within limit: Duration = .seconds(5)) async -> ReadOutcome {
+  let outcomes = AsyncStream<ReadOutcome> { continuation in
+    Thread.detachNewThread {
+      do {
+        _ = try FileContentReader().read(url: url)
+        continuation.yield(.succeeded)
+      } catch let error as FileContentReaderError {
+        continuation.yield(.failed(error))
+      } catch {
+        continuation.yield(.failedOtherwise("\(error)"))
+      }
+      continuation.finish()
     }
-    #expect(throws: FileContentReaderError.statFailed(path: missing.path, code: ENOENT)) {
-      _ = try reader.read(url: missing)
+  }
+  return await withTaskGroup(of: ReadOutcome.self) { group in
+    group.addTask {
+      for await outcome in outcomes { return outcome }
+      return .timedOut
     }
+    group.addTask {
+      try? await ContinuousClock().sleep(for: limit)
+      return .timedOut
+    }
+    let first = await group.next() ?? .timedOut
+    group.cancelAll()
+    return first
   }
 }
 

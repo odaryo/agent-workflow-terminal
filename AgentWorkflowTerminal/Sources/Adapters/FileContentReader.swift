@@ -47,15 +47,22 @@ public struct FileContentReadResult: Sendable, Equatable {
   public let text: FileContentText?
 }
 
+struct OpenedRegularFile {
+  let handle: FileHandle
+  let byteCount: Int
+}
+
 public struct FileContentReader: Sendable {
-  private let byteCountOfRegularFile: @Sendable (URL) throws(FileContentReaderError) -> Int
+  private let openRegularFile: @Sendable (URL) throws(FileContentReaderError) -> OpenedRegularFile
 
   public init() {
-    self.init(byteCountOfRegularFile: Self.regularFileByteCount(of:))
+    self.init(openRegularFile: Self.openRegularFile(at:))
   }
 
-  init(byteCountOfRegularFile: @escaping @Sendable (URL) throws(FileContentReaderError) -> Int) {
-    self.byteCountOfRegularFile = byteCountOfRegularFile
+  init(
+    openRegularFile: @escaping @Sendable (URL) throws(FileContentReaderError) -> OpenedRegularFile
+  ) {
+    self.openRegularFile = openRegularFile
   }
 
   /// 不正な UTF-8 をバイナリと見なす判定は、実際に読んだ範囲にしか及ばない。警告閾値を超えていて
@@ -66,11 +73,12 @@ public struct FileContentReader: Sendable {
     thresholds: FileViewThresholds = .default,
     confirmation: FileOpenConfirmation = .notConfirmed
   ) throws -> FileContentReadResult {
-    let byteCount = try byteCountOfRegularFile(url)
+    let opened = try openRegularFile(url)
+    let byteCount = opened.byteCount
+    let handle = opened.handle
+    defer { try? handle.close() }
 
     do {
-      let handle = try FileHandle(forReadingFrom: url)
-      defer { try? handle.close() }
       let sampleCount = min(byteCount, BinaryFileDetection.sampleByteCount)
       let sampleData = try handle.read(upToCount: sampleCount) ?? Data()
       guard sampleData.count == sampleCount,
@@ -101,22 +109,44 @@ public struct FileContentReader: Sendable {
     }
   }
 
-  /// symlink を辿らないのは、辿るとループし得るうえ worktree の外へ出るため (§8.1 の
-  /// 「検索範囲は常に現在の worktree 内だけ」と同じ理由)。FIFO やキャラクタデバイスは
-  /// `open(2)` が writer を待って戻らず `read(2)` も終わらないので、開く前に種別を確かめる。
+  /// 種別を `lstat` で先に見てから開くと、その隙に同じパスが `renamex_np(RENAME_SWAP)` で
+  /// FIFO へ差し替わったときに `open(2)` が writer を待って戻らない (計測: 4 秒以内にハングし、
+  /// SIGKILL でしか終わらない)。判定は開いた fd の `fstat` に基づける。
+  ///
+  /// `O_NONBLOCK` はその待ちを断つためだけに要る。`O_NOFOLLOW` は同じ隙に symlink へ
+  /// 差し替わった場合に worktree の外を読むのを止める (計測: 200,000 回中 1,033 回、
+  /// 外側のファイルの内容を返していた。§8.1「検索範囲は常に現在の worktree 内だけ」)。
   @Sendable
-  private static func regularFileByteCount(
-    of url: URL
-  ) throws(FileContentReaderError) -> Int {
+  static func openRegularFile(at url: URL) throws(FileContentReaderError) -> OpenedRegularFile {
+    let descriptor = open(url.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
+    guard descriptor >= 0 else { throw openFailure(at: url, code: errno) }
     var info = stat()
-    guard lstat(url.path, &info) == 0 else {
-      throw .statFailed(path: url.path, code: errno)
+    guard fstat(descriptor, &info) == 0 else {
+      let code = errno
+      close(descriptor)
+      throw .statFailed(path: url.path, code: code)
     }
     let kind = FileSystemItemKind(mode: info.st_mode)
     guard kind == .regularFile else {
+      close(descriptor)
       throw .notRegularFile(path: url.path, kind: kind)
     }
-    return Int(info.st_size)
+    // 通常ファイルの読み取りに O_NONBLOCK は要らないので、種別が確定した時点で落とす。
+    let flags = fcntl(descriptor, F_GETFL)
+    if flags >= 0 { _ = fcntl(descriptor, F_SETFL, flags & ~O_NONBLOCK) }
+    return OpenedRegularFile(
+      handle: FileHandle(fileDescriptor: descriptor, closeOnDealloc: true),
+      byteCount: Int(info.st_size))
+  }
+
+  /// `open(2)` は種別ゆえに失敗することがある (`O_NOFOLLOW` で symlink なら `ELOOP`、
+  /// socket なら `EOPNOTSUPP`)。「読めない」と「種別が違う」を同じ結果に丸めない (§12.3)。
+  private static func openFailure(at url: URL, code: Int32) -> FileContentReaderError {
+    var info = stat()
+    guard lstat(url.path, &info) == 0 else { return .statFailed(path: url.path, code: code) }
+    let kind = FileSystemItemKind(mode: info.st_mode)
+    guard kind == .regularFile else { return .notRegularFile(path: url.path, kind: kind) }
+    return .statFailed(path: url.path, code: code)
   }
 
   private func readText(

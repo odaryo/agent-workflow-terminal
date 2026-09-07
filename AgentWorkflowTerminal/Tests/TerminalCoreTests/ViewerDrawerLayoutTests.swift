@@ -29,8 +29,21 @@ struct ViewerDrawerLayoutTests {
     #expect(layout.primary == .code)
     #expect(layout.secondary == .diff)
 
+    layout.setPresentation(.fullscreen)
     layout.closePrimary()
     #expect(layout.primary == .diff)
+    #expect(layout.secondary == nil)
+    #expect(layout.presentation == .fullscreen)
+  }
+
+  @Test("単一ペインに同じ内容を副として開く要求は何もしない")
+  func ignoresDuplicateSecondaryOnSinglePane() {
+    var layout = ViewerDrawerLayout()
+    layout.openPrimary(.code)
+
+    layout.openSecondary(.code)
+
+    #expect(layout.primary == .code)
     #expect(layout.secondary == nil)
   }
 

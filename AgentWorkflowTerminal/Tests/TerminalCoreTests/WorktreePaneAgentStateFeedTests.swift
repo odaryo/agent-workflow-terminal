@@ -318,7 +318,9 @@ private actor FeedSignalSource: AgentSignalSource {
     self.preferredProcessNames = preferredProcessNames
   }
 
-  func signals(for pane: PaneSnapshot) async throws -> AgentSignals {
+  func signals(
+    for pane: PaneSnapshot, minimumChangedLines: Int
+  ) async throws -> AgentSignals {
     throw TestError.failed
   }
 

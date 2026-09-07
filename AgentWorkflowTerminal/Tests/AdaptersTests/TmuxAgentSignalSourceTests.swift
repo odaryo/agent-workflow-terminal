@@ -15,7 +15,7 @@ struct TmuxAgentSignalSourceTests {
       ProcessRunResult(exitCode: 0, stdout: "screen\n", stderr: ""),
     ])
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
-    let signals = try await source.signals(for: pane(id: "%7", pid: 70))
+    let signals = try await source.signals(for: pane(id: "%7", pid: 70), minimumChangedLines: 1)
 
     #expect(signals.paneTitle == "title")
     #expect(signals.screenText == "screen\n")
@@ -46,13 +46,45 @@ struct TmuxAgentSignalSourceTests {
     ])
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
 
-    let first = try await source.signals(for: pane(id: "%7", pid: 70))
-    let unchanged = try await source.signals(for: pane(id: "%7", pid: 70))
-    let changed = try await source.signals(for: pane(id: "%7", pid: 70))
+    let first = try await source.signals(for: pane(id: "%7", pid: 70), minimumChangedLines: 1)
+    let unchanged = try await source.signals(for: pane(id: "%7", pid: 70), minimumChangedLines: 1)
+    let changed = try await source.signals(for: pane(id: "%7", pid: 70), minimumChangedLines: 1)
 
     #expect(first.secondsSinceScreenChange == nil)
     #expect(unchanged.secondsSinceScreenChange.map { $0 >= 0 } == true)
     #expect(changed.secondsSinceScreenChange == 0)
+  }
+
+  @Test("しきい値 2 では1行だけ違う画面が続いても鮮度を 0 に戻さない")
+  func honorsMinimumChangedLines() async throws {
+    let status = ProcessRunResult(
+      exitCode: 0, stdout: #"%7\037title"# + "\n", stderr: ""
+    )
+    // idle 真値区間で実際に観測されたステータス行の遷移 (Spikes/gate3/README.md §13.0) と、
+    // 2 行が動く出力。
+    let statusLines = [
+      "● high · /effort",
+      "tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach"
+        + " for focus tracking",
+      "",
+    ]
+    let tmux = QueueProcessSpy(
+      results: statusLines.flatMap {
+        [status, ProcessRunResult(exitCode: 0, stdout: "❯ \n\($0)", stderr: "")]
+      } + [status, ProcessRunResult(exitCode: 0, stdout: "⏺ writing\n· done 3 lines", stderr: "")])
+    let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
+    let pane = pane(id: "%7", pid: 70)
+
+    let first = try await source.signals(for: pane, minimumChangedLines: 2)
+    let hintOnly = try await source.signals(for: pane, minimumChangedLines: 2)
+    let stillHintOnly = try await source.signals(for: pane, minimumChangedLines: 2)
+    let output = try await source.signals(for: pane, minimumChangedLines: 2)
+
+    #expect(first.secondsSinceScreenChange == nil)
+    #expect(hintOnly.secondsSinceScreenChange.map { $0 > 0 } == true)
+    let elapsed = try #require(stillHintOnly.secondsSinceScreenChange)
+    #expect(elapsed >= (hintOnly.secondsSinceScreenChange ?? 0))
+    #expect(output.secondsSinceScreenChange == 0)
   }
 
   @Test("生産した画面変化信号がそのまま Claude の Working 判定へ届く")
@@ -69,8 +101,8 @@ struct TmuxAgentSignalSourceTests {
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
     let pane = pane(id: "%7", pid: 70)
 
-    let initial = try await source.signals(for: pane)
-    let changed = try await source.signals(for: pane)
+    let initial = try await source.signals(for: pane, minimumChangedLines: 1)
+    let changed = try await source.signals(for: pane, minimumChangedLines: 1)
 
     #expect(
       fixtureState(ClaudeCodeAdapter().classify(signals: initial, liveness: .alive)) == "unknown")
@@ -94,10 +126,11 @@ struct TmuxAgentSignalSourceTests {
     ])
     let source = try makeSource(tmux: tmux, process: process)
     let pane = pane(id: "%7", pid: 70)
-    _ = try await source.signals(for: pane)
+    _ = try await source.signals(for: pane, minimumChangedLines: 1)
 
     #expect(await source.liveness(for: pane, matchingProcessNames: ["agent"]) == .absent)
-    #expect(try await source.signals(for: pane).secondsSinceScreenChange == nil)
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
   }
 
   @Test("capture 失敗を画面利用不能の信号として Adapter へ渡す")
@@ -107,7 +140,7 @@ struct TmuxAgentSignalSourceTests {
       ProcessRunResult(exitCode: 1, stdout: "", stderr: "can't find pane"),
     ])
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
-    let signals = try await source.signals(for: pane(id: "%7", pid: 70))
+    let signals = try await source.signals(for: pane(id: "%7", pid: 70), minimumChangedLines: 1)
 
     guard
       case .observation(let observation) = ClaudeCodeAdapter().classify(
@@ -134,12 +167,13 @@ struct TmuxAgentSignalSourceTests {
     ])
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
     let pane = pane(id: "%7", pid: 70)
-    _ = try await source.signals(for: pane)
+    _ = try await source.signals(for: pane, minimumChangedLines: 1)
 
     await #expect(throws: TmuxAgentSignalSourceError.paneNotFound(PaneID(rawValue: "%7"))) {
-      try await source.signals(for: pane)
+      try await source.signals(for: pane, minimumChangedLines: 1)
     }
-    #expect(try await source.signals(for: pane).secondsSinceScreenChange == nil)
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
   }
 
   @Test("pane_pid 自身が一致すれば子がいなくても alive")
@@ -177,7 +211,7 @@ struct TmuxAgentSignalSourceTests {
     let tmux = QueueProcessSpy(results: [])
     let source = try makeSource(tmux: tmux, process: QueueProcessSpy(results: []))
     await #expect(throws: TmuxAgentSignalSourceError.self) {
-      try await source.signals(for: pane(id: "session", pid: 70))
+      try await source.signals(for: pane(id: "session", pid: 70), minimumChangedLines: 1)
     }
     #expect(await tmux.calls.isEmpty)
   }

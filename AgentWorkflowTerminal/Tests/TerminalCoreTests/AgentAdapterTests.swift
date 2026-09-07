@@ -154,6 +154,124 @@ struct AgentAdapterTests {
     #expect(tracker.observe(screen: "screen", paneID: paneID, at: now) == nil)
   }
 
+  @Test("既定のしきい値 1 では1文字の差も画面変化として扱う")
+  func screenTrackerDefaultThresholdDetectsAnyDifference() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    #expect(tracker.observe(screen: "a\nb", paneID: paneID, at: now) == nil)
+    #expect(tracker.observe(screen: "a\nB", paneID: paneID, at: now.advanced(by: .seconds(1))) == 0)
+    #expect(
+      tracker.observe(screen: "a\nB", paneID: paneID, at: now.advanced(by: .seconds(3))) == 2)
+  }
+
+  @Test("しきい値未満の変化では鮮度が 0 に戻らず、最後の変化からの経過が伸び続ける")
+  func screenTrackerIgnoresChangesBelowThreshold() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    // idle 真値区間で実際に観測されたステータス行の遷移 (Spikes/gate3/README.md §13.0)。
+    // 毎回 1 行だけが違う。
+    let statusLines = [
+      "● high · /effort",
+      "tmux focus-events off · add 'set -g focus-events on' to ~/.tmux.conf and reattach"
+        + " for focus tracking",
+      "",
+    ]
+    var elapsed: [TimeInterval?] = []
+    for (index, statusLine) in statusLines.enumerated() {
+      elapsed.append(
+        tracker.observe(
+          screen: "❯ \n\n\(statusLine)", paneID: paneID,
+          at: now.advanced(by: .seconds(index * 2)), minimumChangedLines: 2
+        ))
+    }
+    #expect(elapsed == [nil, 2, 4])
+  }
+
+  @Test("しきい値以上の変化は出力として鮮度を 0 に戻す")
+  func screenTrackerDetectsChangesAtThreshold() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    _ = tracker.observe(screen: "a\nb\nc", paneID: paneID, at: now, minimumChangedLines: 2)
+    let changed = tracker.observe(
+      screen: "a\nB\nC", paneID: paneID, at: now.advanced(by: .seconds(2)), minimumChangedLines: 2)
+    #expect(changed == 0)
+  }
+
+  @Test("比較対象は常に1回前の観測で、しきい値未満の変化は累積しない")
+  func screenTrackerComparesAgainstPreviousObservation() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    _ = tracker.observe(screen: "a\nb", paneID: paneID, at: now, minimumChangedLines: 2)
+    // 1 行ずつ別の行が変わる。初回の画面と比べれば 2 行違うが、出力とはみなさない。
+    _ = tracker.observe(
+      screen: "A\nb", paneID: paneID, at: now.advanced(by: .seconds(2)), minimumChangedLines: 2)
+    let elapsed = tracker.observe(
+      screen: "A\nB", paneID: paneID, at: now.advanced(by: .seconds(4)), minimumChangedLines: 2)
+    #expect(elapsed == 4)
+  }
+
+  @Test("行数の違う画面は短い側を空行で埋めて index 単位で数える")
+  func screenTrackerPadsShorterScreen() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    _ = tracker.observe(screen: "a", paneID: paneID, at: now, minimumChangedLines: 2)
+    let elapsed = tracker.observe(
+      screen: "a\nb", paneID: paneID, at: now.advanced(by: .seconds(2)), minimumChangedLines: 2)
+    #expect(elapsed == 2)
+    let changed = tracker.observe(
+      screen: "a\nb\nc\nd", paneID: paneID, at: now.advanced(by: .seconds(4)),
+      minimumChangedLines: 2)
+    #expect(changed == 0)
+  }
+
+  @Test("0 以下のしきい値は 1 と同じに扱い、経過を常に 0 へ潰さない", arguments: [0, -1])
+  func screenTrackerClampsNonPositiveThreshold(_ minimumChangedLines: Int) {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    _ = tracker.observe(
+      screen: "a\nb", paneID: paneID, at: now, minimumChangedLines: minimumChangedLines)
+    let unchanged = tracker.observe(
+      screen: "a\nb", paneID: paneID, at: now.advanced(by: .seconds(2)),
+      minimumChangedLines: minimumChangedLines)
+    let changed = tracker.observe(
+      screen: "a\nB", paneID: paneID, at: now.advanced(by: .seconds(4)),
+      minimumChangedLines: minimumChangedLines)
+    #expect(unchanged == 2)
+    #expect(changed == 0)
+  }
+
+  @Test("観測ループは Adapter が宣言したしきい値を信号源へ渡す")
+  func observationsPassAdapterThresholdToSource() async {
+    let source = ThresholdRecordingSignalSource()
+    let stream = ClaudeCodeAdapter().observations(
+      of: claudePane, from: source,
+      intervals: AgentObservationIntervals(signals: .milliseconds(1), liveness: .milliseconds(1))
+    )
+    var iterator = stream.makeAsyncIterator()
+    _ = await iterator.next()
+    #expect(await source.recordedMinimumChangedLines == [2])
+  }
+
+  @Test("画面活動のしきい値を宣言するのは Claude だけで、他の Adapter は既定の 1")
+  func onlyClaudeRaisesScreenActivityThreshold() {
+    #expect(ClaudeCodeAdapter().minimumChangedLinesForScreenActivity == 2)
+    #expect(CodexAdapter().minimumChangedLinesForScreenActivity == 1)
+    #expect(
+      ProcessDetectionFallbackAdapter(processNames: ["agent"])
+        .minimumChangedLinesForScreenActivity == 1)
+  }
+
+  private let claudePane = PaneSnapshot(
+    id: PaneID(rawValue: "%1"), processID: 1, tty: "/dev/ttys001", currentCommand: "claude",
+    currentPath: "/tmp", title: "", termination: nil
+  )
+
   private func assertNeverError(_ result: AgentObservationResult, fixture: AgentStateFixture) {
     switch result {
     case .absent:
@@ -172,9 +290,31 @@ private enum ObservationFailure: Error {
 private actor KnownThenFailingSignalSource: AgentSignalSource {
   private var hasReturnedSignals = false
 
-  func signals(for pane: PaneSnapshot) async throws -> AgentSignals {
+  func signals(
+    for pane: PaneSnapshot, minimumChangedLines: Int
+  ) async throws -> AgentSignals {
     guard !hasReturnedSignals else { throw ObservationFailure.failed }
     hasReturnedSignals = true
+    return AgentSignals(
+      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on",
+      secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
+    )
+  }
+
+  func liveness(
+    for pane: PaneSnapshot, matchingProcessNames: Set<String>
+  ) async -> AgentLiveness {
+    .alive
+  }
+}
+
+private actor ThresholdRecordingSignalSource: AgentSignalSource {
+  private(set) var recordedMinimumChangedLines: [Int] = []
+
+  func signals(
+    for pane: PaneSnapshot, minimumChangedLines: Int
+  ) async throws -> AgentSignals {
+    recordedMinimumChangedLines.append(minimumChangedLines)
     return AgentSignals(
       paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on",
       secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)

@@ -11,6 +11,9 @@ import TerminalCore
 //   swift run -c release replay-swift --records <dir> --dump # 遷移列 TSV を書き出す
 //   swift run -c release replay-swift --score --records <runs dir> [--poll 2.0]
 //                                                           # 真値区間との混同行列 (生記録が要る)
+//   swift run -c release replay-swift --score --records <dir> --poll 2.0 --min-changed-lines 1
+//                                     # 「出力とみなす最小変化行数」を Adapter の宣言値から差し替える。
+//                                     # Issue #203 の k=1/2/3 の表はこの引数を振って再現する。
 //
 // 生記録 (evidence/runs) は容量のため追跡していない。追跡しているのは
 // evidence/replay-observations.tsv (Adapter の分類結果の遷移列) で、
@@ -89,32 +92,54 @@ func adapter(for run: String) -> (any AgentAdapter)? {
   return nil
 }
 
-/// AgentScreenChangeTracker と同じ規則。実物は ContinuousClock 依存で記録の ts を注入できない。
+/// `AgentScreenChangeTracker` と同じ規則。実物は ContinuousClock 依存で記録の ts を注入できない。
+/// 規則がずれると採点が製品の挙動を表さなくなるので、`observe` の分岐は製品と1対1に保つ。
 struct ScreenChange {
-  private var last: (screen: String, at: Double)?
+  /// 出力とみなす最小の変化行数。製品の `minimumChangedLines` と同じで、0 以下は 1 と同じ。
+  let minimumChangedLines: Int
+  /// 直前の**観測**画面と、最後に出力と認めた時刻。前者は毎回、後者は出力のときだけ更新する。
+  private var last: (screen: String, changedAt: Double)?
+  init(minimumChangedLines: Int = 1) { self.minimumChangedLines = minimumChangedLines }
+  /// 製品の `AgentScreenChangeTracker.changedLineCount` と同じく index 単位で数え、
+  /// 短い側を空行で埋める。
+  static func changedLineCount(_ lhs: String, _ rhs: String) -> Int {
+    let left = lhs.components(separatedBy: "\n")
+    let right = rhs.components(separatedBy: "\n")
+    return (0..<max(left.count, right.count)).reduce(0) { count, index in
+      let l = index < left.count ? left[index] : ""
+      let r = index < right.count ? right[index] : ""
+      return count + (l == r ? 0 : 1)
+    }
+  }
   mutating func observe(_ screen: String, at ts: Double) -> TimeInterval? {
     guard let prev = last else {
       last = (screen, ts)
       return nil
     }
-    if prev.screen != screen {
-      last = (screen, ts)
-      return 0
-    }
-    return ts - prev.at
+    let isOutput = Self.changedLineCount(prev.screen, screen) >= max(1, minimumChangedLines)
+    last = (screen, isOutput ? ts : prev.changedAt)
+    return isOutput ? 0 : ts - prev.changedAt
   }
-  mutating func forget() { last = nil }
+  mutating func forget() {
+    last = nil
+  }
 }
 
 func replayRecords(run: String, dir: URL) -> [Observed] {
   replay(run: run, frames: loadFrames(dir))
 }
 
+/// `--min-changed-lines`。指定が無ければ Adapter が宣言する値を使うので、無指定の再生は
+/// 製品の挙動そのものになる。k を振って比べるときだけ明示する。
+/// トップレベル変数なので `nonisolated(unsafe)`。使い捨てハーネスで並行実行しない。
+nonisolated(unsafe) var minimumChangedLinesOverride: Int?
+
 /// フレーム列は呼び出し側が間引ける。`secondsSinceScreenChange` は前回**観測**との差なので、
 /// polling を粗くしたときの成績は分類結果を間引くのではなく、入力を間引いて再生しないと合わない。
 func replay(run: String, frames: [Frame]) -> [Observed] {
   guard let ad = adapter(for: run) else { return [] }
-  var tracker = ScreenChange()
+  var tracker = ScreenChange(
+    minimumChangedLines: minimumChangedLinesOverride ?? ad.minimumChangedLinesForScreenActivity)
   var out: [Observed] = []
   for f in frames {
     let names = f.procNames.union([f.paneCommand])
@@ -244,6 +269,32 @@ func stabilize(_ obs: [Observed], hold: Double) -> [Observed] {
   return displayed
 }
 
+/// `stabilize` と同じ規則で、1 フレームごとの「表示されている」区分を返す。
+func displayedCategories(_ obs: [Observed], hold: Double) -> [(Double, WorktreeStateCategory)] {
+  var out: [(Double, WorktreeStateCategory)] = []
+  var current: Observed?
+  var pendingSince: Double?
+  for o in obs {
+    guard let cur = current else {
+      current = o
+      out.append((o.ts, o.category))
+      continue
+    }
+    if isHeld(from: cur.category, to: o.category) {
+      if pendingSince == nil { pendingSince = o.ts }
+      if o.ts - pendingSince! >= hold {
+        current = o
+        pendingSince = nil
+      }
+    } else {
+      pendingSince = nil
+      current = o
+    }
+    out.append((o.ts, current!.category))
+  }
+  return out
+}
+
 /// working が idle / unknown で中断され working へ戻るまでの長さ。これが振動の実体。
 func workingInterruptions(_ obs: [Observed]) -> [Double] {
   var gaps: [Double] = []
@@ -358,6 +409,106 @@ func predictionLabel(_ observed: Observed) -> String {
     ? "attention" : observed.state.rawValue
 }
 
+/// 真値区間ごとに「タブに何が表示されているか」の内訳。Issue #203 の表と同じ指標。
+/// 連続時間を両向きで出すのは、悪い側が真値によって逆だからである。idle 区間では
+/// working が出続けるのが症状で、working 区間では working が消えるのが代償になる。
+func runDisplayedScore(recordsDir: String, poll: Double, hold: Double) {
+  let root = URL(fileURLWithPath: recordsDir)
+  let runs = ((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [])
+    .filter { $0.hasPrefix("claude-composite-r") }.sorted()
+  let step = max(1, Int((poll / framePeriod).rounded()))
+  print("\n=== 保持 \(hold)s 適用後の表示 (真値区間ごとの表示区分の内訳、秒) ===")
+  print(
+    "真値\tn位相\t区間s\t表示=working s\t表示=idle s\t表示=その他 s\t"
+      + "最長working連続 s\t最長非working連続 s")
+  var totals: [String: [WorktreeStateCategory: Double]] = [:]
+  var maxWorkingRun: [String: Double] = [:]
+  var maxNonWorkingRun: [String: Double] = [:]
+  var spans: [String: Double] = [:]
+  for run in runs {
+    let dir = root.appendingPathComponent(run)
+    let frames = loadFrames(dir)
+    let intervals = truthIntervals(events: truthEvents(dir), frames: frames)
+    for phase in 0..<step {
+      let sampled = stride(from: phase, to: frames.count, by: step).map { frames[$0] }
+      let displayed = displayedCategories(replay(run: run, frames: sampled), hold: hold)
+      for (label, lo, hi) in intervals.map({ ($0.2, $0.0, $0.1) }) {
+        var workingStreak = 0.0
+        var nonWorkingStreak = 0.0
+        var bestWorking = 0.0
+        var bestNonWorking = 0.0
+        var counted = 0.0
+        for (ts, cat) in displayed where ts >= lo && ts < hi {
+          totals[label, default: [:]][cat, default: 0] += Double(step) * framePeriod
+          counted += Double(step) * framePeriod
+          if cat == .working {
+            workingStreak += Double(step) * framePeriod
+            bestWorking = max(bestWorking, workingStreak)
+            nonWorkingStreak = 0
+          } else {
+            nonWorkingStreak += Double(step) * framePeriod
+            bestNonWorking = max(bestNonWorking, nonWorkingStreak)
+            workingStreak = 0
+          }
+        }
+        maxWorkingRun[label] = max(maxWorkingRun[label] ?? 0, bestWorking)
+        maxNonWorkingRun[label] = max(maxNonWorkingRun[label] ?? 0, bestNonWorking)
+        spans[label, default: 0] += counted
+      }
+    }
+  }
+  for (label, byCategory) in totals.sorted(by: { $0.key < $1.key }) {
+    let working = byCategory[.working] ?? 0
+    let idle = byCategory[.idle] ?? 0
+    let other = byCategory.values.reduce(0, +) - working - idle
+    print(
+      "\(label)\t\(step)\t\(String(format: "%.1f", spans[label] ?? 0))\t"
+        + "\(String(format: "%.1f", working))\t\(String(format: "%.1f", idle))\t"
+        + "\(String(format: "%.1f", other))\t"
+        + "\(String(format: "%.1f", maxWorkingRun[label] ?? 0))\t"
+        + "\(String(format: "%.1f", maxNonWorkingRun[label] ?? 0))")
+  }
+}
+
+/// 真値区間ごとの「1 観測でいくつの行が変わったか」の分布。`--min-changed-lines` の値を
+/// 推測で置かないための素材で、k に依存しない (比較対象は常に 1 回前の観測のため)。
+func runChangedLinesHistogram(recordsDir: String, poll: Double) {
+  let root = URL(fileURLWithPath: recordsDir)
+  let runs = ((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [])
+    .filter { $0.hasPrefix("claude-composite-r") }.sorted()
+  let step = max(1, Int((poll / framePeriod).rounded()))
+  var histogram: [String: [Int: Int]] = [:]
+  for run in runs {
+    let dir = root.appendingPathComponent(run)
+    let frames = loadFrames(dir)
+    let intervals = truthIntervals(events: truthEvents(dir), frames: frames)
+    for phase in 0..<step {
+      var previousScreen: String?
+      for frame in stride(from: phase, to: frames.count, by: step).map({ frames[$0] }) {
+        guard let screen = frame.screen, !frame.dead else {
+          previousScreen = nil
+          continue
+        }
+        defer { previousScreen = screen }
+        guard let previous = previousScreen else { continue }
+        let changed = ScreenChange.changedLineCount(previous, screen)
+        guard changed > 0,
+          let interval = intervals.first(where: { frame.ts >= $0.0 && frame.ts < $0.1 }),
+          frame.ts - interval.0 >= scoreGuard, interval.1 - frame.ts >= scoreGuard
+        else { continue }
+        histogram[interval.2, default: [:]][changed, default: 0] += 1
+      }
+    }
+  }
+  print("\n=== 変化があったフレームの変化行数 (真値区間別) ===")
+  print("真値\tn\t内訳")
+  for (label, counts) in histogram.sorted(by: { $0.key < $1.key }) {
+    let breakdown = counts.sorted { $0.key < $1.key }.map { "\($0.key)行:\($0.value)" }
+      .joined(separator: " ")
+    print("\(label)\t\(counts.values.reduce(0, +))\t\(breakdown)")
+  }
+}
+
 func runScore(recordsDir: String, poll: Double) {
   let root = URL(fileURLWithPath: recordsDir)
   let runs = ((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [])
@@ -391,6 +542,9 @@ func runScore(recordsDir: String, poll: Double) {
     }
   }
 
+  print(
+    "min-changed-lines: "
+      + (minimumChangedLinesOverride.map(String.init) ?? "Adapter の宣言値 (claude=2)"))
   print("run: \(runs.count) 本 (\(runs.joined(separator: ", ")))")
   print(
     "poll: \(String(format: "%.2f", Double(step) * framePeriod))s = \(step) フレーム間引き / "
@@ -435,7 +589,17 @@ if args.contains("--score") {
     }
     poll = value
   }
+  if let text = option("--min-changed-lines") {
+    // 黙って無視すると、第三者が指定したつもりの k と別の値で採点した表を読むことになる。
+    guard let value = Int(text), value >= 1 else {
+      FileHandle.standardError.write(Data("--min-changed-lines は 1 以上の整数で指定する\n".utf8))
+      exit(1)
+    }
+    minimumChangedLinesOverride = value
+  }
   runScore(recordsDir: recordsDir, poll: poll)
+  runDisplayedScore(recordsDir: recordsDir, poll: poll, hold: 9)
+  runChangedLinesHistogram(recordsDir: recordsDir, poll: poll)
   exit(0)
 }
 

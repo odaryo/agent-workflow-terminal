@@ -44,8 +44,12 @@ main のビルドからアプリを起動し、次の4点を実測で確認し�
 
 - Viewer Drawer の中身: #30 (+#33 G5 snapshot はここに畳む)
 - #136 (Active 状態の永続化)、#92 (Working 検出の遅延)
-- 着手中: なし。#30 は §25 の Git/Diff 未確定 (base branch の決定方法、Diff range の定義、
-  working tree/staged/untracked の扱い、comment anchor schema) を決めるまで着手できない
+- 着手中: #136 と #92 を並行で進行中。#30 は着手可能になった
+- #30 の前提だった §25 の Git/Diff 4項目 (base branch の決定方法、Diff range の定義、
+  working tree/staged/untracked の扱い、comment anchor schema) は 2026-09-07 に確定し、
+  §9.1.1〜§9.1.3 と §9.2 へ反映した。§9.2.1 のテキスト注入の警告 UI だけは未確定のまま残る
+- #136 の前提だった「停止中の worktree 増減」と「GRDB 確定前の保存方式」も同日に確定し、
+  §3.2.1 と §22.1 へ反映した
 
 #29 は §7 全体では1つの worktree に対して大きすぎたため、§7.3 のファイル別 Git 履歴・過去 commit
 時点のコード・blame を #183 へ切り出した。#183 はどのフェーズにも入れていない。

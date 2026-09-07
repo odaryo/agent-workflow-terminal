@@ -46,7 +46,8 @@ struct CodeViewerContent: View {
         description: Text(message(for: error)))
     } else if let load = model.content {
       if let text = load.result.text {
-        CodeTextView(text: text.content, highlight: load.highlight)
+        CodeTextView(
+          text: text.content, highlight: load.highlight, highlightedLine: model.highlightedLine)
       } else if let reasons = load.result.decision.confirmationReasons {
         confirmation(reasons: reasons)
       } else {
@@ -166,8 +167,12 @@ struct CodeViewerContent: View {
 /// SwiftUI の `Text` は本文全体を1つのレイアウトに載せるため、数 MiB の本文で実用にならない。
 /// read-only の `NSTextView` を使い、`NSScrollView` に行単位のレイアウトを任せる。
 private struct CodeTextView: NSViewRepresentable {
+  private static let highlightedLineColor = NSColor.systemYellow.withAlphaComponent(0.28)
+
   let text: String
   let highlight: FileContentLoad.HighlightOutcome?
+  /// 検索結果から開いたときに強調してスクロールする行 (1 始まり)。
+  let highlightedLine: Int?
 
   func makeNSView(context: Context) -> NSScrollView {
     let scrollView = NSTextView.scrollableTextView()
@@ -200,5 +205,41 @@ private struct CodeTextView: NSViewRepresentable {
       textView.textColor = .labelColor
       textView.backgroundColor = .textBackgroundColor
     }
+    applyLineHighlight(to: textView)
+  }
+
+  private func applyLineHighlight(to textView: NSTextView) {
+    guard let storage = textView.textStorage else { return }
+    let whole = NSRange(location: 0, length: storage.length)
+    storage.removeAttribute(.backgroundColor, range: whole)
+    guard let line = highlightedLine, let range = range(ofLine: line) else { return }
+    storage.addAttribute(.backgroundColor, value: Self.highlightedLineColor, range: range)
+    // 本文を差し替えた直後は layout がまだ無く、`scrollRangeToVisible` が原点へ寄る。
+    // 次の run loop まで待ってから寄せる。ここは既に main thread。
+    DispatchQueue.main.async {
+      MainActor.assumeIsolated {
+        textView.scrollRangeToVisible(range)
+      }
+    }
+  }
+
+  /// `NSTextView` は UTF-16 の範囲を取るので、行の切り出しも UTF-16 の上で数える。
+  private func range(ofLine line: Int) -> NSRange? {
+    guard line >= 1 else { return nil }
+    var location = 0
+    var remaining = line - 1
+    let units = Array(text.utf16)
+    var start = 0
+    while remaining > 0, location < units.count {
+      if units[location] == 0x000A {
+        remaining -= 1
+        start = location + 1
+      }
+      location += 1
+    }
+    guard remaining == 0, start <= units.count else { return nil }
+    var end = start
+    while end < units.count, units[end] != 0x000A { end += 1 }
+    return NSRange(location: start, length: end - start)
   }
 }

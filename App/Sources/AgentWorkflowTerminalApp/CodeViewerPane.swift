@@ -8,15 +8,17 @@ import TerminalCore
 /// (`FileContentReader` は worktree root を知らない)。
 struct CodeViewerPane: View {
   @StateObject private var model: FileBrowserModel
+  @StateObject private var searchModel: WorktreeSearchModel
   @Environment(\.colorScheme) private var colorScheme
 
   init(worktreeRoot: URL) {
     _model = StateObject(wrappedValue: FileBrowserModel(worktreeRoot: worktreeRoot))
+    _searchModel = StateObject(wrappedValue: WorktreeSearchModel(worktreeRoot: worktreeRoot))
   }
 
   var body: some View {
     HSplitView {
-      FileBrowserList(model: model)
+      FileBrowserList(model: model, searchModel: searchModel)
         .frame(minWidth: 180, idealWidth: 240)
       CodeViewerContent(model: model)
         .frame(minWidth: 240, maxWidth: .infinity)
@@ -65,9 +67,12 @@ struct CodeViewerPane: View {
 
 private struct FileBrowserList: View {
   @ObservedObject var model: FileBrowserModel
+  @ObservedObject var searchModel: WorktreeSearchModel
 
   var body: some View {
     VStack(spacing: 0) {
+      WorktreeSearchBar(model: searchModel)
+      Divider()
       if let banner = gitStateBanner {
         Label(banner, systemImage: "exclamationmark.triangle")
           .font(.caption)
@@ -77,11 +82,17 @@ private struct FileBrowserList: View {
           .padding(.vertical, 4)
         Divider()
       }
-      List(model.rows) { row in
-        FileBrowserRowView(model: model, row: row)
-          .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+      if searchModel.isShowingResults {
+        WorktreeSearchResultsList(
+          model: searchModel, selectedPath: model.selection?.path,
+          onSelect: { model.select(openTarget: $0) })
+      } else {
+        List(model.rows) { row in
+          FileBrowserRowView(model: model, row: row)
+            .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+        }
+        .listStyle(.sidebar)
       }
-      .listStyle(.sidebar)
       Divider()
       HStack {
         Button("Git 状態を更新", systemImage: "arrow.clockwise") { model.refreshGitState() }

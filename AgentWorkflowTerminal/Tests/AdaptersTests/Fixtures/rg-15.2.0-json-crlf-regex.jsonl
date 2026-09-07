@@ -1,0 +1,5 @@
+{"type":"begin","data":{"path":{"text":"/tmp/awt-rg-fixture/crlf.txt"}}}
+{"type":"match","data":{"path":{"text":"/tmp/awt-rg-fixture/crlf.txt"},"lines":{"text":"crlf hello world\r\n"},"line_number":1,"absolute_offset":0,"submatches":[{"match":{"text":"hello world\r"},"start":5,"end":17}]}}
+{"type":"match","data":{"path":{"text":"/tmp/awt-rg-fixture/crlf.txt"},"lines":{"text":"second hello\r\n"},"line_number":2,"absolute_offset":18,"submatches":[{"match":{"text":"hello\r"},"start":7,"end":13}]}}
+{"type":"end","data":{"path":{"text":"/tmp/awt-rg-fixture/crlf.txt"},"binary_offset":null,"stats":{"elapsed":{"secs":0,"nanos":23917,"human":"0.000024s"},"searches":1,"searches_with_match":1,"bytes_searched":32,"bytes_printed":500,"matched_lines":2,"matches":2}}}
+{"data":{"elapsed_total":{"human":"0.000800s","nanos":800417,"secs":0},"stats":{"bytes_printed":500,"bytes_searched":32,"elapsed":{"human":"0.000024s","nanos":23917,"secs":0},"matched_lines":2,"matches":2,"searches":1,"searches_with_match":1}},"type":"summary"}

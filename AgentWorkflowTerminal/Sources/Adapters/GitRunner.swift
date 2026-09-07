@@ -54,14 +54,25 @@ public enum GitDiffTarget: Sendable, Equatable {
   case workingTree(against: GitRevision)
   case index(against: GitRevision)
   case range(GitRevisionRange)
+  /// index と working tree の比較 (= revision を渡さない `git diff`)。`workingTree(against:)` は
+  /// staged と unstaged が混ざるため、§9.1.3 の4区分には使えない。
+  case unstaged
 
   fileprivate var arguments: [String] {
     switch self {
     case .workingTree(let revision): [revision.rawValue]
     case .index(let revision): ["--cached", revision.rawValue]
     case .range(let range): range.arguments
+    case .unstaged: []
     }
   }
+}
+
+/// `normal` は未追跡 directory を末尾 `/` の1件へ畳む。Diff はファイル単位の差分を要るので
+/// `all` を選ぶ (§9.1.3)。既定を変えないのは、File Browser 側が件数の爆発を避けているため。
+public enum GitUntrackedFilesMode: String, Sendable, Equatable {
+  case normal
+  case all
 }
 
 /// internal initializer により、モジュール外から書き込み subcommand を注入できない (§17.2)。
@@ -74,11 +85,15 @@ public struct GitReadCommand: Sendable, Equatable {
     self.arguments = arguments
   }
 
-  public static func status(includeIgnored: Bool = false) -> Self {
+  public static func status(
+    includeIgnored: Bool = false,
+    untrackedFiles: GitUntrackedFilesMode = .normal
+  ) -> Self {
     // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
     // --renames は git 2.18 以降。サポート下限の決定は Issue #83 に委ねる。
     var arguments = [
-      "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=normal", "-z",
+      "status", "--porcelain=v2", "--branch", "--renames",
+      "--untracked-files=" + untrackedFiles.rawValue, "-z",
     ]
     if includeIgnored { arguments.append("--ignored=matching") }
     return Self(arguments: arguments)
@@ -96,6 +111,22 @@ public struct GitReadCommand: Sendable, Equatable {
 
   public static func originHead() -> Self {
     Self(arguments: ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
+  }
+
+  /// `--is-ancestor` は真偽しか返さないので、range を組むための OID はこちらで取る (§9.1.2)。
+  public static func mergeBase(_ first: GitRevision, _ second: GitRevision) -> Self {
+    Self(arguments: ["merge-base", first.rawValue, second.rawValue])
+  }
+
+  /// 親を持たない commit の比較対象。`-w` を付けないので object は書き込まれない。
+  /// hash 算法 (sha1 / sha256) ごとに値が違うため、定数を埋め込まず repository へ問い合わせる。
+  public static func emptyTreeObject() -> Self {
+    Self(arguments: ["hash-object", "-t", "tree", "/dev/null"])
+  }
+
+  /// base branch の選び直し (§9.1.1) と Branch Diff の対象選択に使う一覧。
+  public static func listRefs() -> Self {
+    Self(arguments: ["for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/"])
   }
 
   public static func isAncestor(_ ancestor: GitRevision, of descendant: GitRevision) -> Self {
@@ -134,10 +165,20 @@ public struct GitReadCommand: Sendable, Equatable {
   }
 
   public static func diffPatch(_ target: GitDiffTarget, pathspec: [GitPathspec] = []) -> Self {
-    diff(
-      ["--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color"],
+    // patch には -z が無く、path の表現が user config で動く。`core.quotePath=false` は非 ASCII の
+    // 8進 escape を止め、`--src-prefix` / `--dst-prefix` は `diff.noprefix` /
+    // `diff.mnemonicprefix` を上書きする (git 2.50.1 で実測)。どちらもパーサの前提を固定する。
+    // `--full-index` は `index` 行の OID を `core.abbrev` から切り離す (実測: `core.abbrev=4` で
+    // `index 7898..422c`、`=12` で `index 78981922613b..422c2b7ab3b3`)。この OID は差分行を
+    // 持たないファイルの同一性そのものなので、桁数が動くと §9.3 の変更検知が偽陽性・偽陰性を出す。
+    let patched = diff(
+      [
+        "--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color",
+        "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
+      ],
       target,
       pathspec)
+    return Self(arguments: ["-c", "core.quotePath=false"] + patched.arguments)
   }
 
   private static func diff(
@@ -160,6 +201,11 @@ public struct GitRunner: Sendable {
   // 計測で 51 バイト + パス長 (パス 29 文字なら 80 バイト) なので、既定の 8 MiB は約 10 万 entry で
   // 尽きる。64 MiB は同じ見積りで約 80 万 entry にあたる。
   public static let indexListingOutputLimit = 64 << 20
+  // patch の出力量は変更集合の大きさに比例する。計測: 220,000 行 (10.7 MB) のファイルを1つ
+  // `git add` しただけで staged patch が 10,889,014 バイトになり、既定の 8 MiB では
+  // その worktree の Diff が丸ごと開けなくなる (§9.1.3 は未 commit の変更も含めると定めている)。
+  // 64 MiB は同じ見積りで約 130 万行にあたる。
+  public static let diffPatchOutputLimit = 64 << 20
 
   private let repositoryDirectory: URL
   private let processRunner: any ProcessRunning

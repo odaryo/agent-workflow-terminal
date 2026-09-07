@@ -81,6 +81,20 @@ struct GitStatusPorcelainV2Tests {
     #expect(result.failures.count == 1)
   }
 
+  /// fixture は隔離 repository から git 2.50.1 で採取。
+  /// `git status --porcelain=v2 --branch --renames --untracked-files=all -z`
+  @Test("§9.1.3: untracked-files=all は未追跡 directory を畳まずファイル単位で出す")
+  func listsUntrackedFilesIndividually() throws {
+    let all = GitStatusPorcelainV2.parse(
+      output: try fixture(named: "git-2.50.1-status-porcelain-v2-untracked-all-z.txt"))
+    #expect(all.failures.isEmpty)
+    #expect(all.status.entries.contains(.untracked(path: "untrackeddir/nested/u.txt")))
+    #expect(!all.status.entries.contains(.untracked(path: "untrackeddir/")))
+    // ignored は `--ignored` を付けていないので現れない (§9.1.3)。
+    #expect(!all.status.entries.contains(.ignored(path: "ig.txt")))
+    #expect(!all.status.entries.contains(.untracked(path: "ig.txt")))
+  }
+
   @Test("branch ahead/behind の符号を検証する")
   func validatesAheadBehindSigns() {
     let result = GitStatusPorcelainV2.parse(output: "# branch.ab x1 y2\0")

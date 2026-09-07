@@ -1,0 +1,23 @@
+diff --git a/bin.dat b/bin.dat
+index 0f49c4a..28bdb9b 100644
+Binary files a/bin.dat and b/bin.dat differ
+diff --git a/del.txt b/del.txt
+deleted file mode 100644
+index b023018..0000000
+--- a/del.txt
++++ /dev/null
+@@ -1 +0,0 @@
+-bye
+diff --git a/keep.txt b/keep.txt
+index f0f2307..690dc73 100644
+--- a/keep.txt
++++ b/keep.txt
+@@ -1,3 +1,3 @@
+ l1
+-l2
++l2 staged
+ l3
+diff --git a/oldname.txt b/newname.txt
+similarity index 100%
+rename from oldname.txt
+rename to newname.txt

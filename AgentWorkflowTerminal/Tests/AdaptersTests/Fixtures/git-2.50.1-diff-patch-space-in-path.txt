@@ -1,0 +1,28 @@
+diff --git a/plain.txt b/plain.txt
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- a/plain.txt
++++ b/plain.txt
+@@ -1 +1,2 @@
+ one
++two
+diff --git a/sp ace.txt b/sp ace.txt
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- a/sp ace.txt	
++++ b/sp ace.txt	
+@@ -1 +1,2 @@
+ one
++two
+diff --git "a/tab\there.txt" "b/tab\there.txt"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/tab\there.txt"
++++ "b/tab\there.txt"
+@@ -1 +1,2 @@
+ one
++two
+diff --git a/ワイド 名.txt b/ワイド 名.txt
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- a/ワイド 名.txt	
++++ b/ワイド 名.txt	
+@@ -1 +1,2 @@
+ one
++two

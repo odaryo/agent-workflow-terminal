@@ -112,6 +112,7 @@ private final class AppModel: ObservableObject {
 
   let tmuxExecutable: URL?
   let paneStates: WorktreePaneStatesFeed?
+  let diffModels = DiffViewerModelStore()
   private let projectDirectory: URL?
 
   init(dependencies: AppDependencies) {
@@ -223,7 +224,8 @@ private struct ProjectView: View {
       } else {
         ViewerDrawerView(
           layout: $model.viewerDrawerLayout,
-          worktreeRoot: model.selectedWorktreeRoot
+          worktreeRoot: model.selectedWorktreeRoot,
+          diffModels: model.diffModels
         ) {
           TerminalTabs(model: model)
         }

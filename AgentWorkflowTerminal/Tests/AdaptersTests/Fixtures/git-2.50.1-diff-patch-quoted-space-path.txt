@@ -1,0 +1,63 @@
+diff --git "a/He said \"hi\" there.txt" "b/He said \"hi\" there.txt"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/He said \"hi\" there.txt"	
++++ "b/He said \"hi\" there.txt"	
+@@ -1 +1,2 @@
+ one
++two
+diff --git "a/back\\slash and space.txt" "b/back\\slash and space.txt"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/back\\slash and space.txt"	
++++ "b/back\\slash and space.txt"	
+@@ -1 +1,2 @@
+ one
++two
+diff --git a/end with space .txt b/end with space .txt
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- a/end with space .txt	
++++ b/end with space .txt	
+@@ -1 +1,2 @@
+ one
++two
+diff --git "a/nihon\t語 x.txt" "b/nihon\t語 x.txt"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/nihon\t語 x.txt"	
++++ "b/nihon\t語 x.txt"	
+@@ -1 +1,2 @@
+ one
++two
+diff --git a/plain.txt b/plain.txt
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- a/plain.txt
++++ b/plain.txt
+@@ -1 +1,2 @@
+ one
++two
+diff --git "a/sp ace and\ttab.txt" "b/sp ace and\ttab.txt"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/sp ace and\ttab.txt"	
++++ "b/sp ace and\ttab.txt"	
+@@ -1 +1,2 @@
+ one
++two
+diff --git a/sp ace.txt b/sp ace.txt
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- a/sp ace.txt	
++++ b/sp ace.txt	
+@@ -1 +1,2 @@
+ one
++two
+diff --git "a/tab\tmid.txt" "b/tab\tmid.txt"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/tab\tmid.txt"
++++ "b/tab\tmid.txt"
+@@ -1 +1,2 @@
+ one
++two
+diff --git "a/trailtab\t" "b/trailtab\t"
+index 5626abf0f72e58d7a153368ba57db4c673c0e171..814f4a422927b82f5f8a43f8fab6d3839e3983f2 100644
+--- "a/trailtab\t"
++++ "b/trailtab\t"
+@@ -1 +1,2 @@
+ one
++two

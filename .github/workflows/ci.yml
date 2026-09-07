@@ -36,8 +36,13 @@ jobs:
       - name: Build
         run: swift build --build-tests
 
+      # 経過時間とプロセス全体の CPU を測る AdaptersSerialTimingTests は、同一プロセス内で
+      # 並行実行されると他テストの負荷を観測してしまうため分けて走らせる。
       - name: Test
-        run: swift test
+        run: swift test --skip AdaptersSerialTimingTests
+
+      - name: Test (serial, timing sensitive)
+        run: swift test --no-parallel --filter AdaptersSerialTimingTests
 
   build-ios:
     name: Build (iOS Simulator)

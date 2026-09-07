@@ -38,3 +38,10 @@ publish より先に PR を開くと、対応する Release アセットがま�
 上げる担当者だけです。`build-ghostty.sh` には zig 0.15、Xcode、Metal Toolchain、`llvm-libtool-darwin` が必要です。
 ユーザーの `~/.config/ghostty/config` は自動では読みません。設定を使う場合は
 `TerminalRendererConfiguration.configurationFileURL` から明示的に指定します。
+
+## ripgrep
+
+Viewer Drawer の検索 (設計書 §8) は ripgrep CLI を外部プロセスとして呼びます。未導入の場合は
+検索だけが「ripgrep (rg) が見つかりません」と表示され、他の機能はそのまま動きます。
+`brew install ripgrep` で導入してください (探す場所は `/opt/homebrew/bin/rg`、
+`/usr/local/bin/rg`、`/usr/bin/rg` の順)。

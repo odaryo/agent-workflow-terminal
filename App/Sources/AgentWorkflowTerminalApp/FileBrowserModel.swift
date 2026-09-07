@@ -64,6 +64,8 @@ final class FileBrowserModel: ObservableObject {
   @Published private(set) var content: FileContentLoad?
   @Published private(set) var contentError: FileContentReaderError?
   @Published private(set) var isSelectionDeleted = false
+  /// 検索結果から開いたときに強調する行 (1 始まり)。ツリーから開いた場合は `nil`。
+  @Published private(set) var highlightedLine: Int?
 
   private let reader: FileBrowserDirectoryReader
   private var confirmation: FileOpenConfirmation = .notConfirmed
@@ -238,7 +240,22 @@ final class FileBrowserModel: ObservableObject {
 
   func select(_ row: FileBrowserRow) {
     guard case .entry(.file, let path, let url) = row.content else { return }
+    highlightedLine = nil
     selection = FileBrowserSelection(id: row.id, name: row.name, url: url, path: path)
+  }
+
+  /// 検索結果から開く。`WorktreeSearchOpenTarget` のパスは ripgrep が `worktreeRoot` の下で
+  /// 見つけたものを `WorktreePathScope` が root 内だと確かめた値なので、列挙で得た木に
+  /// 無くても §8.1 の「常に現在の worktree 内だけ」を破らない。`WorktreeRelativePath` が
+  /// `..` を含む値を作れないことが、ここで root の外へ抜けられない根拠になっている。
+  func select(openTarget: WorktreeSearchOpenTarget) {
+    let path = openTarget.path
+    highlightedLine = openTarget.lineNumber
+    selection = FileBrowserSelection(
+      id: path.value,
+      name: path.value.split(separator: "/").last.map(String.init) ?? path.value,
+      url: worktreeRoot.appending(path: path.value),
+      path: path)
   }
 
   func confirmOpen() async {

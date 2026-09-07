@@ -519,13 +519,28 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 
 全文検索はripgrep CLIをworktree rootで実行する。インデックス更新や削除時cleanupが不要であり、Git ignoreを尊重した検索と全ファイル検索を切り替えやすい。
 
-次のscope UIは提案されたが、詳細は未確定である。
+次は**既定値**であり、設定可能なものとして扱う。確定仕様(§8.1)ではない。
 
-- Tracked files
-- All files（ignoredを含む）
-- Current directory
+| 項目 | 既定値 |
+| --- | --- |
+| scope UI | `gitignore を尊重`(ripgrepの既定動作)と`全ファイル`(`--no-ignore --hidden`)の2つ。`全ファイル`でも`.git/`は常に除く。当初案の"Current directory"は採らない |
+| 検索開始 | 明示実行(Enterまたは実行ボタン)のみ |
+| debounce | 入れない。入力ごとの自動実行をしないため不要。実行中の再実行は前回をキャンセルする |
+| 最大結果数 | 全体1,000件、1ファイルあたり100件。どちらで打ち切ったかを区別して結果に出す(§12.3) |
+| 1行の表示幅 | 500文字。超えた行は切り、切ったことを結果に出す |
+| 大文字小文字 | smart case(`-S`) |
+| 正規表現 | 既定OFF(`--fixed-strings`)。UIで切り替えられる |
+| バイナリ | ripgrepの既定に従いスキップする |
+| symbolic link | 辿らない(ripgrepの既定。`-L`を付けない) |
+| ファイル名検索 | `rg --files`の出力に対する、大文字小文字を無視した部分一致。scopeは全文検索と共有する |
 
-検索開始タイミング、debounce、最大結果数、バイナリ／巨大ファイルの扱いも未確定。
+ripgrepの`--max-columns` / `--max-columns-preview`は人間向けprinter専用のoptionであり、`--json`出力には効かない(ripgrep 15.2.0で実測)。表示幅の上限は出力を読む側で適用する。
+
+ripgrepの`--json`は`--max-count`に達したことを出力しない。上限に達したファイルの`matched_lines`は上限値と一致するだけで、ちょうどその件数しか一致が無いファイルと区別できず、終了コードも0になる。打ち切りを推測ではなく確定させるため、`--max-count`には利用者へ見せる上限に1を足した値を渡し、上限+1件目が来たファイルを打ち切りと判定する。
+
+ripgrepが未導入の場合は検索だけが使えず、他の機能は動く。実行ファイルは`/opt/homebrew/bin/rg`、`/usr/local/bin/rg`、`/usr/bin/rg`の順に探す。
+
+複数検索結果を選択してfresh Agentへまとめて渡す経路(§8.1)は未実装。
 
 ## 9. Diff Viewerとレビューsnapshot
 

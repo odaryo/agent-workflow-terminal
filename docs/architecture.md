@@ -463,6 +463,8 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - 巨大ディレクトリの性能を守るため、ディレクトリはlazy loadする
 - trackedファイルのGit状態はindex側とworktree側を分け、gitが返す状態を損失なく保持する。単一badgeではworktree側を優先し、worktree側が変更なしの場合だけindex側を表示する
 - gitはディレクトリを追跡しないため、untracked／ignoredのdirectory entryに一致しないディレクトリはGit状態なしとする。配下の状態はディレクトリへ集約しない
+- worktree root直下の`.git`は列挙しない。gitの内部保管庫であり作業ツリーのファイルではない（worktreeでは`.git`はディレクトリではなくファイル）。深い階層の`.git`という名前のユーザーファイルは隠さない
+- サブモジュール配下はGit状態なしとする。`git status`はサブモジュールの中身を一切報告しないため、変更なしと主張できない（§12.3）。サブモジュールの所在はindexが正本なので`ls-files`のgitlinkから得る
 
 ### 7.2 大容量／バイナリファイル
 
@@ -470,6 +472,9 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - サイズ、行数、バイナリ判定を示し、`Open anyway`の確認を出す。
 - 警告対象となるサイズ／行数は設定可能にする。
 - デフォルト閾値は1 MiB／50,000行とする。バイナリは先頭8 KiBにNULバイトが1つでもあれば該当する。
+- `Open anyway`を通しても先頭からの絶対上限までしか読まない。デフォルトは16 MiBとし、警告閾値と同じく設定可能にする。
+- 絶対上限で打ち切った場合は、打ち切ったことを表示する。全文を表示していると誤認させない（§12.3）。
+- バイナリは`Open anyway`を通しても本文を表示しない。v1でhexビューアは作らない。
 
 ### 7.3 Code Viewer
 
@@ -1686,6 +1691,8 @@ PR_READY
 - [x] File Browserはignoredを含む全ファイル、lazy load
 - [x] trackedファイルのGit状態はindex／worktreeの2軸を保持し、ディレクトリへ配下の状態を集約しない
 - [x] 大容量ファイルのデフォルト閾値は1 MiB／50,000行、バイナリは先頭8 KiBのNULバイトで判定
+- [x] `Open anyway`後も絶対上限（デフォルト16 MiB）までで打ち切り、打ち切りを表示する。バイナリは確認後も本文を出さない
+- [x] worktree root直下の`.git`は列挙しない。サブモジュール配下はGit状態なし
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Diffはsnapshot、Refreshで新snapshot

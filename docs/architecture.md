@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-08-31(PoC Gate 1通過。macOS版rendererへのlibghostty採用を確定へ昇格)
+> 最終更新: 2026-09-07(目的の再確認。全paneの概要一覧、タスク完了の区別、通知優先のモバイル導入を反映)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -56,7 +56,22 @@ TerminalはAgent開発フローの表示・操作・レビューを支援する�
 10. 復元・履歴・Evidenceは、worktreeがなくなった後も必要に応じて参照できるようにする。
 11. **単一ユーザー**を前提とする。1人の開発者が自分のMac/PC hostと自分のデバイス群で利用する。
 
-### 1.2 明示的に作らないもの
+### 1.2 利用目的と優先順位 — 確定(2026-09-07)
+
+第一の目的は、並行稼働するAgentセッションで何をしていたかを思い出す時間を減らすこと。
+第二の目的は、人間の判断待ちを見落とさないこと。想定規模は3プロジェクト、各2〜3タスクで、
+1タスク内の別paneにClaude CodeとCodexを含む複数Agentが動く。Agent内部のsubagent一覧は対象に含めない。
+
+人間は要件・設計を質問に答えながら対話で確認し、PRレビューを行う。フェーズ進行とガードレールは
+プロジェクト側ハーネスの責務であり、Terminalは目的・現在地・観測状態を表示する。
+概要は「ログイン不具合を修正する｜設計相談中」程度とし、判断待ち・作業中・終了等は別のアイコンで表す。
+全プロジェクト・全タスクのAgent paneを、タスクを切り替えずに一覧で確認できることを中核要件とする(§13)。
+
+Diffは対象タスクと比較元を指定して別窓で閲覧したい。組み込み別窓と外部ツール連携はいずれも許容し、
+方式は未確定。Gitツリー表示は追加候補であり必須ではない。編集はviや外部IDEで行う。
+既存のViewer DrawerとP2の実装範囲は維持し、別窓への拡張は後続で扱う。
+
+### 1.3 明示的に作らないもの
 
 - 高機能なコードエディタ／IDE
 - フル機能のGitクライアント
@@ -645,7 +660,7 @@ worktree削除後もsnapshotで当時の質問対象を確認できる。Git参�
 - Question
 - Permission
 - Agent Error
-- PR Ready／Ready for Review
+- ハーネスが明示したタスク完了(§12.7)。paneの応答終了だけでは完了通知しない
 - 長時間継続する`Unknown`
 
 通知種別は個別にON/OFFできるようにする。
@@ -657,11 +672,16 @@ worktree削除後もsnapshotで当時の質問対象を確認できる。Git参�
 | Question | worktree → 該当pane → 質問overlay |
 | Permission | worktree → 該当pane |
 | Error | worktree → 該当pane／詳細 |
-| Ready for Review | worktree → Diff |
+| タスク完了 | 対象worktree。明示的なレビュー対象がある場合はその対象 |
 
 通知上でAllow／Denyなどを直接実行する機能は対象外とする。
 
 Push通知は、APNsへ橋渡しする軽量な通知中継をopt-inで利用する方式とする(確定)。中継へ送るpayloadはworktree ID・通知種別などの最小限に留め、コードやTerminal出力を含めない。中継を有効にしない場合は、hostへ接続中のローカル通知のみとなる。中継の具体的な実装・提供形態(自前hosting等)は未確定。
+
+**モバイル初版の利用条件は、Mac側アプリを起動したまま、外出先でiPhoneをロックし、
+モバイルアプリを開いていない間にも判断待ちとタスク完了の通知が届くこと**とする。
+通知中継を有効にした構成で検証する。どのAgent paneの判断待ちも対象にできることを要求する。
+重複抑止、再接続時の再通知、通知から消失したpaneへ戻る場合の扱いは実装前に定める(§25)。
 
 ## 12. Agent Adapterと状態モデル
 
@@ -698,7 +718,9 @@ Needs Attention
 
 Agent完了は`Needs Attention`ではなく`Ready for Review`に分類する。
 
-複数Agent paneがある場合でも、タブには最重要の代表状態を1つ表示し、paneごとの詳細はworktreeを開いて確認する。
+複数Agent paneがある場合でも、タブには最重要の代表状態を1つ表示する。paneごとの概要と状態は
+worktreeを開かずにOverviewでも確認できる(§13)。この代表状態はpane観測の集約であり、
+タスク全体の完了判定ではない。応答終了とタスク完了を混同しない表示へ後続で拡張する(§12.7)。
 
 **代表状態の表示は安定化する。** Adapterの観測をそのままタブへ出すと、通常の作業中とアイドル中に表示が入れ替わり続ける(Gate 3記録のreplay実測: idle区間で11〜13回/分の`Idle`↔`Working`、working区間で19〜33回/分の`Working`↔`Unknown`)。この振動は**許容しない**。
 
@@ -781,23 +803,41 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 
 process fallbackについては、**process観測だけでは`Working`と`Idle`を区別できない**ことがGate 3で実測された。fallbackは推測せず`Unknown`を返す(§12.3)。
 
-## 13. Active Worktrees Overview
+### 12.7 概要・pane状態・タスク完了の分離 — 確定(2026-09-07)
 
-複数Project／worktreeの状況を一時的に確認する軽量Overviewを提供する。メイン画面や常設Dashboardにはしない。
+- paneの目的と現在地は短い概要として保持する。任意のハーネス連携から取得でき、連携なしでは
+  手入力でも利用できる。自動要約は必須にしない。未取得の現在地やphaseをTerminalが推測しない。
+- paneの状態観測と、ハーネスによるタスク完了は別の情報として扱う。既存AgentStateの語彙を
+  そのままタスク完了判定に流用しない。メインpaneの応答終了やprocess終了だけで完了扱いにしない。
+- タスク完了通知は、そのタスクに関連付けられたハーネスの明示信号を根拠とする。
+  連携が無いときも通常Terminalと状態観測は利用できるが、タスク完了を推測して通知しない。
+- メインpaneはタスクへの対応先として識別できるようにする。位置や最終選択paneから自動決定しない。
+  選択・登録方法は未確定。別paneの判断待ちをメインpaneの状態で隠さない。
+- 連携形式、セッションの識別と寿命、手入力と連携の優先順位、再実行時の完了解除、古いイベントの
+  排除方法は未確定。Terminal専用APIをハーネス実行の必須条件にしない(§32)。
+
+## 13. 全Agent pane Overview
+
+**確定(2026-09-07)。** 全Project／Task／Agent paneの概要と状態を一覧表示し、
+Terminalとは独立したウィンドウで常時確認できる。従来の「一時的なOverviewに限定する」制約を撤回する。
+操作の中心はAgent Terminalのままとし、一覧はその選択と状況把握を担当する。
+Project RootのAgent paneも別枠で含める。タスクを切り替えずに各paneを閲覧できることを要求する。
 
 表示例:
 
 ```text
 Project A
-  ? fix-login         Question
-  ● feature-search    Working
-  ✓ payment-api       Ready for Review
-
-Project B
-  ○ Main              Idle
+  ログイン不具合修正
+    ? メイン    ログイン不具合を修正する｜設計相談中
+    ● 調査      認証エラーの発生条件を調べる
+  検索機能追加
+    ● メイン    検索機能を追加する｜実装中
+    ○ レビュー  検索APIの設計を確認する｜応答終了
 ```
 
-Overviewは閲覧と対象worktreeへの移動だけを行う。質問回答、Agent停止、Close、PR操作などはOverviewから行わない。
+paneを選択すると対象worktreeと該当paneへ直接移動する。質問回答、Agent停止、Close、PR操作などは
+Overviewから行わない。概要の入力UIの配置は未確定。状態はアイコンで示し、色だけに依存せず
+accessibility labelで意味を伝える。paneの応答終了とタスク完了は別表示にする。
 
 並び順は次のとおり。
 
@@ -1077,6 +1117,10 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 外付けキーボードも通常どおり利用可能にする。
 
 ### 20.3 移行段階
+
+**導入順序は通知を先、遠隔操作を後とする(確定、2026-09-07)。** 最初に§11.2のロック中の
+判断待ち・タスク完了通知を実機で成立させ、その後に通知から対象へ戻る導線、プロンプト送信、
+新規タスク開始を検証する。SSH Terminalや全構造化データprotocolの完成を通知の前提にはしない。
 
 - 初期段階ではBlink等の外部TerminalからSSHまたはMoshでhostへ接続し、tmuxへattachする構成を利用できる。
 - 最終構成は専用iOS/iPadOSアプリ内でSSH接続し、tmuxへattachする。
@@ -1412,7 +1456,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
 - keyboard shortcut体系
-- multi-window対応
+- Overview以外のmulti-window対応(Diffは別窓を要求し、組み込み／外部連携の選択は未確定)
 
 ### Worktree／tmux
 
@@ -1427,6 +1471,9 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - 質問fallbackのデータ交換形式
 - `Ask Agent`実行時に使用するAgent CLIの選択方法
 - Unknown通知のデフォルト時間
+- 概要連携のschema、セッション識別と寿命、手入力との優先順位、メインpaneの登録方法
+- タスク完了信号の関連付け、再実行時の解除、古い／重複イベントの排除
+- 通知の重複抑止、再接続時の再通知、消失したpaneへの通知導線
 
 ### Git／Diff
 
@@ -1672,6 +1719,12 @@ PR_READY
 ---
 
 # 付録A. 確定事項チェックリスト
+
+- [x] 全Project／Task／Agent paneの短い概要と状態アイコンを独立Overviewウィンドウに表示
+- [x] 概要は任意のハーネス連携と手入力に対応し、観測できない現在地を推測しない
+- [x] paneの応答終了とハーネスによるタスク完了を区別し、完了通知は後者を根拠にする
+- [x] Macアプリ起動を前提にiPhoneロック中の判断待ち・タスク完了通知をモバイル初版の利用条件とする
+- [x] P2を維持し、モバイルは通知を先に、遠隔操作を後に導入する
 
 - [x] 1 Task = 1 worktree = 1 Task Tab
 - [x] Project Rootは別枠の常設tmux session

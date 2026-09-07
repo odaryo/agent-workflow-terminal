@@ -1680,6 +1680,7 @@ PR_READY
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割
 - [x] Code／Diff／Evidenceを必要時だけ表示
+- [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
 - [x] File Browserはignoredを含む全ファイル、lazy load
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種

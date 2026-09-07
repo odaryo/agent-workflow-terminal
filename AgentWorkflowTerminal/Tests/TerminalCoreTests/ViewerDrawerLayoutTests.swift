@@ -140,6 +140,52 @@ struct ViewerDrawerLayoutTests {
     #expect(layout.presentation == .inline)
   }
 
+  @Test("開状態では閉状態の overlay 保持履歴を等価性に含めない")
+  func ignoresRetainedOverlayHistoryWhileOpen() {
+    var initialLayout = ViewerDrawerLayout()
+    initialLayout.openPrimary(.code)
+
+    var reopenedLayout = ViewerDrawerLayout()
+    reopenedLayout.openPrimary(.code)
+    reopenedLayout.setPresentation(.overlay)
+    reopenedLayout.closeAll()
+    reopenedLayout.openPrimary(.code)
+    reopenedLayout.setPresentation(.inline)
+
+    #expect(initialLayout == reopenedLayout)
+    #expect(initialLayout.hashValue == reopenedLayout.hashValue)
+    #expect(Set([initialLayout, reopenedLayout]).count == 1)
+  }
+
+  @Test("overlay 保持後に inline で閉じると次回は inline で開く")
+  func resetsRetainedOverlayAfterClosingInline() {
+    var layout = ViewerDrawerLayout()
+    layout.openPrimary(.code)
+    layout.setPresentation(.overlay)
+    layout.closeAll()
+    layout.openPrimary(.code)
+    layout.setPresentation(.inline)
+
+    layout.closeAll()
+    layout.openPrimary(.diff)
+
+    #expect(layout.presentation == .inline)
+  }
+
+  @Test("overlay で閉じると副ペインを開く要求も overlay で開く")
+  func reopensSecondaryRequestInOverlay() {
+    var layout = ViewerDrawerLayout()
+    layout.openPrimary(.code)
+    layout.setPresentation(.overlay)
+    layout.closeAll()
+
+    layout.openSecondary(.diff)
+
+    #expect(layout.primary == .diff)
+    #expect(layout.secondary == nil)
+    #expect(layout.presentation == .overlay)
+  }
+
   @Test("分割方向は副ペインが無い間と閉状態でも保持する")
   func retainsSplitAxisWithoutSecondaryPane() {
     var layout = ViewerDrawerLayout()

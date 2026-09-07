@@ -41,10 +41,12 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
 
   public mutating func openPrimary(_ content: ViewerContent) {
     guard var current = openLayout else {
+      let presentation: ViewerDrawerPresentation = opensInOverlay ? .overlay : .inline
+      opensInOverlay = false
       openLayout = OpenLayout(
         primary: content,
         secondary: nil,
-        presentation: opensInOverlay ? .overlay : .inline
+        presentation: presentation
       )
       return
     }
@@ -57,10 +59,12 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
 
   public mutating func openSecondary(_ content: ViewerContent) {
     guard var current = openLayout else {
+      let presentation: ViewerDrawerPresentation = opensInOverlay ? .overlay : .inline
+      opensInOverlay = false
       openLayout = OpenLayout(
         primary: content,
         secondary: nil,
-        presentation: opensInOverlay ? .overlay : .inline
+        presentation: presentation
       )
       return
     }

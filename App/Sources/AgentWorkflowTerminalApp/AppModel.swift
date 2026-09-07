@@ -109,6 +109,7 @@ final class AppModel: ObservableObject {
 
   let tmuxExecutable: URL?
   let paneStates: WorktreePaneStatesFeed?
+  let diffModels = DiffViewerModelStore()
   private let projectDirectory: URL?
   private let applicationSupportDirectory: URL?
   private var store: WorktreeInventoryStore?

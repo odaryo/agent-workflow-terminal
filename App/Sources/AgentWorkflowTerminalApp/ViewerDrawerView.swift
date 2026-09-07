@@ -9,8 +9,11 @@ import TerminalCore
 /// 見た目の差は frame / offset / opacity で表す。
 struct ViewerDrawerView<Terminal: View>: View {
   @Binding var layout: ViewerDrawerLayout
-  /// `.code` ペインが列挙の起点にする worktree。選択中のタブが無い間は `nil`。
+  /// `.code` / `.diff` ペインが起点にする worktree。選択中のタブが無い間は `nil`。
   let worktreeRoot: URL?
+  /// Drawer の開閉より長く生きる必要がある Diff の状態 (§9.1.1 の base branch 記憶と
+  /// §9.3 の過去 snapshot) を持つ。
+  let diffModels: DiffViewerModelStore
   @ViewBuilder let terminal: () -> Terminal
 
   @State private var requestedInlineDrawerWidth = ViewerDrawerMetrics.defaultDrawerWidth
@@ -129,7 +132,14 @@ struct ViewerDrawerView<Terminal: View>: View {
       } else {
         unavailable(content)
       }
-    case .diff, .evidence:
+    case .diff:
+      if let worktreeRoot {
+        DiffViewerPane(model: diffModels.model(for: worktreeRoot))
+          .id(worktreeRoot)
+      } else {
+        unavailable(content)
+      }
+    case .evidence:
       unavailable(content)
     }
   }

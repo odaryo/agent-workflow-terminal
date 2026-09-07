@@ -52,8 +52,27 @@ struct GitRunnerTests {
       ])
     #expect(
       GitReadCommand.diffPatch(.workingTree(against: .head)).arguments == [
-        "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color",
-        "HEAD", "--",
+        "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
+        "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "HEAD",
+        "--",
+      ])
+    // §9.1.3: staged と混ざらない unstaged だけの diff は revision を渡さない形になる。
+    #expect(
+      GitReadCommand.diffPatch(.unstaged).arguments == [
+        "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
+        "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "--",
+      ])
+    #expect(
+      GitReadCommand.status(untrackedFiles: .all).arguments == [
+        "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=all", "-z",
+      ])
+    #expect(
+      GitReadCommand.mergeBase(main, .head).arguments == ["merge-base", "main", "HEAD"])
+    #expect(
+      GitReadCommand.emptyTreeObject().arguments == ["hash-object", "-t", "tree", "/dev/null"])
+    #expect(
+      GitReadCommand.listRefs().arguments == [
+        "for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/",
       ])
   }
 

@@ -92,6 +92,54 @@ struct ViewerDrawerLayoutTests {
     #expect(layout.presentation == .fullscreen)
   }
 
+  @Test("初回は inline で開く")
+  func initiallyOpensInline() {
+    var layout = ViewerDrawerLayout()
+
+    layout.openPrimary(.code)
+
+    #expect(layout.presentation == .inline)
+  }
+
+  @Test("overlay で一括閉じすると次回も overlay で開く")
+  func retainsOverlayAfterClosingAll() {
+    var layout = ViewerDrawerLayout()
+    layout.openPrimary(.code)
+    layout.setPresentation(.overlay)
+
+    layout.closeAll()
+    #expect(layout.presentation == nil)
+    layout.openPrimary(.diff)
+
+    #expect(layout.presentation == .overlay)
+  }
+
+  @Test("overlay の単一ペインを閉じると次回も overlay で開く")
+  func retainsOverlayAfterClosingPrimary() {
+    var layout = ViewerDrawerLayout()
+    layout.openPrimary(.code)
+    layout.setPresentation(.overlay)
+
+    layout.closePrimary()
+    #expect(layout.presentation == nil)
+    layout.openPrimary(.evidence)
+
+    #expect(layout.presentation == .overlay)
+  }
+
+  @Test("fullscreen で閉じると次回は inline で開く")
+  func resetsFullscreenAfterClosing() {
+    var layout = ViewerDrawerLayout()
+    layout.openPrimary(.code)
+    layout.setPresentation(.overlay)
+    layout.setPresentation(.fullscreen)
+
+    layout.closeAll()
+    layout.openPrimary(.diff)
+
+    #expect(layout.presentation == .inline)
+  }
+
   @Test("分割方向は副ペインが無い間と閉状態でも保持する")
   func retainsSplitAxisWithoutSecondaryPane() {
     var layout = ViewerDrawerLayout()

@@ -23,6 +23,7 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
   }
 
   private var openLayout: OpenLayout?
+  private var opensInOverlay: Bool
   public private(set) var splitAxis: ViewerDrawerSplitAxis
 
   public static let closed = Self()
@@ -34,12 +35,17 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
 
   public init(splitAxis: ViewerDrawerSplitAxis = .horizontal) {
     openLayout = nil
+    opensInOverlay = false
     self.splitAxis = splitAxis
   }
 
   public mutating func openPrimary(_ content: ViewerContent) {
     guard var current = openLayout else {
-      openLayout = OpenLayout(primary: content, secondary: nil, presentation: .inline)
+      openLayout = OpenLayout(
+        primary: content,
+        secondary: nil,
+        presentation: opensInOverlay ? .overlay : .inline
+      )
       return
     }
     if current.secondary == content {
@@ -51,7 +57,11 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
 
   public mutating func openSecondary(_ content: ViewerContent) {
     guard var current = openLayout else {
-      openLayout = OpenLayout(primary: content, secondary: nil, presentation: .inline)
+      openLayout = OpenLayout(
+        primary: content,
+        secondary: nil,
+        presentation: opensInOverlay ? .overlay : .inline
+      )
       return
     }
     if current.primary == content {
@@ -65,6 +75,7 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
   public mutating func closePrimary() {
     guard let current = openLayout else { return }
     guard let secondary = current.secondary else {
+      opensInOverlay = current.presentation == .overlay
       openLayout = nil
       return
     }
@@ -80,6 +91,8 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
   }
 
   public mutating func closeAll() {
+    guard let current = openLayout else { return }
+    opensInOverlay = current.presentation == .overlay
     openLayout = nil
   }
 

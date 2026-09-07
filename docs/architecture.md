@@ -759,6 +759,7 @@ worktreeを開かずにOverviewでも確認できる(§13)。この代表状態�
 - 保持時間を0〜30秒のどの値にしても、`Needs Attention`／`Ready for Review`の遷移時刻は保持なしの場合と一致する。保持時間を延ばしても人の対応が要る通知は遅れない。
 - 数字は記録の250msサンプリング上のもので、**表示遷移の頻度は製品の予測値ではない**。Gate 3 §7.5は250msのpollingが成立しないと結論しており、`AgentObservationIntervals.signals`はこれより粗くなる。中断70件のうち55件が0.77秒以下なので、この粗さはベースライン側を大きく動かす。一方、閾値の根拠であるテール(7.90秒と9.89秒)はサンプリング間隔に対して頑健である。
 - 保持を`Working`からの降格だけに限ると、`Idle`表示中に`Unknown`が一瞬入る往復が残る(5秒未満で入れ替わる`Idle`／`Unknown`表示が9秒保持で28回)。遷移元を問わない形にすると14回へ減る。これが遷移元を限定しない理由である。残る14回の大半は各runの先頭フレームで、画面の変化量を測る比較対象がまだ無く`Unknown`から始まることによる。
+- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.995**、残る誤判定は**`Ready for Review`を1 poll分だけ先に出す2フレーム(443中0.45%)**だけである。250ms pollingではrecall 0.867で、取りこぼしは`Ready for Review`ではなくすべて`Unknown`になる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。この0.45%は**許容範囲として受け入れる**。
 
 ### 12.3 Unknown
 

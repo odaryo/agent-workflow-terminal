@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 8)
+    #expect(fixtures.count == 9)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -41,6 +41,25 @@ struct ClaudeCodeAdapterTests {
     )
     let result = ClaudeCodeAdapter().classify(signals: signals, liveness: .alive)
     #expect(fixtureState(of: result) == "unknown")
+  }
+
+  @Test("前ターンの done が残るターン開始直後でも、画面が動いていれば Working")
+  func turnStartWithStaleDoneMarkerIsWorking() throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: "claude-working-turn-start").first)
+    func classify(elapsed: TimeInterval) -> String {
+      fixtureState(
+        of: ClaudeCodeAdapter().classify(
+          signals: AgentSignals(
+            paneTitle: fixture.paneTitle, screenText: fixture.screen,
+            secondsSinceScreenChange: elapsed, observedAt: .distantPast
+          ),
+          liveness: .alive
+        ))
+    }
+    #expect(classify(elapsed: 0) == "working")
+    // 画面鮮度が失われると残存 done が勝つ。製品の 2.0 秒 polling で working 区間の
+    // 0.45% (443 中 2 フレーム) がこれに当たる — 許容する残差 (§12.2)。
+    #expect(classify(elapsed: 2.0) == "completed")
   }
 
   @Test("画面変化から1.0秒までは Working、直後は Unknown")

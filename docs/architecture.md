@@ -759,7 +759,8 @@ worktreeを開かずにOverviewでも確認できる(§13)。この代表状態�
 - 保持時間を0〜30秒のどの値にしても、`Needs Attention`／`Ready for Review`の遷移時刻は保持なしの場合と一致する。保持時間を延ばしても人の対応が要る通知は遅れない。
 - 数字は記録の250msサンプリング上のもので、**表示遷移の頻度は製品の予測値ではない**。Gate 3 §7.5は250msのpollingが成立しないと結論しており、`AgentObservationIntervals.signals`はこれより粗くなる。中断70件のうち55件が0.77秒以下なので、この粗さはベースライン側を大きく動かす。一方、閾値の根拠であるテール(7.90秒と9.89秒)はサンプリング間隔に対して頑健である。
 - 保持を`Working`からの降格だけに限ると、`Idle`表示中に`Unknown`が一瞬入る往復が残る(5秒未満で入れ替わる`Idle`／`Unknown`表示が9秒保持で28回)。遷移元を問わない形にすると14回へ減る。これが遷移元を限定しない理由である。残る14回の大半は各runの先頭フレームで、画面の変化量を測る比較対象がまだ無く`Unknown`から始まることによる。
-- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.995**、残る誤判定は**`Ready for Review`を1 poll分だけ先に出す2フレーム(443中0.45%)**だけである。250ms pollingではrecall 0.867で、取りこぼしは`Ready for Review`ではなくすべて`Unknown`になる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。この0.45%は**許容範囲として受け入れる**。
+- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.995**、残る誤判定は**`Ready for Review`を1 poll分だけ先に出す2フレーム(443中0.45%)**だけである。250ms pollingではrecall 0.867で、取りこぼしは`Ready for Review`ではなくすべて`Unknown`になる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。**ターン開始直後の検出については、この0.45%を許容する**(許容条件そのものは§12.6・§25のとおり未確定である)。
+- 同じpollingの粗さは、`Working`の検出率を上げる代わりに`Idle`の検出率を下げる。同じ`--score`出力で`Idle`区間のrecallは250msの0.892から2.0秒では0.763へ落ち、455フレーム中98が`Working`になる。さらに製品の`WorktreeRepresentativeStateStabilizer`(保持9秒)を同じidle真値区間へ当てると、GUARDを除いた23.0秒のうち表示が`Working`のままの時間が12.8〜22.5秒を占める(5 run×8位相、2.0秒polling)。原因の特定と対策は本節では扱わず、別Issueとする。
 
 ### 12.3 Unknown
 
@@ -821,7 +822,7 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 - `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーが未計測であることを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
-- false positive／false negativeの許容条件(表示の振動を許容しないことは§12.2で決着済み)
+- false positive／false negativeの許容条件(表示の振動を許容しないこと、およびターン開始直後のfalse positiveは§12.2で決着済み)
 
 process fallbackについては、**process観測だけでは`Working`と`Idle`を区別できない**ことがGate 3で実測された。fallbackは推測せず`Unknown`を返す(§12.3)。
 
@@ -1489,7 +1490,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Agent
 
 - 各Adapterが採用するsignalの組み合わせ(個々の信号の採用基準は§12.5で確定。どう合成して7状態へ落とすかは実装時に決める)
-- false positive／false negativeの許容条件(振動の可否は§12.2で決着済み)
+- false positive／false negativeの許容条件(振動の可否とターン開始直後のfalse positiveは§12.2で決着済み)
 - 質問fallbackのデータ交換形式
 - `Ask Agent`実行時に使用するAgent CLIの選択方法
 - Unknown通知のデフォルト時間

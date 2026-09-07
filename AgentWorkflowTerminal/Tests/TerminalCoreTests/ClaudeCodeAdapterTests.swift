@@ -46,20 +46,16 @@ struct ClaudeCodeAdapterTests {
   @Test("前ターンの done が残るターン開始直後でも、画面が動いていれば Working")
   func turnStartWithStaleDoneMarkerIsWorking() throws {
     let fixture = try #require(AgentStateFixture.load(prefix: "claude-working-turn-start").first)
-    func classify(elapsed: TimeInterval) -> String {
-      fixtureState(
-        of: ClaudeCodeAdapter().classify(
-          signals: AgentSignals(
-            paneTitle: fixture.paneTitle, screenText: fixture.screen,
-            secondsSinceScreenChange: elapsed, observedAt: .distantPast
-          ),
-          liveness: .alive
-        ))
-    }
-    #expect(classify(elapsed: 0) == "working")
-    // 画面鮮度が失われると残存 done が勝つ。製品の 2.0 秒 polling で working 区間の
-    // 0.45% (443 中 2 フレーム) がこれに当たる — 許容する残差 (§12.2)。
-    #expect(classify(elapsed: 2.0) == "completed")
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: fixture.screen,
+        secondsSinceScreenChange: 0, observedAt: .distantPast
+      ),
+      liveness: .alive
+    )
+    // 画面鮮度が失われたときにこの画面がどう転ぶかは固定しない。現状は残存 done が勝って
+    // completed になるが、それは受け入れた残差 (§12.2) であって仕様ではない。
+    #expect(fixtureState(of: result) == "working")
   }
 
   @Test("画面変化から1.0秒までは Working、直後は Unknown")

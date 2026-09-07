@@ -392,20 +392,27 @@ func runScore(recordsDir: String, poll: Double) {
   }
 
   print("run: \(runs.count) 本 (\(runs.joined(separator: ", ")))")
-  print("poll: \(poll)s = \(step) フレーム間引き / 位相 \(step) 通りを合算")
+  print(
+    "poll: \(String(format: "%.2f", Double(step) * framePeriod))s = \(step) フレーム間引き / "
+      + "位相 \(step) 通りを合算")
   print("採点 \(scored) フレーム / GUARD \(scoreGuard)s で除外 \(excluded) フレーム")
   print("\n真値\tn\trecall\t危険率\t予測の内訳")
   for (truth, counts) in dist.sorted(by: { $0.key < $1.key }) {
     let n = counts.values.reduce(0, +)
     let hit = counts[truth.replacingOccurrences(of: "-left", with: "")] ?? 0
+    // 真値が Needs Attention でない区間に「危険な誤判定」は定義されない。0.000 と書くと
+    // 計測値に見えるので、測っていないことを "—" で示す。
     let danger =
       needsAttentionTruth.contains(truth)
-      ? counts.filter { !safeForAttention.contains($0.key) }.values.reduce(0, +) : 0
+      ? String(
+        format: "%.3f",
+        Double(counts.filter { !safeForAttention.contains($0.key) }.values.reduce(0, +))
+          / Double(n)) : "—"
     let breakdown = counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
       .map { "\($0.key)=\($0.value)" }.joined(separator: " ")
     print(
       "\(truth)\t\(n)\t\(String(format: "%.3f", Double(hit) / Double(n)))\t"
-        + "\(String(format: "%.3f", Double(danger) / Double(n)))\t\(breakdown)")
+        + "\(danger)\t\(breakdown)")
   }
 }
 
@@ -416,7 +423,19 @@ if args.contains("--score") {
     FileHandle.standardError.write(Data("--score には --records が要る\n".utf8))
     exit(1)
   }
-  runScore(recordsDir: recordsDir, poll: Double(option("--poll") ?? "") ?? framePeriod)
+  var poll = framePeriod
+  if let text = option("--poll") {
+    // 黙って丸めると、第三者が「表示された値で再現した」つもりで別の間隔を測ることになる。
+    guard let value = Double(text), value >= framePeriod,
+      abs((value / framePeriod).rounded() * framePeriod - value) < 1e-9
+    else {
+      FileHandle.standardError.write(
+        Data("--poll は記録間隔 \(framePeriod)s 以上のその倍数で指定する (例: 0.25, 0.5, 2.0)\n".utf8))
+      exit(1)
+    }
+    poll = value
+  }
+  runScore(recordsDir: recordsDir, poll: poll)
   exit(0)
 }
 

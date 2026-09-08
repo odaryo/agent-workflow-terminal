@@ -246,15 +246,20 @@ struct MainPaneRegistryIntegrationTests {
 
   /// 注入したテキストが実行され得る pane を作る。macOS 標準の bash 3.2 ではなく zsh を使うのは
   /// `TmuxTextInjection` の統合テストと同じ理由 (bracketed paste の有無で結果が変わるため)。
-  private static func shellSessionArguments(session: TmuxSessionName) -> [String] {
-    [
-      "new-session", "-d", "-s", session.rawValue, "-x", "200", "-y", "50",
-      "-e", "PS1=AWT_SHELL_READY> ", "/bin/zsh", "-f", "-i",
-    ]
+  /// prompt を `-e "PS1=..."` で渡さない理由は `ShellPromptZDotDir` に書いた (Issue #290)。
+  /// shell 起動は argv で渡す (1文字列にすると tmux が `default-shell` を挟む。理由は同上)。
+  private static func shellSessionArguments(
+    session: TmuxSessionName, shellArguments: [String]
+  ) -> [String] {
+    ["new-session", "-d", "-s", session.rawValue, "-x", "200", "-y", "50"] + shellArguments
   }
 
   private func makeShellSession(_ runner: TmuxRunner, session: TmuxSessionName) async throws {
-    _ = try await runner.run(arguments: Self.shellSessionArguments(session: session))
+    let prompt = try ShellPromptZDotDir()
+    defer { prompt.remove() }
+    _ = try await runner.run(
+      arguments: Self.shellSessionArguments(
+        session: session, shellArguments: prompt.shellArguments))
     try await waitForShellPrompt(runner, session: session)
   }
 
@@ -265,7 +270,7 @@ struct MainPaneRegistryIntegrationTests {
         arguments: ["list-panes", "-s", "-t", "=\(session.rawValue)", "-F", "#{pane_id}"])
       guard let first = panes.stdout.split(separator: "\n").first else { return false }
       return try await capturePane(runner, pane: PaneID(rawValue: String(first)))
-        .contains("AWT_SHELL_READY>")
+        .contains(ShellPromptZDotDir.marker)
     }
   }
 
@@ -287,11 +292,13 @@ struct MainPaneRegistryIntegrationTests {
   /// session の作成順も揃える。アプリでも Project Root の session (§12) が worktree session
   /// より先に居る。作り直した server がユーザーの `~/.tmux.conf` を読んでいないことも見る。
   private func restartServer(_ runner: TmuxRunner, session: TmuxSessionName) async throws {
+    let prompt = try ShellPromptZDotDir()
+    defer { prompt.remove() }
     try await IsolatedTmuxServer.restartServer(
       runner,
       creatingSessions: [
         ["new-session", "-d", "-s", "awt-operations", "sleep 300"],
-        Self.shellSessionArguments(session: session),
+        Self.shellSessionArguments(session: session, shellArguments: prompt.shellArguments),
       ])
     try await waitForShellPrompt(runner, session: session)
     let options = try await globalOptions(runner)

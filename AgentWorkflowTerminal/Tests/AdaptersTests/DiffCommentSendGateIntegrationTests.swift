@@ -115,7 +115,7 @@ struct DiffCommentSendGateIntegrationTests {
   private func makeWorkingPane(_ runner: TmuxRunner, label: String) async throws -> PaneID {
     let pane = try await makePane(
       runner, label: label,
-      command: #"/bin/sh -c "echo SLEEP_START; sleep 4; echo SLEEP_END; exec /bin/sh""#)
+      command: [#"/bin/sh -c "echo SLEEP_START; sleep 4; echo SLEEP_END; exec /bin/sh""#])
     try await waitUntil("前景の sleep が始まる") {
       try await capturePane(runner, pane: pane).contains("SLEEP_START")
     }
@@ -129,22 +129,27 @@ struct DiffCommentSendGateIntegrationTests {
   }
 
   /// prompt を出して待っている pane。prompt が見えていれば zle が動いている。
+  /// prompt を `-e "PS1=..."` で渡さない理由は `ShellPromptZDotDir` に書いた (Issue #290)。
   private func makeShellPane(_ runner: TmuxRunner, label: String) async throws -> PaneID {
-    let pane = try await makePane(runner, label: label, command: "/bin/zsh -f -i")
+    let prompt = try ShellPromptZDotDir()
+    defer { prompt.remove() }
+    let pane = try await makePane(runner, label: label, command: prompt.shellArguments)
     try await waitUntil("shell の prompt 表示") {
-      try await capturePane(runner, pane: pane).contains("AWT_SHELL_READY>")
+      try await capturePane(runner, pane: pane).contains(ShellPromptZDotDir.marker)
     }
     return pane
   }
 
+  /// `command` は tmux の argv。要素が1つなら tmux は既定 shell 経由で解釈し、複数なら
+  /// shell を挟まずそのまま exec する (実測)。
   private func makePane(
-    _ runner: TmuxRunner, label: String, command: String
+    _ runner: TmuxRunner, label: String, command: [String]
   ) async throws -> PaneID {
     let created = try await runner.run(
       arguments: [
         "new-session", "-d", "-s", "awt-send-gate-\(label)", "-x", "200", "-y", "50",
-        "-e", "PS1=AWT_SHELL_READY> ", "-P", "-F", "#{pane_id}", command,
-      ])
+        "-P", "-F", "#{pane_id}",
+      ] + command)
     return PaneID(rawValue: created.stdout.trimmingCharacters(in: .newlines))
   }
 

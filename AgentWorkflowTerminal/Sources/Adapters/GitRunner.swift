@@ -91,8 +91,11 @@ public struct GitReadCommand: Sendable, Equatable {
   ) -> Self {
     // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
     // --renames は git 2.18 以降。サポート下限の決定は Issue #83 に委ねる。
+    // `--ignore-submodules=none` が無いと `diff.ignoreSubmodules=all` で gitlink の変更が
+    // 出力から消える (git 2.50.1 で実測: 巻き戻した gitlink があるのに entry ゼロ)。
+    // `status` に `--submodule` は無い (実測: `error: unknown option`)。
     var arguments = [
-      "status", "--porcelain=v2", "--branch", "--renames",
+      "status", "--porcelain=v2", "--branch", "--renames", "--ignore-submodules=none",
       "--untracked-files=" + untrackedFiles.rawValue, "-z",
     ]
     if includeIgnored { arguments.append("--ignored=matching") }
@@ -155,10 +158,13 @@ public struct GitReadCommand: Sendable, Equatable {
   ) -> Self {
     // --no-abbrev は man page に無い否定形。--full-index は patch の index 行にしか効かず、
     // raw OID を config 非依存の完全長にする代替にはならない。
+    // `--ignore-submodules=none` は `diff.ignoreSubmodules=all` による gitlink 欠落を止める。
+    // `--submodule` は付けない — raw / numstat は gitlink を常に1件として出すため、
+    // `diff.submodule` の値で出力が変わらないことを実測した。
     diff(
       [
         "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat", "--no-abbrev",
-        "-z",
+        "--ignore-submodules=none", "-z",
       ],
       target,
       pathspec)
@@ -171,10 +177,15 @@ public struct GitReadCommand: Sendable, Equatable {
     // `--full-index` は `index` 行の OID を `core.abbrev` から切り離す (実測: `core.abbrev=4` で
     // `index 7898..422c`、`=12` で `index 78981922613b..422c2b7ab3b3`)。この OID は差分行を
     // 持たないファイルの同一性そのものなので、桁数が動くと §9.3 の変更検知が偽陽性・偽陰性を出す。
+    // `--submodule=short` が無いと `diff.submodule=diff` で **別 repository (submodule 内) の
+    // ファイル**が worktree の変更として並び、その行に付いたコメントがこの worktree に無い
+    // パスを指す (§9.2 の誤送信)。`=log` では gitlink の変更が解析不能な1件に化ける。
+    // `--ignore-submodules=none` は `diff.ignoreSubmodules=all` による gitlink 欠落を止める。
     let patched = diff(
       [
         "--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color",
-        "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
+        "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short",
+        "--ignore-submodules=none",
       ],
       target,
       pathspec)

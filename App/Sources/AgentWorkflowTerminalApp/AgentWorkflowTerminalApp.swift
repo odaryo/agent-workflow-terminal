@@ -73,7 +73,8 @@ private struct ProjectView: View {
           worktree: model.selectedWorktree,
           diffModels: model.diffModels,
           mainPanes: model.mainPanes,
-          agentPaneStates: model.agentPaneStates(of:)
+          agentPaneStates: model.agentPaneStates(of:),
+          keyboardFocus: keyboardFocus
         ) {
           TerminalTabs(model: model, keyboardFocus: keyboardFocus)
         }
@@ -189,10 +190,8 @@ private struct TerminalTabs: View {
     }
   }
 
-  /// 選択されていないタブへは `nil` を渡す。値を渡すと、そのタブが自分で first responder を
-  /// 取りに行けてしまう。
-  private func focusRequest(for identity: WorktreeIdentity) -> Int? {
-    model.selectedIdentity == identity ? keyboardFocus.request : nil
+  private func focusRequest(for identity: WorktreeIdentity) -> TerminalFocusRequest? {
+    keyboardFocus.focusRequest(isTabSelected: model.selectedIdentity == identity)
   }
 }
 
@@ -294,7 +293,7 @@ private struct WorktreeTab: View {
 private struct TerminalTabContent: View {
   let worktree: DetectedWorktree
   let tmuxExecutable: URL?
-  let focusRequest: Int?
+  let focusRequest: TerminalFocusRequest?
 
   var body: some View {
     if let tmuxExecutable {

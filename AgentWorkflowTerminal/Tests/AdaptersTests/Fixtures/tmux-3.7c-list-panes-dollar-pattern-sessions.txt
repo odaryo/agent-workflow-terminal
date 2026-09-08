@@ -1,0 +1,13 @@
+%5brace${x}0@5069991sleep0/dev/ttys038/private/tmpRyotaronoMacBook-Pro-10.local
+%15bsemoji\\\\$😀0@15070201sleep0/dev/ttys048/private/tmpRyotaronoMacBook-Pro-10.local
+%14bshebrew\\\\$א0@14070181sleep0/dev/ttys047/private/tmpRyotaronoMacBook-Pro-10.local
+%13bsletter\\\\$a0@13070161sleep0/dev/ttys046/private/tmpRyotaronoMacBook-Pro-10.local
+%6digit\\\\$10@6070011sleep0/dev/ttys039/private/tmpRyotaronoMacBook-Pro-10.local
+%7double$$0@7070031sleep0/dev/ttys040/private/tmpRyotaronoMacBook-Pro-10.local
+%12emoji$😀0@12070131sleep0/dev/ttys045/private/tmpRyotaronoMacBook-Pro-10.local
+%10hebrew$א0@10070091sleep0/dev/ttys043/private/tmpRyotaronoMacBook-Pro-10.local
+%11japanese$日0@11070111sleep0/dev/ttys044/private/tmpRyotaronoMacBook-Pro-10.local
+%3letter$a0@3069951sleep0/dev/ttys036/private/tmpRyotaronoMacBook-Pro-10.local
+%9symbol$-0@9070071sleep0/dev/ttys042/private/tmpRyotaronoMacBook-Pro-10.local
+%8terminal$0@8070051sleep0/dev/ttys041/private/tmpRyotaronoMacBook-Pro-10.local
+%4under$_0@4069971sleep0/dev/ttys037/private/tmpRyotaronoMacBook-Pro-10.local

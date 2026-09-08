@@ -38,11 +38,113 @@ jobs:
 
       # 経過時間とプロセス全体の CPU を測る AdaptersSerialTimingTests は、同一プロセス内で
       # 並行実行されると他テストの負荷を観測してしまうため分けて走らせる。
+      #
+      # run-swift-test.sh を挟むのは、job の timeout-minutes ではハングを cancel でしか
+      # 止められず、ログも成果物も残らないため (実測: run 34231972322 は 19 分無言のまま
+      # cancel され、どのテストで止まったか特定できなかった)。
       - name: Test
-        run: swift test --skip AdaptersSerialTimingTests
+        run: |
+          "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
+            --log "$RUNNER_TEMP/test-logs/build-and-test.log" \
+            --timeout 600 \
+            -- swift test --skip AdaptersSerialTimingTests
 
       - name: Test (serial, timing sensitive)
-        run: swift test --no-parallel --filter AdaptersSerialTimingTests
+        run: |
+          "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
+            --log "$RUNNER_TEMP/test-logs/build-and-test-serial.log" \
+            --timeout 300 \
+            -- swift test --no-parallel --filter AdaptersSerialTimingTests
+
+      # 成否にかかわらず保存する。条件付きにすると、書き間違えたときに一番必要な回のログが
+      # 消える (762 件中 1 件だけ落ちた回を 2 度取り逃している: Issue #272)。
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-build-and-test
+          path: ${{ runner.temp }}/test-logs/
+          # ビルド段階で落ちるとログが1件も無い。ここで二重に失敗させても情報は増えない。
+          if-no-files-found: warn
+
+  # 実 tmux / git / ripgrep を起動する統合テスト。既定の swift test では `.enabled(if:)` で
+  # 無効になっており、この job だけが AWT_*_INTEGRATION を渡す。tmux と ripgrep は runner
+  # イメージに無い (実測 2026-09-08: macos-15-arm64 の README にどちらも記載が無い) ため
+  # 導入に数分かかる。既存の Build & Test を遅くしないよう別 job にし、PR ごとに必ず走らせる。
+  integration-test:
+    name: Integration Test (real CLIs)
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: AgentWorkflowTerminal
+    env:
+      AWT_TMUX_INTEGRATION: "1"
+      AWT_GIT_INTEGRATION: "1"
+      AWT_RIPGREP_INTEGRATION: "1"
+      # 8 suite / 63 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
+      # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
+      AWT_INTEGRATION_FILTER: >-
+        TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|GitWorktreeDetectorIntegrationTests|RipgrepSearchIntegrationTests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install tmux and ripgrep
+        run: brew install tmux ripgrep
+
+      # 版数は固定せず runner の既定を使い、ログに残す。サポート下限版数が未決 (Issue #16) の
+      # 段階で pin すると、外界のドリフトを検出するというこの job の目的自体が消える。
+      - name: Show external CLI versions
+        run: |
+          tmux -V
+          git --version
+          rg --version
+
+      - name: Build
+        run: swift build --build-tests
+
+      # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは既存 job と
+      # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
+      - name: Test (integration enabled)
+        run: |
+          "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
+            --log "$RUNNER_TEMP/test-logs/integration-full.log" \
+            --timeout 900 \
+            -- swift test --skip AdaptersSerialTimingTests
+
+      # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
+      # これらの suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
+      - name: Test (integration suites only)
+        run: |
+          "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
+            --log "$RUNNER_TEMP/test-logs/integration-only.log" \
+            --timeout 900 \
+            -- swift test --filter "$AWT_INTEGRATION_FILTER"
+
+      - name: Verify integration suites actually ran
+        run: |
+          "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
+            --log "$RUNNER_TEMP/test-logs/integration-only.log" \
+            --min-tests 63 \
+            --suites 8
+
+      # テストが落ちた回ほど後始末の状態を知りたいので always で走らせる。
+      - name: Check for leftover servers and sockets
+        if: always()
+        run: "$GITHUB_WORKSPACE/scripts/check-integration-leftovers.sh"
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-integration
+          path: ${{ runner.temp }}/test-logs/
+          if-no-files-found: warn
 
   build-ios:
     name: Build (iOS Simulator)

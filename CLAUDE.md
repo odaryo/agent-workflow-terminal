@@ -136,6 +136,13 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 **Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k) because autocompact effectively never fires on a 1M window.
 
 - **One Issue, one Director session.** The Director ends every Issue's final report with an explicit one-line request to run `/clear`, before the next worktree is created. This cannot be automated and the rule exists because the manual step was being forgotten: nothing in Claude Code lets the model invoke `/clear` or `/compact` itself, hooks (`PreCompact` / `PostCompact` included) can observe compaction but not trigger it, and autocompact (`autoCompactEnabled` / `autoCompactWindow`, default on) only fires as the context nears its limit — which the measurements above show a 1M window never reaches. Never `/clear` mid-Issue: the reviewer round-trip needs the Director's memory of what was already measured and rejected.
+- **並列レーン運用では、監督が worktree を作る前にユーザーへ `/clear` を依頼する。** 監督 (main session) が
+  worktree を作って隣の pane のセッションへ Issue を割り当てる運用では、上のルールの順序が壊れる —
+  レーンが最終報告で `/clear` を要請した時点で、監督はもう次の worktree を作って次の Issue を渡している。
+  レーンは規約に従って停止し (実測: 3回要請して停止したまま)、あるいは待つのをやめて規約を外れる。
+  **順序は「レーンの完了報告 → 監督がユーザーへ `/clear` を依頼 → 打たれたのを確認 → 次の worktree を
+  作って割り当て」**。`/clear` 後のレーンは文脈を失うので、割り当てメッセージは Issue 番号・worktree の
+  パス・spec の在り処を含む自己完結した形にすること (spec が Issue コメントに載っていれば足りる)。
 - **Do not `--resume` a large session left idle for over an hour.** The 1-hour prompt cache has expired and the first request rewrites the entire history: measured $2.06–$2.51 for a 200–233k resume, against $0.43–$0.65 to prime a fresh one. Start a new session and re-read what you need.
 - **Never pass a `model:` override when calling a subagent on your own initiative.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`.
 - **Read-only exploration goes to `explorer`, not `general-purpose`** — restating the Director's role above, because in practice this is the rule that gets skipped.

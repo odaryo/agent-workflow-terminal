@@ -125,6 +125,41 @@ repository は毎回 `/private/tmp/awt-git-<UUID>` に作り、`defer` で削除
 いますが、統合テストはホストの git 設定から完全に隔離されてはいません。
 2026-09-05 に git 2.50.1 (Apple Git-155) で成功を確認しています。
 
+### ripgrep 統合テスト
+
+検索 (`RipgrepSearchIntegrationTests`) は実際の `rg` を起動します。こちらも独立した環境変数で
+切り替えます。
+
+```shell
+cd AgentWorkflowTerminal
+AWT_RIPGREP_INTEGRATION=1 swift test --filter RipgrepSearchIntegrationTests
+```
+
+### CI での統合テスト
+
+3つのフラグは CI の `Integration Test (real CLIs)` job がまとめて有効にします。tmux と ripgrep は
+macos-15 runner イメージに入っていないため、この job が `brew install` で導入します。**版数は
+固定せず runner の既定を使い、`tmux -V` / `git --version` / `rg --version` をログに残します。**
+サポート下限版数が未決 (Issue #16) の段階で pin すると、外界のドリフトを検出するというこの job の
+目的自体が消えるためです。
+
+skip は静かに起きます — 環境変数が無いと `.enabled(if:)` の suite は skip されますが
+`swift test` は成功で終わります (実測: フラグ無しでも `Test run with 63 tests in 8 suites passed`)。
+そのため job は統合 suite だけの実行結果を `scripts/check-integration-ran.sh` に掛け、skip 0 件と
+件数の下限を検査します。実行後には `scripts/check-integration-leftovers.sh` が、残存 socket・
+`-L awt-` の tmux server・fixture の一時ディレクトリが無いことを検査します
+(socket が残っている = 上記のとおり server の停止を確認できなかった、という異常)。
+
+テストの実行は `scripts/run-swift-test.sh` を経由します。job の `timeout-minutes` はハングを
+cancel でしか止められず、ログも成果物も残りません。このスクリプトは上限時間を過ぎた実行を
+スタック採取のうえ失敗 (exit 124) させ、出力を artifact として残します。
+
+**タイムアウトした回のログは末尾が欠けます。** 子プロセスの stdio はブロックバッファで、
+TERM/KILL では flush されないためです (実測: ハングするテスト1件だけの回のログは 98 バイトで、
+テスト進行の行は1行も残らない)。`tee` でも同じなので出力方法の選択とは無関係で、止まった箇所の
+手掛かりは同時に保存される `<log>.stacks.txt` の側にあります (実測でハングしたテスト名と
+行番号まで出ます)。
+
 ## Lint / Format
 
 repository ルートの設定ファイルを使います。ツール本体はこのリポジトリでは配布していません。

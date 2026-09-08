@@ -116,8 +116,19 @@ enum IsolatedTmuxServer {
     let serverPID = read.flatMap {
       pid_t($0.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
-    var serverWasStopped =
-      (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil
+    var serverWasStopped: Bool
+    do {
+      _ = try await runner.run(arguments: ["kill-server"], timeout: .seconds(1))
+      serverWasStopped = true
+    } catch let error as TmuxRunnerError where error.isServerAbsent {
+      // server が既に消えているのは停止の最良の結果であって失敗ではない。ここを失敗と同じに
+      // 扱うと、テスト自身が最後の pane を閉じて server を終わらせる回 (awt-close-last-*) が
+      // 成功したまま socket を残し、後始末検査が緑の回に落ちる。
+      serverWasStopped = true
+    } catch {
+      // timeout や実行失敗はここ。不在を確認できていないので socket は残す。
+      serverWasStopped = false
+    }
     if !serverWasStopped, let serverPID {
       serverWasStopped = terminate(serverPID)
     }

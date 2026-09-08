@@ -1,0 +1,8 @@
+recorded_at	2026-09-08T10:10:56Z
+note	Issue #217 の採り直し (claude composite のみ)。versions.tsv は 2.1.259 の記録として残す
+macos	26.5.2 (25F84)
+arch	arm64
+tmux	tmux 3.4
+claude	2.1.263 (Claude Code)
+tmux_socket	awt-217-gate3
+capture	tmux capture-pane -e -p

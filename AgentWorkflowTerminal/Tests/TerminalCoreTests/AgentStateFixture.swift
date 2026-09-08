@@ -5,16 +5,21 @@ import Testing
 
 struct AgentStateFixture: Decodable {
   let source: String
+  let expectedState: String
   let acceptableStates: [String]
   let paneTitle: String
   let secondsSinceScreenChange: TimeInterval?
   let processNames: [String]
   let screen: String
+  /// `capture-pane -e -p` を採った fixture だけが持つ。属性なしで採った旧 fixture では
+  /// `nil` になり、実路で属性を観測できなかった場合と同じ入力になる。
+  let styledScreen: String?
 
   var signals: AgentSignals {
     AgentSignals(
       paneTitle: paneTitle,
       screenText: screen,
+      styledScreenText: styledScreen,
       secondsSinceScreenChange: secondsSinceScreenChange,
       observedAt: Date(timeIntervalSince1970: 2)
     )

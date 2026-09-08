@@ -27,6 +27,9 @@ func option(_ name: String) -> String? {
 let recordsDir = option("--records")
 let tsvPath = option("--tsv") ?? "../evidence/replay-observations.tsv"
 let shouldDump = args.contains("--dump")
+/// 属性 (dim) を無かったことにして採点する。同じ記録で属性ありと無しを並べるため
+/// (Issue #217: 属性を持たない旧記録では replay で再採点できないことの対照)。
+let ignoresStyling = args.contains("--no-styled")
 /// 記録の間隔。生記録は 250ms 周期で、TSV から復元するときも同じ間隔で刻む。
 let framePeriod = 0.25
 
@@ -42,6 +45,9 @@ struct Frame {
   let ts: Double
   let title: String
   let screen: String?
+  /// `capture-pane -e -p` の生画面。属性を持たない旧記録では nil になり、
+  /// dim を使う判定は「属性が取れなかった」側へ落ちる (Issue #217)。
+  let screenEsc: String?
   /// pane 配下のプロセス名。recorder の `descendants()` は pane_pid 自身を含まないため、
   /// 製品の `TmuxAgentSignalSource.processTreeNames(of:rows:)` に合わせて
   /// `pane_current_command` を呼び出し側で足す。
@@ -72,6 +78,7 @@ func loadFrames(_ dir: URL) -> [Frame] {
     frames.append(
       Frame(
         ts: ts, title: fmt["pane_title"] as? String ?? "", screen: obj["screen"] as? String,
+        screenEsc: obj["screen_esc"] as? String,
         procNames: names, paneCommand: fmt["pane_current_command"] as? String ?? "",
         dead: (fmt["pane_dead"] as? String) == "1"))
   }
@@ -161,6 +168,7 @@ func replay(run: String, frames: [Frame]) -> [Observed] {
     }
     let signals = AgentSignals(
       paneTitle: f.title, screenText: f.screen,
+      styledScreenText: ignoresStyling ? nil : f.screenEsc,
       secondsSinceScreenChange: elapsed,
       observedAt: Date(timeIntervalSince1970: f.ts))
     switch ad.classify(signals: signals, liveness: liveness) {

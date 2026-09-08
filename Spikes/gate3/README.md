@@ -258,6 +258,53 @@ Codex に同じ依頼をすると、**質問を平文で出力してターンを
 | `TierA-combined` | 0.930 | 1.000 | 1.000 | 0.994 | 1.000 |
 | `S3-hooks` (Tier B) | unknown 1.000 | unknown 1.000 | unknown 1.000 | unknown 1.000 | unknown 1.000 |
 
+### 6.4 2.1.263 での採り直し (Issue #217)
+
+**属性 (SGR) に依存する信号は、既存の記録では再採点できない。** `scripts/recorder.py` は
+`capture-pane -p` で記録しており、文字属性が記録に写っていないためである。設計書 §12.5 が
+前提にしている「記録は保存されているため再採点は安価」は、**記録に写っている信号についてのみ**
+成り立つ。Issue #217 の dim 属性がこれに当たるので、recorder を `capture-pane -e -p` へ変え、
+**Claude Code の composite シナリオだけ**を現行版で採り直した (2026-09-08、5 run、
+`claude-composite-r{1..5}-2.1.263`)。2.1.259 の行 (§6.1) は版数ドリフトの記録として残す。
+
+版数は `evidence/versions-2.1.263.tsv` (claude 2.1.263 / tmux 3.4 / macOS 26.5.2 (25F84) arm64、
+socket `awt-217-gate3`)。記録の `screen` は `-e -p` から SGR / OSC を除いたもので `-p` と
+バイト等価 (40 組で 40/40。行末の rstrip に NBSP を含めると 31/40 へ落ちる。入力欄の区切りが
+その NBSP である)。生の `-e -p` は `screen_esc` に併記する。集計は
+`evidence/report-composite-2.1.263.json`。
+
+**analyze.py の分類器** (採点 4,503 フレーム / GUARD 除外 298):
+
+| 分類器 | idle | working | permission | completed | completed(放置) |
+|---|---|---|---|---|---|
+| | n=452 | n=443 | n=762 | n=1813 | n=1033 |
+| `S2-screen` | 1.000 | 0.081 | 1.000 | 1.000 | 1.000 |
+| `S2-screen-dim` (新) | 1.000 | 0.081 | 1.000 | 1.000 | 1.000 |
+| `TierA-combined` | 0.830 | 0.957 | 1.000 | 0.965 | 1.000 |
+
+`S2-screen-dim` は S2 へ「入力欄が dim でない非空 = 利用者が入力中なので `completed` /
+`idle` を主張しない」を足したもの。**この記録では S2 と 1 フレームも違わない** —
+driver が `send-keys` で即送信するため、入力途中の画面が真値区間に現れないからである。
+dim が効くのは、入力欄が空であることを Completed / Idle の条件にしている**製品の
+`ClaudeCodeAdapter`** 側で、そちらは `replay-swift --score` で採点する。
+
+**製品の Adapter** (`replay-swift --score --poll 2.0`、製品の観測間隔。`--no-styled` は
+属性を無かったことにして採点する対照):
+
+| 記録 / 入力 | idle | working | permission (危険率) | completed | completed(放置) |
+|---|---|---|---|---|---|
+| 2.1.259 記録 (属性なし) | 0.976 | 0.953 | 1.000 (0.000) | 0.978 | 1.000 |
+| 2.1.263 記録・dim 無視 | 0.978 | 0.955 | 1.000 (0.000) | **0.892** | **0.801** |
+| 2.1.263 記録・dim あり | 0.978 | 0.955 | 1.000 (0.000) | **0.978** | **1.000** |
+
+2.1.259 の行は §13.2 の k=2 行と一致する (この Issue の変更で旧記録の採点は 1 フレームも
+変わっていない。属性を持たない記録では dim ルールが発火しないため)。
+
+2.1.263 で Completed が落ちるのは、ターン完了後の入力欄に文脈サジェストが描かれ
+`^❯[ ]*$` に一致しなくなるためで、取りこぼしは**全て `unknown`** (危険な誤判定は
+増えていない: permission 危険率 0.000 のまま)。dim を空欄として扱うと 2.1.259 と同じ
+水準へ戻る。idle / working / permission は dim の有無で変わらない。
+
 ### 6.3 読み取れること
 
 1. **単独信号はどれか一つで必ず 100% 危険側へ倒れる。**
@@ -456,6 +503,12 @@ Spikes/gate3/scripts/m4-binding.sh                   # pane 紐付け
 Spikes/gate3/scripts/fallback-probe.sh               # 非 Agent の誤検出
 Spikes/gate3/scripts/m4-polling-cost.sh              # 観測コスト
 python3 Spikes/gate3/scripts/analyze.py Spikes/gate3/evidence/runs/*-composite-r*
+
+# §6.4 (Issue #217): 属性つきで採り直し、製品の Adapter で dim あり / 無しを並べる
+G3_SOCKET=awt-217-gate3 Spikes/gate3/scripts/run-suite.sh claude composite 5
+cd Spikes/gate3/replay-swift
+swift run -c release replay-swift --score --records <新記録> --poll 2.0
+swift run -c release replay-swift --score --records <新記録> --poll 2.0 --no-styled
 ```
 
 `G3_WORK` で作業ディレクトリを、`G3_SOCKET` で tmux socket を差し替えられる。

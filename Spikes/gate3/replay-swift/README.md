@@ -12,7 +12,12 @@ swift run -c release replay-swift                        # 追跡済みの遷移
 swift run -c release replay-swift --records ../evidence/runs        # 生記録から計算
 swift run -c release replay-swift --records ../evidence/runs --dump # 遷移列 TSV を作り直す
 swift run -c release replay-swift --score --records ../evidence/runs --poll 2.0  # 混同行列
+swift run -c release replay-swift --score --records <記録> --poll 2.0 --no-styled # 属性なしの対照
 ```
+
+`--no-styled` は記録の `screen_esc` (`capture-pane -e -p`) を無かったことにして採点する。
+属性を持つ記録と持たない記録を同じ土俵で比べるためのもので、結果は属性なしで記録した
+run を採点した場合と一致する (README.md §6.4)。
 
 ## `--score` — 真値区間との突き合わせ
 

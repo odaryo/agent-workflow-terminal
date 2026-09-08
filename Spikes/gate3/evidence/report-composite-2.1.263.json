@@ -1,0 +1,443 @@
+{
+ "runs": [
+  "claude-composite-r1-2.1.263",
+  "claude-composite-r2-2.1.263",
+  "claude-composite-r3-2.1.263",
+  "claude-composite-r4-2.1.263",
+  "claude-composite-r5-2.1.263"
+ ],
+ "frames_scored": 4503,
+ "frames_excluded_guard": 298,
+ "report": {
+  "claude": {
+   "S1-proc-honest": {
+    "completed": {
+     "n": 1813,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 1813
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 452
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 443
+     }
+    }
+   },
+   "S1-proc-naive": {
+    "completed": {
+     "n": 1813,
+     "recall": 0.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 1813
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 0.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 452
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 0.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 1.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.016,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 436,
+      "working": 7
+     }
+    }
+   },
+   "S2-screen": {
+    "completed": {
+     "n": 1813,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1813
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 452
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 1.0,
+     "dist": {
+      "permission": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.081,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 371,
+      "working": 36,
+      "completed": 36
+     }
+    }
+   },
+   "S2-screen-dim": {
+    "completed": {
+     "n": 1813,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1813
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 452
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 1.0,
+     "dist": {
+      "permission": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.081,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 371,
+      "working": 36,
+      "completed": 36
+     }
+    }
+   },
+   "S3-hooks": {
+    "completed": {
+     "n": 1813,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1813
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 452
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 1.0,
+     "dist": {
+      "permission": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "working": 443
+     }
+    }
+   },
+   "S5-activity": {
+    "completed": {
+     "n": 1813,
+     "recall": 0.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 1750,
+      "working": 63
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 0.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 0.83,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 375,
+      "working": 77
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 0.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 1.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 749,
+      "working": 13
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.957,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "working": 424,
+      "idle": 19
+     }
+    }
+   },
+   "S5-title": {
+    "completed": {
+     "n": 1813,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 1813
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 452
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.0,
+     "unknown_rate": 1.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "unknown": 443
+     }
+    }
+   },
+   "TierA-combined": {
+    "completed": {
+     "n": 1813,
+     "recall": 0.965,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1750,
+      "working": 63
+     }
+    },
+    "completed-left": {
+     "n": 1033,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "completed": 1033
+     }
+    },
+    "idle": {
+     "n": 452,
+     "recall": 0.83,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "idle": 375,
+      "working": 77
+     }
+    },
+    "permission": {
+     "n": 762,
+     "recall": 1.0,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 1.0,
+     "dist": {
+      "permission": 762
+     }
+    },
+    "working": {
+     "n": 443,
+     "recall": 0.957,
+     "unknown_rate": 0.0,
+     "dangerous_rate": 0.0,
+     "attention_rate": 0.0,
+     "dist": {
+      "working": 424,
+      "idle": 19
+     }
+    }
+   }
+  }
+ }
+}

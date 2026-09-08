@@ -7,7 +7,7 @@ import Testing
 struct AgentAdapterTests {
   private let signals = AgentSignals(
     paneTitle: "",
-    screenText: "stale screen",
+    screenText: "stale screen", styledScreenText: nil,
     secondsSinceScreenChange: 0,
     observedAt: Date(timeIntervalSince1970: 1)
   )
@@ -296,7 +296,7 @@ private actor KnownThenFailingSignalSource: AgentSignalSource {
     guard !hasReturnedSignals else { throw ObservationFailure.failed }
     hasReturnedSignals = true
     return AgentSignals(
-      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on",
+      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on", styledScreenText: nil,
       secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
     )
   }
@@ -316,7 +316,7 @@ private actor ThresholdRecordingSignalSource: AgentSignalSource {
   ) async throws -> AgentSignals {
     recordedMinimumChangedLines.append(minimumChangedLines)
     return AgentSignals(
-      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on",
+      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on", styledScreenText: nil,
       secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
     )
   }

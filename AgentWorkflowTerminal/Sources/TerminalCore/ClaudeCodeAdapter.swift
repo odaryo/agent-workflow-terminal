@@ -28,8 +28,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     if screen.contains("Enter to select ·") && screen.contains("Type something.") {
       return observation(.question, signals)
     }
+    let inputBox = Self.inputBoxContent(screen: screen, styled: signals.styledScreenText)
+    // プレースホルダ (文脈サジェスト) が出ている入力欄は、利用者が何も打っていないので
+    // 空欄と同じに扱う。plain text では入力済みテキストと区別できず、dim 属性だけが手掛かりである
+    // (Issue #217 の実測: 区切りはどちらも NBSP で、サジェストに固定接頭辞は無い)。
     let hasEmptyInputPrompt =
       screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
+      || inputBox == .placeholder
     let hasSubmittedPrompt =
       screen.range(of: #"(?m)^❯[  ]*\S"#, options: .regularExpression) != nil
     if let elapsed = signals.secondsSinceScreenChange,
@@ -51,7 +56,55 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     {
       return observation(.completed, signals)
     }
+    // 属性が取れていれば定まったかもしれない判定を、adapter の見立て不能へ丸めない (§12.4.4)。
+    if inputBox == .attributesUnavailable {
+      return unknown(signals, reason: .screenAttributesUnavailable)
+    }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  /// 入力欄の行を dim で分類する。
+  ///
+  /// - Important: 入力欄の行は `❯` の直後が NBSP であることで会話履歴の
+  ///   `❯ <送信済み>` 行 (区切りは半角スペース) と分けられる (2.1.259 / 2.1.263 で実測)。
+  ///   見つからなければ `.absent` を返し、呼び出し側は従来の plain ルールだけで判定する。
+  static func inputBoxContent(screen: String, styled: String?) -> InputBoxContent {
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
+    guard let index = lines.lastIndex(where: { $0.hasPrefix("❯ ") }) else { return .absent }
+    let content = lines[index].dropFirst().drop { $0 == " " || $0 == " " }
+    guard !content.isEmpty else { return .empty }
+    guard let styled else { return .attributesUnavailable }
+    let parsed = StyledScreenText(capturedWithEscapeSequences: styled)
+    guard parsed.containsAnyStyling, index < parsed.lines.count,
+      parsed.lines[index].text == lines[index]
+    else {
+      return .attributesUnavailable
+    }
+    let line = parsed.lines[index]
+    var offset = 0
+    while offset < line.characters.count, Self.isPromptSeparator(line.characters[offset]) {
+      offset += 1
+    }
+    for position in offset..<line.characters.count
+    where line.characters[position] != " " && !line.isDim[position] {
+      return .typed
+    }
+    return .placeholder
+  }
+
+  private static func isPromptSeparator(_ character: Character) -> Bool {
+    character == "❯" || character == " " || character == " "
+  }
+
+  enum InputBoxContent {
+    case empty
+    /// 文脈サジェスト。利用者の入力ではない。
+    case placeholder
+    case typed
+    /// 属性が無いため placeholder と typed を分けられない。
+    case attributesUnavailable
+    /// 入力欄の行自体が画面に無い (permission / question のダイアログなど)。
+    case absent
   }
 
   private func observation(_ state: AgentState, _ signals: AgentSignals) -> AgentObservationResult {

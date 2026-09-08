@@ -16,13 +16,18 @@ public enum TmuxCapturePaneError: Error, Sendable, Equatable {
 public struct TmuxCapturePane: Sendable {
   private let runner: TmuxRunner
   public init(runner: TmuxRunner) { self.runner = runner }
-  public func capture(_ pane: PaneID) async throws(TmuxCapturePaneError) -> String {
+  /// 返り値は SGR / OSC を含む生の画面。文字属性 (dim) が Claude Code の入力欄で
+  /// プレースホルダと入力済みテキストを分ける唯一の手掛かりであり、plain 側は
+  /// これを剥がして作る (Issue #217)。`-p` と併せて2回起動しないのは §7.5 の観測コスト制約。
+  public func captureWithEscapeSequences(
+    _ pane: PaneID
+  ) async throws(TmuxCapturePaneError) -> String {
     guard Self.isWellFormed(pane) else {
       throw .invalidPaneID(pane)
     }
     do {
       return try await runner.run(
-        arguments: ["capture-pane", "-p", "-t", pane.rawValue]
+        arguments: ["capture-pane", "-e", "-p", "-t", pane.rawValue]
       ).stdout
     } catch {
       throw .tmux(error)
@@ -86,13 +91,16 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
       screenChangeTracker.forget(paneID: pane.id)
       throw TmuxAgentSignalSourceError.paneNotFound(pane.id)
     }
-    let screen: String?
+    let styledScreen: String?
     do {
-      screen = try await capturePane.capture(pane.id)
+      styledScreen = try await capturePane.captureWithEscapeSequences(pane.id)
     } catch {
       screenChangeTracker.forget(paneID: pane.id)
-      screen = nil
+      styledScreen = nil
     }
+    // 画面変化の計測は plain 側で行う。属性だけが変わったフレーム (spinner の色替えなど) を
+    // 出力とみなすと `secondsSinceScreenChange` が 0 に張り付く。
+    let screen = styledScreen.map { StyledScreenText(capturedWithEscapeSequences: $0).plainText }
     // await 後に採ることで、actor 再入時も古い時刻で changedAt を上書きしない。
     let capturedAt = ContinuousClock().now
     let observedAt = Date()
@@ -101,7 +109,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
         screen: $0, paneID: pane.id, at: capturedAt, minimumChangedLines: minimumChangedLines)
     }
     return AgentSignals(
-      paneTitle: status.title, screenText: screen,
+      paneTitle: status.title, screenText: screen, styledScreenText: styledScreen,
       secondsSinceScreenChange: secondsSinceScreenChange,
       observedAt: observedAt
     )

@@ -19,7 +19,7 @@ struct CodexAdapterTests {
   @Test("title 由来の操作待ち category を保つ")
   func titleAttention() {
     let signals = AgentSignals(
-      paneTitle: "[ . ] Action Required | worktree", screenText: "stale",
+      paneTitle: "[ . ] Action Required | worktree", screenText: "stale", styledScreenText: nil,
       secondsSinceScreenChange: nil, observedAt: .distantPast
     )
     guard

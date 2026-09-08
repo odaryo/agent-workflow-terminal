@@ -126,6 +126,81 @@ def c_screen(rec, agent, prev):
     return "unknown"
 
 
+# Issue #217: 入力欄の行。区切りは NBSP で、会話履歴の "❯ <送信済み>" 行 (半角スペース) と分かれる。
+INPUT_BOX = re.compile("(?m)^\u276f[\u00a0 ]*(?P<content>.*)$")
+DIM_RUN = re.compile("\x1b\\[[0-9;:]*m")
+
+
+def input_box_state(rec) -> str:
+    """入力欄が空 / プレースホルダ (dim) / 入力中 のどれかを、属性から決める。
+
+    plain text には手掛かりが無い (プレースホルダも入力済みも区切りは同じ NBSP、
+    サジェストに固定接頭辞も無い)。属性なしで記録した run では "unknown" を返す。
+    """
+    esc = rec.get("screen_esc")
+    if esc is None:
+        return "unknown"
+    box = None
+    for line in strip_escapes_keep_sgr(esc).split("\n"):
+        if DIM_RUN.sub("", line).startswith("\u276f\u00a0"):
+            box = line
+    if box is None:
+        return "absent"
+    dim = False
+    seen_marker = False
+    for token in re.split("(\x1b\\[[0-9;:]*m)", box):
+        if token.startswith("\x1b["):
+            dim = apply_sgr(token[2:-1], dim)
+            continue
+        for character in token:
+            if character in "\u276f \u00a0":
+                seen_marker = seen_marker or character == "\u276f"
+                continue
+            if not seen_marker:
+                continue
+            return "placeholder" if dim else "typing"
+    return "empty"
+
+
+def apply_sgr(parameters: str, dim: bool) -> bool:
+    fields = parameters.split(";")
+    index = 0
+    while index < len(fields):
+        field = fields[index]
+        index += 1
+        if ":" in field:
+            continue
+        code = int(field) if field.isdigit() else (0 if field == "" else -1)
+        if code in (0, 22):
+            dim = False
+        elif code == 2:
+            dim = True
+        elif code in (38, 48, 58) and index < len(fields):
+            kind = fields[index]
+            index += 1
+            index += 1 if kind == "5" else (3 if kind == "2" else 0)
+    return dim
+
+
+def strip_escapes_keep_sgr(text: str) -> str:
+    """OSC だけ落として SGR は残す (入力欄の dim を読むため)。"""
+    return OSC_ONLY.sub("", text)
+
+
+OSC_ONLY = re.compile("\x1b\\][^\x07\x1b]*(?:\x07|\x1b\\\\)")
+
+
+def c_screen_dim(rec, agent, ctx):
+    """S2 + dim (Issue #217)。利用者が入力中の画面で completed / idle を主張しない。
+
+    claude 以外は S2 と同じ。属性を持たない記録では S2 と一致する。
+    """
+    state = c_screen(rec, agent, ctx)
+    if agent != "claude" or state not in ("completed", "idle"):
+        return state
+    return "unknown" if input_box_state(rec) == "typing" else state
+
+
 def c_tier_a(rec, agent, ctx):
     """Tier A の組み合わせ。
 
@@ -173,6 +248,7 @@ CLASSIFIERS = {
     "S5-activity": c_activity,
     "S5-title": c_title,
     "S2-screen": c_screen,
+    "S2-screen-dim": c_screen_dim,
     "TierA-combined": c_tier_a,
     "S3-hooks": c_hooks,
 }

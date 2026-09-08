@@ -54,6 +54,10 @@ public enum UnknownReason: String, Sendable, Hashable, Codable {
   case adapterUndetermined
   case observationFailed
   case livenessUnavailable
+  /// 画面は取れたが、判定に要る文字属性 (SGR) が観測できなかった場合。属性が無いと
+  /// Claude Code の入力欄はプレースホルダと入力済みテキストを区別できない
+  /// (Issue #217 の実測: plain text 側に手掛かりが存在しない)。
+  case screenAttributesUnavailable
 }
 
 public enum AgentLiveness: String, Sendable, Hashable, Codable {
@@ -65,17 +69,22 @@ public enum AgentLiveness: String, Sendable, Hashable, Codable {
 public struct AgentSignals: Sendable, Hashable, Codable {
   public let paneTitle: String
   public let screenText: String?
+  /// `capture-pane -e -p` の生出力。`screenText` はこれから SGR / OSC を除いたもので、
+  /// 両者は同じ1回の捕捉に由来する (tmux 起動回数は増やさない。§7.5)。
+  /// `nil` は属性を観測できなかったことを表し、`screenText` が空であることとは別物。
+  public let styledScreenText: String?
   /// pane の `capture-pane` 画面が最後に変化してからの秒数。window 単位の
   /// `window_activity` は使わない (Spikes/gate3/README.md §3.3、§3.4)。
   public let secondsSinceScreenChange: TimeInterval?
   public let observedAt: Date
 
   public init(
-    paneTitle: String, screenText: String?, secondsSinceScreenChange: TimeInterval?,
-    observedAt: Date
+    paneTitle: String, screenText: String?, styledScreenText: String?,
+    secondsSinceScreenChange: TimeInterval?, observedAt: Date
   ) {
     self.paneTitle = paneTitle
     self.screenText = screenText
+    self.styledScreenText = styledScreenText
     self.secondsSinceScreenChange = secondsSinceScreenChange
     self.observedAt = observedAt
   }

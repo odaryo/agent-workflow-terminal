@@ -41,7 +41,12 @@ wait_ready() {
         if printf '%s' "$s" | grep -q 'Yes, I trust this folder'; then
           g3_tmux send-keys -t "$win" Down; sleep 0.3; g3_tmux send-keys -t "$win" Enter; sleep 3; continue
         fi
-        printf '%s' "$s" | grep -qE '(manual|auto|plan) mode on' && return 0 ;;
+        # permission シナリオは auto mode では発生しない。2.1.263 は設定によっては
+        # --permission-mode default でも auto で起動するため、manual へ送り戻す (Issue #217)。
+        if printf '%s' "$s" | grep -qE '(auto|plan) mode on'; then
+          g3_tmux send-keys -t "$win" BTab; sleep 0.5; continue
+        fi
+        printf '%s' "$s" | grep -q 'manual mode on' && return 0 ;;
       codex)
         if printf '%s' "$s" | grep -q 'Yes, continue'; then
           g3_tmux send-keys -t "$win" Enter; sleep 3; continue

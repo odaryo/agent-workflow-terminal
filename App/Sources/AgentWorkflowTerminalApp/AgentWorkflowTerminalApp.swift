@@ -69,8 +69,10 @@ private struct ProjectView: View {
       } else {
         ViewerDrawerView(
           layout: $model.viewerDrawerLayout,
-          worktreeRoot: model.selectedWorktreeRoot,
-          diffModels: model.diffModels
+          worktree: model.selectedWorktree,
+          diffModels: model.diffModels,
+          mainPanes: model.mainPanes,
+          agentPaneStates: model.agentPaneStates(of:)
         ) {
           TerminalTabs(model: model)
         }

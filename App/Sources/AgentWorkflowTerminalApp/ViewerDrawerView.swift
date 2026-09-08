@@ -10,10 +10,14 @@ import TerminalCore
 struct ViewerDrawerView<Terminal: View>: View {
   @Binding var layout: ViewerDrawerLayout
   /// `.code` / `.diff` ペインが起点にする worktree。選択中のタブが無い間は `nil`。
-  let worktreeRoot: URL?
+  let worktree: DetectedWorktree?
   /// Drawer の開閉より長く生きる必要がある Diff の状態 (§9.1.1 の base branch 記憶と
   /// §9.3 の過去 snapshot) を持つ。
   let diffModels: DiffViewerModelStore
+  /// Diff コメントの送信先 (§9.2 / §12.7)。
+  let mainPanes: MainPaneCoordinator
+  /// 候補 pane に Agent の印を付けるための観測経路。無ければ印の無い一覧になる。
+  let agentPaneStates: (WorktreeIdentity) -> AsyncStream<[PaneAgentState]>?
   @ViewBuilder let terminal: () -> Terminal
 
   @State private var requestedInlineDrawerWidth = ViewerDrawerMetrics.defaultDrawerWidth
@@ -121,6 +125,10 @@ struct ViewerDrawerView<Terminal: View>: View {
     .frame(minWidth: 160, minHeight: 160)
   }
 
+  private var worktreeRoot: URL? {
+    worktree.map { URL(fileURLWithPath: $0.worktreePath) }
+  }
+
   @ViewBuilder
   private func paneContent(_ content: ViewerContent) -> some View {
     switch content {
@@ -133,9 +141,14 @@ struct ViewerDrawerView<Terminal: View>: View {
         unavailable(content)
       }
     case .diff:
-      if let worktreeRoot {
-        DiffViewerPane(model: diffModels.model(for: worktreeRoot))
-          .id(worktreeRoot)
+      if let worktree, let worktreeRoot {
+        DiffViewerPane(
+          model: diffModels.model(for: worktreeRoot),
+          mainPane: mainPanes,
+          worktree: worktree.identity,
+          agentPaneStates: { agentPaneStates(worktree.identity) }
+        )
+        .id(worktreeRoot)
       } else {
         unavailable(content)
       }

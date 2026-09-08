@@ -143,6 +143,22 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 - **打鍵の計測で Enter を送らない。** 修正前のビルドでは、コメント欄へ打ったつもりの文字列が生きた
   shell のプロンプトへ積まれていた。`verify-app-ui.sh type` は改行を含む文字列をコードで拒否する。
 
+**外部 CLI を計測するときの作法** (#290 の実測による)。
+
+- **tmux は未知の format 名をエラーにせず空文字にする。** `#{pane_bracket_paste}` は実在しないが、
+  `display-message -p` は空文字を返し、`#{?pane_bracket_paste,ON,off}` は `off` を返す — 存在しない
+  format 名を渡した対照実験と**完全に同じ挙動**である。つまり書き間違えた format は「観測できた false」
+  として静かに通り、そこから導いた結論が監督の方針判断まで届く (#290 で実際に起きた)。**format を
+  観測に使う前に、`list-formats` に在ることと、でたらめな名前が同じ値を返さないことを確かめること。**
+- **コードベースが既に知っている制約を先に読む。** 上の件は `TmuxTextInjection.swift` の
+  「アプリ側が 2004 を立てているかは tmux 3.4 の format に無く、注入側から観測できない」という注釈と、
+  統合テストが**それゆえ prompt を zle の代理観測にしている**という注釈が、どちらも先に書かれていた。
+  新しい観測手段を作る前に、対象のソースと既存テストの注釈を読むこと — 「観測できない」と分かっている
+  ものを観測しようとしていないか。
+- **外界の版数差は、想定より広いことがある。** #286 は「区切りが escape されない」として起票されたが、
+  実測では tmux 3.7c が**出力段の escape を一切行っていない** (`\ooo` / named escape / `\$` が全部)。
+  Issue 本文の記述を実測が上書きしたら、**Issue 側を訂正してから**進めること。
+
 **Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the legacy `P3 バグ改修` milestone (the parking lot, not the current P3) and do **not** count against the current phase. Promote findings when measured impact blocks a phase's acceptance criteria; data loss and incorrect input routing require evaluation even if everyday use has not reproduced them. The current P3–P5 and their acceptance criteria live in `docs/roadmap.md`. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; the parking lot prevents these from making a phase unbounded.
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.

@@ -2,6 +2,23 @@ import Darwin
 import Foundation
 import TerminalCore
 
+/// 注入先 pane の同一性。`%N` は tmux server の生存中しか一意でなく、`pane_pid` も PID 空間の
+/// 一周で再利用され得るため、3つ組で照合する (Issue #246)。値は登録時に観測したものをそのまま
+/// 持ち回り、`paste-buffer` と同じ tmux コマンドの中で比較する。
+public struct TmuxPaneIdentity: Sendable, Hashable {
+  public let pane: PaneID
+  /// tmux `#{pane_pid}`。
+  public let paneProcessID: Int32
+  /// tmux `#{pid}` (server の PID)。
+  public let serverProcessID: Int32
+
+  public init(pane: PaneID, paneProcessID: Int32, serverProcessID: Int32) {
+    self.pane = pane
+    self.paneProcessID = paneProcessID
+    self.serverProcessID = serverProcessID
+  }
+}
+
 public enum TmuxTextInjectionError: Error, Sendable, Equatable {
   /// `%N` 形式でない値。tmux へ渡す前に弾いた場合だけこれになる。
   case invalidPaneID(PaneID)
@@ -12,7 +29,13 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
   case unsafeControlCharacter(scalar: Unicode.Scalar, unicodeScalarOffset: Int)
   /// 注入テキストを載せる一時ファイルを作れなかった。
   case temporaryFileCreationFailed(path: String)
-  /// tmux 3.4 実測: 対象 pane が無いと exit 1 / stderr `can't find pane: %N\n`。1バイトも届かない。
+  /// 対象 pane が無い。1バイトも届かない。
+  ///
+  /// - Important: **これになるのは `inject(_:into pane:)` (同一性を照合しない経路) だけ。**
+  ///   同一性つきの経路では `if-shell -F -t %N` が対象の不在では失敗せず (実測: 存在しない
+  ///   pane を `-t` に渡しても条件 `1` は true を返す)、`#{pane_pid}` が空へ展開されて同一性
+  ///   条件が false になるため `paneIdentityMismatch` になる。
+  ///   tmux 3.4 実測の stderr は `can't find pane: %N\n` (exit 1)。
   case paneNotFound(PaneID)
   /// 対象 pane が pane mode にいたため送らなかった。1バイトも届いていない。
   ///
@@ -35,6 +58,17 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
   /// 消える一方、pane には0バイトしか届かない**。成功として返すと、呼び出し側が「送った」と
   /// 表示したまま本文が消える。
   case paneInputDisabled(PaneID)
+  /// 送信先が、登録したときの pane ではなくなっていた。1バイトも届いていない。
+  ///
+  /// 判定は `paste-buffer` と同じ tmux コマンドの中で行うため、判定と paste の間に pane が
+  /// 入れ替わる窓は無い (実測: `if-shell -F` の分岐で `#{pid}` と `#{pane_pid}` を比べると、
+  /// 不一致では buffer が消費されず1バイトも届かない)。
+  case paneIdentityMismatch(PaneID)
+  /// tmux server が動いていない。1バイトも届いていない。socket が残ったまま server が消えた
+  /// 場合と socket 自体が無い場合の両方を含む (判定は `TmuxRunnerError.isServerAbsent`)。
+  /// **送信先が別 pane になった**のとは別物なので混ぜない — ユーザーに「選び直せ」と言っても
+  /// 選ぶ候補が無い。
+  case serverNotRunning
   /// 上記へ分類しなかった失敗。終了コード・stdout・stderr を加工せずに保持する。
   /// tmux の非ゼロ終了を「正常状態」と「エラー」へ一般に分類するのは Issue #62 の担当。
   /// 例: 死んだ pane (`remain-on-exit`) は exit 1 / `target pane has exited` でここへ来る (実測)。
@@ -55,9 +89,11 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
 ///   Enter として配達される。同じアプリでも状態次第で結果が変わる (実測: bracketed paste に
 ///   対応した vim 9.1 でも、normal mode では 2004 が立っておらず、注入した `:!touch …` が
 ///   実行された)。したがって「Claude Code なら安全」のようなアプリ単位の判断は成り立たない。
-///   この型が塞ぐのは、tmux の format で観測できる `pane_in_mode` と `pane_input_off` だけで、
-///   **アプリ側が 2004 を立てているかは tmux 3.4 の format に無く、注入側から観測できない。**
-///   その範囲は呼び出し側でも判定できないため、残存リスクとして受け入れている。
+///   この型が gate で塞ぐのは `pane_in_mode` / `pane_input_off` と、`inject(_:into:)` に
+///   `TmuxPaneIdentity` を渡した場合の送信先の同一性で、いずれも `paste-buffer` と同じ
+///   コマンドの中で判定する。**アプリ側が 2004 を立てているかは tmux 3.4 の format に無く、
+///   注入側から観測できない。** その範囲は呼び出し側でも判定できないため、残存リスクとして
+///   受け入れている。
 /// - Important: **注入テキストは一時的にディスクへ載る。** `ProcessRunning` は設計上、子プロセスへ
 ///   stdin を渡さない (`ProcessRunner.swift`) ため `load-buffer -` が使えず、所有者だけが読める
 ///   一時ファイルを経由する。ファイルは `inject` を抜けるときに消すが、プロセスが SIGKILL 等で
@@ -92,6 +128,21 @@ public struct TmuxTextInjection: Sendable {
   /// (実測)。その副作用として、空文字列のときだけ `pane` の**状態も存在も**確かめない
   /// (`%N` 形式かどうかの検査は行う)。
   public func inject(_ text: String, into pane: PaneID) async throws(TmuxTextInjectionError) {
+    try await inject(text, into: pane, identity: nil)
+  }
+
+  /// 送信先が登録したときの pane のままであることを、`paste-buffer` と**同じコマンドの中で**
+  /// 確かめてから貼る (Issue #246 / #240)。クライアント側で先に確認してから撃つ形と違い、
+  /// 確認と paste の間に tmux server が入れ替わる窓が無い。
+  public func inject(
+    _ text: String, into identity: TmuxPaneIdentity
+  ) async throws(TmuxTextInjectionError) {
+    try await inject(text, into: identity.pane, identity: identity)
+  }
+
+  private func inject(
+    _ text: String, into pane: PaneID, identity: TmuxPaneIdentity?
+  ) async throws(TmuxTextInjectionError) {
     guard Self.isWellFormed(pane) else {
       throw .invalidPaneID(pane)
     }
@@ -100,7 +151,7 @@ public struct TmuxTextInjection: Sendable {
     }
     guard !text.isEmpty else { return }
 
-    let attempt = Attempt(pane: pane)
+    let attempt = Attempt(pane: pane, identity: identity)
     let fileURL = temporaryDirectory.appending(path: Self.resourceNamePrefix + attempt.token)
     try Self.writeOwnerOnly(text, to: fileURL)
     defer { try? FileManager.default.removeItem(at: fileURL) }
@@ -251,10 +302,13 @@ extension TmuxTextInjection {
   fileprivate struct Attempt {
     let token = UUID().uuidString
     let pane: PaneID
+    /// `nil` は同一性を照合しない注入 (呼び出し側が登録を持たない経路)。
+    let identity: TmuxPaneIdentity?
 
     var bufferName: String { TmuxTextInjection.resourceNamePrefix + token }
     private var copyModeSentinel: String { "awt-refused-copy-mode-" + token }
     private var inputDisabledSentinel: String { "awt-refused-input-off-" + token }
+    private var identitySentinel: String { "awt-refused-identity-" + token }
 
     /// 受け側 pane の状態判定と paste を tmux 側の1コマンドに載せる。クライアントで状態を読んでから
     /// 貼ると、その間に pane が copy-mode へ入る TOCTOU が残るため
@@ -274,10 +328,29 @@ extension TmuxTextInjection {
       let target = pane.rawValue
       let whenInputDisabled = "delete-buffer -b \(inputDisabledSentinel)"
       let paste = "paste-buffer -p -d -b \(bufferName) -t \(target)"
-      return [
+      let stateGate = [
         "if-shell", "-F", "-t", target, "#{pane_in_mode}",
         "delete-buffer -b \(copyModeSentinel)",
         "if-shell -F -t \(target) '#{pane_input_off}' '\(whenInputDisabled)' '\(paste)'",
+      ]
+      guard let identity else { return stateGate }
+      // 同一性は**いちばん外側**で見る。別 pane を指していたときに、その pane の copy-mode や
+      // 入力無効を理由として返すと、ユーザーへ間違った復旧操作を案内することになる
+      // (実測: 同一性不一致かつ copy-mode の pane では identity 側の sentinel が返る)。
+      //
+      // 入れ子が1段深くなるので引用符も1段増える。level 2 は単引用符、level 3 は二重引用符で
+      // 実測している。level 3 の中の `#{…}` が展開されずに内側の `if-shell` まで届くことも
+      // 同じ実測で確認した。
+      let condition =
+        "#{&&:#{==:#{pid},\(identity.serverProcessID)},"
+        + "#{==:#{pane_pid},\(identity.paneProcessID)}}"
+      let inner =
+        "if-shell -F -t \(target) \"#{pane_input_off}\" \"\(whenInputDisabled)\" \"\(paste)\""
+      return [
+        "if-shell", "-F", "-t", target, condition,
+        "if-shell -F -t \(target) '#{pane_in_mode}' 'delete-buffer -b \(copyModeSentinel)' "
+          + "'\(inner)'",
+        "delete-buffer -b \(identitySentinel)",
       ]
     }
 
@@ -285,10 +358,13 @@ extension TmuxTextInjection {
       guard case .commandFailed(let exitCode, _, let stderr) = error, exitCode == 1 else {
         return .tmux(error)
       }
+      // 「server が居ない」は形が2つあるので、判定は `TmuxRunnerError` の1箇所へ寄せる。
+      if TmuxRunnerError.isServerAbsent(stderr: stderr) { return .serverNotRunning }
       switch stderr {
       // mode 名は `TmuxTextInjection.labelling` が読み直して埋める。ここでは判別だけする。
       case "unknown buffer: \(copyModeSentinel)\n": return .paneInMode(pane, mode: "")
       case "unknown buffer: \(inputDisabledSentinel)\n": return .paneInputDisabled(pane)
+      case "unknown buffer: \(identitySentinel)\n": return .paneIdentityMismatch(pane)
       case "can't find pane: \(pane.rawValue)\n": return .paneNotFound(pane)
       default: return .tmux(error)
       }

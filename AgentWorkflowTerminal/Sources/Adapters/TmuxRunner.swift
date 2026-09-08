@@ -5,6 +5,36 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
   case binaryNotFound(candidates: [URL])
   case process(ProcessRunnerError)
   case commandFailed(exitCode: Int32, stdout: String, stderr: String)
+
+  /// この socket に tmux server が居ないことを表す失敗か。
+  ///
+  /// **形は2つあり、どちらも「居ない」を意味する** (tmux 3.4 実測、`<path>` は socket の絶対パス):
+  ///
+  /// | 状況 | stderr |
+  /// | --- | --- |
+  /// | socket は在るが server が消えた (kill / crash) | `no server running on <path>\n` |
+  /// | socket 自体が無い (未起動・削除済み) | `error connecting to <path> (No such file or directory)\n` |
+  ///
+  /// 片方だけを見る述語を各所に置くと、同じ事実に食い違う判定が生まれる (実際に起きた) ため、
+  /// 判定はこの1箇所に集める。
+  ///
+  /// - Note: 3つ目に `error connecting to <path> (Socket operation on non-socket)` があるが、
+  ///   これは「server が居ない」ではなく**その path が socket ではない**という設定の誤りなので
+  ///   含めない。含めると pane 一覧が黙って空になる。
+  /// - Note: locale では変わらない (`LC_ALL` / `LANG` を `C` / `ja_JP.UTF-8` / `fr_FR.UTF-8` に
+  ///   して stderr がバイト一致することを実測。tmux 3.4 は gettext を持たない)。
+  public var isServerAbsent: Bool {
+    guard case .commandFailed(let exitCode, _, let stderr) = self, exitCode == 1 else {
+      return false
+    }
+    return Self.isServerAbsent(stderr: stderr)
+  }
+
+  static func isServerAbsent(stderr: String) -> Bool {
+    if stderr.hasPrefix("no server running on ") { return true }
+    return stderr.hasPrefix("error connecting to ")
+      && stderr.hasSuffix(" (No such file or directory)\n")
+  }
 }
 
 /// どの tmux server へ接続するか。

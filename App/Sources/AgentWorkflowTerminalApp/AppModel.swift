@@ -310,12 +310,17 @@ final class AppModel: ObservableObject {
     return worktrees.first { $0.identity == selectedIdentity }?.detected
   }
 
-  /// Agent と判定済みの pane を候補一覧の印にするための観測経路 (設計書 §12.7)。Project Root は
-  /// `TaskWorktree` ではないので `nil` になり、その場合は印の無い候補一覧になる。
+  /// pane の Agent 状態の観測経路。候補一覧の印 (§12.7) と送信可否 (§9.2.2) の両方がこれを見る。
+  /// Project Root も含める — 含めないと Project Root タブで送信が恒久的に不可になる。
+  /// `nil` は「観測経路が無い」で、到達不能な worktree と tmux を使えない起動がここへ入る。
   func agentPaneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
-    guard let paneStates, let worktree = worktrees.first(where: { $0.identity == identity }),
-      worktree.detected.isReachable
+    guard let paneStates, let detected = detectedWorktree(of: identity), detected.isReachable
     else { return nil }
-    return paneStates(worktree)
+    return paneStates(detected)
+  }
+
+  private func detectedWorktree(of identity: WorktreeIdentity) -> DetectedWorktree? {
+    if let projectRoot, projectRoot.identity == identity { return projectRoot }
+    return worktrees.first { $0.identity == identity }?.detected
   }
 }

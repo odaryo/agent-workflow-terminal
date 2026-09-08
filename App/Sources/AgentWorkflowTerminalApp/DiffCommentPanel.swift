@@ -6,7 +6,7 @@ struct DiffCommentPanel: View {
   @ObservedObject var model: DiffViewerModel
   @ObservedObject var mainPane: MainPaneCoordinator
   let worktree: WorktreeIdentity
-  let agentPaneIDs: () -> Set<PaneID>
+  let agentPaneStates: () -> [PaneAgentState]?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -77,10 +77,10 @@ struct DiffCommentPanel: View {
           Task {
             await model.requestSend(
               .single(comment.id), worktree: worktree, mainPane: mainPane,
-              agentPaneIDs: agentPaneIDs())
+              agentPaneStates: agentPaneStates())
           }
         }
-        .disabled(model.isSending)
+        .disabled(model.isSending || isSendBlocked)
         Button("削除") { model.removeComment(comment.id) }
         Spacer(minLength: 0)
       }
@@ -88,6 +88,13 @@ struct DiffCommentPanel: View {
       .font(.caption)
     }
     .padding(.vertical, 2)
+  }
+
+  /// 理由は §9.2.2 の banner が1箇所で出すので、ここは無効化だけ行う。
+  private var isSendBlocked: Bool {
+    model.sendBlock(
+      registeredPane: mainPane.registeredPane(for: worktree),
+      agentPaneStates: agentPaneStates()) != nil
   }
 
   private static func anchorLabel(_ anchor: DiffCommentAnchor) -> String {
@@ -103,18 +110,15 @@ struct DiffCommentPanel: View {
 /// 置かない。「Agent」の印は選択の材料であって、選択そのものはユーザーが行う。
 struct MainPanePicker: View {
   let request: DiffViewerModel.PaneSelectionRequest
-  let choose: (PaneID) -> Void
+  let choose: (MainPaneCandidate) -> Void
   let cancel: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("送信先の pane を選ぶ").fontWeight(.medium)
-      if let missing = request.missingPane {
-        Label(
-          "登録されていた pane \(missing.rawValue) は現在存在しません。選び直してください。",
-          systemImage: "exclamationmark.triangle"
-        )
-        .font(.caption)
+      if let absence = request.absence {
+        Label(Self.absenceMessage(absence), systemImage: "exclamationmark.triangle")
+          .font(.caption)
       }
       if request.candidates.isEmpty {
         Text("この worktree の tmux session に生存 pane がありません。")
@@ -123,7 +127,7 @@ struct MainPanePicker: View {
       } else {
         List(request.candidates) { candidate in
           Button {
-            choose(candidate.id)
+            choose(candidate)
           } label: {
             HStack(spacing: 6) {
               Text(candidate.pane.id.rawValue).font(.caption.monospaced())
@@ -146,5 +150,20 @@ struct MainPanePicker: View {
     }
     .padding(12)
     .frame(width: 380)
+  }
+
+  /// `paneReplaced` で「存在しません」と書かない。その `%N` はすぐ下の候補一覧に並んでいる。
+  private static func absenceMessage(_ absence: MainPaneAbsence) -> String {
+    switch absence {
+    case .paneGone(let pane):
+      "登録されていた pane \(pane.rawValue) は現在存在しません。選び直してください。"
+    case .paneReplaced(let pane):
+      "登録されていた pane \(pane.rawValue) は、同じ ID の別の pane に置き換わっています "
+        + "(tmux server の再起動など)。選び直してください。"
+    case .identityUnverifiable(let pane):
+      // 「別 pane になった」と断定しない。確かめられなかっただけ。
+      "登録されていた pane \(pane.rawValue) が同じ pane のままか確かめられませんでした "
+        + "(tmux server の同一性を読めていません)。選び直してください。"
+    }
   }
 }

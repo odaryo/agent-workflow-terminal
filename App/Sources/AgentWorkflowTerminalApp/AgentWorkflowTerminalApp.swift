@@ -264,7 +264,7 @@ private struct WorktreeTab: View {
     .opacity(worktree.detected.isReachable ? 1 : 0.4)
     .task(id: worktree.identity) {
       guard worktree.detected.isReachable, let paneStates else { return }
-      let states = WorktreeRepresentativeStateFeed().states(from: paneStates(worktree))
+      let states = WorktreeRepresentativeStateFeed().states(from: paneStates(worktree.detected))
       for await state in states {
         representativeState = state
       }
@@ -276,15 +276,7 @@ private struct WorktreeTab: View {
     // 観測した状態に丸めることになる (設計書 §12.3 の `Unknown` と同じ理由)。
     guard worktree.detected.isReachable else { return "到達不能" }
     guard let representativeState else { return "Idle" }
-    return switch representativeState.state {
-    case .working: "Working"
-    case .question: "Question"
-    case .permission: "Permission"
-    case .completed: "Ready for Review"
-    case .error: "Error"
-    case .idle: "Idle"
-    case .unknown: "Unknown"
-    }
+    return representativeState.state.displayLabel
   }
 
   private var stateColor: Color {

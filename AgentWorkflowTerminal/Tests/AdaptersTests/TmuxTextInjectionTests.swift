@@ -36,6 +36,77 @@ struct TmuxTextInjectionTests {
     #expect(invocations.allSatisfy { !$0.arguments.contains("send-keys") })
   }
 
+  @Test("同一性つきの注入は、判定と paste を1つの tmux コマンドに載せる (Issue #246 / #240)")
+  func checksPaneIdentityInsideTheSameCommandAsThePaste() async throws {
+    let spy = ProcessRunnerSpy()
+    let injection = try makeInjection(spy)
+    let identity = TmuxPaneIdentity(pane: pane, paneProcessID: 4242, serverProcessID: 900)
+
+    try await injection.inject("hello\n", into: identity)
+
+    let invocations = await spy.invocations
+    #expect(invocations.count == 3)
+    let buffer = try #require(invocations.first?.arguments.dropFirst(5).first)
+    let token = String(buffer.dropFirst("awt-inject-".count))
+    // 期待値は実装の写しではなく、隔離ソケットで挙動を確かめた形をそのまま書いている
+    // (一致で paste / 不一致で buffer 残存、copy-mode と入力無効の sentinel が別々に返る)。
+    #expect(
+      invocations[1].arguments == prefix + [
+        "if-shell", "-F", "-t", "%3",
+        "#{&&:#{==:#{pid},900},#{==:#{pane_pid},4242}}",
+        "if-shell -F -t %3 '#{pane_in_mode}' "
+          + "'delete-buffer -b awt-refused-copy-mode-\(token)' "
+          + "'if-shell -F -t %3 \"#{pane_input_off}\" "
+          + "\"delete-buffer -b awt-refused-input-off-\(token)\" "
+          + "\"paste-buffer -p -d -b \(buffer) -t %3\"'",
+        "delete-buffer -b awt-refused-identity-\(token)",
+      ])
+  }
+
+  @Test("同一性の不一致は、mode や入力無効と別のエラーとして返る")
+  func reportsIdentityMismatchSeparately() async throws {
+    let spy = SentinelFailingSpy(sentinelPrefix: "awt-refused-identity-", paneMode: "")
+    let injection = try makeInjection(spy)
+    let identity = TmuxPaneIdentity(pane: pane, paneProcessID: 1, serverProcessID: 2)
+
+    await #expect(throws: TmuxTextInjectionError.paneIdentityMismatch(pane)) {
+      try await injection.inject("text\n", into: identity)
+    }
+  }
+
+  @Test(
+    "server 不在は2つの stderr のどちらでも同じ結果になる",
+    arguments: [
+      "no server running on /private/tmp/tmux-501/awt-x\n",
+      "error connecting to /private/tmp/tmux-501/awt-x (No such file or directory)\n",
+    ])
+  func reportsServerAbsenceForBothStderrForms(_ stderr: String) async throws {
+    let spy = ProcessRunnerSpy(
+      results: ["load-buffer": .init(exitCode: 1, stdout: "", stderr: stderr)])
+    let injection = try makeInjection(spy)
+
+    await #expect(throws: TmuxTextInjectionError.serverNotRunning) {
+      try await injection.inject("text\n", into: pane)
+    }
+  }
+
+  @Test("socket でない path は「server 不在」に含めない")
+  func doesNotTreatANonSocketPathAsAbsentServer() async throws {
+    // 実測の3つ目の形。path が socket でない設定の誤りであって、server が居ないのとは違う。
+    let stderr =
+      "error connecting to /private/tmp/tmux-501/awt-x (Socket operation on non-socket)\n"
+    let spy = ProcessRunnerSpy(
+      results: ["load-buffer": .init(exitCode: 1, stdout: "", stderr: stderr)])
+    let injection = try makeInjection(spy)
+
+    await #expect(
+      throws: TmuxTextInjectionError.tmux(
+        .commandFailed(exitCode: 1, stdout: "", stderr: stderr))
+    ) {
+      try await injection.inject("text\n", into: pane)
+    }
+  }
+
   @Test("tmux が読む時点の一時ファイルは所有者だけが読め、注入テキストそのものが入っている")
   func writesTemporaryFileReadableOnlyByOwner() async throws {
     let text = "レビューコメント $PATH `id` \"q\" '\\' \t🙂\n"

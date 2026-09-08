@@ -53,8 +53,25 @@ enum IsolatedTmuxServer {
     } catch {
       result = .failure(error)
     }
-    await stopServer(runner, serverPID: serverPID, socketURL: socketURL)
+    await stopServer(runner, socketURL: socketURL)
     return try result.get()
+  }
+
+  /// body が同じ socket で server を作り直すときの入り口。`kill-server` の後、`sessions` を
+  /// 渡された順に作る。
+  ///
+  /// helper に集めているのは、**server を起こす `new-session` に `-f /dev/null` が付かないと
+  /// 新しい server がユーザーの `~/.tmux.conf` を読む**ため (実測: 付けないと
+  /// `prefix C-q` / `status-position top` / `history-limit 10000`、付けると `C-b` / `bottom` /
+  /// `2000`)。rc は server の起動時にしか読まれないので、2本目以降には不要 (実測)。
+  static func restartServer(
+    _ runner: TmuxRunner,
+    creatingSessions sessions: [[String]]
+  ) async throws {
+    _ = try await runner.run(arguments: ["kill-server"])
+    for (index, arguments) in sessions.enumerated() {
+      _ = try await runner.run(arguments: (index == 0 ? noConfigFile : []) + arguments)
+    }
   }
 
   /// `#{pane_left}` / `#{pane_top}` は分割の向きを、`#{window_zoomed_flag}` は zoom 状態を、
@@ -85,13 +102,20 @@ enum IsolatedTmuxServer {
     ]
   }
 
-  /// `serverPID` が `nil` なのは `#{pid}` を読めなかったときだけで、その場合は `kill-server` の
-  /// 成否だけで判断する。
+  /// SIGTERM の対象は、**停止する直前に socket から読み直した** `#{pid}` だけにする。
+  /// `withServer` が生成時に得た PID は、body が `restartServer` で server を作り直すと死んだ
+  /// PID を指す。それを撃つと (a) 未再利用なら `ESRCH` を「停止した」と誤読して**生きている
+  /// server の socket を消し** (`-L` から到達できない orphan になる)、(b) 再利用済みなら
+  /// **無関係のプロセスへ SIGTERM** が飛ぶ。読み直しに失敗したときは撃たない。
   private static func stopServer(
     _ runner: TmuxRunner,
-    serverPID: pid_t?,
     socketURL: URL
   ) async {
+    let read = try? await runner.run(
+      arguments: ["display-message", "-p", "#{pid}"], timeout: .seconds(1))
+    let serverPID = read.flatMap {
+      pid_t($0.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
     var serverWasStopped =
       (try? await runner.run(arguments: ["kill-server"], timeout: .seconds(1))) != nil
     if !serverWasStopped, let serverPID {

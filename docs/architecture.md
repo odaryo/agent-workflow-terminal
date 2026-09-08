@@ -611,6 +611,8 @@ snapshot内では出所を区別して表示する。区別はcommit済み／sta
 **コメント送信の対象外**とする。解決が進むにつれて行が動くファイルにコメントanchor(§9.2)を張らない
 ためである。§9.2のcomment anchorが持つ6要素の構造自体は変更しない。
 
+**競合(unmerged)の情報源と本文 — 確定(2026-09-09)。** 競合ファイルの一覧は`git status --porcelain=v2`の`u`レコードから作る。`git diff`が出すcombined diff(`diff --cc`)と`git diff --cached`が出す`* Unmerged path`はどちらも通常のpatch形式と別物で、パーサは既知のレコードとして読み飛ばすだけにする — 「このパスは競合中」という一次情報はstatusが持っており、そちらだけを使う方が版数差に強い(git 2.50.1で実測: 競合中のパスは`git diff`／`git diff --cached`のどちらにも`diff --git`形式では現れず、unstaged側は`diff --cc`と`* Unmerged path`の両方を出す)。P2では**差分本文(combined diff)を表示せず**、一覧に競合中として出したうえで、開いたときに本文を表示しない理由を明示する。黙って空にしないことが要求であり、本文の表示方法は未確定として§25に残す。競合中でも`u`レコードのXY(例: `UU`／`AA`／`DU`)とstage 1/2/3のOIDは保持し、状態を「変更」へ丸めない(§12.3)。
+
 ### 9.2 コメント
 
 - Diffの行または範囲にローカルレビューコメントを付けられる。
@@ -1615,6 +1617,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Git／Diff
 
 - rename、binary Diff、submodule、LFS
+- 競合(unmerged)ファイルの差分本文(combined diff)の表示方法
 
 ### Mobile／remote
 

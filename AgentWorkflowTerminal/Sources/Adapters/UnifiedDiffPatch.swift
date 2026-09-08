@@ -20,6 +20,17 @@ public struct UnifiedDiffParseFailure: Error, Sendable, Equatable {
 public struct UnifiedDiffParseResult: Sendable, Equatable {
   public let files: [UnifiedDiffFile]
   public let failures: [UnifiedDiffParseFailure]
+  /// 競合として読み飛ばしたレコードのパスを、出力に現れた順で持つ。読み飛ばしても情報が
+  /// 失われていないことを示すためだけにあり、**一覧の生成には使わない** — 競合の一次情報は
+  /// `git status` の `u` レコードで、`DiffSnapshotBuilder` はそちらから区分を作る (§9.1.3)。
+  ///
+  /// 値は行から接頭辞を落とした残りそのままで、`git diff` の patch が path に施す quoting は
+  /// 解いていない (`-z` が無いため quote され得る)。突き合わせにも表示にも使わないため。
+  ///
+  /// そもそも status 側との突き合わせはできない: 同じパスでも記録元で表記が違い、`* Unmerged
+  /// path` は quote されないのに `diff --cc` header は quote する (git 2.50.1 で実測:
+  /// `* Unmerged path q"uote.txt` と `diff --cc "q\"uote.txt"`)。
+  public let unmergedPaths: [String]
 }
 
 /// `git diff --patch --no-color` の解析。1ファイルの異常で全体を失わない部分成功型
@@ -30,14 +41,29 @@ public enum UnifiedDiffPatch {
     if lines.last?.isEmpty == true { lines.removeLast() }
     var files: [UnifiedDiffFile] = []
     var failures: [UnifiedDiffParseFailure] = []
+    var unmergedPaths: [String] = []
     var index = 0
     while index < lines.count {
-      guard lines[index].hasPrefix("diff --git ") else {
+      let line = lines[index]
+      // 競合中のパスは patch 形式では出ない。unstaged 側は combined diff (`diff --cc`) と
+      // `* Unmerged path` の両方を、`--cached` 側は後者だけを出す (git 2.50.1 で実測)。
+      if let path = line.value(after: DiffRecord.unmergedPathPrefix) {
+        unmergedPaths.append(path)
+        // 改行を含まないパスでは1行のレコードで、次の行が通常の `diff --git` ブロックで
+        // あり得るため1行だけ進める。改行を含むパスでは quote されずに複数の物理行へ割れ、
+        // 2行目以降がここを抜ける (git 2.50.1 で実測。Issue #307)。
+        index += 1
+        continue
+      }
+      if let path = DiffRecord.combinedHeaderPath(line) {
+        unmergedPaths.append(path)
+        index = skipToNextRecord(lines, from: index + 1)
+        continue
+      }
+      guard line.hasPrefix(DiffRecord.gitHeaderPrefix) else {
         failures.append(
-          .init(
-            lineNumber: index + 1, line: lines[index],
-            error: .unexpectedLine(lines[index])))
-        index = skipToNextFile(lines, from: index + 1)
+          .init(lineNumber: index + 1, line: line, error: .unexpectedLine(line)))
+        index = skipToNextRecord(lines, from: index + 1)
         continue
       }
       var parser = FileParser(lines: lines, start: index)
@@ -46,15 +72,33 @@ public enum UnifiedDiffPatch {
       case .failure(let failure): failures.append(failure)
       }
       index =
-        parser.recovered ? skipToNextFile(lines, from: parser.index) : parser.index
+        parser.recovered ? skipToNextRecord(lines, from: parser.index) : parser.index
     }
-    return UnifiedDiffParseResult(files: files, failures: failures)
+    return UnifiedDiffParseResult(
+      files: files, failures: failures, unmergedPaths: unmergedPaths)
   }
 
-  private static func skipToNextFile(_ lines: [String], from index: Int) -> Int {
+  private static func skipToNextRecord(_ lines: [String], from index: Int) -> Int {
     var index = index
-    while index < lines.count, !lines[index].hasPrefix("diff --git ") { index += 1 }
+    while index < lines.count, !DiffRecord.startsRecord(lines[index]) { index += 1 }
     return index
+  }
+}
+
+/// patch の中でレコードの始まりになり得る行。combined diff の本文行は必ず2文字の接頭辞を
+/// 持つので、本文がこれらの語で始まることはない (git 2.50.1 で実測)。
+private enum DiffRecord {
+  static let gitHeaderPrefix = "diff --git "
+  static let unmergedPathPrefix = "* Unmerged path "
+  private static let combinedHeaderPrefixes = ["diff --cc ", "diff --combined "]
+
+  static func startsRecord(_ line: String) -> Bool {
+    line.hasPrefix(gitHeaderPrefix) || line.hasPrefix(unmergedPathPrefix)
+      || combinedHeaderPath(line) != nil
+  }
+
+  static func combinedHeaderPath(_ line: String) -> String? {
+    combinedHeaderPrefixes.lazy.compactMap { line.value(after: $0) }.first
   }
 }
 
@@ -91,7 +135,10 @@ private struct FileParser {
   }
 
   mutating func parse() -> Result<UnifiedDiffFile, UnifiedDiffParseFailure> {
-    while index < lines.count, !lines[index].hasPrefix("diff --git ") {
+    // `* Unmerged path` は通常ブロックの直後にも来る (git 2.50.1 で実測: `--cached` が
+    // 自動マージ済みファイルの patch に続けて出した)。ここで止めないと metadata として
+    // 黙って捨てることになる。
+    while index < lines.count, !DiffRecord.startsRecord(lines[index]) {
       let line = lines[index]
       if line.hasPrefix("@@") {
         if let failure = consumeHunk() { return .failure(failure) }

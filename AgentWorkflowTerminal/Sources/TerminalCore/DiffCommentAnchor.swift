@@ -121,12 +121,17 @@ public struct DiffCommentAnchor: Sendable, Equatable, Hashable {
 
 extension DiffSnapshot {
   /// 実在しない出所・パス・行番号からは `nil`。範囲内の行が1つでも欠けていれば作らない。
+  ///
+  /// 競合(unmerged)は行の有無によらず弾く。§9.1.3 が競合をコメント送信の対象外と定めており
+  /// (§9.2 の anchor の出所に競合は現れない)、いま本文を持たないのは P2 の表示方針という
+  /// 生成側の事情でしかないため、本文を出せるようになった時点で送信が黙って解禁されてしまう。
   public func commentAnchor(
     origin: DiffChangeOrigin,
     path: String,
     side: DiffLineSide,
     lines: DiffLineRange
   ) -> DiffCommentAnchor? {
+    guard origin != .unmerged else { return nil }
     guard let anchored = anchoredLines(origin: origin, path: path, side: side, lines: lines) else {
       return nil
     }

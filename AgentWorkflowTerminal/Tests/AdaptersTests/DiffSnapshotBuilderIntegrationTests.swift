@@ -321,6 +321,118 @@ struct DiffSnapshotBuilderIntegrationTests {
     }
   }
 
+  /// Issue #242: 競合中のパスは `git diff` / `git diff --cached` のどちらにも patch 形式では
+  /// 現れないため、status の `u` レコードからしか一覧を作れない。
+  @Test("競合中のファイルは unmerged 区分に出て、解析失敗にならない", .timeLimit(.minutes(1)))
+  func showsUnmergedFiles() async throws {
+    try await withGitRepository { repository in
+      try await makeConflict(in: repository)
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      let result = try await builder.build(
+        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+      let snapshot = result.snapshot
+
+      // 主症状の回帰テスト: 汎用の「解析できていません」を出さない。
+      #expect(result.patchFailures.isEmpty)
+      #expect(result.statusFailures.isEmpty)
+      #expect(snapshot.sections.map(\.unparsedRecordCount).allSatisfy { $0 == 0 })
+
+      #expect(snapshot.section(.unmerged)?.files.map(\.path).sorted() == Self.conflictedPaths)
+      #expect(snapshot.section(.staged)?.files.map(\.path) == ["auto.txt"])
+      #expect(snapshot.section(.unstaged)?.files.map(\.path) == ["auto.txt"])
+      for path in Self.conflictedPaths {
+        #expect(snapshot.file(origin: .staged, path: path) == nil)
+        #expect(snapshot.file(origin: .unstaged, path: path) == nil)
+      }
+
+      // 競合はコメント送信の対象外 (§9.2)。本文を持たないので anchor を作れない。
+      let line = try #require(DiffLineRange(line: 1))
+      #expect(
+        snapshot.commentAnchor(
+          origin: .unmerged, path: "both.txt", side: .new, lines: line) == nil)
+    }
+  }
+
+  @Test("競合の XY と stage の OID を保ち、解決すれば staged へ移る", .timeLimit(.minutes(1)))
+  func keepsConflictStagesUntilResolved() async throws {
+    try await withGitRepository { repository in
+      let root = repository.mainWorktree
+      try await makeConflict(in: repository)
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: root, processRunner: FoundationProcessRunner())
+      let snapshot = try await builder.build(
+        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+      ).snapshot
+
+      // OID の値そのものは固定せず、実体の無い stage が nil であることを固定する。
+      let both = try #require(conflict(in: snapshot, path: "both.txt"))
+      #expect(both.status == WorktreeTrackedFileStatus(index: .unmerged, worktree: .unmerged))
+      #expect([both.baseObject, both.ourObject, both.theirObject].allSatisfy { $0 != nil })
+
+      // add/add には共通の祖先が無い。
+      let addadd = try #require(conflict(in: snapshot, path: "addadd.txt"))
+      #expect(addadd.status == WorktreeTrackedFileStatus(index: .added, worktree: .added))
+      #expect(addadd.baseObject == nil)
+      #expect([addadd.ourObject, addadd.theirObject].allSatisfy { $0 != nil })
+
+      // modify/delete は ours 側が削除。
+      let delmod = try #require(conflict(in: snapshot, path: "delmod.txt"))
+      #expect(delmod.status == WorktreeTrackedFileStatus(index: .deleted, worktree: .unmerged))
+      #expect(delmod.ourObject == nil)
+      #expect([delmod.baseObject, delmod.theirObject].allSatisfy { $0 != nil })
+
+      for path in Self.conflictedPaths { try write("resolved\n", to: root, path) }
+      try await repository.git(["add", "-A"])
+      let resolved = try await builder.build(
+        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+      #expect(resolved.patchFailures.isEmpty)
+      #expect(resolved.snapshot.section(.unmerged)?.files.isEmpty == true)
+      for path in Self.conflictedPaths {
+        #expect(resolved.snapshot.file(origin: .staged, path: path) != nil)
+      }
+    }
+  }
+
+  private static let conflictedPaths = ["addadd.txt", "both.txt", "delmod.txt"]
+
+  /// content / add-add / modify-delete の3種の競合と、自動マージできた `auto.txt` を作る。
+  private func makeConflict(in repository: GitTestRepository) async throws {
+    let root = repository.mainWorktree
+    try write("base\n", to: root, "both.txt")
+    try write("base\n", to: root, "delmod.txt")
+    try write("x\n", to: root, "auto.txt")
+    try await repository.git(["add", "-A"])
+    try await repository.git(["commit", "-q", "-m", "base"])
+
+    try await repository.git(["checkout", "-q", "-b", "feature"])
+    try write("ours\n", to: root, "both.txt")
+    try write("ours\n", to: root, "addadd.txt")
+    try FileManager.default.removeItem(at: root.appending(path: "delmod.txt"))
+    try await repository.git(["add", "-A"])
+    try await repository.git(["commit", "-q", "-m", "feature"])
+
+    try await repository.git(["checkout", "-q", "main"])
+    try write("theirs\n", to: root, "both.txt")
+    try write("theirs\n", to: root, "addadd.txt")
+    try write("base\nmodified\n", to: root, "delmod.txt")
+    try write("x\nmain-added\n", to: root, "auto.txt")
+    try await repository.git(["add", "-A"])
+    try await repository.git(["commit", "-q", "-m", "main"])
+    try await repository.git(["checkout", "-q", "feature"])
+
+    // 競合した merge は終了コード 1 で終わる。
+    let merge = try await repository.gitExitCode(["merge", "--no-edit", "main"])
+    #expect(merge.exitCode == 1)
+    try write("x\nmain-added\nunstaged-edit\n", to: root, "auto.txt")
+  }
+
+  private func conflict(in snapshot: DiffSnapshot, path: String) -> UnifiedDiffConflict? {
+    guard case .conflicted(let conflict) = snapshot.file(origin: .unmerged, path: path)?.content
+    else { return nil }
+    return conflict
+  }
+
   private func write(_ contents: String, to root: URL, _ name: String) throws {
     try Data(contents.utf8).write(to: root.appending(path: name))
   }

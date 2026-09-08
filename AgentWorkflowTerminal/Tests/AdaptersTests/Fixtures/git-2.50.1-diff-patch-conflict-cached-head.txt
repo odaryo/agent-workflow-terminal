@@ -1,0 +1,10 @@
+* Unmerged path addadd.txt
+diff --git a/auto.txt b/auto.txt
+index 587be6b4c3f93f93c489c0111bba5596147a26cb..1b85fcd1bebd4e0708ef1df37e389c2b2a79e67c 100644
+--- a/auto.txt
++++ b/auto.txt
+@@ -1 +1,2 @@
+ x
++main-added
+* Unmerged path both.txt
+* Unmerged path delmod.txt

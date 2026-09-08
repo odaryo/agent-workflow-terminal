@@ -93,6 +93,17 @@ struct GitTestRepository {
 
   /// 既定は main worktree での実行。`in:` に `root` からの相対名を渡すと別の作業ツリーで走る。
   func git(_ arguments: [String], in worktreeName: String? = nil) async throws {
+    let result = try await gitExitCode(arguments, in: worktreeName)
+    guard result.exitCode == 0 else {
+      throw GitTestRepositoryError.commandFailed(arguments: arguments, stderr: result.stderr)
+    }
+  }
+
+  /// 競合した `merge` のように、非 0 終了が期待値になる呼び出し用。
+  @discardableResult
+  func gitExitCode(
+    _ arguments: [String], in worktreeName: String? = nil
+  ) async throws -> (exitCode: Int32, stderr: String) {
     let directory = worktreeName.map { root.appending(path: $0) } ?? mainWorktree
     let result = try await processRunner.run(
       executableURL: executableURL,
@@ -108,9 +119,7 @@ struct GitTestRepository {
       ],
       timeout: .seconds(30)
     )
-    guard result.exitCode == 0 else {
-      throw GitTestRepositoryError.commandFailed(arguments: arguments, stderr: result.stderr)
-    }
+    return (result.exitCode, result.stderr)
   }
 }
 

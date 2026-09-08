@@ -80,6 +80,23 @@ struct DiffCommentAnchorTests {
         == nil)
   }
 
+  /// §9.2「競合(unmerged)はコメント送信の対象外」。行を持つファイルを `.unmerged` 区分へ
+  /// 入れても anchor は作れない — 出所そのもので弾いていることの証拠 (Issue #242)。
+  /// `.conflicted` が本文を持たないという生成側の事情に頼ると、P3 で combined diff の本文を
+  /// 出した時点で送信が黙って解禁される。
+  @Test("行を持っていても競合(unmerged)からは anchor を作れない")
+  func doesNotBuildAnchorForUnmerged() throws {
+    let snapshot = Self.snapshot(sections: [
+      DiffOriginSection(origin: .unmerged, files: [Self.modifiedFile(path: "a.swift")])
+    ])
+    let range = try #require(DiffLineRange(start: 1, end: 3))
+    #expect(snapshot.file(origin: .unmerged, path: "a.swift")?.hunks.isEmpty == false)
+    #expect(
+      snapshot.commentAnchor(origin: .unmerged, path: "a.swift", side: .new, lines: range) == nil)
+    #expect(
+      snapshot.commentAnchor(origin: .unmerged, path: "a.swift", side: .old, lines: range) == nil)
+  }
+
   @Test("側ごとに存在する行だけを見る")
   func resolvesLinesPerSide() throws {
     let snapshot = Self.standardSnapshot()

@@ -27,8 +27,8 @@ struct GitRunnerTests {
     let range = GitRevisionRange.threeDot(from: main, to: topic)
     #expect(
       GitReadCommand.status(includeIgnored: true).arguments == [
-        "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=normal", "-z",
-        "--ignored=matching",
+        "status", "--porcelain=v2", "--branch", "--renames", "--ignore-submodules=none",
+        "--untracked-files=normal", "-z", "--ignored=matching",
       ])
     #expect(GitReadCommand.worktreeList().arguments == ["worktree", "list", "--porcelain", "-z"])
     #expect(
@@ -48,23 +48,26 @@ struct GitRunnerTests {
     #expect(
       GitReadCommand.diffFileSummaries(.index(against: .head), pathspec: [path]).arguments == [
         "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat",
-        "--no-abbrev", "-z", "--cached", "HEAD", "--", "Sources/a.swift",
+        "--no-abbrev", "--ignore-submodules=none", "-z", "--cached", "HEAD", "--",
+        "Sources/a.swift",
       ])
     #expect(
       GitReadCommand.diffPatch(.workingTree(against: .head)).arguments == [
         "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
-        "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "HEAD",
-        "--",
+        "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
+        "--submodule=short", "--ignore-submodules=none", "HEAD", "--",
       ])
     // §9.1.3: staged と混ざらない unstaged だけの diff は revision を渡さない形になる。
     #expect(
       GitReadCommand.diffPatch(.unstaged).arguments == [
         "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
-        "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "--",
+        "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
+        "--submodule=short", "--ignore-submodules=none", "--",
       ])
     #expect(
       GitReadCommand.status(untrackedFiles: .all).arguments == [
-        "status", "--porcelain=v2", "--branch", "--renames", "--untracked-files=all", "-z",
+        "status", "--porcelain=v2", "--branch", "--renames", "--ignore-submodules=none",
+        "--untracked-files=all", "-z",
       ])
     #expect(
       GitReadCommand.mergeBase(main, .head).arguments == ["merge-base", "main", "HEAD"])
@@ -85,7 +88,7 @@ struct GitRunnerTests {
     #expect(
       call.arguments == [
         "--no-optional-locks", "-C", "/repo", "--no-pager", "status", "--porcelain=v2", "--branch",
-        "--renames", "--untracked-files=normal", "-z",
+        "--renames", "--ignore-submodules=none", "--untracked-files=normal", "-z",
       ])
     #expect(call.environment == ["LC_ALL": "C", "HOME": "/home", "PATH": "/bin"])
     #expect(call.timeout == .seconds(30))

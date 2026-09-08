@@ -641,16 +641,29 @@ Agentへ送る文面へ元コードを添える際にsnapshot本体を引かず�
 
 #### 9.2.2 送信可否の判定 — 確定(2026-09-08)
 
-Diffレビューコメントの送信可否は、送信先paneの正規化状態で決まる。**送信を許可するのは`Idle`のみ。**
-`Working`／`Question`／`Permission`／`Unknown`では送信操作を無効化し、「先にpane側の処理を進めてから
-送信する」旨をUIに表示する。コメントは破棄せずUI側に保持し、送信可能な状態になったら送れる。
+Diffレビューコメントの送信可否は、送信先paneの正規化状態で決まる。**送信を許可するのは
+`Idle`と`Completed`(Ready for Review)の2状態だけ**とし、`Working`／`Question`／`Permission`／
+`Error`／`Unknown`、および**そのpaneの状態エントリが存在しない場合**は送信操作を無効化して、
+「先にpane側の処理を進めてから送信する」旨をUIに表示する。コメントは破棄せずUI側に保持し、
+送信可能な状態になったら送れる。
 
 理由:
 
+- `Completed`のpaneは空の入力欄で次のプロンプトを待っており、`Idle`と同じ安全性を持つ。
+  §9.2の主フロー(Agentが実装を終える → 人がDiffを見る → コメントを送る)はこの状態で起きるため、
+  ここを不可にすると機能そのものが成立しない。**実測上、Agentが作業を終えたpaneは`Idle`ではなく
+  `Completed`になる** — `Idle`は起動直後の限られた区間でしか観測されない(Gate 3、Issue #240)。
 - `Question`はAgentの質問への回答欄、`Permission`は許可応答であり、コメント本文がそれらへの回答として
   解釈される。
 - `Working`ではpaneのプロセス終了後にコメント本文がシェルのコマンドとして実行される(実測、Issue #240)。
-- `Unknown`は丸めない(§12.3で確定)ので送信不可側に置く。
+- `Error`はAgentが落ちてpaneが素のシェルへ戻っている場合を含み、そのとき`Working`と同じ経路で
+  コメント本文が実行される。
+- `Unknown`は丸めない(§12.3で確定)ので送信不可側に置く。状態エントリが存在しない場合(ユーザーが
+  素のシェルpaneをメインpaneに選んだ場合や、process fallbackがpaneを一覧に出さない場合)も同じ理由で
+  送信不可とする。
+
+許可集合は実装上も1箇所で定義し、UIの有効・無効と実際の送信経路が別々に判定しないこと。
+二重判定は片方だけが直る抜け道になる。
 
 送信を`Idle`限定にしたことで、制約1(受け側次第で本文が実行され得ること)が及ぶ範囲は、人がAgentへ
 プロンプトを送る通常の送信操作と地続きになる。送信前に制約1を個別に警告するUIは不要と判断し、確定した
@@ -1875,7 +1888,7 @@ PR_READY
 - [x] Base／Branch Diffはworking tree・staged・untrackedを含め、出所を5種(競合(unmerged)を含む)で区別表示する (ignoredは含めない)。競合(unmerged)は一覧とDiffに表示するがコメント送信の対象外
 - [x] コメントのanchorは`(snapshot ID, パス, old／new, 行範囲, 行テキストのハッシュ)`、新snapshotへの推測追従はしない
 - [x] Diffコメントは単体／batchでAgentへ送信
-- [x] Diffレビューコメントの送信はpaneが`Idle`のときだけ許可し、他状態(`Working`／`Question`／`Permission`／`Unknown`)では送信操作を無効化してコメントをUI側に保持する
+- [x] Diffレビューコメントの送信は`Idle`と`Completed`のときだけ許可し、他状態(`Working`／`Question`／`Permission`／`Error`／`Unknown`)と状態エントリが無いpaneでは送信操作を無効化してコメントをUI側に保持する
 - [x] GitHub PR review連携はしない
 - [x] Consultationはfresh contextが基本、paneは再利用
 - [x] Consultation LogはProject単位で永続化し、Gitには載せない

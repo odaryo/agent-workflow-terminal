@@ -20,11 +20,31 @@ extension GhosttySurfaceView {
     trackingAreaReference = area
   }
 
+  // Why not local event monitor: 上流はフォーカス移譲のクリックが terminal へ届く前に
+  // 捨てるため、responder chain の外で先回りする必要がある。こちらでフォーカスが他所に
+  // ある状況は Drawer / 別タブ / 別ウィンドウのいずれかで、どれも mouseDown 自体はこの view
+  // へ届くため、同じ判断をここで行えば足りる。判断の内容 (自分が first responder でなければ
+  // 移譲し、アプリと window が既に前面ならそのクリックは端末へ渡さない) は上流に揃えた。
+  // 出典: App/vendor/ghostty/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift:653-688
   override public func mouseDown(with event: NSEvent) {
+    if let window, window.firstResponder !== self {
+      window.makeFirstResponder(self)
+      if NSApp.isActive, window.isKeyWindow {
+        // Why not 端末へも渡す: フォーカスを移すだけのクリックであり、press だけを送ると
+        // 対になる release が来ない。
+        suppressesNextLeftMouseUp = true
+        return
+      }
+    }
+    suppressesNextLeftMouseUp = false
     reportMouseButton(event, state: GHOSTTY_MOUSE_PRESS, button: GHOSTTY_MOUSE_LEFT)
   }
 
   override public func mouseUp(with event: NSEvent) {
+    guard !suppressesNextLeftMouseUp else {
+      suppressesNextLeftMouseUp = false
+      return
+    }
     reportMouseButton(event, state: GHOSTTY_MOUSE_RELEASE, button: GHOSTTY_MOUSE_LEFT)
   }
 

@@ -24,6 +24,7 @@ struct AgentWorkflowTerminalApp: App {
 
 private struct ProjectView: View {
   @ObservedObject var model: AppModel
+  @StateObject private var keyboardFocus = TerminalKeyboardFocus()
 
   var body: some View {
     VStack(spacing: 0) {
@@ -74,11 +75,17 @@ private struct ProjectView: View {
           mainPanes: model.mainPanes,
           agentPaneStates: model.agentPaneStates(of:)
         ) {
-          TerminalTabs(model: model)
+          TerminalTabs(model: model, keyboardFocus: keyboardFocus)
         }
       }
     }
     .task { await model.run() }
+    .onChange(of: model.selectedIdentity) { _, _ in
+      keyboardFocus.tabSelectionChanged(drawerLayout: model.viewerDrawerLayout)
+    }
+    .onChange(of: model.viewerDrawerLayout) { old, new in
+      keyboardFocus.drawerLayoutChanged(from: old, to: new)
+    }
   }
 }
 
@@ -153,24 +160,39 @@ private extension ViewerContent {
 
 private struct TerminalTabs: View {
   @ObservedObject var model: AppModel
+  @ObservedObject var keyboardFocus: TerminalKeyboardFocus
 
   var body: some View {
     ZStack {
       if let projectRoot = model.projectRoot,
         model.openedIdentities.contains(projectRoot.identity)
       {
-        TerminalTabContent(worktree: projectRoot, tmuxExecutable: model.tmuxExecutable)
-          .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
-          .allowsHitTesting(model.selectedIdentity == projectRoot.identity)
+        TerminalTabContent(
+          worktree: projectRoot,
+          tmuxExecutable: model.tmuxExecutable,
+          focusRequest: focusRequest(for: projectRoot.identity)
+        )
+        .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
+        .allowsHitTesting(model.selectedIdentity == projectRoot.identity)
       }
       ForEach(model.worktrees, id: \.identity) { worktree in
         if model.openedIdentities.contains(worktree.identity) {
-          TerminalTabContent(worktree: worktree.detected, tmuxExecutable: model.tmuxExecutable)
-            .opacity(model.selectedIdentity == worktree.identity ? 1 : 0)
-            .allowsHitTesting(model.selectedIdentity == worktree.identity)
+          TerminalTabContent(
+            worktree: worktree.detected,
+            tmuxExecutable: model.tmuxExecutable,
+            focusRequest: focusRequest(for: worktree.identity)
+          )
+          .opacity(model.selectedIdentity == worktree.identity ? 1 : 0)
+          .allowsHitTesting(model.selectedIdentity == worktree.identity)
         }
       }
     }
+  }
+
+  /// 選択されていないタブへは `nil` を渡す。値を渡すと、そのタブが自分で first responder を
+  /// 取りに行けてしまう。
+  private func focusRequest(for identity: WorktreeIdentity) -> Int? {
+    model.selectedIdentity == identity ? keyboardFocus.request : nil
   }
 }
 
@@ -280,6 +302,7 @@ private struct WorktreeTab: View {
 private struct TerminalTabContent: View {
   let worktree: DetectedWorktree
   let tmuxExecutable: URL?
+  let focusRequest: Int?
 
   var body: some View {
     if let tmuxExecutable {
@@ -289,7 +312,8 @@ private struct TerminalTabContent: View {
           TmuxSessionName(identity: worktree.identity).rawValue,
           "-c", worktree.worktreePath,
         ],
-        workingDirectory: worktree.worktreePath
+        workingDirectory: worktree.worktreePath,
+        focusRequest: focusRequest
       )
     } else {
       ContentUnavailableView("tmux を利用できません", systemImage: "terminal")

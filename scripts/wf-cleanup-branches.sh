@@ -8,17 +8,23 @@ source "$SCRIPT_DIR/lib.sh"
 usage() {
   cat <<'EOF'
 使い方: wf-cleanup-branches.sh [--yes] [--dry-run]
+       wf-cleanup-branches.sh --discard <branch>... [--yes] [--dry-run]
 
-マージ済み PR の head ブランチ (main と現在のブランチを除く) を削除する。
+既定はマージ済み PR の head ブランチ (main と現在のブランチを除く) の削除。
 リモートが自動削除済みでローカルだけ残ったものと、リモートに残っているものの双方が対象。
-  --yes       削除を実行する (省略時は一覧表示のみ)
-  --dry-run   --yes が指定されていても削除しない
-  -h, --help  このヘルプを表示
+  --yes        削除を実行する (省略時は一覧表示のみ)
+  --dry-run    --yes が指定されていても削除しない
+  --discard    PR を1つも持たないブランチを名前指定で削除する (使い捨ての診断ブランチ用)。
+               PR が存在するブランチは state を問わず拒否する — マージ済みなら既定の経路が、
+               未マージなら人が扱うべきで、いずれもこの経路の対象ではない
+  -h, --help   このヘルプを表示
 EOF
 }
 
 do_delete=0
 dry_run=0
+discard=0
+discard_branches=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -30,12 +36,21 @@ while [[ $# -gt 0 ]]; do
       dry_run=1
       shift
       ;;
+    --discard)
+      discard=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
       ;;
-    *)
+    -*)
       die "不明な引数です: $1"
+      ;;
+    *)
+      [[ "$discard" -eq 1 ]] || die "不明な引数です: $1"
+      discard_branches+=("$1")
+      shift
       ;;
   esac
 done
@@ -47,13 +62,72 @@ git fetch --prune origin
 
 current_branch=$(git rev-parse --abbrev-ref HEAD)
 
-load_merged_pr_heads
-
-# 他の worktree が checkout 中のブランチは `git branch -D` が拒否する。一覧に出してから
-# 失敗させないよう事前に除外するが、これは best-effort — rebase が停止中の worktree は
+# 他の worktree が checkout 中のブランチは `git branch -D` が拒否する。既定の経路では一覧に
+# 出してから失敗させないよう事前に除外するが、これは best-effort — rebase が停止中の worktree は
 # `branch` 行ではなく `detached` を出力するのに削除は拒否される (git 2.50.1 で実測)。
-# 取りこぼしは後段の削除ループが per-item で許容する。
+# 取りこぼしは後段の削除ループが per-item で許容する。--discard は事前検査で弾く。
 checked_out=$(git worktree list --porcelain | awk '$1 == "branch" { print substr($2, 12) }')
+
+if [[ "$discard" -eq 1 ]]; then
+  [[ ${#discard_branches[@]} -gt 0 ]] || die "--discard にはブランチ名を1つ以上指定してください"
+
+  # 削除の前に全件を検査する。1件でも条件を満たさなければ何も消さない — 一部だけ消えた
+  # 状態は、呼び出し側が「消えた分」を知らないまま再実行することになるため。
+  for b in "${discard_branches[@]}"; do
+    case "$b" in
+      main | "$current_branch") die "'$b' は main か現在のブランチのため削除できません" ;;
+    esac
+    if grep -qxF "$b" <<<"$checked_out"; then
+      die "'$b' は worktree が checkout 中です。先に wf-worktree-remove.sh を実行してください"
+    fi
+    prs=$(gh pr list --head "$b" --state all --limit 1 --json number --jq '.[].number')
+    if [[ -n "$prs" ]]; then
+      die "'$b' は PR #$prs を持つため --discard の対象外です (マージ済みなら --yes だけで消せます)"
+    fi
+    if ! git show-ref --verify --quiet "refs/heads/$b" \
+      && ! git show-ref --verify --quiet "refs/remotes/origin/$b"; then
+      die "'$b' はローカルにもリモートにも存在しません"
+    fi
+  done
+
+  info "PR を持たないブランチを削除します:"
+  for b in "${discard_branches[@]}"; do
+    info "  $b"
+  done
+
+  if [[ "$do_delete" -ne 1 ]]; then
+    info "削除するには --yes を指定してください"
+    exit 0
+  fi
+
+  failed=0
+  for b in "${discard_branches[@]}"; do
+    if git show-ref --verify --quiet "refs/heads/$b"; then
+      if [[ "$dry_run" -eq 1 ]]; then
+        info "[dry-run] git branch -D $b"
+      elif git branch -D "$b"; then
+        info "ローカルを削除しました: $b"
+      else
+        info "警告: ローカル '$b' の削除に失敗しました"
+        failed=1
+      fi
+    fi
+    if git show-ref --verify --quiet "refs/remotes/origin/$b"; then
+      if [[ "$dry_run" -eq 1 ]]; then
+        info "[dry-run] git push origin --delete $b"
+      elif git push origin --delete "$b"; then
+        info "リモートを削除しました: origin/$b"
+      else
+        info "警告: 'origin/$b' の削除に失敗しました"
+        failed=1
+      fi
+    fi
+  done
+  [[ "$failed" -eq 0 ]] || die "削除できなかったブランチがあります (上の警告を確認してください)"
+  exit 0
+fi
+
+load_merged_pr_heads
 
 # ローカルとリモートの両方を候補にする。GitHub の deleteBranchOnMerge が有効だと
 # マージ時点でリモート ref が消えるため、リモートだけを見ると常に候補ゼロになる

@@ -129,6 +129,40 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop. **UI wiring in `App/` is reviewed by running it, not by the reviewer**: the layer is not unit-testable and measurement-based adversarial review has little to measure there, so the implementer attaches a manual-run check (screenshot in the PR) and only the `TerminalCore` / `Adapters` side of the change goes to the reviewer. **Drive that run with `scripts/verify-app-ui.sh`** (`build` / `launch` / `find` / `click-text` / `expect`, and `selftest` to check the harness itself) — it launches the bundle `scripts/build-app.sh` produced, locates elements through Accessibility instead of guessed coordinates, and closes the two traps that made Issue #230 a false alarm: a click on a non-active window is eaten by activation, and System Events clicks never fire SwiftUI's `onTapGesture` even though they do actuate Buttons.
 
+**UI 層を計測するときの作法** (#278 の実測による)。
+
+- **合成キーストロークは埋め込み端末 (libghostty の NSView) へ届く。** 以前「届かないので実キーボードを
+  代表できない」と記録されていたが誤りで、`verify-app-ui.sh type` は端末へも入る (旧計測の null 結果の
+  原因は特定できていない)。「実キーボードでしか測れない」と早々に諦めないこと。ただし System Events の
+  制約で**非 ASCII は送れない**。逆に AX からは、libghostty の NSView が Accessibility 要素として
+  現れないため「端末がフォーカスを持っている」と「どこも持っていない」を区別できない — フォーカスの
+  所在は `focused` の戻り値ではなく**打鍵の到達先**で判定する。
+- **tmux の pane を証拠に使うときは、一意なマーカーを1回だけ打つ。** pane はアプリの再起動をまたいで
+  残るので、履歴と今回の打鍵を区別できない。#278 では「コメント欄と pane の両方に同じ文字列がある」
+  状態が「2回打った」と「1回が両方へ入った」を区別できず、一意なマーカーで測り直して初めて判定できた。
+- **打鍵の計測で Enter を送らない。** 修正前のビルドでは、コメント欄へ打ったつもりの文字列が生きた
+  shell のプロンプトへ積まれていた。`verify-app-ui.sh type` は改行を含む文字列をコードで拒否する。
+
+**外部 CLI を計測するときの作法** (#290 の実測による)。
+
+- **tmux は未知の format 名をエラーにせず空文字にする。** `#{pane_bracket_paste}` は実在しないが、
+  `display-message -p` は空文字を返し、`#{?pane_bracket_paste,ON,off}` は `off` を返す — 存在しない
+  format 名を渡した対照実験と**完全に同じ挙動**である。つまり書き間違えた format は「観測できた false」
+  として静かに通り、そこから導いた結論が監督の方針判断まで届く (#290 で実際に起きた)。**format を
+  観測に使う前に、`list-formats` に在ることと、でたらめな名前が同じ値を返さないことを確かめること。**
+- **コードベースが既に知っている制約を先に読む。** 上の件は `TmuxTextInjection.swift` の
+  「アプリ側が 2004 を立てているかは tmux 3.4 の format に無く、注入側から観測できない」という注釈と、
+  統合テストが**それゆえ prompt を zle の代理観測にしている**という注釈が、どちらも先に書かれていた。
+  新しい観測手段を作る前に、対象のソースと既存テストの注釈を読むこと — 「観測できない」と分かっている
+  ものを観測しようとしていないか。
+- **外界の版数差は、想定より広いことがある。** #286 は「区切りが escape されない」として起票されたが、
+  実測では tmux 3.7c が `\ooo` / named escape / `\$` の**いずれも生成しなかった** — 区切りだけの話では
+  なかった。Issue 本文の記述を実測が上書きしたら、**Issue 側を訂正してから**進めること。
+- **観測の範囲を超えた一般化を書かない。** 上の1文は当初「3.7c は escape を一切行わない」と書いていたが、
+  試した入力について「生成しなかった」ことしか測っていない。この差は次に読む人が「では escape は
+  考えなくてよい」と判断できるかどうかを分ける。#286 では逆向きの実例も出た — spec が「保存段の escape は
+  両版同一」と断じていたが、3.4 は保存段で `$` の前にも `\` を足す (実装者が検出、レビューアが独立再現)。
+
 **Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the legacy `P3 バグ改修` milestone (the parking lot, not the current P3) and do **not** count against the current phase. Promote findings when measured impact blocks a phase's acceptance criteria; data loss and incorrect input routing require evaluation even if everyday use has not reproduced them. The current P3–P5 and their acceptance criteria live in `docs/roadmap.md`. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; the parking lot prevents these from making a phase unbounded.
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
@@ -136,6 +170,13 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 **Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k) because autocompact effectively never fires on a 1M window.
 
 - **One Issue, one Director session.** The Director ends every Issue's final report with an explicit one-line request to run `/clear`, before the next worktree is created. This cannot be automated and the rule exists because the manual step was being forgotten: nothing in Claude Code lets the model invoke `/clear` or `/compact` itself, hooks (`PreCompact` / `PostCompact` included) can observe compaction but not trigger it, and autocompact (`autoCompactEnabled` / `autoCompactWindow`, default on) only fires as the context nears its limit — which the measurements above show a 1M window never reaches. Never `/clear` mid-Issue: the reviewer round-trip needs the Director's memory of what was already measured and rejected.
+- **並列レーン運用では、監督が worktree を作る前にユーザーへ `/clear` を依頼する。** 監督 (main session) が
+  worktree を作って隣の pane のセッションへ Issue を割り当てる運用では、上のルールの順序が壊れる —
+  レーンが最終報告で `/clear` を要請した時点で、監督はもう次の worktree を作って次の Issue を渡している。
+  レーンは規約に従って停止し (実測: 3回要請して停止したまま)、あるいは待つのをやめて規約を外れる。
+  **順序は「レーンの完了報告 → 監督がユーザーへ `/clear` を依頼 → 打たれたのを確認 → 次の worktree を
+  作って割り当て」**。`/clear` 後のレーンは文脈を失うので、割り当てメッセージは Issue 番号・worktree の
+  パス・spec の在り処を含む自己完結した形にすること (spec が Issue コメントに載っていれば足りる)。
 - **Do not `--resume` a large session left idle for over an hour.** The 1-hour prompt cache has expired and the first request rewrites the entire history: measured $2.06–$2.51 for a 200–233k resume, against $0.43–$0.65 to prime a fresh one. Start a new session and re-read what you need.
 - **Never pass a `model:` override when calling a subagent on your own initiative.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`.
 - **Read-only exploration goes to `explorer`, not `general-purpose`** — restating the Director's role above, because in practice this is the rule that gets skipped.

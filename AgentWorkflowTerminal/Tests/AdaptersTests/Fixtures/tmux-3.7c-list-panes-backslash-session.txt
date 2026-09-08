@@ -1,0 +1,1 @@
+%1host\\\\$1\\\\name0@1069871zsh0/dev/ttys034/private/tmpRyotaronoMacBook-Pro-10.local

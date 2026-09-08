@@ -37,10 +37,13 @@ final class DiffViewerModel: ObservableObject {
     let id = UUID()
     let worktree: WorktreeIdentity
     let candidates: [MainPaneCandidate]
-    /// 登録が残っているが、その pane が今は存在しない場合だけ入る。
-    let missingPane: PaneID?
+    /// 登録が残っているが、その pane を送信先として使えない場合だけ入る。「ID ごと消えた」と
+    /// 「ID は在るが別 pane」で文面を変えるため、`PaneID` へ潰さない。
+    let absence: MainPaneAbsence?
     /// 送信操作の途中で選ばせている場合だけ入る。`nil` は送信先の選び直しだけを行う操作。
     let pending: PendingSend?
+    /// 候補を観測したときの `#{pid}`。選ばれた候補と組にして登録を作る。
+    let serverProcessID: Int32?
   }
 
   /// 再観測の間隔。agent の編集は `.git/index` を触らないので index の監視では拾えず、
@@ -198,21 +201,26 @@ final class DiffViewerModel: ObservableObject {
     _ pending: PendingSend,
     worktree: WorktreeIdentity,
     mainPane: MainPaneCoordinator,
-    agentPaneIDs: Set<PaneID>
+    agentPaneStates: [PaneAgentState]?
   ) async {
     guard !isSending else { return }
     dismissMessages()
-    switch await mainPane.resolve(for: worktree, agentPaneIDs: agentPaneIDs) {
+    switch await mainPane.resolve(
+      for: worktree, agentPaneIDs: Set((agentPaneStates ?? []).map(\.id)))
+    {
     case .failure(let failure):
       commentError = failure.message
-    case .success(.registered(let pane, _)):
-      await send(pending, to: pane, worktree: worktree, mainPane: mainPane)
-    case .success(.unregistered(let candidates)):
+    case .success(let observation):
+      if case .registered(let registration, _) = observation.resolution {
+        await send(
+          pending, to: registration, worktree: worktree, mainPane: mainPane,
+          agentPaneStates: agentPaneStates)
+        return
+      }
       paneSelectionRequest = PaneSelectionRequest(
-        worktree: worktree, candidates: candidates, missingPane: nil, pending: pending)
-    case .success(.registeredPaneMissing(let pane, let candidates)):
-      paneSelectionRequest = PaneSelectionRequest(
-        worktree: worktree, candidates: candidates, missingPane: pane, pending: pending)
+        worktree: worktree, candidates: observation.resolution.candidates,
+        absence: observation.resolution.absence, pending: pending,
+        serverProcessID: observation.serverProcessID)
     }
   }
 
@@ -220,43 +228,69 @@ final class DiffViewerModel: ObservableObject {
   func requestMainPaneSelection(
     worktree: WorktreeIdentity,
     mainPane: MainPaneCoordinator,
-    agentPaneIDs: Set<PaneID>
+    agentPaneStates: [PaneAgentState]?
   ) async {
     dismissMessages()
-    switch await mainPane.resolve(for: worktree, agentPaneIDs: agentPaneIDs) {
+    switch await mainPane.resolve(
+      for: worktree, agentPaneIDs: Set((agentPaneStates ?? []).map(\.id)))
+    {
     case .failure(let failure):
       commentError = failure.message
-    case .success(let resolution):
+    case .success(let observation):
       paneSelectionRequest = PaneSelectionRequest(
         worktree: worktree,
-        candidates: resolution.candidates,
-        missingPane: resolution.missingPane,
-        pending: nil)
+        candidates: observation.resolution.candidates,
+        absence: observation.resolution.absence,
+        pending: nil,
+        serverProcessID: observation.serverProcessID)
     }
   }
 
   /// 選ばれた pane を登録し、送信操作の途中だったならそのまま送る。
   func choose(
-    _ pane: PaneID, for request: PaneSelectionRequest, mainPane: MainPaneCoordinator
+    _ candidate: MainPaneCandidate, for request: PaneSelectionRequest,
+    mainPane: MainPaneCoordinator, agentPaneStates: [PaneAgentState]?
   ) async {
+    guard let serverProcessID = request.serverProcessID else {
+      paneSelectionRequest = nil
+      commentError = "tmux server の同一性を読めなかったため、送信先を登録していません。開き直してください。"
+      return
+    }
+    let registration = MainPaneRegistration(candidate.pane, serverProcessID: serverProcessID)
     guard let pending = request.pending else {
-      mainPane.register(pane, for: request.worktree)
+      mainPane.register(registration, for: request.worktree)
       paneSelectionRequest = nil
       return
     }
-    await send(pending, to: pane, worktree: request.worktree, mainPane: mainPane)
+    await send(
+      pending, to: registration, worktree: request.worktree, mainPane: mainPane,
+      agentPaneStates: agentPaneStates)
   }
 
   /// ユーザーが選んだ pane を記憶してから送る (§12.7)。以後はこの pane が既定の送信先になる。
+  /// - Important: 状態による可否は `DiffCommentSendGate` だけが決める。UI の無効化
+  ///   (`sendBlock(registeredPane:agentPaneStates:)`) と**同じ関数**を通し、ここでもう一度
+  ///   確かめる。ボタンが押せる状態のまま状態が変わる窓があり、無効化だけでは塞げない
+  ///   (窓が残ること自体は `DiffCommentSendGate` の doc を参照)。
   func send(
     _ pending: PendingSend,
-    to pane: PaneID,
+    to registration: MainPaneRegistration,
     worktree: WorktreeIdentity,
-    mainPane: MainPaneCoordinator
+    mainPane: MainPaneCoordinator,
+    agentPaneStates: [PaneAgentState]?
   ) async {
     guard !isSending else { return }
-    mainPane.register(pane, for: worktree)
+    let pane = registration.pane
+    mainPane.register(registration, for: worktree)
     paneSelectionRequest = nil
+    if case .blocked = DiffCommentSendGate.sendability(toPane: pane, states: agentPaneStates) {
+      // コメントは消さない。送信可能な状態になれば同じ操作で送れる (§9.2.2)。
+      //
+      // ここで `commentError` を立てないのは、同じ判定 (`sendBlock`) を見ている banner が
+      // 既に理由を出しているため。登録は直前に済ませているので banner の条件は必ず満たす。
+      sendReport = nil
+      return
+    }
 
     let targets: [DiffReviewComment]
     let text: String
@@ -278,7 +312,7 @@ final class DiffViewerModel: ObservableObject {
     }
 
     isSending = true
-    let outcome = await mainPane.inject(text, into: pane)
+    let outcome = await mainPane.inject(text, into: registration)
     isSending = false
 
     switch outcome {
@@ -294,40 +328,6 @@ final class DiffViewerModel: ObservableObject {
       // コメントはローカルに残す (消さない)。
       sendReport = nil
       commentError = Self.message(for: failure)
-    }
-  }
-
-  /// 拒否の理由ごとに文言を変える。`TmuxTextInjectionError` の分類はユーザーが取る復旧操作の
-  /// 違いに対応しているため、まとめると復旧できない (`TmuxTextInjection` の doc 参照)。
-  static func message(for failure: MainPaneInjectionFailure) -> String {
-    switch failure {
-    case .tmuxUnavailable:
-      return "tmux を利用できないため送っていません。"
-    case .rejected(let error):
-      switch error {
-      case .unsafeControlCharacter(let scalar, let offset):
-        let code = String(format: "U+%04X", scalar.value)
-        return
-          "本文に貼り付けできない制御文字があります: 先頭から \(offset + 1) 番目の Unicode scalar が \(code)。"
-          + "bracketed paste を抜け得るため送っていません。文面は自動修正しません。"
-      case .paneInMode(let pane, let mode):
-        let name = mode.isEmpty ? "(mode 名を読み直せませんでした。既に抜けた可能性があります)" : mode
-        return
-          "pane \(pane.rawValue) が \(name) 中のため送っていません (1バイトも届いていません)。"
-          + "mode を抜けてから送り直してください。"
-      case .paneInputDisabled(let pane):
-        return
-          "pane \(pane.rawValue) は入力が無効 (select-pane -d) のため送っていません "
-          + "(1バイトも届いていません)。入力を有効に戻してください。"
-      case .paneNotFound(let pane):
-        return "pane \(pane.rawValue) が見つかりません。送信先を選び直してください。"
-      case .invalidPaneID(let pane):
-        return "pane ID の形式が不正です: \(pane.rawValue)"
-      case .temporaryFileCreationFailed(let path):
-        return "注入用の一時ファイルを作れませんでした: \(path)"
-      case .tmux(let error):
-        return "tmux の実行に失敗しました: \(error)"
-      }
     }
   }
 

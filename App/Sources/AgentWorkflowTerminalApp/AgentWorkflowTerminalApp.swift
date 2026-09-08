@@ -73,7 +73,8 @@ private struct ProjectView: View {
           worktree: model.selectedWorktree,
           diffModels: model.diffModels,
           mainPanes: model.mainPanes,
-          agentPaneStates: model.agentPaneStates(of:)
+          agentPaneStates: model.agentPaneStates(of:),
+          keyboardFocus: keyboardFocus
         ) {
           TerminalTabs(model: model, keyboardFocus: keyboardFocus)
         }
@@ -189,10 +190,8 @@ private struct TerminalTabs: View {
     }
   }
 
-  /// 選択されていないタブへは `nil` を渡す。値を渡すと、そのタブが自分で first responder を
-  /// 取りに行けてしまう。
-  private func focusRequest(for identity: WorktreeIdentity) -> Int? {
-    model.selectedIdentity == identity ? keyboardFocus.request : nil
+  private func focusRequest(for identity: WorktreeIdentity) -> TerminalFocusRequest? {
+    keyboardFocus.focusRequest(isTabSelected: model.selectedIdentity == identity)
   }
 }
 
@@ -264,7 +263,7 @@ private struct WorktreeTab: View {
     .opacity(worktree.detected.isReachable ? 1 : 0.4)
     .task(id: worktree.identity) {
       guard worktree.detected.isReachable, let paneStates else { return }
-      let states = WorktreeRepresentativeStateFeed().states(from: paneStates(worktree))
+      let states = WorktreeRepresentativeStateFeed().states(from: paneStates(worktree.detected))
       for await state in states {
         representativeState = state
       }
@@ -276,15 +275,7 @@ private struct WorktreeTab: View {
     // 観測した状態に丸めることになる (設計書 §12.3 の `Unknown` と同じ理由)。
     guard worktree.detected.isReachable else { return "到達不能" }
     guard let representativeState else { return "Idle" }
-    return switch representativeState.state {
-    case .working: "Working"
-    case .question: "Question"
-    case .permission: "Permission"
-    case .completed: "Ready for Review"
-    case .error: "Error"
-    case .idle: "Idle"
-    case .unknown: "Unknown"
-    }
+    return representativeState.state.displayLabel
   }
 
   private var stateColor: Color {
@@ -302,7 +293,7 @@ private struct WorktreeTab: View {
 private struct TerminalTabContent: View {
   let worktree: DetectedWorktree
   let tmuxExecutable: URL?
-  let focusRequest: Int?
+  let focusRequest: TerminalFocusRequest?
 
   var body: some View {
     if let tmuxExecutable {

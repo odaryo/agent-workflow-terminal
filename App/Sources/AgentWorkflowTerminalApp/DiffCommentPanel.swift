@@ -6,7 +6,15 @@ struct DiffCommentPanel: View {
   @ObservedObject var model: DiffViewerModel
   @ObservedObject var mainPane: MainPaneCoordinator
   let worktree: WorktreeIdentity
-  let agentPaneIDs: () -> Set<PaneID>
+  /// 入力欄がキーボードを主張している間、端末に first responder を取り返させないための
+  /// 調停役 (Issue #278)。
+  let keyboardFocus: TerminalKeyboardFocus
+  let agentPaneStates: () -> [PaneAgentState]?
+
+  @FocusState private var isEditorFocused: Bool
+  /// 主張の持ち主。解除がビューの消滅と `@FocusState` の両方から来ても、他の入力欄の
+  /// 主張を巻き込まないための識別子。
+  @State private var claimant = UUID()
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -17,6 +25,19 @@ struct DiffCommentPanel: View {
     }
     .padding(8)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    // 行を選ぶ操作 (Button / tap gesture) では macOS の first responder は動かない
+    // (Full Keyboard Access は既定 off)。選んだ直後の打鍵が端末へ流れないよう、選択が
+    // 入った時点でこちらへ移す (Issue #278)。
+    .onChange(of: model.lineSelection) { old, new in
+      guard old == nil, new != nil else { return }
+      isEditorFocused = true
+    }
+    .onChange(of: isEditorFocused) { _, focused in
+      keyboardFocus.setTextInputClaim(focused, owner: claimant)
+    }
+    // Drawer を閉じる・ペインを差し替えるとこのビューごと消える。`@FocusState` の false は
+    // その順で必ず届くとは限らないので、消滅の側でも主張を落とす。
+    .onDisappear { keyboardFocus.setTextInputClaim(false, owner: claimant) }
   }
 
   @ViewBuilder
@@ -26,6 +47,7 @@ struct DiffCommentPanel: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       TextEditor(text: $model.commentDraft)
+        .focused($isEditorFocused)
         .font(.callout)
         .frame(height: 80)
         .border(Color.secondary.opacity(0.3))
@@ -77,10 +99,10 @@ struct DiffCommentPanel: View {
           Task {
             await model.requestSend(
               .single(comment.id), worktree: worktree, mainPane: mainPane,
-              agentPaneIDs: agentPaneIDs())
+              agentPaneStates: agentPaneStates())
           }
         }
-        .disabled(model.isSending)
+        .disabled(model.isSending || isSendBlocked)
         Button("削除") { model.removeComment(comment.id) }
         Spacer(minLength: 0)
       }
@@ -88,6 +110,13 @@ struct DiffCommentPanel: View {
       .font(.caption)
     }
     .padding(.vertical, 2)
+  }
+
+  /// 理由は §9.2.2 の banner が1箇所で出すので、ここは無効化だけ行う。
+  private var isSendBlocked: Bool {
+    model.sendBlock(
+      registeredPane: mainPane.registeredPane(for: worktree),
+      agentPaneStates: agentPaneStates()) != nil
   }
 
   private static func anchorLabel(_ anchor: DiffCommentAnchor) -> String {
@@ -103,18 +132,15 @@ struct DiffCommentPanel: View {
 /// 置かない。「Agent」の印は選択の材料であって、選択そのものはユーザーが行う。
 struct MainPanePicker: View {
   let request: DiffViewerModel.PaneSelectionRequest
-  let choose: (PaneID) -> Void
+  let choose: (MainPaneCandidate) -> Void
   let cancel: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("送信先の pane を選ぶ").fontWeight(.medium)
-      if let missing = request.missingPane {
-        Label(
-          "登録されていた pane \(missing.rawValue) は現在存在しません。選び直してください。",
-          systemImage: "exclamationmark.triangle"
-        )
-        .font(.caption)
+      if let absence = request.absence {
+        Label(Self.absenceMessage(absence), systemImage: "exclamationmark.triangle")
+          .font(.caption)
       }
       if request.candidates.isEmpty {
         Text("この worktree の tmux session に生存 pane がありません。")
@@ -123,7 +149,7 @@ struct MainPanePicker: View {
       } else {
         List(request.candidates) { candidate in
           Button {
-            choose(candidate.id)
+            choose(candidate)
           } label: {
             HStack(spacing: 6) {
               Text(candidate.pane.id.rawValue).font(.caption.monospaced())
@@ -146,5 +172,20 @@ struct MainPanePicker: View {
     }
     .padding(12)
     .frame(width: 380)
+  }
+
+  /// `paneReplaced` で「存在しません」と書かない。その `%N` はすぐ下の候補一覧に並んでいる。
+  private static func absenceMessage(_ absence: MainPaneAbsence) -> String {
+    switch absence {
+    case .paneGone(let pane):
+      "登録されていた pane \(pane.rawValue) は現在存在しません。選び直してください。"
+    case .paneReplaced(let pane):
+      "登録されていた pane \(pane.rawValue) は、同じ ID の別の pane に置き換わっています "
+        + "(tmux server の再起動など)。選び直してください。"
+    case .identityUnverifiable(let pane):
+      // 「別 pane になった」と断定しない。確かめられなかっただけ。
+      "登録されていた pane \(pane.rawValue) が同じ pane のままか確かめられませんでした "
+        + "(tmux server の同一性を読めていません)。選び直してください。"
+    }
   }
 }

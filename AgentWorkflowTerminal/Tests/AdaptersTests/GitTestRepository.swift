@@ -1,7 +1,8 @@
-import Adapters
 import Foundation
 import TerminalCore
 import Testing
+
+@testable import Adapters
 
 /// 実 git を使う統合テストが共有する隔離 repository。
 ///
@@ -38,6 +39,48 @@ struct GitTestRepository {
     try FileManager.default.createDirectory(at: mainWorktree, withIntermediateDirectories: true)
     try await git(["init", "-q", "-b", "main"])
     try await git(["commit", "-q", "--allow-empty", "-m", "init"])
+  }
+
+  /// 検証対象の `GitRunner` に汚れた global config を読ませる。`GitRunner` から `HOME` を落とす
+  /// (= config を読ませない) 対処は credential helper や include まで殺すので採れない。偽の
+  /// `HOME` に `.gitconfig` を置くのが、実運用の `~/.gitconfig` と同じ経路になる。
+  func runner(globalConfig: String, in worktreeName: String? = nil) throws -> GitRunner {
+    let home = root.appending(path: "home-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    try globalConfig.write(
+      to: home.appending(path: ".gitconfig"), atomically: true, encoding: .utf8)
+    return try GitRunner(
+      repositoryDirectory: worktreeName.map { root.appending(path: $0) } ?? mainWorktree,
+      processRunner: processRunner,
+      executableCandidates: [executableURL],
+      // `GitRunner` は `HOME` と `PATH` しか子へ渡さないので、`GIT_CONFIG_SYSTEM` を足しても
+      // 効かない。system config は実 `/etc/gitconfig` のまま = 製品と同じ条件になる。
+      parentEnvironment: [
+        "HOME": home.path, "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
+      ],
+      isExecutableFile: { FileManager.default.isExecutableFile(atPath: $0.path) })
+  }
+
+  /// gitlink を1つ巻き戻した superproject。`diff.submodule` / `diff.ignoreSubmodules` の影響は
+  /// 「gitlink が指す commit だけが変わった」状態でしか観測できない。
+  func addRewoundSubmodule(name: String) async throws {
+    let upstreamName = "upstream-\(name)"
+    let upstream = root.appending(path: upstreamName)
+    try FileManager.default.createDirectory(at: upstream, withIntermediateDirectories: true)
+    try await git(["init", "-q", "-b", "main"], in: upstreamName)
+    for contents in ["s1\n", "s2\n"] {
+      try contents.write(
+        to: upstream.appending(path: "s.txt"), atomically: true, encoding: .utf8)
+      try await git(["add", "-A"], in: upstreamName)
+      try await git(
+        ["commit", "-q", "-m", contents.trimmingCharacters(in: .newlines)],
+        in: upstreamName)
+    }
+    // file 経由の submodule clone は既定で拒否される (CVE-2022-39253 の緩和)。
+    try await git(
+      ["-c", "protocol.file.allow=always", "submodule", "add", "-q", upstream.path, name])
+    try await git(["commit", "-q", "-m", "add \(name)"])
+    try await git(["checkout", "-q", "HEAD~1"], in: "main/\(name)")
   }
 
   func detector() throws -> GitWorktreeDetector {

@@ -117,7 +117,7 @@ struct TmuxTextInjectionIntegrationTests {
     try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("dead")) { runner in
       let root = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
       _ = try await runner.run(arguments: ["set-option", "-g", "remain-on-exit", "on"])
-      let pane = try await splitPane(runner, from: root, command: "true")
+      let pane = try await splitPane(runner, from: root, command: ["true"])
       try await waitUntil("pane の終了") {
         try await display(runner, pane: pane, format: "#{pane_dead}") == "1"
       }
@@ -216,7 +216,7 @@ struct TmuxTextInjectionIntegrationTests {
       let root = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
       let pane = try await splitPane(
         runner, from: root,
-        command: "stty raw -echo; printf '\\033[?2004hREADY'; cat > '\(outputPath)'")
+        command: ["stty raw -echo; printf '\\033[?2004hREADY'; cat > '\(outputPath)'"])
       // READY は 2004 の直後に同じ stream へ書かれるため、見えた時点で 2004 は処理済み。
       try await waitUntil("観測用 pane の準備") {
         try await capturePane(runner, pane: pane).contains("READY")
@@ -228,29 +228,28 @@ struct TmuxTextInjectionIntegrationTests {
 
   /// 注入されたコマンドが実行されないことを確かめるための pane。zsh を選ぶのは、macOS 標準の
   /// bash 3.2 が bracketed paste 非対応で、同じ注入が**実行されてしまう**ことを実測したため
-  /// (`TmuxTextInjection` の doc に書いた限界そのもの)。`PS1` は prompt の描画を待つ目印で、
-  /// prompt が出ていれば zle が動いている = 2004 が立っている。
+  /// (`TmuxTextInjection` の doc に書いた限界そのもの)。prompt は zle が動いている
+  /// = 2004 が立っていることの目印で、出るまで待たずに注入すると保証を確かめずに測ることになる。
   private func makeShellPane(_ runner: TmuxRunner) async throws -> PaneID {
     let root = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
-    let pane = try await splitPane(
-      runner, from: root, command: "/bin/zsh -f -i",
-      environment: "PS1=AWT_SHELL_READY> ")
+    let prompt = try ShellPromptZDotDir()
+    defer { prompt.remove() }
+    let pane = try await splitPane(runner, from: root, command: prompt.shellArguments)
     try await waitUntil("shell の prompt 表示") {
-      try await capturePane(runner, pane: pane).contains("AWT_SHELL_READY>")
+      try await capturePane(runner, pane: pane).contains(ShellPromptZDotDir.marker)
     }
     return pane
   }
 
+  /// `command` は tmux の argv。要素が1つなら tmux は既定 shell 経由で解釈し、複数なら
+  /// shell を挟まずそのまま exec する (実測)。
   private func splitPane(
     _ runner: TmuxRunner,
     from root: PaneID,
-    command: String,
-    environment: String? = nil
+    command: [String]
   ) async throws -> PaneID {
     let created = try await runner.run(
-      arguments: ["split-window", "-t", root.rawValue]
-        + (environment.map { ["-e", $0] } ?? [])
-        + ["-P", "-F", "#{pane_id}", command])
+      arguments: ["split-window", "-t", root.rawValue, "-P", "-F", "#{pane_id}"] + command)
     return PaneID(rawValue: created.stdout.trimmingCharacters(in: .newlines))
   }
 
@@ -346,5 +345,48 @@ private struct ByteCapture {
       try await Task.sleep(for: .milliseconds(50))
     }
     #expect(delivered() == expected)
+  }
+}
+
+/// prompt を出す shell pane を作るための一時 `ZDOTDIR`。3つの統合テストが共有する。
+///
+/// prompt を `split-window -e 'PS1=...'` で渡さないのは、**CI runner ではその値が pane の環境へ
+/// 届かず** (Issue #290 の計測: 同じ tmux 3.7c でもローカルは届き runner は届かない)、
+/// prompt が出ないまま 20 秒でタイムアウトしていたため。rc ファイル経由なら両方で prompt が出る
+/// ことを実測済み。
+struct ShellPromptZDotDir {
+  /// prompt が描画されたことを画面で判定するための目印。
+  static let marker = "AWT_SHELL_READY>"
+
+  private let directory: URL
+
+  init() throws {
+    directory = FileManager.default.temporaryDirectory
+      .appending(path: "awt-shell-zdotdir-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+    try "PS1='\(Self.marker) '\n".write(
+      to: directory.appending(path: ".zshrc"), atomically: true, encoding: .utf8)
+  }
+
+  /// **1文字列ではなく argv で渡す。** `ZDOTDIR=... /bin/zsh` のような env prefix つきの
+  /// 1文字列にすると tmux が `default-shell` を挟み、その shell が非対話・非ログインでも
+  /// **ホストの `~/.zshenv` を読む** (実測: pane に `AWT_LEAK_ZSHENV=1` と `~/.zshenv` の
+  /// stderr が出た)。`default-shell` が csh 系だと `VAR=val cmd` が構文エラーになり
+  /// **pane が即死する** (実測: tcsh で `cmd= dead=`)。argv なら shell を挟まないので両方消える。
+  /// 環境変数は `env(1)` で渡す。
+  ///
+  /// `-d` は `/etc/zshrc` などの global rc を読ませないため (実測: 付けると `GLOBAL_RCS=off`、
+  /// `/etc/zshrc` の `disable log` も効かない)。`-f` は `$ZDOTDIR/.zshrc` まで読まなくなるので
+  /// 使えない (実測: `PS1=[%m%# ]` のまま)。
+  var shellArguments: [String] {
+    ["/usr/bin/env", "ZDOTDIR=\(directory.path)", "/bin/zsh", "-d", "-i"]
+  }
+
+  /// prompt が出た時点で `.zshrc` は読み終わっているため、pane より先に消してよい。
+  /// **これは `-d` に依存する**: `-d` を外すと `/etc/zshrc` が
+  /// `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history` を設定し、pane の生存中この場所へ書きに来る。
+  /// テストの成否にかかわらず消すこと。
+  func remove() {
+    try? FileManager.default.removeItem(at: directory)
   }
 }

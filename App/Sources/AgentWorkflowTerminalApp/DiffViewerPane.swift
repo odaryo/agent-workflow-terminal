@@ -10,8 +10,13 @@ struct DiffViewerPane: View {
   /// Agent と判定された pane を候補一覧の**印**にするためだけの観測 (§12.7)。Project Root の
   /// ように観測経路が無ければ `nil` で、その場合は印の無い候補一覧になる。
   let agentPaneStates: () -> AsyncStream<[PaneAgentState]>?
+  let keyboardFocus: TerminalKeyboardFocus
 
-  @State private var agentPaneIDs: Set<PaneID> = []
+  /// 候補一覧の Agent 印 (§12.7) と、送信可否の判定 (§9.2.2) の両方に使う最後の観測。
+  @State private var paneStates: [PaneAgentState] = []
+  /// 観測経路そのものがあるか。空配列 (経路はあるが Agent pane が無い) と区別して
+  /// §9.2.2 の文言を変えるために持つ。
+  @State private var isObservingPanes = false
 
   var body: some View {
     VStack(spacing: 0) {
@@ -34,13 +39,17 @@ struct DiffViewerPane: View {
     }
     .task {
       guard let states = agentPaneStates() else { return }
+      isObservingPanes = true
       for await panes in states {
-        agentPaneIDs = Set(panes.map(\.id))
+        paneStates = panes
       }
     }
     .sheet(item: $model.paneSelectionRequest) { request in
-      MainPanePicker(request: request) { pane in
-        Task { await model.choose(pane, for: request, mainPane: mainPane) }
+      MainPanePicker(request: request) { candidate in
+        Task {
+          await model.choose(
+            candidate, for: request, mainPane: mainPane, agentPaneStates: observedPaneStates)
+        }
       } cancel: {
         model.paneSelectionRequest = nil
       }
@@ -96,7 +105,7 @@ struct DiffViewerPane: View {
       Button("送信先を選ぶ") {
         Task {
           await model.requestMainPaneSelection(
-            worktree: worktree, mainPane: mainPane, agentPaneIDs: agentPaneIDs)
+            worktree: worktree, mainPane: mainPane, agentPaneStates: observedPaneStates)
         }
       }
       .buttonStyle(.link)
@@ -106,11 +115,20 @@ struct DiffViewerPane: View {
         Task {
           await model.requestSend(
             .batch(model.currentSnapshotComments.map(\.id)),
-            worktree: worktree, mainPane: mainPane, agentPaneIDs: agentPaneIDs)
+            worktree: worktree, mainPane: mainPane, agentPaneStates: observedPaneStates)
         }
       }
-      .disabled(model.currentSnapshotComments.isEmpty || model.isSending)
+      .disabled(model.currentSnapshotComments.isEmpty || model.isSending || sendBlock != nil)
     }
+  }
+
+  /// `nil` は観測経路が無いこと。到達不能な worktree などで、pane のせいにしないための区別。
+  private var observedPaneStates: [PaneAgentState]? { isObservingPanes ? paneStates : nil }
+
+  /// 状態で送信操作を無効にする理由 (§9.2.2)。判定は `DiffCommentSendGate` の1箇所に閉じる。
+  private var sendBlock: DiffCommentSendBlock? {
+    model.sendBlock(
+      registeredPane: mainPane.registeredPane(for: worktree), agentPaneStates: observedPaneStates)
   }
 
   private var destinationLabel: String {
@@ -205,6 +223,9 @@ struct DiffViewerPane: View {
       ForEach(model.notices, id: \.self) { notice in
         banner(notice, icon: "exclamationmark.triangle")
       }
+      if let block = sendBlock, let pane = mainPane.registeredPane(for: worktree) {
+        banner(DiffViewerModel.message(for: block, pane: pane), icon: "pause.circle")
+      }
       if let error = model.commentError {
         banner(error, icon: "exclamationmark.octagon")
       }
@@ -245,8 +266,11 @@ struct DiffViewerPane: View {
         DiffHunkView(model: model, file: selectedFile(in: snapshot))
           .frame(minWidth: 200, maxWidth: .infinity)
         Divider()
-        DiffCommentPanel(model: model, mainPane: mainPane, worktree: worktree) {
-          agentPaneIDs
+        DiffCommentPanel(
+          model: model, mainPane: mainPane, worktree: worktree,
+          keyboardFocus: keyboardFocus
+        ) {
+          observedPaneStates
         }
         .frame(width: 260)
       }

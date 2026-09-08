@@ -123,11 +123,7 @@ enum IsolatedTmuxServer {
     } catch let error as TmuxRunnerError where error.isServerAbsent {
       // server が既に消えているのは停止の最良の結果であって失敗ではない。ここを失敗と同じに
       // 扱うと、テスト自身が最後の pane を閉じて server を終わらせる回 (awt-close-last-*) が
-      // 成功したまま socket を残し、後始末検査が緑の回に落ちる。判定を自前で書かず
-      // `TmuxRunnerError.isServerAbsent` に委ねるのは、不在の stderr が2形あり (socket 残存で
-      // `no server running on <path>`、socket 無しで `error connecting to <path>
-      // (No such file or directory)`)、片方だけ見る述語を増やすと食い違うため。
-      // tmux 3.4 / 3.7c の双方で同じ2形になることを実測済み。
+      // 成功したまま socket を残し、後始末検査が緑の回に落ちる。
       serverWasStopped = true
     } catch {
       // timeout や実行失敗はここ。不在を確認できていないので socket は残す。

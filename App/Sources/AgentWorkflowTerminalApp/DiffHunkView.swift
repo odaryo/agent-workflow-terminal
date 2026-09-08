@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TerminalCore
 
@@ -94,7 +95,7 @@ struct DiffHunkView: View {
 /// Why not context menu で範囲指定: **右クリックは context menu を開く前に行の tap gesture も
 /// 発火させる** (実測: 別の行を選択した状態で対象行を右クリックし、メニューを Esc で閉じると
 /// 選択がその行へ移っていた)。そのためメニュー項目の「ここまで広げる」は必ず自分自身までの
-/// 1行になり、範囲にならない。`TapGesture().modifiers(.shift)` は右クリックを経由しない。
+/// 1行になり、範囲にならない。shift + click は右クリックを経由しない。
 private struct DiffLineRow: View {
   @ObservedObject var model: DiffViewerModel
   let line: UnifiedDiffLine
@@ -111,13 +112,18 @@ private struct DiffLineRow: View {
   var body: some View {
     content
       .contentShape(.rect)
-      .gesture(
-        TapGesture().modifiers(.shift)
-          .onEnded { if let number { model.extendSelection(to: number, side: side) } }
-          .exclusively(
-            before: TapGesture()
-              .onEnded { if let number { model.selectLine(number, side: side) } })
-      )
+      .onTapGesture {
+        guard let number else { return }
+        // 修飾キーは gesture ではなく click 時点の実キー状態で見る。
+        // Why not `TapGesture().modifiers(.shift)` との合成: `.exclusively(before:)` で組むと
+        // **shift 無しの click まで届かなくなり、行が一切選べなくなる** (実測: 同じ画面で
+        // Reviewing/Reviewed のラジオは合成クリックで切り替わるのに、行の tap だけ無反応)。
+        if NSEvent.modifierFlags.contains(.shift) {
+          model.extendSelection(to: number, side: side)
+        } else {
+          model.selectLine(number, side: side)
+        }
+      }
       .contextMenu {
         Button("選択を解除") { model.clearLineSelection() }
       }
@@ -128,9 +134,14 @@ private struct DiffLineRow: View {
       number(line.oldLineNumber)
       number(line.newLineNumber)
       // 横スクロール中の行なので、幅を親いっぱいへ広げず本文の長さのままにする。
+      //
+      // Why not `.textSelection(.enabled)`: 付けると**行の tap gesture が一切発火しなくなり、
+      // コメントを付ける行を選べなくなる** (実測: 同じビルドでこの修飾子を外すだけで、
+      // 同じ座標への HID クリックが `選択中: … new 41` へ変わった。行番号の桁を狙っても
+      // 付いている間は無反応で、テキストの上だけの現象ではない)。§9.2 の行選択を優先し、
+      // マウスでの本文コピーは落としている。
       Text(line.kind.sign + line.text + (line.isMissingTrailingNewline ? " (改行なし)" : ""))
         .font(.system(.caption, design: .monospaced))
-        .textSelection(.enabled)
         .fixedSize(horizontal: true, vertical: false)
         .padding(.leading, 4)
       Spacer(minLength: 0)

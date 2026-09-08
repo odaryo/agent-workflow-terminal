@@ -38,6 +38,7 @@
       "Bash(scripts/wf-worktree-remove.sh:*)",
       "Bash(open -a:*)",
       "Bash(screencapture:*)",
+      "Bash(osascript:*)",
       "Bash(shellcheck:*)"
     ],
     "deny": []

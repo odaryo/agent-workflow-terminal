@@ -110,11 +110,16 @@ jobs:
 
       # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは既存 job と
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
+      # 上限 600s + 次ステップの 300s = 900s。CI 実測 (run 34245198762) の固定費は
+      # setup+checkout+toolchain 5s / brew 3s / build 44s、wrapper の停止処理は 17s。
+      # 固定費を 420s、停止処理を 2 本分 120s まで見積もっても 1440s = 24 分で、
+      # job の timeout-minutes: 30 に届かない。2 本ともハングした回でも、両方が
+      # exit 124 とスタックを書き終えてから job が終わる。
       - name: Test (integration enabled)
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-full.log" \
-            --timeout 900 \
+            --timeout 600 \
             -- swift test --skip AdaptersSerialTimingTests
 
       # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
@@ -123,7 +128,7 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --timeout 900 \
+            --timeout 300 \
             -- swift test --filter "$AWT_INTEGRATION_FILTER"
 
       - name: Verify integration suites actually ran
@@ -133,9 +138,11 @@ jobs:
             --min-tests 63 \
             --suites 8
 
-      # テストが落ちた回ほど後始末の状態を知りたいので always で走らせる。
+      # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では
+      # ないのは、concurrency の cancel-in-progress で途中で殺された回にも走ってしまい、
+      # 中断による残存を後始末漏れとして赤くするため (always() は cancel でも実行される)。
       - name: Check for leftover servers and sockets
-        if: always()
+        if: ${{ !cancelled() }}
         run: "$GITHUB_WORKSPACE/scripts/check-integration-leftovers.sh"
 
       - name: Upload test logs

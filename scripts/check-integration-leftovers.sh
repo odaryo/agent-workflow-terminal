@@ -52,7 +52,18 @@ if [[ -n "$servers" ]]; then
   found=1
 fi
 
-for pattern in "/private/tmp/awt-git-" "${TMPDIR:-/private/tmp}/awt-rg-it-"; do
+# rg の fixture は `NSTemporaryDirectory()` 基準。これは `TMPDIR` が無くても
+# `/var/folders/.../T/` を返す (実測: `env -u TMPDIR` でも同じ値、`confstr(_CS_DARWIN_USER_TEMP_DIR)`
+# へフォールバックする)。`${TMPDIR:-/private/tmp}` は macOS では決して当たらない枝なので、
+# 同じ値を返す `getconf DARWIN_USER_TEMP_DIR` を使う (実測: 文字列まで一致)。
+# 解決できなければ黙って素通りさせず失敗させる。検査項目が1つ空振りしたまま緑になるより、
+# 検査自体が壊れていることを見せたい。
+user_temp_dir=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)
+[[ -n "$user_temp_dir" ]] || user_temp_dir="${TMPDIR:-}"
+[[ -n "$user_temp_dir" ]] \
+  || die "rg fixture の一時ディレクトリを解決できません (getconf DARWIN_USER_TEMP_DIR も TMPDIR も空)"
+
+for pattern in "/private/tmp/awt-git-" "${user_temp_dir%/}/awt-rg-it-"; do
   dirs=$(find "$(dirname "$pattern")" -mindepth 1 -maxdepth 1 \
     -name "$(basename "$pattern")*" 2>/dev/null || true)
   if [[ -n "$dirs" ]]; then

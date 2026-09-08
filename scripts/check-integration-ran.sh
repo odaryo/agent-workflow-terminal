@@ -54,12 +54,19 @@ done
 [[ "$min_tests" =~ ^[0-9]+$ ]] || die "--min-tests には件数が必要です"
 [[ "$suites" =~ ^[0-9]+$ ]] || die "--suites には suite 数が必要です"
 
+# 要約行の形は toolchain で変わる。`in N suites` は付く場合と付かない場合があり、
+# 失敗した回は付かないことがある (実測: CI の Swift 6.1.2 は成功回も失敗回も
+# `Test run with 744 tests passed after ...` / `... failed after ... with 18 issues.`、
+# ローカルの Swift 6.3.2 は両方とも `in N suites` 付き)。件数だけを必須にする。
 # パイプの終端が tail なので grep の空振りは終了コードに出ない。値の有無で判定する。
-summary=$(grep -E 'Test run with [0-9]+ tests? in [0-9]+ suites?' "$log" | tail -1 || true)
+summary=$(grep -E 'Test run with [0-9]+ tests?( in [0-9]+ suites?)? (passed|failed)' "$log" | tail -1 || true)
 [[ -n "$summary" ]] || die "実行結果の要約行がログにありません: $log"
 
-ran_tests=$(echo "$summary" | sed -E 's/.*Test run with ([0-9]+) tests? in .*/\1/')
-ran_suites=$(echo "$summary" | sed -E 's/.*in ([0-9]+) suites?.*/\1/')
+ran_tests=$(echo "$summary" | sed -E 's/.*Test run with ([0-9]+) tests?.*/\1/')
+ran_suites=""
+if echo "$summary" | grep -qE 'in [0-9]+ suites?'; then
+  ran_suites=$(echo "$summary" | sed -E 's/.*in ([0-9]+) suites?.*/\1/')
+fi
 
 skipped=$(grep -c ' skipped\.' "$log" || true)
 
@@ -73,7 +80,10 @@ if [[ "$ran_tests" -lt "$min_tests" ]]; then
   info "実行件数が下限を下回りました: $ran_tests < $min_tests"
   failures=1
 fi
-if [[ "$ran_suites" -ne "$suites" ]]; then
+if [[ -z "$ran_suites" ]]; then
+  # 飛ばしたことを黙らせない。skip 0 件と件数下限はこの場合も検査している。
+  info "suite 数は要約行に含まれないため未検査です (skip 件数と件数下限は検査済み): $summary"
+elif [[ "$ran_suites" -ne "$suites" ]]; then
   info "suite 数が一致しません: $ran_suites != $suites"
   failures=1
 fi

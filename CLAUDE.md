@@ -129,6 +129,20 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop. **UI wiring in `App/` is reviewed by running it, not by the reviewer**: the layer is not unit-testable and measurement-based adversarial review has little to measure there, so the implementer attaches a manual-run check (screenshot in the PR) and only the `TerminalCore` / `Adapters` side of the change goes to the reviewer. **Drive that run with `scripts/verify-app-ui.sh`** (`build` / `launch` / `find` / `click-text` / `expect`, and `selftest` to check the harness itself) — it launches the bundle `scripts/build-app.sh` produced, locates elements through Accessibility instead of guessed coordinates, and closes the two traps that made Issue #230 a false alarm: a click on a non-active window is eaten by activation, and System Events clicks never fire SwiftUI's `onTapGesture` even though they do actuate Buttons.
 
+**UI 層を計測するときの作法** (#278 の実測による)。
+
+- **合成キーストロークは埋め込み端末 (libghostty の NSView) へ届く。** 以前「届かないので実キーボードを
+  代表できない」と記録されていたが誤りで、`verify-app-ui.sh type` は端末へも入る (旧計測の null 結果の
+  原因は特定できていない)。「実キーボードでしか測れない」と早々に諦めないこと。ただし System Events の
+  制約で**非 ASCII は送れない**。逆に AX からは、libghostty の NSView が Accessibility 要素として
+  現れないため「端末がフォーカスを持っている」と「どこも持っていない」を区別できない — フォーカスの
+  所在は `focused` の戻り値ではなく**打鍵の到達先**で判定する。
+- **tmux の pane を証拠に使うときは、一意なマーカーを1回だけ打つ。** pane はアプリの再起動をまたいで
+  残るので、履歴と今回の打鍵を区別できない。#278 では「コメント欄と pane の両方に同じ文字列がある」
+  状態が「2回打った」と「1回が両方へ入った」を区別できず、一意なマーカーで測り直して初めて判定できた。
+- **打鍵の計測で Enter を送らない。** 修正前のビルドでは、コメント欄へ打ったつもりの文字列が生きた
+  shell のプロンプトへ積まれていた。`verify-app-ui.sh type` は改行を含む文字列をコードで拒否する。
+
 **Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the legacy `P3 バグ改修` milestone (the parking lot, not the current P3) and do **not** count against the current phase. Promote findings when measured impact blocks a phase's acceptance criteria; data loss and incorrect input routing require evaluation even if everyday use has not reproduced them. The current P3–P5 and their acceptance criteria live in `docs/roadmap.md`. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; the parking lot prevents these from making a phase unbounded.
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.

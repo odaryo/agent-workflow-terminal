@@ -10,21 +10,31 @@ import TerminalCore
 
 public struct GhosttyTerminalView: NSViewRepresentable {
   private let configuration: TerminalRendererConfiguration
+  private let focusRequest: Int?
 
+  /// `focusRequest` はキーボードフォーカスを取り直す要求。`nil` は「この端末は今画面に
+  /// 出ていない」を意味し、first responder を取りに行かない。値そのものに意味は無く、
+  /// 変わったことだけが要求を表す。SwiftUI の `opacity` / `allowsHitTesting` は AppKit の
+  /// first responder を動かさないので、切り替える側が明示的に渡す必要がある (Issue #233)。
   public init(
     command: [String],
     workingDirectory: String? = nil,
-    configurationFileURL: URL? = nil
+    configurationFileURL: URL? = nil,
+    focusRequest: Int? = nil
   ) {
     configuration = TerminalRendererConfiguration(
       command: command,
       workingDirectory: workingDirectory,
       configurationFileURL: configurationFileURL
     )
+    self.focusRequest = focusRequest
   }
 
   public func makeNSView(context: Context) -> GhosttySurfaceView {
     let view = GhosttySurfaceView()
+    // Why start より前: surface は window へ装着された時点で作られ、その中で first responder を
+    // 取るかどうかをこの値で決める。最初の updateNSView はそれより後に来る。
+    view.applyFocusRequest(focusRequest)
     do {
       try view.start(configuration: configuration)
     } catch {
@@ -33,7 +43,9 @@ public struct GhosttyTerminalView: NSViewRepresentable {
     return view
   }
 
-  public func updateNSView(_ nsView: GhosttySurfaceView, context: Context) {}
+  public func updateNSView(_ nsView: GhosttySurfaceView, context: Context) {
+    nsView.applyFocusRequest(focusRequest)
+  }
 
   public static func dismantleNSView(_ nsView: GhosttySurfaceView, coordinator: ()) {
     // Why not deinit: SwiftUI は破棄前にこの main actor callback を呼ぶ契約であり、
@@ -454,6 +466,11 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   private var configuration: TerminalRendererConfiguration?
+  /// 表示されているタブの端末だけが true。false の間は自分から first responder を取らない。
+  private var wantsKeyboardFocus = false
+  private var appliedFocusRequest: Int?
+  /// フォーカス移譲だけに使われたクリックの mouseUp を握り潰すための印。
+  var suppressesNextLeftMouseUp = false
   var trackingAreaReference: NSTrackingArea?
   let markedTextStorage = NSMutableAttributedString()
   var textAccumulator: [String]?
@@ -555,6 +572,20 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     updateContentScaleFromWindow()
     updateSurfaceSize()
     updateDisplayID()
+  }
+
+  func applyFocusRequest(_ request: Int?) {
+    wantsKeyboardFocus = request != nil
+    guard let request else {
+      // Why not 覚えたままにする: 覚えたままだと、同じ要求番号のまま選び直されたタブが
+      // first responder を取り直せない。
+      appliedFocusRequest = nil
+      return
+    }
+    guard request != appliedFocusRequest else { return }
+    appliedFocusRequest = request
+    // window が無い間 (装着前) は記録だけしておき、surface 生成時に取る。
+    window?.makeFirstResponder(self)
   }
 
   override public var acceptsFirstResponder: Bool { true }
@@ -671,8 +702,11 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     updateContentScaleFromWindow()
     updateSurfaceSize()
     updateDisplayID()
-    ghostty_surface_set_focus(surface, window?.isKeyWindow == true)
-    window?.makeFirstResponder(self)
+    // Why not 常に取る: 背面のタブの surface が (再) 生成されるたびに first responder を
+    // 奪うと、表示中のタブへの打鍵が背面の端末へ入る (Issue #233 と同じ誤送信)。
+    if wantsKeyboardFocus { window?.makeFirstResponder(self) }
+    ghostty_surface_set_focus(
+      surface, window?.isKeyWindow == true && window?.firstResponder === self)
     perform(lifecycle.handle(.creationSucceeded))
   }
 

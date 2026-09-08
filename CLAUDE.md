@@ -156,8 +156,12 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
   新しい観測手段を作る前に、対象のソースと既存テストの注釈を読むこと — 「観測できない」と分かっている
   ものを観測しようとしていないか。
 - **外界の版数差は、想定より広いことがある。** #286 は「区切りが escape されない」として起票されたが、
-  実測では tmux 3.7c が**出力段の escape を一切行っていない** (`\ooo` / named escape / `\$` が全部)。
-  Issue 本文の記述を実測が上書きしたら、**Issue 側を訂正してから**進めること。
+  実測では tmux 3.7c が `\ooo` / named escape / `\$` の**いずれも生成しなかった** — 区切りだけの話では
+  なかった。Issue 本文の記述を実測が上書きしたら、**Issue 側を訂正してから**進めること。
+- **観測の範囲を超えた一般化を書かない。** 上の1文は当初「3.7c は escape を一切行わない」と書いていたが、
+  試した入力について「生成しなかった」ことしか測っていない。この差は次に読む人が「では escape は
+  考えなくてよい」と判断できるかどうかを分ける。#286 では逆向きの実例も出た — spec が「保存段の escape は
+  両版同一」と断じていたが、3.4 は保存段で `$` の前にも `\` を足す (実装者が検出、レビューアが独立再現)。
 
 **Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the legacy `P3 バグ改修` milestone (the parking lot, not the current P3) and do **not** count against the current phase. Promote findings when measured impact blocks a phase's acceptance criteria; data loss and incorrect input routing require evaluation even if everyday use has not reproduced them. The current P3–P5 and their acceptance criteria live in `docs/roadmap.md`. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; the parking lot prevents these from making a phase unbounded.
 

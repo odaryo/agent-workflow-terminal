@@ -5,6 +5,7 @@
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -52,6 +53,19 @@ def descendants(pid: int) -> list[dict]:
     return result
 
 
+CSI = re.compile(r"\x1b\[[0-9;:?<=>]*[ -/]*[@-~]")
+OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def strip_escapes(text: str) -> str:
+    """`capture-pane -e -p` から `-p` と同じ文字列を作る (Issue #217 で 40/40 一致)。
+
+    行末の除去は**半角スペースとタブだけ**。NBSP まで落とすと `-p` と一致しなくなる
+    (実測 25 組中 9 組)。入力欄の区切りがこの NBSP である。
+    """
+    return "\n".join(line.rstrip(" \t") for line in CSI.sub("", OSC.sub("", text)).split("\n"))
+
+
 def sample(target: str) -> dict:
     now = time.time()
     r = tmux("list-panes", "-t", target, "-F", FMT)
@@ -65,8 +79,12 @@ def sample(target: str) -> dict:
         rec["procs"] = descendants(int(rec["fmt"]["pane_pid"]))
     except (ValueError, KeyError):
         rec["procs"] = []
-    cap = tmux("capture-pane", "-p", "-t", target)
-    rec["screen"] = cap.stdout if cap.returncode == 0 else None
+    # 属性付きで採る (Issue #217)。dim は Claude Code の入力欄でプレースホルダと
+    # 入力済みテキストを分ける唯一の手掛かりで、-p の記録では replay で再採点できない。
+    # tmux の起動回数は 1 回のまま。`screen` は `-p` と等価になるよう剥がしたもの。
+    cap = tmux("capture-pane", "-e", "-p", "-t", target)
+    rec["screen_esc"] = cap.stdout if cap.returncode == 0 else None
+    rec["screen"] = strip_escapes(cap.stdout) if cap.returncode == 0 else None
     return rec
 
 

@@ -28,7 +28,7 @@ struct TmuxAgentSignalSourceTests {
           "display-message", "-p", "-t", "%7", TmuxListPanes.agentPaneStatusFormat,
         ]
     )
-    #expect(calls[1].suffix(4) == ["capture-pane", "-p", "-t", "%7"])
+    #expect(calls[1].suffix(5) == ["capture-pane", "-e", "-p", "-t", "%7"])
   }
 
   @Test("画面差分から pane 単位の最終変化時刻を追跡する")

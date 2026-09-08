@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 9)
+    #expect(fixtures.count == 14)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -17,26 +17,72 @@ struct ClaudeCodeAdapterTests {
     }
   }
 
+  @Test("入力欄のサジェストが dim なら空欄として扱う")
+  func dimPlaceholderCountsAsEmptyInputBox() throws {
+    for prefix in ["claude-2.1.263-idle-placeholder", "claude-2.1.263-completed-placeholder"] {
+      let fixture = try #require(AgentStateFixture.load(prefix: prefix).first)
+      let actual = fixtureState(
+        of: ClaudeCodeAdapter().classify(signals: fixture.signals, liveness: .alive))
+      #expect(actual == fixture.expectedState, Comment(rawValue: prefix))
+    }
+  }
+
+  @Test("属性が無ければ Idle / Completed へ丸めず、理由を screenAttributesUnavailable にする")
+  func placeholderWithoutAttributesStaysUnknown() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.263-completed-placeholder").first)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, observedAt: .distantPast
+      ), liveness: .alive)
+    guard case .observation(let observation) = result else {
+      Issue.record("absent")
+      return
+    }
+    #expect(observation.state == .unknown)
+    #expect(observation.unknownReason == .screenAttributesUnavailable)
+  }
+
+  @Test("色の付かない捕捉では dim を根拠にしない")
+  func captureWithoutAnyStylingStaysUnknown() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.263-completed-placeholder").first)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: fixture.screen,
+        styledScreenText: fixture.screen,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, observedAt: .distantPast
+      ), liveness: .alive)
+    #expect(fixtureState(of: result) == "unknown")
+  }
+
   @Test("permission 文言が変わっても残存 done を Completed と断言しない")
   func permissionMutationIsUnknown() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "claude-permission").first)
-    let mutated = AgentSignals(
-      paneTitle: fixture.paneTitle,
-      screenText: fixture.screen
+    func mutate(_ screen: String) -> String {
+      screen
         .replacingOccurrences(of: "Do you want to ", with: "Confirm whether to ")
-        .replacingOccurrences(of: "Esc to cancel · Tab to amend", with: "Escape cancels"),
-      secondsSinceScreenChange: 2,
-      observedAt: .distantPast
-    )
-    let result = ClaudeCodeAdapter().classify(signals: mutated, liveness: .alive)
-    #expect(fixtureState(of: result) == "unknown")
+        .replacingOccurrences(of: "Esc to cancel · Tab to amend", with: "Escape cancels")
+    }
+    for prefix in ["claude-permission", "claude-2.1.263-permission"] {
+      let fixture = try #require(AgentStateFixture.load(prefix: prefix).first)
+      let mutated = AgentSignals(
+        paneTitle: fixture.paneTitle,
+        screenText: mutate(fixture.screen),
+        styledScreenText: fixture.styledScreen.map(mutate),
+        secondsSinceScreenChange: 2,
+        observedAt: .distantPast
+      )
+      let result = ClaudeCodeAdapter().classify(signals: mutated, liveness: .alive)
+      #expect(fixtureState(of: result) == "unknown", Comment(rawValue: prefix))
+    }
   }
 
   @Test("初回観測では残存完了マーカーを Completed と断言しない")
   func initialObservationIsNotCompleted() throws {
     let fixture = try #require(AgentStateFixture.load(prefix: "claude-completed").first)
     let signals = AgentSignals(
-      paneTitle: fixture.paneTitle, screenText: fixture.screen,
+      paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
       secondsSinceScreenChange: nil, observedAt: .distantPast
     )
     let result = ClaudeCodeAdapter().classify(signals: signals, liveness: .alive)
@@ -48,7 +94,7 @@ struct ClaudeCodeAdapterTests {
     let fixture = try #require(AgentStateFixture.load(prefix: "claude-working-turn-start").first)
     let result = ClaudeCodeAdapter().classify(
       signals: AgentSignals(
-        paneTitle: fixture.paneTitle, screenText: fixture.screen,
+        paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
         secondsSinceScreenChange: 0, observedAt: .distantPast
       ),
       liveness: .alive
@@ -65,7 +111,7 @@ struct ClaudeCodeAdapterTests {
       fixtureState(
         of: ClaudeCodeAdapter().classify(
           signals: AgentSignals(
-            paneTitle: fixture.paneTitle, screenText: fixture.screen,
+            paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
             secondsSinceScreenChange: elapsed, observedAt: .distantPast
           ),
           liveness: .alive

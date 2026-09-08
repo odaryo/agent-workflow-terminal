@@ -15,10 +15,11 @@ struct TmuxCapturePaneTests {
       executableCandidates: [URL(fileURLWithPath: "/tmux")],
       parentEnvironment: [:], isExecutableFile: { _ in true }
     )
-    let output = try await TmuxCapturePane(runner: runner).capture(PaneID(rawValue: "%7"))
+    let output = try await TmuxCapturePane(runner: runner).captureWithEscapeSequences(
+      PaneID(rawValue: "%7"))
     #expect(output == "line\n\n")
     let call = try #require(await spy.calls.first)
-    #expect(call.arguments == ["-u", "-L", "capture-test", "capture-pane", "-p", "-t", "%7"])
+    #expect(call.arguments == ["-u", "-L", "capture-test", "capture-pane", "-e", "-p", "-t", "%7"])
   }
 
   @Test("不正な pane ID は tmux へ渡さない")
@@ -32,7 +33,8 @@ struct TmuxCapturePaneTests {
       parentEnvironment: [:], isExecutableFile: { _ in true }
     )
     await #expect(throws: TmuxCapturePaneError.invalidPaneID(PaneID(rawValue: "other"))) {
-      try await TmuxCapturePane(runner: runner).capture(PaneID(rawValue: "other"))
+      try await TmuxCapturePane(runner: runner).captureWithEscapeSequences(
+        PaneID(rawValue: "other"))
     }
     #expect(await spy.calls.isEmpty)
   }

@@ -117,7 +117,9 @@ public enum PersistedWorktreeActivation: String, Sendable, Hashable, Codable {
 /// - 保存に無く今回検出できた worktree は `.inactive` から始める。停止中の出現は §3.2 の
 ///   「観測中に新しく現れた」に当たらない。
 /// - 保存にあり今回検出できなかったものは捨てず、到達不能として保持する。ユーザーの Active 指定を
-///   「消えた」と決めつけて捨てないため。
+///   「消えた」と決めつけて捨てないため。ただし今回 entry 単位で観測に失敗したパス (`unobserved`) は
+///   `.unreachable` ではなく `.observationFailed` として保持する。到達可能性を確かめられていない
+///   ものを「到達不能」と断定して見せないため (Issue #243)。
 /// - したがって `appeared` と `disappeared` は常に空になる。復元は出現も消失も宣言しない。
 ///
 /// - Important: `saved` の `nil` は「保存が無い」= 初回起動を表し、空の保存 (前回は1件も
@@ -135,11 +137,17 @@ public enum PersistedWorktreeActivation: String, Sendable, Hashable, Codable {
 ///   Project Root を Task 側へ移すことは §2.3 が禁じているため。
 public func restoreWorktreeInventory(
   detected: [DetectedWorktree],
-  saved: PersistedWorktreeInventory?
+  saved: PersistedWorktreeInventory?,
+  unobserved: [String] = []
 ) -> WorktreeScanResult {
   guard let saved else {
-    return reconcileDetectedWorktrees(detected: detected, previous: nil)
+    return reconcileDetectedWorktrees(detected: detected, previous: nil, unobserved: unobserved)
   }
+
+  // 検出できているパスは観測できているので、失敗の側を無視する
+  // (`reconcileDetectedWorktrees` と同じ規則)。
+  let unobservedPaths = Set(unobserved).subtracting(detected.map(\.worktreePath))
+  var unobservedIdentities: [WorktreeIdentity] = []
 
   var savedActivations: [WorktreeIdentity: WorktreeActivation] = [:]
   for task in saved.taskWorktrees where savedActivations[task.identity] == nil {
@@ -168,24 +176,47 @@ public func restoreWorktreeInventory(
     )
   }
 
-  if let savedProjectRoot = saved.projectRoot,
-    projectRoot == nil,
-    !seen.contains(savedProjectRoot.identity)
+  if let restoredRoot = restoredProjectRoot(
+    saved: saved, detectedProjectRoot: projectRoot, seen: seen, unobservedPaths: unobservedPaths)
   {
-    projectRoot = DetectedWorktree(
-      identity: savedProjectRoot.identity,
-      worktreePath: savedProjectRoot.worktreePath,
-      branch: savedProjectRoot.branch,
-      isProjectRoot: true,
-      isReachable: false
-    )
+    projectRoot = restoredRoot
+    if restoredRoot.observation == .observationFailed {
+      unobservedIdentities.append(restoredRoot.identity)
+    }
   }
 
   var retained = seen
   if let projectRoot {
     retained.insert(projectRoot.identity)
   }
-  for task in saved.taskWorktrees where retained.insert(task.identity).inserted {
+  let leftovers = restoredLeftovers(
+    saved: saved, retained: retained, unobservedPaths: unobservedPaths)
+  taskWorktrees.append(contentsOf: leftovers.taskWorktrees)
+  unobservedIdentities.append(contentsOf: leftovers.unobserved)
+
+  return WorktreeScanResult(
+    inventory: WorktreeInventory(projectRoot: projectRoot, taskWorktrees: taskWorktrees),
+    appeared: [],
+    disappeared: [],
+    unobserved: unobservedIdentities
+  )
+}
+
+/// 今回どれとも突き合わなかった保存済み Task worktree。ユーザーの Active 指定を捨てないため、
+/// 検出できていなくても一覧に残す。
+private func restoredLeftovers(
+  saved: PersistedWorktreeInventory,
+  retained: Set<WorktreeIdentity>,
+  unobservedPaths: Set<String>
+) -> (taskWorktrees: [TaskWorktree], unobserved: [WorktreeIdentity]) {
+  var remaining = retained
+  var taskWorktrees: [TaskWorktree] = []
+  var unobserved: [WorktreeIdentity] = []
+  for task in saved.taskWorktrees where remaining.insert(task.identity).inserted {
+    let observation = restoredObservation(of: task.worktreePath, in: unobservedPaths)
+    if observation == .observationFailed {
+      unobserved.append(task.identity)
+    }
     taskWorktrees.append(
       TaskWorktree(
         detected: DetectedWorktree(
@@ -193,16 +224,41 @@ public func restoreWorktreeInventory(
           worktreePath: task.worktreePath,
           branch: task.branch,
           isProjectRoot: false,
-          isReachable: false
+          observation: observation
         ),
         activation: task.activation.activation
       )
     )
   }
+  return (taskWorktrees, unobserved)
+}
 
-  return WorktreeScanResult(
-    inventory: WorktreeInventory(projectRoot: projectRoot, taskWorktrees: taskWorktrees),
-    appeared: [],
-    disappeared: []
+/// 今回検出できなかった保存済み Project Root を保持する。捨てる条件は
+/// `restoreWorktreeInventory` の doc のとおり。
+private func restoredProjectRoot(
+  saved: PersistedWorktreeInventory,
+  detectedProjectRoot: DetectedWorktree?,
+  seen: Set<WorktreeIdentity>,
+  unobservedPaths: Set<String>
+) -> DetectedWorktree? {
+  guard let savedProjectRoot = saved.projectRoot, detectedProjectRoot == nil,
+    !seen.contains(savedProjectRoot.identity)
+  else { return nil }
+  return DetectedWorktree(
+    identity: savedProjectRoot.identity,
+    worktreePath: savedProjectRoot.worktreePath,
+    branch: savedProjectRoot.branch,
+    isProjectRoot: true,
+    observation: restoredObservation(of: savedProjectRoot.worktreePath, in: unobservedPaths)
   )
+}
+
+/// 検出できなかった保存済み worktree を、既定の `unreachable` ではなく `observationFailed` に
+/// 振り替える。起動直後の1回目で「到達不能」と断定して見せないため — このスキャンでは
+/// 到達可能性そのものを確かめられていない。
+private func restoredObservation(
+  of worktreePath: String,
+  in unobservedPaths: Set<String>
+) -> WorktreeObservation {
+  unobservedPaths.contains(worktreePath) ? .observationFailed : .unreachable
 }

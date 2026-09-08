@@ -362,6 +362,61 @@ struct WorktreeInventoryRestorationTests {
     #expect(restored.inventory == inventory)
   }
 
+  // MARK: - 観測失敗 (Issue #243)
+
+  @Test("起動時の観測に失敗した worktree は、到達不能ではなく観測失敗として保持する")
+  func unobservedWorktreeIsRestoredAsObservationFailure() throws {
+    let alpha = try detected("alpha")
+    let beta = try detected("beta")
+
+    let restored = restoreWorktreeInventory(
+      detected: [],
+      saved: saved([(alpha, .active), (beta, .active)]),
+      unobserved: [alpha.worktreePath]
+    )
+
+    #expect(restored.unobserved == [alpha.identity])
+    let restoredAlpha = try #require(
+      restored.inventory.taskWorktrees.first { $0.identity == alpha.identity })
+    let restoredBeta = try #require(
+      restored.inventory.taskWorktrees.first { $0.identity == beta.identity })
+    #expect(restoredAlpha.detected.observation == .observationFailed)
+    #expect(restoredAlpha.activation == .active)
+    // 観測に失敗していない側は、これまでどおり到達不能として保持する。
+    #expect(restoredBeta.detected.observation == .unreachable)
+    #expect(restoredBeta.activation == .active)
+  }
+
+  @Test("起動時に観測できなかった Project Root も観測失敗として保持する")
+  func unobservedProjectRootIsRestoredAsObservationFailure() throws {
+    let root = try detected("root", isProjectRoot: true)
+    let alpha = try detected("alpha")
+
+    let restored = restoreWorktreeInventory(
+      detected: [],
+      saved: saved(projectRoot: root, [(alpha, .active)]),
+      unobserved: [root.worktreePath]
+    )
+
+    #expect(restored.inventory.projectRoot?.observation == .observationFailed)
+    #expect(restored.unobserved == [root.identity])
+  }
+
+  @Test("今回検出できたパスは、観測失敗に挙がっていても検出の側を採る")
+  func detectedPathWinsOverAnObservationFailure() throws {
+    let alpha = try detected("alpha")
+
+    let restored = restoreWorktreeInventory(
+      detected: [alpha],
+      saved: saved([(alpha, .active)]),
+      unobserved: [alpha.worktreePath]
+    )
+
+    #expect(restored.unobserved.isEmpty)
+    #expect(restored.inventory.taskWorktrees.map(\.detected) == [alpha])
+    #expect(restored.inventory.taskWorktrees.map(\.activation) == [.active])
+  }
+
   @Test("到達可能性は保存しない")
   func reachabilityIsNotPersisted() throws {
     let alpha = try detected("alpha", isReachable: false)

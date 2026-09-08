@@ -164,6 +164,9 @@ public struct GitWorktreeDetector: Sendable {
   private let makeRunner: @Sendable (URL) throws(GitRunnerError) -> GitRunner
   private let isWorktreeReachable: @Sendable (String) -> Bool
   private let findAdministrativeDirectory: @Sendable (String, WorktreeIdentity) -> WorktreeIdentity?
+  /// `nil` は `GitRunner` の既定 (30 秒)。テストが実プロセスの timeout を現実的な時間で起こすため
+  /// だけの注入口で、製品の経路はここを触らない。
+  private let entryTimeout: Duration?
 
   public init(
     projectDirectory: URL,
@@ -184,6 +187,7 @@ public struct GitWorktreeDetector: Sendable {
     }
     self.isWorktreeReachable = Self.isReachableWorkingTree
     self.findAdministrativeDirectory = Self.administrativeDirectory
+    self.entryTimeout = nil
   }
 
   init(
@@ -192,12 +196,14 @@ public struct GitWorktreeDetector: Sendable {
     isWorktreeReachable: @escaping @Sendable (String) -> Bool = Self.isReachableWorkingTree,
     findAdministrativeDirectory:
       @escaping @Sendable (String, WorktreeIdentity) -> WorktreeIdentity? =
-      Self.administrativeDirectory
+      Self.administrativeDirectory,
+    entryTimeout: Duration? = nil
   ) {
     self.projectRunner = projectRunner
     self.makeRunner = makeRunner
     self.isWorktreeReachable = isWorktreeReachable
     self.findAdministrativeDirectory = findAdministrativeDirectory
+    self.entryTimeout = entryTimeout
   }
 
   /// - Returns: 対象外として除外した entry はどちらの配列にも載せず、除外したこと自体も
@@ -284,7 +290,9 @@ public struct GitWorktreeDetector: Sendable {
       // 読み取り専用の subcommand をモジュール内で組み立てる。`GitReadCommand` の
       // initializer が internal なのは、書き込み subcommand をモジュール外から
       // 注入させないためである (§17.2)。
-      stdout = try await runner.run(GitReadCommand(arguments: Self.gitDirectoryArguments)).stdout
+      stdout = try await runner.run(
+        GitReadCommand(arguments: Self.gitDirectoryArguments), timeout: entryTimeout
+      ).stdout
     } catch {
       if case .commandFailed = error, !isWorktreeReachable(entry.path) {
         guard let identity = findAdministrativeDirectory(entry.path, projectCommonDirectory) else {

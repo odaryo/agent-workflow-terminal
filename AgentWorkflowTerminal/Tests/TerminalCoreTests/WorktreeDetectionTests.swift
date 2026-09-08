@@ -312,6 +312,139 @@ struct WorktreeDetectionTests {
     )
   }
 
+  // MARK: - 観測失敗 (Issue #243)
+
+  @Test("観測に失敗した worktree は消失にせず、Active のまま保持する")
+  func unobservedWorktreeIsRetainedWithItsActivation() throws {
+    let root = try detected("root", isProjectRoot: true)
+    let alpha = try detected("alpha")
+    let beta = try detected("beta")
+    let previous = inventory(projectRoot: root, [(alpha, .active), (beta, .inactive)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [root, beta],
+      previous: previous,
+      unobserved: [alpha.worktreePath]
+    )
+
+    #expect(result.disappeared.isEmpty)
+    #expect(result.unobserved == [alpha.identity])
+    #expect(result.appeared.isEmpty)
+    let retained = try #require(
+      result.inventory.taskWorktrees.first { $0.identity == alpha.identity })
+    #expect(retained.activation == .active)
+    #expect(retained.detected.observation == .observationFailed)
+    #expect(retained.detected.branch == alpha.branch)
+    #expect(retained.detected.worktreePath == alpha.worktreePath)
+  }
+
+  @Test("観測失敗から復帰した worktree は新規出現にならず、Active のまま戻る")
+  func recoveryFromAnObservationFailureKeepsTheActivation() throws {
+    let root = try detected("root", isProjectRoot: true)
+    let alpha = try detected("alpha")
+    let previous = inventory(projectRoot: root, [(alpha, .active)])
+
+    let failed = reconcileDetectedWorktrees(
+      detected: [root],
+      previous: previous,
+      unobserved: [alpha.worktreePath]
+    )
+    let recovered = reconcileDetectedWorktrees(detected: [root, alpha], previous: failed.inventory)
+
+    #expect(recovered.appeared.isEmpty)
+    #expect(recovered.disappeared.isEmpty)
+    #expect(recovered.unobserved.isEmpty)
+    #expect(recovered.inventory.taskWorktrees.map(\.activation) == [.active])
+    #expect(recovered.inventory.taskWorktrees.map(\.detected) == [alpha])
+  }
+
+  @Test("観測に失敗した worktree の Active 指定は保存表現から消えない")
+  func unobservedActivationSurvivesInThePersistedRepresentation() throws {
+    let alpha = try detected("alpha")
+    let previous = inventory([(alpha, .active)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [],
+      previous: previous,
+      unobserved: [alpha.worktreePath]
+    )
+
+    let persisted = PersistedWorktreeInventory(result.inventory)
+    #expect(persisted == PersistedWorktreeInventory(previous))
+    #expect(persisted.taskWorktrees.map(\.activation) == [.active])
+  }
+
+  @Test("観測に失敗した Project Root も消失にせず保持する")
+  func unobservedProjectRootIsRetained() throws {
+    let root = try detected("root", isProjectRoot: true)
+    let alpha = try detected("alpha")
+    let previous = inventory(projectRoot: root, [(alpha, .active)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [alpha],
+      previous: previous,
+      unobserved: [root.worktreePath]
+    )
+
+    #expect(result.disappeared.isEmpty)
+    #expect(result.unobserved == [root.identity])
+    #expect(result.inventory.projectRoot?.identity == root.identity)
+    #expect(result.inventory.projectRoot?.observation == .observationFailed)
+  }
+
+  @Test("検出できたパスが観測失敗にも挙がっていたら、検出の側を採る")
+  func detectedPathWinsOverAnObservationFailure() throws {
+    let alpha = try detected("alpha")
+    let previous = inventory([(alpha, .active)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [alpha],
+      previous: previous,
+      unobserved: [alpha.worktreePath]
+    )
+
+    #expect(result.unobserved.isEmpty)
+    #expect(result.inventory.taskWorktrees.map(\.detected) == [alpha])
+    #expect(result.inventory.taskWorktrees.map(\.activation) == [.active])
+  }
+
+  @Test("前回状態のどれとも一致しない観測失敗のパスは、何も生やさない")
+  func unknownUnobservedPathCreatesNothing() throws {
+    let alpha = try detected("alpha")
+    let previous = inventory([(alpha, .active)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [alpha],
+      previous: previous,
+      unobserved: ["/wt/never-seen"]
+    )
+
+    #expect(result.unobserved.isEmpty)
+    #expect(result.inventory.taskWorktrees.map(\.identity) == [alpha.identity])
+  }
+
+  @Test("観測失敗を渡さない消失は、これまでどおり disappeared になる")
+  func disappearanceIsUnchangedWithoutAnObservationFailure() throws {
+    let alpha = try detected("alpha")
+    let previous = inventory([(alpha, .active)])
+
+    let result = reconcileDetectedWorktrees(detected: [], previous: previous)
+
+    #expect(result.disappeared == [alpha.identity])
+    #expect(result.unobserved.isEmpty)
+    #expect(result.inventory.taskWorktrees.isEmpty)
+  }
+
+  @Test("到達不能として検出された worktree は observationFailed にならない (Issue #160)")
+  func unreachableDetectionStaysUnreachable() throws {
+    let alpha = try detected("alpha", isReachable: false)
+
+    let result = reconcileDetectedWorktrees(detected: [alpha], previous: inventory([]))
+
+    #expect(result.inventory.taskWorktrees.map(\.detected.observation) == [.unreachable])
+    #expect(result.inventory.taskWorktrees.map(\.detected.isReachable) == [false])
+  }
+
   // MARK: - 決定性
 
   @Test("Task worktreeは検出順で返す")

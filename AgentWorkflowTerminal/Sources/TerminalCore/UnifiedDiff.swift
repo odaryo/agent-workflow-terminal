@@ -58,6 +58,31 @@ public enum UnifiedDiffChangeKind: Sendable, Equatable, Hashable {
   /// `similarity` は git の `similarity index` の百分率。出力に無ければ `nil`。
   case renamed(from: String, similarity: Int?)
   case copied(from: String, similarity: Int?)
+  /// マージ／rebase 中の競合 (§9.1.3)。`DU` を `modified` と呼ぶような丸めをしない (§12.3)。
+  case conflicted
+}
+
+/// `git status --porcelain=v2` の `u` レコードが持つ競合の状態。
+public struct UnifiedDiffConflict: Sendable, Equatable, Hashable {
+  /// `u` レコードの XY (例: `UU` / `AA` / `DU`)。
+  public let status: WorktreeTrackedFileStatus
+  /// stage 1/2/3 の OID。実体の無い stage は `nil` — git は全 0 の OID で表すが、その値を
+  /// そのまま持つと「OID がある」と読めてしまう。
+  public let baseObject: String?
+  public let ourObject: String?
+  public let theirObject: String?
+
+  public init(
+    status: WorktreeTrackedFileStatus,
+    baseObject: String?,
+    ourObject: String?,
+    theirObject: String?
+  ) {
+    self.status = status
+    self.baseObject = baseObject
+    self.ourObject = ourObject
+    self.theirObject = theirObject
+  }
 }
 
 public enum UnifiedDiffUnreadableReason: Sendable, Equatable, Hashable {
@@ -76,6 +101,9 @@ public enum UnifiedDiffContent: Sendable, Equatable, Hashable {
   /// untracked ファイルの中身を読めず、全行追加へ合成できなかった状態。「変更なし」とも
   /// 「binary」とも言えないので独立させる (§12.3)。
   case unreadable(UnifiedDiffUnreadableReason)
+  /// 競合中のため P2 では本文 (combined diff) を出さないと決めた状態 (§9.1.3)。読めなかった
+  /// `unreadable` とは意味が違うので分ける。
+  case conflicted(UnifiedDiffConflict)
 }
 
 public struct UnifiedDiffFile: Sendable, Equatable, Hashable {
@@ -169,12 +197,24 @@ public enum UntrackedFileDiff {
   }
 }
 
+public enum ConflictedFileDiff {
+  /// §9.1.3: 競合中のファイルは status の `u` レコードだけから作る。競合には「変更前」の
+  /// パスという概念が無いので、両側とも同じパスにする。
+  public static func file(path: String, conflict: UnifiedDiffConflict) -> UnifiedDiffFile {
+    UnifiedDiffFile(
+      oldPath: path, newPath: path, changeKind: .conflicted, content: .conflicted(conflict))
+  }
+}
+
 public enum UnifiedDiffCanonicalText {
   /// snapshot 生成時の観測値 (fingerprint) を作るための決定的な直列化。表示には使わない。
   ///
   /// 差分行を持たないファイル (binary・mode 変更のみ) の同一性は `index` の OID が担う。
   /// untracked で中身を読めなかったファイルだけは OID が無く、サイズしか比べられないため、
   /// 同じサイズのままの書き換えを検知できない。
+  ///
+  /// 競合中のファイルも同じ限界を持つ: 前像に入るのは XY と stage 1/2/3 の OID だけなので、
+  /// stage を動かさない作業ツリー上の編集 (競合マーカーの手直し) は検知できない。
   public static func text(of file: UnifiedDiffFile) -> String {
     var parts: [String] = [
       file.oldPath ?? "", file.newPath ?? "", encode(file.changeKind),
@@ -184,6 +224,7 @@ public enum UnifiedDiffCanonicalText {
     case .binary: parts.append("binary")
     case .noContentChange: parts.append("no-content-change")
     case .unreadable(let reason): parts.append("unreadable:" + encode(reason))
+    case .conflicted(let conflict): parts.append("conflicted:" + encode(conflict))
     case .hunks(let hunks):
       for hunk in hunks {
         parts.append("@@\(hunk.oldStart),\(hunk.oldCount) \(hunk.newStart),\(hunk.newCount)")
@@ -205,6 +246,27 @@ public enum UnifiedDiffCanonicalText {
     case .modified: "modified"
     case .renamed(let from, let similarity): "renamed:\(from):\(similarity ?? -1)"
     case .copied(let from, let similarity): "copied:\(from):\(similarity ?? -1)"
+    case .conflicted: "conflicted"
+    }
+  }
+
+  private static func encode(_ conflict: UnifiedDiffConflict) -> String {
+    [
+      encode(conflict.status.index), encode(conflict.status.worktree),
+      conflict.baseObject ?? "", conflict.ourObject ?? "", conflict.theirObject ?? "",
+    ].joined(separator: ":")
+  }
+
+  private static func encode(_ status: WorktreeGitFileStatus) -> String {
+    switch status {
+    case .unchanged: "unchanged"
+    case .modified: "modified"
+    case .typeChanged: "type-changed"
+    case .added: "added"
+    case .deleted: "deleted"
+    case .renamed: "renamed"
+    case .copied: "copied"
+    case .unmerged: "unmerged"
     }
   }
 

@@ -80,6 +80,25 @@ struct DiffCommentAnchorTests {
         == nil)
   }
 
+  /// §9.2「競合(unmerged)はコメント送信の対象外」。本文を持たない値なので、行を探す前に
+  /// anchor が作れない (Issue #242)。
+  @Test("競合(unmerged)からは anchor を作れない")
+  func doesNotBuildAnchorForUnmerged() throws {
+    let conflicted = ConflictedFileDiff.file(
+      path: "a.swift",
+      conflict: UnifiedDiffConflict(
+        status: WorktreeTrackedFileStatus(index: .unmerged, worktree: .unmerged),
+        baseObject: nil, ourObject: nil, theirObject: nil))
+    let snapshot = Self.snapshot(sections: [
+      DiffOriginSection(origin: .unmerged, files: [conflicted])
+    ])
+    let range = try #require(DiffLineRange(line: 1))
+    #expect(
+      snapshot.commentAnchor(origin: .unmerged, path: "a.swift", side: .new, lines: range) == nil)
+    #expect(
+      snapshot.commentAnchor(origin: .unmerged, path: "a.swift", side: .old, lines: range) == nil)
+  }
+
   @Test("側ごとに存在する行だけを見る")
   func resolvesLinesPerSide() throws {
     let snapshot = Self.standardSnapshot()

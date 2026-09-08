@@ -265,6 +265,32 @@ struct UnifiedDiffPatchTests {
     #expect(result.failures.first?.error == .truncatedHunk(remainingOld: 2, remainingNew: 2))
   }
 
+  /// 競合中のパスは patch 形式では出ないので、`files` へは入れずに `unmergedPaths` へ残す。
+  /// 汎用の解析失敗にすると UI が「解析できていません」だけを出す (Issue #242)。
+  @Test("競合の combined diff と `* Unmerged path` を失敗にせず読み飛ばす")
+  func recognizesUnmergedRecords() throws {
+    let unstaged = UnifiedDiffPatch.parse(
+      output: try fixture("git-2.50.1-diff-patch-conflict-unstaged.txt"))
+    #expect(unstaged.failures.isEmpty)
+    #expect(unstaged.files.map(\.path) == ["auto.txt"])
+    #expect(unstaged.unmergedPaths == ["addadd.txt", "both.txt", "delmod.txt"])
+    #expect(unstaged.files.first?.hunks.flatMap(\.lines).count == 3)
+
+    // `--cached` は combined diff を出さず、通常ブロックの前後に1行レコードを挟む。
+    let cached = UnifiedDiffPatch.parse(
+      output: try fixture("git-2.50.1-diff-patch-conflict-cached-head.txt"))
+    #expect(cached.failures.isEmpty)
+    #expect(cached.files.map(\.path) == ["auto.txt"])
+    #expect(cached.unmergedPaths == ["addadd.txt", "both.txt", "delmod.txt"])
+  }
+
+  @Test("競合が無ければ unmergedPaths は空")
+  func leavesUnmergedPathsEmptyWithoutConflict() throws {
+    let result = UnifiedDiffPatch.parse(
+      output: try fixture("git-2.50.1-diff-patch-cached-head.txt"))
+    #expect(result.unmergedPaths.isEmpty)
+  }
+
   @Test("空の入力は失敗にしない")
   func acceptsEmptyOutput() {
     let result = UnifiedDiffPatch.parse(output: "")

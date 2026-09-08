@@ -341,6 +341,7 @@ extension DiffChangeOrigin {
     case .staged: "staged"
     case .unstaged: "unstaged"
     case .untracked: "untracked"
+    case .unmerged: "競合(unmerged)"
     }
   }
 }
@@ -353,6 +354,8 @@ extension UnifiedDiffChangeKind {
     case .modified: "M"
     case .renamed: "R"
     case .copied: "C"
+    // git 自身が `u` レコードの XY に使う文字。
+    case .conflicted: "U"
     }
   }
 
@@ -360,6 +363,7 @@ extension UnifiedDiffChangeKind {
     switch self {
     case .deleted: .red
     case .added: .green
+    case .conflicted: .orange
     default: .blue
     }
   }

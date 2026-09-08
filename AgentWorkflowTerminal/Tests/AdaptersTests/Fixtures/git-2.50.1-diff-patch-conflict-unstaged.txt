@@ -1,0 +1,29 @@
+diff --cc addadd.txt
+index b19a1e93bec1317dc6097229e12afaffbfa74dc2,950b81b7eee953d050aa05a641f8e056c85dd1bd..0000000000000000000000000000000000000000
+--- a/addadd.txt
++++ b/addadd.txt
+@@@ -1,1 -1,1 +1,5 @@@
+++<<<<<<< HEAD
+ +ours
+++=======
++ theirs
+++>>>>>>> main
+diff --cc both.txt
+index b19a1e93bec1317dc6097229e12afaffbfa74dc2,950b81b7eee953d050aa05a641f8e056c85dd1bd..0000000000000000000000000000000000000000
+--- a/both.txt
++++ b/both.txt
+@@@ -1,1 -1,1 +1,5 @@@
+++<<<<<<< HEAD
+ +ours
+++=======
++ theirs
+++>>>>>>> main
+diff --git a/auto.txt b/auto.txt
+index 1b85fcd1bebd4e0708ef1df37e389c2b2a79e67c..d94b151f486baf7015a21eb81fef63ae03e032cb 100644
+--- a/auto.txt
++++ b/auto.txt
+@@ -1,2 +1,3 @@
+ x
+ main-added
++unstaged-edit
+* Unmerged path delmod.txt

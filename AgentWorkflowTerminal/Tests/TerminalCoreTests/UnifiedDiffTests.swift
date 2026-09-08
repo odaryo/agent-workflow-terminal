@@ -96,6 +96,50 @@ struct UnifiedDiffTests {
     #expect(UnifiedDiffCanonicalText.text(of: before) != UnifiedDiffCanonicalText.text(of: after))
   }
 
+  @Test("競合中のファイルは本文を持たず、変更前後のパスが同じ")
+  func conflictedFileHasNoLines() {
+    let file = ConflictedFileDiff.file(path: "c.txt", conflict: Self.conflict)
+    #expect(file.changeKind == .conflicted)
+    #expect(file.content == .conflicted(Self.conflict))
+    #expect(file.hunks.isEmpty)
+    #expect(file.oldPath == "c.txt")
+    #expect(file.newPath == "c.txt")
+  }
+
+  /// 前像に XY と stage の OID が入らないと、§9.3 の再観測が「stage が変わった」を検知できない。
+  @Test("競合は XY と stage の OID の違いで見分ける")
+  func distinguishesConflictsByStatusAndStageObjects() {
+    let base = UnifiedDiffCanonicalText.text(
+      of: ConflictedFileDiff.file(path: "c.txt", conflict: Self.conflict))
+    let otherStatus = UnifiedDiffConflict(
+      status: WorktreeTrackedFileStatus(index: .deleted, worktree: .unmerged),
+      baseObject: Self.conflict.baseObject, ourObject: Self.conflict.ourObject,
+      theirObject: Self.conflict.theirObject)
+    let otherStage = UnifiedDiffConflict(
+      status: Self.conflict.status, baseObject: Self.conflict.baseObject,
+      ourObject: String(repeating: "d", count: 40), theirObject: Self.conflict.theirObject)
+    let missingStage = UnifiedDiffConflict(
+      status: Self.conflict.status, baseObject: nil, ourObject: Self.conflict.ourObject,
+      theirObject: Self.conflict.theirObject)
+    for other in [otherStatus, otherStage, missingStage] {
+      #expect(
+        base
+          != UnifiedDiffCanonicalText.text(
+            of: ConflictedFileDiff.file(path: "c.txt", conflict: other)))
+    }
+    // 読めなかった untracked とも別物として扱う。
+    #expect(
+      base
+        != UnifiedDiffCanonicalText.text(
+          of: UntrackedFileDiff.fileWithoutContent(path: "c.txt", reason: .notReadable)))
+  }
+
+  private static let conflict = UnifiedDiffConflict(
+    status: WorktreeTrackedFileStatus(index: .unmerged, worktree: .unmerged),
+    baseObject: String(repeating: "a", count: 40),
+    ourObject: String(repeating: "b", count: 40),
+    theirObject: String(repeating: "c", count: 40))
+
   @Test("gitlink の mode を submodule として見分ける")
   func detectsSubmodule() {
     let file = UnifiedDiffFile(

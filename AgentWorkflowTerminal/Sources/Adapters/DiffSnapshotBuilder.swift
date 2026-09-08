@@ -184,6 +184,8 @@ public struct DiffSnapshotBuilder: Sendable {
     let statusResult = try await status(untrackedFiles: .all)
     let untracked = synthesizeUntracked(statusResult.status)
     sections.append(DiffOriginSection(origin: .untracked, files: untracked.files))
+    sections.append(
+      DiffOriginSection(origin: .unmerged, files: synthesizeUnmerged(statusResult.status)))
 
     return Collected(
       subject: subject(mergeBase),
@@ -193,6 +195,29 @@ public struct DiffSnapshotBuilder: Sendable {
       patchFailures: failures,
       statusFailures: statusResult.failures,
       unreadableUntrackedPaths: untracked.unreadablePaths)
+  }
+
+  /// 競合中のパスは `git diff` / `git diff --cached` のどちらにも patch 形式では現れないため、
+  /// staged / unstaged 区分には構造的に出得ない。一次情報は status の `u` レコードだけ (§9.1.3)。
+  private func synthesizeUnmerged(_ status: GitStatus) -> [UnifiedDiffFile] {
+    status.entries.compactMap { entry in
+      guard case .unmerged(let unmerged) = entry else { return nil }
+      return ConflictedFileDiff.file(
+        path: unmerged.path,
+        conflict: UnifiedDiffConflict(
+          status: WorktreeTrackedFileStatus(
+            index: unmerged.indexStatus.worktreeStatus,
+            worktree: unmerged.worktreeStatus.worktreeStatus),
+          baseObject: Self.stageObject(unmerged.stage1Object),
+          ourObject: Self.stageObject(unmerged.stage2Object),
+          theirObject: Self.stageObject(unmerged.stage3Object)))
+    }
+  }
+
+  /// git は実体の無い stage を全 0 の OID で表す (2.50.1 で実測: add/add の stage 1 と
+  /// modify/delete の削除側)。
+  private static func stageObject(_ value: String) -> String? {
+    value.isEmpty || value.allSatisfy { $0 == "0" } ? nil : value
   }
 
   private func synthesizeUntracked(

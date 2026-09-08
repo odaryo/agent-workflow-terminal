@@ -9,12 +9,13 @@ public struct DiffSnapshotID: Sendable, Equatable, Hashable {
   }
 }
 
-/// §9.1.3 の4区分。出所をまたいで hunk をマージしない。
+/// §9.1.3 の5区分。出所をまたいで hunk をマージしない。
 public enum DiffChangeOrigin: Sendable, Equatable, Hashable, CaseIterable {
   case committed
   case staged
   case unstaged
   case untracked
+  case unmerged
 }
 
 public enum DiffSubject: Sendable, Equatable {

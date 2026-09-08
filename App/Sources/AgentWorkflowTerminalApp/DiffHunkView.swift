@@ -49,6 +49,11 @@ struct DiffHunkView: View {
       note("差分行はありません (mode 変更または rename のみ)")
     case .unreadable(let reason):
       note(reason.message)
+    case .conflicted(let conflict):
+      note(
+        "競合(unmerged)のため差分本文は表示しません (§9.1.3)\n"
+          + "競合の状態: ours=\(conflict.status.index.conflictLabel)"
+          + " / theirs=\(conflict.status.worktree.conflictLabel)")
     case .hunks(let hunks):
       // Why not ScrollView へ直接 frame: 両軸スクロールでは内容が viewport より小さいとき
       // 右下へ寄る (実測)。viewport の大きさを下限として内容側へ与え、左上に固定する。
@@ -172,6 +177,21 @@ extension UnifiedDiffLineKind {
     case .context: .clear
     case .added: .green.opacity(0.15)
     case .removed: .red.opacity(0.15)
+    }
+  }
+}
+
+extension WorktreeGitFileStatus {
+  /// `u` レコードの XY は X が ours、Y が theirs を表す。
+  fileprivate var conflictLabel: String {
+    switch self {
+    case .unchanged: "変更なし"
+    case .modified, .unmerged: "変更"
+    case .typeChanged: "型変更"
+    case .added: "追加"
+    case .deleted: "削除"
+    case .renamed: "rename"
+    case .copied: "copy"
     }
   }
 }

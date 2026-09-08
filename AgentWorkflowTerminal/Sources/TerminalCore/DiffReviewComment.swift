@@ -138,13 +138,14 @@ public enum DiffReviewCommentOrder {
 }
 
 extension DiffChangeOrigin {
-  /// §9.1.3 の並び (commit済み → staged → unstaged → untracked)。表示にも使える。
+  /// §9.1.3 の並び (commit済み → staged → unstaged → untracked → 競合)。表示にも使える。
   fileprivate var sortOrder: Int {
     switch self {
     case .committed: 0
     case .staged: 1
     case .unstaged: 2
     case .untracked: 3
+    case .unmerged: 4
     }
   }
 }

@@ -26,6 +26,10 @@ public struct UnifiedDiffParseResult: Sendable, Equatable {
   ///
   /// 値は行から接頭辞を落とした残りそのままで、`git diff` の patch が path に施す quoting は
   /// 解いていない (`-z` が無いため quote され得る)。突き合わせにも表示にも使わないため。
+  ///
+  /// そもそも status 側との突き合わせはできない: 同じパスでも記録元で表記が違い、`* Unmerged
+  /// path` は quote されないのに `diff --cc` header は quote する (git 2.50.1 で実測:
+  /// `* Unmerged path q"uote.txt` と `diff --cc "q\"uote.txt"`)。
   public let unmergedPaths: [String]
 }
 
@@ -45,7 +49,9 @@ public enum UnifiedDiffPatch {
       // `* Unmerged path` の両方を、`--cached` 側は後者だけを出す (git 2.50.1 で実測)。
       if let path = line.value(after: DiffRecord.unmergedPathPrefix) {
         unmergedPaths.append(path)
-        // 1行レコードなので、次の行が通常の `diff --git` ブロックであり得る。
+        // 改行を含まないパスでは1行のレコードで、次の行が通常の `diff --git` ブロックで
+        // あり得るため1行だけ進める。改行を含むパスでは quote されずに複数の物理行へ割れ、
+        // 2行目以降がここを抜ける (git 2.50.1 で実測。Issue #307)。
         index += 1
         continue
       }

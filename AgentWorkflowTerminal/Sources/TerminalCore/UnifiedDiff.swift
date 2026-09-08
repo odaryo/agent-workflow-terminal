@@ -64,7 +64,12 @@ public enum UnifiedDiffChangeKind: Sendable, Equatable, Hashable {
 
 /// `git status --porcelain=v2` の `u` レコードが持つ競合の状態。
 public struct UnifiedDiffConflict: Sendable, Equatable, Hashable {
-  /// `u` レコードの XY (例: `UU` / `AA` / `DU`)。
+  /// `u` レコードの XY (例: `UU` / `AA` / `DU`)。**組で1つの競合の種類**を表すので、
+  /// index / worktree を別々に読まないこと — `displayedStatus` は競合値に対しては意味を持たない
+  /// (`UA` に対して theirs 側の `A` を返す)。
+  ///
+  /// stage の mode は持たない。そのため競合中の submodule と型競合を通常のファイル競合と
+  /// 区別できない (Issue #305)。
   public let status: WorktreeTrackedFileStatus
   /// stage 1/2/3 の OID。実体の無い stage は `nil` — git は全 0 の OID で表すが、その値を
   /// そのまま持つと「OID がある」と読めてしまう。
@@ -214,7 +219,8 @@ public enum UnifiedDiffCanonicalText {
   /// 同じサイズのままの書き換えを検知できない。
   ///
   /// 競合中のファイルも同じ限界を持つ: 前像に入るのは XY と stage 1/2/3 の OID だけなので、
-  /// stage を動かさない作業ツリー上の編集 (競合マーカーの手直し) は検知できない。
+  /// stage を動かさない作業ツリー上の変化 — 競合マーカーの手直しも、ファイルごと削除して
+  /// `u` レコードの `mW` が `000000` になることも — 検知できない (Issue #306)。
   public static func text(of file: UnifiedDiffFile) -> String {
     var parts: [String] = [
       file.oldPath ?? "", file.newPath ?? "", encode(file.changeKind),

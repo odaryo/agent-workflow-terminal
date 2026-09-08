@@ -45,7 +45,8 @@ public enum DiffReviewCommentMessage {
   }
 
   /// §9.1.3 の5区分。表示名ではなく安定した識別子を送る (`AgentAdapterID` と同じ理由)。
-  /// 競合(unmerged)はコメント送信の対象外 (§9.2) なので、この分岐は実際には通らない。
+  /// 競合(unmerged)の分岐が通らないのは、`DiffSnapshot.commentAnchor` が出所として競合を
+  /// 弾くため (§9.2)。`DiffCommentAnchor` の生成経路はそこだけなので、網羅性のためだけに残す。
   private static func token(_ origin: DiffChangeOrigin) -> String {
     switch origin {
     case .committed: "committed"

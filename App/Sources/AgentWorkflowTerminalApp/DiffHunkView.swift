@@ -50,10 +50,7 @@ struct DiffHunkView: View {
     case .unreadable(let reason):
       note(reason.message)
     case .conflicted(let conflict):
-      note(
-        "競合(unmerged)のため差分本文は表示しません (§9.1.3)\n"
-          + "競合の状態: ours=\(conflict.status.index.conflictLabel)"
-          + " / theirs=\(conflict.status.worktree.conflictLabel)")
+      note("競合(unmerged)のため差分本文は表示しません (§9.1.3)\n競合の種類: \(conflict.label)")
     case .hunks(let hunks):
       // Why not ScrollView へ直接 frame: 両軸スクロールでは内容が viewport より小さいとき
       // 右下へ寄る (実測)。viewport の大きさを下限として内容側へ与え、左上に固定する。
@@ -181,17 +178,41 @@ extension UnifiedDiffLineKind {
   }
 }
 
+extension UnifiedDiffConflict {
+  /// `u` レコードの XY は**組で1つの競合の種類**を表す (`git status --help` の short format の
+  /// 表、および git 2.50.1 での実測)。レターを ours / theirs に分解して個別に訳すと嘘になる —
+  /// 例えば `UA` の `U` に「変更」の意味は無く、ours 側にはそのパスが存在しない
+  /// (実測: rename/rename では `u UA … 000000 000000 100644` と stage 2 が空)。
+  ///
+  /// `ours` / `theirs` を「自分 / 相手」と言い換えないのは、rebase・cherry-pick 中は git の
+  /// ours が upstream 側になるため。git 自身の語のまま出す。
+  fileprivate var label: String {
+    switch (status.index, status.worktree) {
+    case (.deleted, .deleted): "both deleted (ours・theirs の両方で削除)"
+    case (.added, .unmerged): "added by us (ours だけが追加)"
+    case (.unmerged, .deleted): "deleted by them (theirs で削除)"
+    case (.unmerged, .added): "added by them (theirs だけが追加)"
+    case (.deleted, .unmerged): "deleted by us (ours で削除)"
+    case (.added, .added): "both added (ours・theirs の両方で追加)"
+    case (.unmerged, .unmerged): "both modified (ours・theirs の両方で変更)"
+    // 表に無い組は丸めず、git が出したレターをそのまま見せる (§12.3)。
+    default: "不明な組み合わせ (\(status.index.letter)\(status.worktree.letter))"
+    }
+  }
+}
+
 extension WorktreeGitFileStatus {
-  /// `u` レコードの XY は X が ours、Y が theirs を表す。
-  fileprivate var conflictLabel: String {
+  /// porcelain v2 が XY に使うレター。変更なしだけは short format の空白ではなく `.`。
+  fileprivate var letter: String {
     switch self {
-    case .unchanged: "変更なし"
-    case .modified, .unmerged: "変更"
-    case .typeChanged: "型変更"
-    case .added: "追加"
-    case .deleted: "削除"
-    case .renamed: "rename"
-    case .copied: "copy"
+    case .unchanged: "."
+    case .modified: "M"
+    case .typeChanged: "T"
+    case .added: "A"
+    case .deleted: "D"
+    case .renamed: "R"
+    case .copied: "C"
+    case .unmerged: "U"
     }
   }
 }

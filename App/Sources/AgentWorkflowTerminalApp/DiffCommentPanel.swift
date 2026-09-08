@@ -6,7 +6,15 @@ struct DiffCommentPanel: View {
   @ObservedObject var model: DiffViewerModel
   @ObservedObject var mainPane: MainPaneCoordinator
   let worktree: WorktreeIdentity
+  /// 入力欄がキーボードを主張している間、端末に first responder を取り返させないための
+  /// 調停役 (Issue #278)。
+  let keyboardFocus: TerminalKeyboardFocus
   let agentPaneStates: () -> [PaneAgentState]?
+
+  @FocusState private var isEditorFocused: Bool
+  /// 主張の持ち主。解除がビューの消滅と `@FocusState` の両方から来ても、他の入力欄の
+  /// 主張を巻き込まないための識別子。
+  @State private var claimant = UUID()
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -17,6 +25,19 @@ struct DiffCommentPanel: View {
     }
     .padding(8)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    // 行を選ぶ操作 (Button / tap gesture) では macOS の first responder は動かない
+    // (Full Keyboard Access は既定 off)。選んだ直後の打鍵が端末へ流れないよう、選択が
+    // 入った時点でこちらへ移す (Issue #278)。
+    .onChange(of: model.lineSelection) { old, new in
+      guard old == nil, new != nil else { return }
+      isEditorFocused = true
+    }
+    .onChange(of: isEditorFocused) { _, focused in
+      keyboardFocus.setTextInputClaim(focused, owner: claimant)
+    }
+    // Drawer を閉じる・ペインを差し替えるとこのビューごと消える。`@FocusState` の false は
+    // その順で必ず届くとは限らないので、消滅の側でも主張を落とす。
+    .onDisappear { keyboardFocus.setTextInputClaim(false, owner: claimant) }
   }
 
   @ViewBuilder
@@ -26,6 +47,7 @@ struct DiffCommentPanel: View {
         .font(.caption)
         .foregroundStyle(.secondary)
       TextEditor(text: $model.commentDraft)
+        .focused($isEditorFocused)
         .font(.callout)
         .frame(height: 80)
         .border(Color.secondary.opacity(0.3))

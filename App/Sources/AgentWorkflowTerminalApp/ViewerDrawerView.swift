@@ -18,6 +18,8 @@ struct ViewerDrawerView<Terminal: View>: View {
   let mainPanes: MainPaneCoordinator
   /// 候補 pane に Agent の印を付けるための観測経路。無ければ印の無い一覧になる。
   let agentPaneStates: (WorktreeIdentity) -> AsyncStream<[PaneAgentState]>?
+  /// Drawer のテキスト入力がキーボードを主張している間、端末に取り返させないための調停役。
+  let keyboardFocus: TerminalKeyboardFocus
   @ViewBuilder let terminal: () -> Terminal
 
   @State private var requestedInlineDrawerWidth = ViewerDrawerMetrics.defaultDrawerWidth
@@ -146,7 +148,8 @@ struct ViewerDrawerView<Terminal: View>: View {
           model: diffModels.model(for: worktreeRoot),
           mainPane: mainPanes,
           worktree: worktree.identity,
-          agentPaneStates: { agentPaneStates(worktree.identity) }
+          agentPaneStates: { agentPaneStates(worktree.identity) },
+          keyboardFocus: keyboardFocus
         )
         .id(worktreeRoot)
       } else {

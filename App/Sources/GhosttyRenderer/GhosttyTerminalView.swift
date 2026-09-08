@@ -10,17 +10,18 @@ import TerminalCore
 
 public struct GhosttyTerminalView: NSViewRepresentable {
   private let configuration: TerminalRendererConfiguration
-  private let focusRequest: Int?
+  private let focusRequest: TerminalFocusRequest?
 
   /// `focusRequest` はキーボードフォーカスを取り直す要求。`nil` は「この端末は今画面に
-  /// 出ていない」を意味し、first responder を取りに行かない。値そのものに意味は無く、
-  /// 変わったことだけが要求を表す。SwiftUI の `opacity` / `allowsHitTesting` は AppKit の
-  /// first responder を動かさないので、切り替える側が明示的に渡す必要がある (Issue #233)。
+  /// 出ていない」を意味し、first responder を取りに行かない。SwiftUI の `opacity` /
+  /// `allowsHitTesting` は AppKit の first responder を動かさないので、切り替える側が
+  /// 明示的に渡す必要がある (Issue #233)。取ってよいかどうかは表示の有無とは別の値
+  /// (`isTerminalAllowed`) が持つ (Issue #278)。
   public init(
     command: [String],
     workingDirectory: String? = nil,
     configurationFileURL: URL? = nil,
-    focusRequest: Int? = nil
+    focusRequest: TerminalFocusRequest? = nil
   ) {
     configuration = TerminalRendererConfiguration(
       command: command,
@@ -466,7 +467,9 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   private var configuration: TerminalRendererConfiguration?
-  /// 表示されているタブの端末だけが true。false の間は自分から first responder を取らない。
+  /// 表示中のタブで、かつ Drawer のテキスト入力がキーボードを主張していないときだけ true。
+  /// false の間は自分から first responder を取らない。surface の (再) 生成の経路も
+  /// `applyFocusRequest` の経路も、この同じ述語だけを読む (Issue #278)。
   private var wantsKeyboardFocus = false
   private var appliedFocusRequest: Int?
   /// フォーカス移譲だけに使われたクリックの mouseUp を握り潰すための印。
@@ -574,16 +577,20 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     updateDisplayID()
   }
 
-  func applyFocusRequest(_ request: Int?) {
-    wantsKeyboardFocus = request != nil
+  func applyFocusRequest(_ request: TerminalFocusRequest?) {
+    wantsKeyboardFocus = request?.isTerminalAllowed == true
     guard let request else {
       // Why not 覚えたままにする: 覚えたままだと、同じ要求番号のまま選び直されたタブが
       // first responder を取り直せない。
       appliedFocusRequest = nil
       return
     }
-    guard request != appliedFocusRequest else { return }
-    appliedFocusRequest = request
+    // Why not 適用済みを忘れる: 忘れると主張が解けた瞬間に、主張より前の古い要求で
+    // first responder を奪い返す。要求は保留したまま、主張が解けた時点で最新の1つだけが
+    // 下の比較を通る (Issue #278 の規則 2・3)。
+    guard request.isTerminalAllowed else { return }
+    guard request.token != appliedFocusRequest else { return }
+    appliedFocusRequest = request.token
     // window が無い間 (装着前) は記録だけしておき、surface 生成時に取る。
     window?.makeFirstResponder(self)
   }
@@ -703,7 +710,9 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     updateSurfaceSize()
     updateDisplayID()
     // Why not 常に取る: 背面のタブの surface が (再) 生成されるたびに first responder を
-    // 奪うと、表示中のタブへの打鍵が背面の端末へ入る (Issue #233 と同じ誤送信)。
+    // 奪うと、表示中のタブへの打鍵が背面の端末へ入る (Issue #233 と同じ誤送信)。表示中でも
+    // Drawer のテキスト入力が主張している間は取らない — この経路は AppKit 側で走り SwiftUI の
+    // `@FocusState` を見ないので、入力側だけで表しても止まらない (Issue #278)。
     if wantsKeyboardFocus { window?.makeFirstResponder(self) }
     ghostty_surface_set_focus(
       surface, window?.isKeyWindow == true && window?.firstResponder === self)

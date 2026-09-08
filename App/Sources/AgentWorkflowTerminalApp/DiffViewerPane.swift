@@ -10,6 +10,7 @@ struct DiffViewerPane: View {
   /// Agent と判定された pane を候補一覧の**印**にするためだけの観測 (§12.7)。Project Root の
   /// ように観測経路が無ければ `nil` で、その場合は印の無い候補一覧になる。
   let agentPaneStates: () -> AsyncStream<[PaneAgentState]>?
+  let keyboardFocus: TerminalKeyboardFocus
 
   /// 候補一覧の Agent 印 (§12.7) と、送信可否の判定 (§9.2.2) の両方に使う最後の観測。
   @State private var paneStates: [PaneAgentState] = []
@@ -265,7 +266,10 @@ struct DiffViewerPane: View {
         DiffHunkView(model: model, file: selectedFile(in: snapshot))
           .frame(minWidth: 200, maxWidth: .infinity)
         Divider()
-        DiffCommentPanel(model: model, mainPane: mainPane, worktree: worktree) {
+        DiffCommentPanel(
+          model: model, mainPane: mainPane, worktree: worktree,
+          keyboardFocus: keyboardFocus
+        ) {
           observedPaneStates
         }
         .frame(width: 260)

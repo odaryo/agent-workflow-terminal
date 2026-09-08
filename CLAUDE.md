@@ -157,6 +157,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 - 同じ project root から起動した複数セッションは key を共有し、最後に終了したセッションの handoff が残る。`show` は記録時と現在のブランチが違えば1行警告するが、**検出できるのはブランチが変わった場合だけで、同じブランチで別の作業が上書きされたことは検出できない**。この `branch` は seal 時点の Claude の cwd 由来 (`cwd` は Claude に追従する) であり、key のアンカーである起動時の project root とは別物。
 - `sealed_at` が7日より古い handoff は表示しない。休眠したプロジェクトで起動のたびに古い最終報告がコンテキストへ入るのを避けるため。ファイル自体は手で読める記録として残る。
 - **`CLAUDE.local.md` は使わない。** 自動で読まれるが「指示」の位置に「状態」を置くことになり、古い引き継ぎが規約として効き続ける。加えてこの環境では実測で gitignore されていない — `core.excludesFile` が設定されているため `~/.config/git/ignore` の `**/CLAUDE.local.md` が参照されない。
+- **Claude Code の auto memory はこのプロジェクトで採用しない。** 上表がすでに行き先を定めている — 棄却した仮説は PR 本文、横断的な学びは `CLAUDE.md` / `.claude/agents/*.md`。auto memory を足すとレビューで追えない第二の知識源になり、古い仮説が黙って効き続ける。
 
 ## Task tracking (GitHub Projects)
 

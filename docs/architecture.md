@@ -221,6 +221,15 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 
 **4はbranchがマージ済みの場合にだけ選択できる。** 未マージbranchの削除はTerminalから行わず、§17.2のとおりAgentまたは通常Terminalに委ねる。Closeの後始末としてのマージ済みbranch削除だけを例外として認め、任意のbranchを消せる汎用機能にはしない。
 
+**「マージ済み」の判定は、ancestor判定(既定branchへfast-forwardで到達できるか)だけでなく、patch相当の
+同一性(squash merge)も検出する — 確定(2026-09-08)。** squash mergeはancestor判定に現れない別commitとして
+既定branchへ入るため、ancestor判定だけでは検出できず、未マージのbranchが誤って削除不可のまま残るか
+検出漏れが起きる。判定は外部git CLIの出力に依存するため、実装時に隔離環境での計測で検証する。
+
+**HEADがbranchを指していない(detached HEAD)worktreeでは、Closeそのものを拒否する — 確定(2026-09-08)。**
+選択肢1〜4のいずれを選んでも実行せず、ブランチを作るか進行中のrebase／mergeを完了するよう促す。
+下記の検査(警告して続行可)より強い扱いとして、確認では済ませない。
+
 **3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
 
 | 検査 | 判定 |
@@ -594,9 +603,13 @@ Branch Diffも同じ定義に従う。Commit Diffは指定commitとその親の�
 Base DiffとBranch Diffは、commit済みの変更に加えて**working tree・staged・untrackedをすべて含む**。
 Agentが作業中の差分こそレビュー対象であり、含めなければこの機能の主用途が抜けるため。
 
-snapshot内では出所を区別して表示する。区別はcommit済み／staged／unstaged／untrackedの4種で、
-untrackedは新規ファイルとして全行追加で表示する。ignoredファイルは含めない
+snapshot内では出所を区別して表示する。区別はcommit済み／staged／unstaged／untracked／競合(unmerged)の
+5種で、untrackedは新規ファイルとして全行追加で表示する。ignoredファイルは含めない
 (§7.1のFile Browserがignoredを列挙することとは別の判断で、Diffは対象外)。
+
+**競合(unmerged) — 確定(2026-09-08)。** マージ／rebase中の競合ファイルは一覧とDiffに表示するが、
+**コメント送信の対象外**とする。解決が進むにつれて行が動くファイルにコメントanchor(§9.2)を張らない
+ためである。§9.2のcomment anchorが持つ6要素の構造自体は変更しない。
 
 ### 9.2 コメント
 
@@ -606,7 +619,8 @@ untrackedは新規ファイルとして全行追加で表示する。ignoredフ�
 - GitHub PR reviewへの直接投稿は行わない。
 
 コメントのanchorは`(snapshot ID, 出所, ファイルパス, 側 (old／new), 行範囲, 対象行のテキストハッシュ)`で表す。
-**出所**は§9.1.3の4区分(commit済み／staged／unstaged／untracked)で、これが無いと行が一意に定まらない。
+**出所**は§9.1.3の区分のうちcommit済み／staged／unstaged／untrackedで、これが無いと行が一意に定まらない。
+競合(unmerged)はコメント送信の対象外(§9.1.3)のため、anchorの出所には現れない。
 §9.1.3が同じファイルの複数区分への同時出現を要求しており、区分ごとに内容の違う差分になるため、
 `(snapshot ID, パス, 側, 行範囲)`だけではどの区分の行を指すか決まらない(隔離repoで実測)。
 snapshotは§9.3のとおり不変なので出所まで含めれば行番号だけで一意に定まるが、テキストハッシュを併せ持つことで
@@ -625,7 +639,22 @@ Agentへ送る文面へ元コードを添える際にsnapshot本体を引かず�
 2. **bracketed pasteにescapeが無い。** 本文中の`ESC[201~`が受け側でpasteを打ち切り、残りが打鍵として届いて実行される。本文を黙って書き換えるとレビューコメントが壊れるため、tab／LF／CR以外のC0・DEL・C1を含むテキストは**加工せず拒否**して呼び出し側へ返す。
 3. **注入テキストは一時的にディスクへ載る。** 外部プロセス実行層が子プロセスへstdinを渡さない方針のため`load-buffer -`が使えず、所有者だけが読める一時ファイルを経由する。
 
-制約1をユーザーへ事前に示すUI(送信前の警告等)の要否は未確定(§25)。
+#### 9.2.2 送信可否の判定 — 確定(2026-09-08)
+
+Diffレビューコメントの送信可否は、送信先paneの正規化状態で決まる。**送信を許可するのは`Idle`のみ。**
+`Working`／`Question`／`Permission`／`Unknown`では送信操作を無効化し、「先にpane側の処理を進めてから
+送信する」旨をUIに表示する。コメントは破棄せずUI側に保持し、送信可能な状態になったら送れる。
+
+理由:
+
+- `Question`はAgentの質問への回答欄、`Permission`は許可応答であり、コメント本文がそれらへの回答として
+  解釈される。
+- `Working`ではpaneのプロセス終了後にコメント本文がシェルのコマンドとして実行される(実測、Issue #240)。
+- `Unknown`は丸めない(§12.3で確定)ので送信不可側に置く。
+
+送信を`Idle`限定にしたことで、制約1(受け側次第で本文が実行され得ること)が及ぶ範囲は、人がAgentへ
+プロンプトを送る通常の送信操作と地続きになる。送信前に制約1を個別に警告するUIは不要と判断し、確定した
+(§25に残っていた当該項目は解消)。
 
 ### 9.3 snapshot
 
@@ -894,6 +923,15 @@ process fallbackについては、**process観測だけでは`Working`と`Idle`�
   ユーザーはいつでも選び直せる。初回に選ばれるまでは送信操作を無効にし、候補が1つでも自動では選ばない。
 - 連携形式、セッションの識別と寿命、手入力と連携の優先順位、再実行時の完了解除、古いイベントの
   排除方法は未確定。Terminal専用APIをハーネス実行の必須条件にしない(§32)。
+
+### 12.8 trust promptとPermission信号 — 確定(2026-09-08)
+
+Claude Code／Codexの初回起動時のtrust prompt(作業ディレクトリを信頼するかを尋ねる画面)は
+**Permission信号に含める。** タブ優先度では他のPermissionと同様に`Needs Attention`として扱う(§12.2)。
+
+信号としての採用は§12.5の基準に従う。§12.5は採点済みでない信号の使用を認めないため、両CLIの
+現行版で該当画面をfixture化し、Gate 3の検出率記録を再採点してから採用する必要がある。この作業自体は
+Issue #252で行う。
 
 ## 13. 全Agent pane Overview
 
@@ -1561,7 +1599,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Git／Diff
 
 - rename、binary Diff、submodule、LFS
-- テキスト注入の制約1(受け側次第で本文が実行され得ること)をユーザーへ事前に示すUIの要否(§9.2.1)
 
 ### Mobile／remote
 
@@ -1818,6 +1855,8 @@ PR_READY
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
 - [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。壊れた値ではフォールバックせず、特定できなければ判定不能として警告する
 - [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う
+- [x] 「マージ済み」の判定はancestor判定に加え、patch相当の同一性(squash merge)も検出する
+- [x] HEADがbranchを指していない(detached HEAD)worktreeはCloseそのものを拒否する(既存の警告して続行可な検査より強い扱い)
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割
@@ -1833,9 +1872,10 @@ PR_READY
 - [x] Diffはsnapshot、Refreshで新snapshot
 - [x] Base branchはupstream→`origin/HEAD`の既定branch→ユーザー選択の順で決め、結果をタスクタブごとに記憶する
 - [x] Base／Branch Diffのrangeはmerge-base起点 (base branchの進行分をレビュー範囲へ混ぜない)
-- [x] Base／Branch Diffはworking tree・staged・untrackedを含め、出所を4種で区別表示する (ignoredは含めない)
+- [x] Base／Branch Diffはworking tree・staged・untrackedを含め、出所を5種(競合(unmerged)を含む)で区別表示する (ignoredは含めない)。競合(unmerged)は一覧とDiffに表示するがコメント送信の対象外
 - [x] コメントのanchorは`(snapshot ID, パス, old／new, 行範囲, 行テキストのハッシュ)`、新snapshotへの推測追従はしない
 - [x] Diffコメントは単体／batchでAgentへ送信
+- [x] Diffレビューコメントの送信はpaneが`Idle`のときだけ許可し、他状態(`Working`／`Question`／`Permission`／`Unknown`)では送信操作を無効化してコメントをUI側に保持する
 - [x] GitHub PR review連携はしない
 - [x] Consultationはfresh contextが基本、paneは再利用
 - [x] Consultation LogはProject単位で永続化し、Gitには載せない
@@ -1857,6 +1897,7 @@ PR_READY
 - [x] `scrollback-limit` 10MBと`history-limit` 10000を製品既定として明示(tmux側はsession単位)
 - [x] 代表状態はNeeds Attention／Ready for Reviewへ即時反映、`Idle`／`Unknown`へ入る遷移は遷移元を問わず9秒保持
 - [x] Adapterが使う信号はGate 3の混同行列に数字が残るものに限る
+- [x] Claude Code／Codexの初回起動時trust promptはPermission信号に含め、タブ優先度で`Needs Attention`として扱う(信号採用時のfixture化・再採点は§12.5に従う)
 - [x] tmuxコマンドの組み立てと実行を分離し、ローカル実行の型はhost platformに限定
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
 - [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)

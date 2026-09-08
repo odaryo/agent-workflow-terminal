@@ -111,20 +111,31 @@ public struct TmuxAgentPaneStatus: Sendable, Equatable {
 public enum TmuxListPanes {
   private static let formatSeparator = "\u{1F}"
   private static let encodedSeparator: [UInt8] = [0x5C, 0x30, 0x33, 0x37]
+  private static let unitSeparator: UInt8 = 0x1F
   private static let backslash: UInt8 = 0x5C
   private static let dollar: UInt8 = 0x24
 
-  /// tmux 3.4 の非 control-mode 出力では、format に埋めた Unit Separator は `\037` になる。
+  /// format に埋めた Unit Separator の見え方は版で異なる。tmux 3.4 の非 control-mode 出力は
+  /// これを `\037` にし、3.7c は生 0x1F のまま出す (両版を同一 format で並べて `od -c` 実測)。
+  /// 3.7c はリテラル部も値も素通しで、実測した範囲 (ASCII 制御バイト・`$`・0x1F・TAB・LF) では
+  /// `\ooo` / named escape (`\a` `\r`) / `\$` を1つも生成しなかった。
   /// slash を持ち得る全フィールドを置換で二重化し、出力段が足す escape だけを奇数列にする。
+  /// 置換は版に依らず同一に効く (backslash 連 1/2/3 個で n→2n を両版で実測) ため、3.7c の値の
+  /// backslash 列は必ず偶数になる。
   /// session の保存段で `\t` / `\n` / `\ooo` となったテキストも、その `\` バイトを二重化するため
   /// 正式名の一部として偶数列に残る。これにより `$` の後続文字やホストの locale に依存しない。
-  /// 制御バイトは 0x01...0x06 / 0x0E...0x1F / 0x7F が八進、BEL / BS / VT / FF / CR が
+  /// 保存段そのものは版で違い、3.4 は `$` の前にも `\` を足すが 3.7c は足さない (実測)。
+  /// 復号後の session 名が版で変わるのはこのためで、どちらもその版の `has-session -t` が
+  /// 求める正式名に一致する。
+  /// 制御バイトは 3.4 では 0x01...0x06 / 0x0E...0x1F / 0x7F が八進、BEL / BS / VT / FF / CR が
   /// named escape、TAB / LF が生出力だった。有効な UTF-8 の C1 制御文字は変更されなかった。
   /// 単独 0x80...0x9F と不正 UTF-8 は、実測に使った `pane_current_path` と `pane_title` へは
-  /// macOS の path と tmux title が受け付けず投入できなかったため未確認 (`pane_current_command`
-  /// を含む他フィールドについても同様に未確認)。
-  /// リテラル `\` は全フィールドで `\\` となるため通常の区切り走査は順序に依存しないが、出力段が
-  /// 実 0x1F を `\037`、LF を生のまま出すため、その値を含む pane は壊れた値を返さず failure にする。
+  /// macOS の path と tmux title が受け付けず投入できなかったため両版とも未確認
+  /// (`pane_current_command` を含む他フィールドについても同様に未確認)。
+  /// リテラル `\` が `\\` になるのは置換で包んだ5フィールドだけで、通常の区切り走査がそこで順序に
+  /// 依存しないのはこのため。残るフィールドは下記のとおり tmux 管理値で backslash を出さない。
+  /// 値の中の実 0x1F は区切りと同じ形 (3.4 は `\037`、3.7c は生 0x1F) になり、LF は両版で生のまま
+  /// 出るため、その値を含む pane は壊れた値を返さず failure にする。
   /// `pane_dead_status` / `pane_dead_signal` は tmux 管理値で、実測値域が空文字列・非負整数・
   /// signal token のため、ユーザー由来の生フィールドと異なり置換を重ねない。
   public static let format = [
@@ -144,8 +155,9 @@ public enum TmuxListPanes {
     #"#{s/\\/\\\\/:pane_title}"#,
   ].joined(separator: formatSeparator)
 
-  /// `display-message` でも Unit Separator は `\037` になるため、list-panes と同じ
-  /// parity 方式で title 内の backslash と区切りを識別する (Gate 3 README §2.1)。
+  /// `display-message` の Unit Separator も list-panes と同じ見え方をする (3.4 は `\037`、
+  /// 3.7c は生 0x1F。両版で実測) ため、同じ splitter で title 内の backslash と区切りを
+  /// 識別する (Gate 3 README §2.1)。
   /// `display-message` は `%H` 等を strftime 展開する点が list-panes と異なるため、
   /// template へ literal `%` を足さない。
   public static let agentPaneStatusFormat = [
@@ -302,6 +314,10 @@ public enum TmuxListPanes {
     }
   }
 
+  /// 区切りは版で形が違う (3.4 = 奇数列の `\` に続く `037`、3.7c = 生 0x1F) が、どちらも
+  /// 他方の版の出力には現れないため、版を判定せず両方を受理して曖昧さが出ない。3.7c 側は
+  /// 置換により値の `\` 列が必ず偶数になることが根拠で、生 0x1F は区切りか、値に紛れ込んだ
+  /// 0x1F (= フィールド数がずれて failure) のどちらかにしかならない。
   private static func splitEncodedFields(_ line: String) -> [String] {
     let bytes = Array(line.utf8)
     var fields: [String] = []
@@ -309,6 +325,12 @@ public enum TmuxListPanes {
     var index = 0
 
     while index < bytes.count {
+      if bytes[index] == unitSeparator {
+        fields.append(String(decoding: bytes[fieldStart..<index], as: UTF8.self))
+        index += 1
+        fieldStart = index
+        continue
+      }
       guard bytes[index] == backslash else {
         index += 1
         continue

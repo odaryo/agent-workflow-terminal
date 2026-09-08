@@ -32,6 +32,12 @@ private struct ProjectView: View {
         WarningBar(text: warning) { model.dismissWarning() }
         Divider()
       }
+      // 観測失敗を上と同じスロットへ載せない (`AppModel.scanFailureWarning`)。2本同時に出ても
+      // 端末が潰れないのは、`WarningBar` がどちらも1行に丸めているためである。
+      if let scanFailureWarning = model.scanFailureWarning {
+        WarningBar(text: scanFailureWarning) { model.dismissScanFailureWarning() }
+        Divider()
+      }
       if model.projectRoot != nil || !model.worktrees.isEmpty {
         HStack(spacing: 0) {
           ScrollView(.horizontal) {

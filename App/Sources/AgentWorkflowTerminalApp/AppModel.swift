@@ -112,6 +112,11 @@ final class AppModel: ObservableObject {
   /// 端末を出したまま伝えるべき失敗 (Active/Inactive の保存など) をあちらへ載せると、
   /// 致命的でない失敗で端末が消える。
   @Published private(set) var warning: String?
+  /// `warning` と分ける。同じスロットに載せると、`prepare(for:)` が立てた「この起動では
+  /// Active/Inactive を保存しません」がスキャンのたびに上書きされ、観測失敗が解消した時点で
+  /// 恒久的に消える (保存できないままユーザーへの通知だけが消える)。2つの通知は互いに
+  /// 独立していて、どちらも取り下げられない。
+  @Published private(set) var scanFailureWarning: String?
 
   let tmuxExecutable: URL?
   let paneStates: WorktreePaneStatesFeed?
@@ -125,13 +130,10 @@ final class AppModel: ObservableObject {
   private var canSave = false
   private var didStart = false
   private var pendingSave: Task<Void, Never>?
-  /// 直近のスキャンで観測に失敗した entry の要約。**毎回 `warning` へ代入しない**ための状態で、
+  /// 直近のスキャンで観測に失敗した entry の要約。**毎回バナーへ代入しない**ための状態で、
   /// これが変わらない限り再表示しない。5 秒ごとの再スキャンで代入すると、ユーザーが閉じた
   /// バナーが閉じた直後に復活し、端末の上に貼り付いたままになる。
   private var reportedScanFailures: Set<String> = []
-  /// 観測失敗として自分が出した `warning` の本文。別の理由で立った warning を消さないために
-  /// 突き合わせる。
-  private var scanFailureWarning: String?
 
   /// 再スキャンの間隔。P1 の暫定値で、根拠は pane 観測 (`makeWorktreePaneStatesFeed`) と同じく
   /// 「体感で追随し、git への負荷が無視できる」程度でしかない。
@@ -291,25 +293,30 @@ final class AppModel: ObservableObject {
     warning = nil
   }
 
-  /// 失敗の集合が変わったときだけ `warning` を差し替える。集合が同じ間は、ユーザーが閉じた
-  /// バナーを 5 秒ごとに復活させない。
+  func dismissScanFailureWarning() {
+    scanFailureWarning = nil
+  }
+
+  /// 失敗の集合が変わったときだけバナーを差し替える。集合が同じ間は、ユーザーが閉じた
+  /// バナーを 5 秒ごとに復活させない (`reportedScanFailures` を閉じても消さないのはこのため)。
+  ///
+  /// - Important: 保存の成否に触れない文言にする。この起動で Active/Inactive を保存できるとは
+  ///   限らず (`canSave`)、`previous` に居ないパスは保持のしようも無いため、「保持しています」は
+  ///   どちらの場合にも偽になる。ここで言えるのは「観測できなかった」ことと、それを消失として
+  ///   扱っていないことだけである。
   private func report(scanFailures failures: [GitWorktreeEntryFailure]) {
     let summaries = Set(failures.map(Self.summary(of:)))
     guard summaries != reportedScanFailures else { return }
     reportedScanFailures = summaries
 
     guard !summaries.isEmpty else {
-      // 別の理由で立った warning は消さない。
-      if warning == scanFailureWarning { warning = nil }
       scanFailureWarning = nil
       return
     }
-    let text =
-      "\(summaries.count) 件の worktree を観測できませんでした。"
-      + "Active/Inactive はそのまま保持しています: "
+    scanFailureWarning =
+      "\(summaries.count) 件の worktree を今回のスキャンで観測できませんでした。"
+      + "消えたものとしては扱っていません: "
       + summaries.sorted().joined(separator: ", ")
-    scanFailureWarning = text
-    warning = text
   }
 
   private static func summary(of failure: GitWorktreeEntryFailure) -> String {

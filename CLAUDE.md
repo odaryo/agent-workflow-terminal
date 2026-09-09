@@ -164,9 +164,12 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
   socket を決める**ため、tmux pane の中で動くレーンのこの行は隔離 server ではなく既定 server へ
   飛んだ (同じコマンド列でも server を起こす行だけは `env -i` が付いており、そちらは隔離できていた)。
   隔離側の server は生き残り、既定 server が死んだことが証拠である。`TMUX_TMPDIR` にはもう1つ罠が
-  あり、**socket パスが長すぎると tmux は黙って既定 socket へフォールバックする** (実測: 200文字の
-  `TMUX_TMPDIR` で `list-sessions` がユーザーの session を返した)。scratchpad 配下のパスは容易に
-  この長さを超える。エラーにならないので、隔離したつもりの破壊操作が既定 server に着地する。
+  あり、**存在しないディレクトリを指していると tmux は黙って既定 socket へフォールバックする**
+  (実測 tmux 3.4: 未作成のディレクトリを指した `list-sessions` がユーザーの session を返した。
+  `TmuxRunner.swift` の realpath の注釈と同じ機序)。作り忘れ・`rm -rf` の後・typo のいずれでも、
+  エラーにならずに既定 server へ着地する。なお**パスが長すぎる場合はエラーになりフォールバックしない**
+  (実測: 202文字で `File name too long`) — 当初この節は「長さが原因」と書いていたが、レビューアの
+  独立計測が否定し、再計測で覆った。原因は長さではなく不在である。
 - **後始末は名前指定で消す。`kill-server` を既定 socket に届きうる文脈で書かない。** 消すのは
   `tmux -L <一時名> kill-session -t '=<作った名前>'` — `=` の完全一致で、自分が作ったものだけを撃つ。
   `kill-server` を使うのは、`-L` で隔離した socket に対してテストの後始末 (`IsolatedTmuxServer`) が

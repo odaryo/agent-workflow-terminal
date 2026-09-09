@@ -41,20 +41,23 @@ private struct ProjectView: View {
       if model.projectRoot != nil || !model.worktrees.isEmpty {
         HStack(spacing: 0) {
           ScrollView(.horizontal) {
+            // `LazyHStack` にしない。Active タブの代表状態は画面外でも観測し続ける必要があり
+            // (Needs Attention を色で知らせる)、lazy にすると観測の有無がスクロール位置で
+            // 変わる。対象が Active だけに絞られたので、観測の数はタブの数を超えない。
             HStack(spacing: 4) {
               if let projectRoot = model.projectRoot {
                 ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
                   model.selectProjectRoot()
                 }
-                if !model.worktrees.isEmpty {
+                if !model.tabbedWorktrees.isEmpty {
                   Divider().frame(height: 22).padding(.horizontal, 2)
                 }
               }
-              ForEach(model.worktrees, id: \.identity) { worktree in
+              ForEach(model.tabbedWorktrees, id: \.identity) { worktree in
                 WorktreeTab(
                   worktree: worktree,
                   selected: model.selectedIdentity == worktree.identity,
-                  paneStates: model.paneStates,
+                  agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
                   select: { model.select(worktree) },
                   setActivation: { model.setActivation($0, of: worktree.identity) }
                 )
@@ -63,13 +66,17 @@ private struct ProjectView: View {
             .padding(6)
           }
           .scrollIndicators(.hidden)
+          InactiveWorktreeMenu(
+            worktrees: model.inactiveWorktrees,
+            activate: { model.setActivation(.active, of: $0) }
+          )
           ViewerDrawerToolbar(layout: $model.viewerDrawerLayout)
             .padding(.trailing, 6)
         }
         Divider()
       }
 
-      if let message = model.message {
+      if let message = model.message ?? model.emptyStateMessage {
         ContentUnavailableView(
           "Agent Workflow Terminal", systemImage: "exclamationmark.triangle",
           description: Text(message))
@@ -182,7 +189,7 @@ private struct TerminalTabs: View {
         .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
         .allowsHitTesting(model.selectedIdentity == projectRoot.identity)
       }
-      ForEach(model.worktrees, id: \.identity) { worktree in
+      ForEach(model.tabbedWorktrees, id: \.identity) { worktree in
         if model.openedIdentities.contains(worktree.identity) {
           TerminalTabContent(
             worktree: worktree.detected,
@@ -218,10 +225,48 @@ private struct ProjectRootTab: View {
   }
 }
 
+/// Inactive worktree を Active にする導線 (設計書 §3.2)。**状態は出さない** — 状態を出すには
+/// pane を観測する必要があり、Inactive をタブから外した目的そのものが失われる (Issue #237)。
+private struct InactiveWorktreeMenu: View {
+  let worktrees: [TaskWorktree]
+  let activate: (WorktreeIdentity) -> Void
+
+  var body: some View {
+    if !worktrees.isEmpty {
+      Menu("Inactive", systemImage: "tray") {
+        ForEach(worktrees, id: \.identity) { worktree in
+          Button(title(of: worktree)) { activate(worktree.identity) }
+            // 到達不能・観測失敗の Active 化は設計書 §3.2 が認めていない (attach 先を
+            // 確かめられていない)。`AppModel.setActivation` も拒否するので、押せる見た目に
+            // しない。
+            .disabled(!worktree.detected.isReachable)
+        }
+      }
+      .menuStyle(.borderlessButton)
+      .fixedSize()
+    }
+  }
+
+  private func title(of worktree: TaskWorktree) -> String {
+    let name =
+      worktree.detected.branch
+      ?? URL(fileURLWithPath: worktree.detected.worktreePath).lastPathComponent
+    // 「観測失敗」を「到達不能」と出さない。到達できないと確かめられていないものを断定して
+    // 見せないため (設計書 §12.3 と同じ理由、Issue #243)。
+    switch worktree.detected.observation {
+    case .reachable: return name
+    case .unreachable: return "\(name) (到達不能)"
+    case .observationFailed: return "\(name) (観測失敗)"
+    }
+  }
+}
+
 private struct WorktreeTab: View {
   let worktree: TaskWorktree
   let selected: Bool
-  let paneStates: WorktreePaneStatesFeed?
+  /// `AppModel.paneStates` を直に受けない。観測の可否を判定する経路を1本にし、タブ側と
+  /// ドロワー側で食い違わないようにするため (Issue #237)。
+  let agentPaneStates: () -> AsyncStream<[PaneAgentState]>?
   let select: () -> Void
   let setActivation: (WorktreeActivation) -> Void
   @State private var representativeState: WorktreeRepresentativeState?
@@ -268,8 +313,8 @@ private struct WorktreeTab: View {
     .disabled(!worktree.detected.isReachable)
     .opacity(worktree.detected.isReachable ? 1 : 0.4)
     .task(id: worktree.identity) {
-      guard worktree.detected.isReachable, let paneStates else { return }
-      let states = WorktreeRepresentativeStateFeed().states(from: paneStates(worktree.detected))
+      guard let paneStates = agentPaneStates() else { return }
+      let states = WorktreeRepresentativeStateFeed().states(from: paneStates)
       for await state in states {
         representativeState = state
       }

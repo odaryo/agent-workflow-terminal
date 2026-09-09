@@ -205,7 +205,10 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
   `.claude/settings.json` であり (`${CLAUDE_PROJECT_DIR}` は起動時のプロジェクトルートに固定され、
   Claude が worktree へ `cd` しても動かない)、**この変更を含まない worktree を起点に起動した
   セッションだけが無防備**になる。main で起動したセッションは古い worktree を触ってもガードされ、
-  レーンは `scripts/wf-sync-main.sh` を通すまで無い。判定を変えたときは
+  レーンは `scripts/wf-sync-main.sh` を通すまで無い。**設定の取り込みにセッションの再起動は要らない**
+  — マージ直後の監督セッション (main で起動、途中でマージ) で canary が拒否されることを実測した
+  (公式ドキュメントの「Direct edits to hooks in settings files are normally picked up automatically
+  by the file watcher」と一致。一度「再起動が要る」と書いて撤回した経緯がある)。判定を変えたときは
   `scripts/check-tmux-kill-guard.sh` の fixture で確かめる (CI の `shell-guard`)。
 - **フックの fail-closed には閉じられない穴が4つある。** 判定スクリプトが**無い** / **実行権が
   無い** / **timeout を超えた** / **`python3` が無くて起動できない** ときは、いずれもツール

@@ -7,6 +7,10 @@
   "source": "claude-composite-r1 +0.47s (prompt_perm_sent 1788400975.582 から画面が最初に変化したフレーム)",
   "paneTitle": "✳ 1から20の数字と豆知識",
   "paneCurrentCommand": "2.1.259",
+  "agentVersion": "claude 2.1.259 (Claude Code)",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 0,
   "processNames": [
     "(bash)",

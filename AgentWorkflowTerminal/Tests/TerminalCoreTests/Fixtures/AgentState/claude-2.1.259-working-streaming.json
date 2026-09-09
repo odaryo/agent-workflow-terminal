@@ -4,9 +4,13 @@
     "working"
   ],
   "note": "長い応答の streaming 中。画面には実行中の印が一切出ず、出力が増えていることだけが手がかり (README §6.3-2)",
-  "source": "claude-working-streaming",
+  "source": "claude-2.1.259-working-streaming",
   "paneTitle": "✳ 1から20の数字リスト",
   "paneCurrentCommand": "2.1.259",
+  "agentVersion": "claude 2.1.259 (Claude Code)",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 0.5,
   "processNames": [
     "caffeinate",

@@ -4,9 +4,13 @@
     "completed"
   ],
   "note": "ターン完了後の放置",
-  "source": "codex-completed",
+  "source": "codex-0.152.1-completed",
   "paneTitle": "gate3-work-codex",
   "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.152.1",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 2.0,
   "processNames": [
     "codex",

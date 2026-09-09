@@ -4,9 +4,13 @@
     "unknown"
   ],
   "note": "40桁で過去の送信プロンプトが画面外へ流れ、完了を裏づける情報が不足した静止画面。copy-mode 自体は判定条件にしない (README §7.3.1)",
-  "source": "claude-copy-mode",
+  "source": "claude-2.1.259-copy-mode",
   "paneTitle": "✳ 1から20の数字と豆知識",
   "paneCurrentCommand": "2.1.259",
+  "agentVersion": "claude 2.1.259 (Claude Code)",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 2.0,
   "processNames": [
     "chrome-devtools-mcp",

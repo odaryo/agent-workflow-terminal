@@ -14,8 +14,14 @@ public final class DetachedOnceTask {
 
   /// 2 回目以降の呼び出しは何もしない。前回の本体が既に終了していても再入させない
   /// (「1 回だけ起動する」であって「同時に 1 本だけ」ではない)。
-  public func start(_ body: @escaping @MainActor @Sendable () async -> Void) {
-    guard task == nil else { return }
+  ///
+  /// - Returns: 本体を起動したかどうか。呼び出し側に使い道は無い。「起動しなかった」ことを
+  ///   本体の副作用の**不在**で測ると、その観測は本体が走る順序に依存し、順序が崩れた日に
+  ///   壊れた実装のまま緑になる。戻り値はそれを順序抜きで観測するためにある。
+  @discardableResult
+  public func start(_ body: @escaping @MainActor @Sendable () async -> Void) -> Bool {
+    guard task == nil else { return false }
     task = Task { await body() }
+    return true
   }
 }

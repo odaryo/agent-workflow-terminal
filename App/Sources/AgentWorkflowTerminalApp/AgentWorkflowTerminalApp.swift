@@ -1,4 +1,5 @@
 import Adapters
+import AppKit
 import GhosttyRenderer
 import SwiftUI
 import TerminalCore
@@ -23,10 +24,21 @@ struct AgentWorkflowTerminalApp: App {
         .frame(minWidth: 480, minHeight: 320)
     }
     .defaultSize(width: 900, height: 560)
-    // `Window` だけで File メニューごと消えることは probe で観測済みで、この行は多重防御。
-    // `WindowGroup` に戻して `.newItem` だけを外しても File メニューは同じく消えるため、
-    // 「⌘N だけ消して ⌘W を残す」形はこの 2 つの組み合わせでは作れない (Issue #238 の計測)。
-    .commands { CommandGroup(replacing: .newItem) {} }
+    .commands {
+      // `Window` だけで File メニューごと消えることは計測済みで、この行は多重防御。
+      CommandGroup(replacing: .newItem) {}
+      // File メニューが消えると ⌘W も巻き添えになる。このアプリは
+      // `applicationShouldTerminateAfterLastWindowClosed` が `true` なので、⌘W は終了導線でも
+      // ある。`.newItem` / `.printItem` へ置くと組み込みの Close が重複して現れたため
+      // `.saveItem` に置く (Issue #238 の計測)。
+      //
+      // - Note: 計測で確かめたのはメニュー項目と ⌘W の生成までで、`performClose` が実際に
+      //   window を閉じるところは未検証 (#316)。
+      CommandGroup(replacing: .saveItem) {
+        Button("Close") { NSApp.keyWindow?.performClose(nil) }
+          .keyboardShortcut("w")
+      }
+    }
   }
 }
 

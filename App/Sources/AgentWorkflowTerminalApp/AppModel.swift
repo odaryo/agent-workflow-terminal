@@ -132,8 +132,8 @@ final class AppModel: ObservableObject {
   /// 保存されたファイルを読めなかった起動では `false`。読めなかったファイルを上書きすると、
   /// ユーザーが手で復旧できる可能性まで消える。
   private var canSave = false
-  private var didStart = false
-  /// `didStart` と分ける。あちらは `run()` の二重起動を防ぐ印で、スキャンが**終わった**ことは
+  private let rescan = DetachedOnceTask()
+  /// `rescan` と分ける。あちらは `run()` の二重起動を防ぐ側で、スキャンが**終わった**ことは
   /// 表さない。空の一覧を「worktree が無い」と読んでよいのは、この印が立った後だけである。
   @Published private(set) var didCompleteInitialScan = false
   private var pendingSave: Task<Void, Never>?
@@ -191,10 +191,15 @@ final class AppModel: ObservableObject {
     }
   }
 
-  func run() async {
-    guard !didStart, let projectDirectory else { return }
-    didStart = true
+  /// すぐ返る。本体を呼び出し元の `.task` の寿命に乗せると、window を閉じた時点で再スキャンが
+  /// 止まり、§3.2 確定の「観測中に新規出現した worktree の自動 Active 化」が働かなくなる
+  /// (Issue #238)。ループはアプリの生存期間そのものなので、`self` を握ったままにする。
+  func run() {
+    guard let projectDirectory else { return }
+    rescan.start { await self.scanAndObserve(projectDirectory: projectDirectory) }
+  }
 
+  private func scanAndObserve(projectDirectory: URL) async {
     let detector: GitWorktreeDetector
     do {
       detector = try GitWorktreeDetector(

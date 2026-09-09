@@ -403,6 +403,7 @@ private struct TerminalTabContent: View {
       GhosttyTerminalView(
         command: command,
         workingDirectory: worktree.worktreePath,
+        configurationFileURL: terminalConfigurationFileURL,
         focusRequest: focusRequest,
         // プロセスが終わった端末にキーボードを持たせない。`focusRequest` を `nil` に
         // すり替える形では塞がらない — `nil` は「取りに行かない」だけで、既に別のタブの

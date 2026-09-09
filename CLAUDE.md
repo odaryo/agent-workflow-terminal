@@ -31,10 +31,10 @@ scripts/build-app.sh                                      # ローカルの macO
 # from the repository root
 swift format lint --configuration .swift-format --recursive --strict \
   AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
-  App/Sources App/Package.swift
+  App/Sources App/Tests App/Package.swift
 swift format format --configuration .swift-format --recursive --in-place \
   AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
-  App/Sources App/Package.swift
+  App/Sources App/Tests App/Package.swift
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 

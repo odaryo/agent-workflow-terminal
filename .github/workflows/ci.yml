@@ -197,6 +197,12 @@ jobs:
         working-directory: App
         run: swift build
 
+      # UI 層は unit test の対象外 (docs/coding-guidelines.md) だが、libghostty の設定
+      # 読み込み経路だけは window も GHOSTTY_RESOURCES_DIR も無しに検証できる (Issue #236)。
+      - name: Test
+        working-directory: App
+        run: swift test
+
   # PreToolUse (Bash) フックの判定本体を fixture で検査する。フックは Claude Code の設定から
   # 呼ばれるだけでリポジトリのビルドには関与しないため、壊れても他の job は緑のまま通る
   # (Issue #314)。
@@ -257,6 +263,7 @@ jobs:
             AgentWorkflowTerminal/Tests \
             AgentWorkflowTerminal/Package.swift \
             App/Sources \
+            App/Tests \
             App/Package.swift
 
   # SwiftLint はランナーイメージに同梱されていればそれを使い、

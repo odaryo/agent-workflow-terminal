@@ -47,6 +47,17 @@ let package = Package(
       ],
       swiftSettings: commonSwiftSettings
     ),
+    .testTarget(
+      name: "GhosttyRendererTests",
+      dependencies: [
+        "GhosttyRenderer",
+        "GhosttyKit",
+        .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
+      ],
+      swiftSettings: commonSwiftSettings + [
+        .unsafeFlags(["-Xcc", "-Wno-incomplete-umbrella"])
+      ]
+    ),
   ],
   swiftLanguageModes: [.v6]
 )

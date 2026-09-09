@@ -1384,7 +1384,28 @@ libghosttyの配布方法と固定versionの方針は**未確定**(§25)。Gate 
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)等の既存Swift renderer | permissive licenseの既存端末エミュレータを利用 | SwiftTermは2026-08-31時点でMIT(GitHub license metadataで確認)。採用時は固定versionで再監査する |
 | 外部SSHアプリ連携 | 当面はBlink等の外部Terminalへ委譲(§20.3) | 専用アプリ内Terminalの最終形とは別の段階的手段 |
 
-### 21.6 採用しない／後回しの候補
+### 21.6 端末設定ファイルの経路
+
+**この節は実装済みの事実の記録であり、§21章の状態(現在の推奨)を変えるものではない。**
+
+macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-terminal/config`から読む。書式はghosttyの設定構文で、ファイルが無ければ何も読まない。`ghostty_config_load_file`で1プロセスにつき1回だけ読み込む(libghosttyの設定はプロセス全体で共有されるため、§21.5のrenderer隔離の内側で完結する)。
+
+**`ghostty_config_load_default_files`は呼ばない。** vendored libghostty v1.3.1の実体(`src/config/Config.zig`の`loadDefaultFiles`、`src/config/file_load.zig`)では、これがmacOSで読むのは次の4経路である。
+
+1. `${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config`(v1.3.0未満の旧名)
+2. 同`.../ghostty/config.ghostty`(v1.3.1の推奨名)
+3. `~/Library/Application Support/<bundle_id>/config`(旧名)
+4. 同`.../config.ghostty`(推奨名)
+
+呼ばない理由は3つ。
+
+- 3と4の`bundle_id`はlibghosttyのコンパイル時定数`com.mitchellh.ghostty`(`src/build_config.zig`)であり、**実行中のアプリのbundle idではない**。つまりこの経路は本物のGhostty.appの設定ディレクトリを読む。ユーザーがGhostty本体向けに書いた設定が別アプリであるこの端末へ黙って効くのは驚き最小に反する。さらにこのapp support経路は**環境変数では隔離できない**。`NSSearchPathForDirectoriesInDomains`は`$HOME`を見ないため、`env -i HOME=<偽home>`で呼んでも実ユーザーの`~/Library/Application Support/com.mitchellh.ghostty/`の設定が読み込まれることを実測で確認している(偽home側に置いた値ではなく実ユーザー設定のthemeとfont-sizeが効いた)。
+- §4.4は履歴の上限を「Terminalが製品既定として明示し、ユーザーの`~/.tmux.conf`やghostty設定任せにしない」と決めている。default filesを読むと`scrollback-limit`が別アプリ向けのファイルから黙って上書きされうる。
+- ユーザーのGhosttyのkeybindが、独自のタブ/pane操作を持つこの端末の中へそのまま入る。
+
+アプリ固有の名前を持つことで、1と2のどちらが「ユーザーのghostty設定」なのかという版数依存の曖昧さも消える。
+
+### 21.7 採用しない／後回しの候補
 
 | 候補 | 状態 | 理由 |
 |---|---|---|

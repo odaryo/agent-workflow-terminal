@@ -1,0 +1,152 @@
+# exit 2 (拒否) を期待するコマンド。
+#
+# fixture は `%%` だけの行で区切る (コマンドが複数行になりうるため)。ブロック先頭の `#` 行は
+# コメントとして落とすが、2 行目以降の `#` はコマンドの一部として扱う (heredoc 本文のため)。
+# 行はシェルで評価されず、hook JSON の tool_input.command としてそのまま渡される。
+%%
+# 2026-09-09 の事故そのもの。`-u` は socket 指定ではない (tmux の usage: [-2CDlNuVv])。
+TMUX_TMPDIR="$TMUX_TMPDIR2" tmux -u kill-server
+%%
+tmux kill-server
+%%
+env -u TMUX tmux kill-server
+%%
+tmux -L default kill-server
+%%
+tmux -S /private/tmp/tmux-501/default kill-server
+%%
+tmux kill-session -t awt-x
+%%
+tmux kill-session
+%%
+tmux kill-sess -t x
+%%
+tmux kill-ser
+%%
+cd /tmp && tmux kill-server
+%%
+bash -c 'tmux kill-server'
+%%
+/opt/homebrew/bin/tmux kill-server
+%%
+timeout 5 tmux kill-server
+%%
+# ここから下は実装時に足した派生 (接頭辞一致・連結オプション・コマンド置換・引用符の閉じ忘れ)。
+tmux -uL default kill-session -t '=x'
+%%
+tmux -Ldefault kill-sess -t x
+%%
+tmux -f /dev/null kill-server
+%%
+env -i tmux kill-server
+%%
+sh -c "tmux kill-sess -t x"
+%%
+tmux -L "" kill-session -t x
+%%
+echo hi; tmux kill-server
+%%
+tmux kill-session -t '=x'
+%%
+echo $(tmux kill-server)
+%%
+tmux kill-server '
+%%
+# ここから下は敵対的レビュー (#314) が見つけた素通り。いずれも修正前は exit 0 だった。
+#
+# C1: 行継続。`\` + 改行はシェルでは 1 文字も残らない。CLAUDE.md 自身が薦める
+# 「env -u TMUX は行ごとに付ける」書き方から自然に出る形であり、難読化ではない。
+tmux \
+kill-server
+%%
+env -u TMUX \
+  tmux \
+  kill-server
+%%
+# M1: 予約語・グループ化の前置
+{ tmux kill-server; }
+%%
+while true; do tmux kill-server; done
+%%
+if true; then tmux kill-session -t x; fi
+%%
+# M2: socket 名の解決は大文字小文字を区別しない (実測: APFS)
+tmux -L Default kill-session -t x
+%%
+tmux -L DEFAULT kill-sess -t '=x'
+%%
+# M2: `/` を含む値は socket ディレクトリからの相対パスとして解決される
+# (実測: -L ./default も -L ../tmux-501/default も既定 server の session を返した)
+tmux -L ./default kill-session -t x
+%%
+tmux -L ../tmux-501/default kill-session -t x
+%%
+# 区切り語を引用しない heredoc の本文では展開が起きるので、置換の中身は検査する
+cat <<EOF
+$(tmux kill-server)
+EOF
+%%
+# ここから下は 2 巡目の敵対的レビュー (#314) が見つけた素通り。
+#
+# M-A: リダイレクトがコマンド名と引数の間に挟まった形。区切り扱いにしていたため、
+# 後ろの kill-… が別のコマンドとして素通りしていた。いずれも修正前は exit 0。
+tmux 2>/dev/null kill-server
+%%
+>/tmp/o tmux kill-server
+%%
+tmux -L default 2>/dev/null kill-session -t x
+%%
+tmux <in kill-server
+%%
+env -u TMUX >/tmp/o tmux -L default kill-session -t x
+%%
+tmux kill-server 2>&1 | tee /tmp/o
+%%
+# ここから下は 3 巡目の敵対的レビュー (#314) が見つけた素通り (M-1)。リダイレクト直後の
+# 連続記号を `> < &` しか見ていなかったため、`&>` `>|` は区切りの読み飛ばしから漏れ、
+# `<(` `>(` では読み飛ばしが直後の `tmux` という語そのものを食べていた。
+# いずれも偽 tmux を PATH 先頭に置いた実挙動で「実際に走る」ことが確認されている。
+tmux &>/dev/null kill-server
+%%
+tmux &> /dev/null kill-server
+%%
+tmux >|/tmp/o kill-server
+%%
+diff <(tmux kill-server) /dev/null
+%%
+tee >(tmux kill-server) </dev/null
+%%
+tmux 3>/dev/null kill-server
+%%
+# m-2: コマンド置換が上限を超えたら、黙って捨てず拒否に倒す
+echo $(echo kill-se0) $(echo kill-se1) $(echo kill-se2) $(echo kill-se3) $(echo kill-se4) $(echo kill-se5) $(echo kill-se6) $(echo kill-se7) $(echo kill-se8) $(echo kill-se9) $(echo kill-se10) $(echo kill-se11) $(echo kill-se12) $(echo kill-se13) $(echo kill-se14) $(echo kill-se15) $(echo kill-se16) $(echo kill-se17) $(echo kill-se18) $(echo kill-se19) $(echo kill-se20) $(echo kill-se21) $(echo kill-se22) $(echo kill-se23) $(echo kill-se24) $(echo kill-se25) $(echo kill-se26) $(echo kill-se27) $(echo kill-se28) $(echo kill-se29) $(echo kill-se30) $(echo kill-se31) $(echo kill-se32) $(echo kill-se33) $(echo kill-se34) $(echo kill-se35) $(echo kill-se36) $(echo kill-se37) $(echo kill-se38) $(echo kill-se39) $(echo kill-se40) $(echo kill-se41) $(echo kill-se42) $(echo kill-se43) $(echo kill-se44) $(echo kill-se45) $(echo kill-se46) $(echo kill-se47) $(echo kill-se48) $(echo kill-se49) $(echo kill-se50) $(echo kill-se51) $(echo kill-se52) $(echo kill-se53) $(echo kill-se54) $(echo kill-se55) $(echo kill-se56) $(echo kill-se57) $(echo kill-se58) $(echo kill-se59) $(echo kill-se60) $(echo kill-se61) $(echo kill-se62) $(echo kill-se63) $(echo kill-se64) $(echo kill-se65) $(echo kill-se66) $(echo kill-se67) $(echo kill-se68) $(echo kill-se69) $(tmux kill-server)
+%%
+# ここから下は 4 巡目の敵対的レビュー (#314)。いずれも 1 プロセスのコマンド文字列で完結し、
+# 既に検査対象に入っている経路の取りこぼし (スコープ外と決めた `… | bash` とは別)。
+# すべて偽 tmux を PATH 先頭に置いた実行で「実際に tmux へ届く」ことを確認済み。
+#
+# M1: `-c` の前に値を取るオプションがあると `bash -c` の検査が外れていた
+bash -euo pipefail -c 'tmux kill-server'
+%%
+bash -o pipefail -c 'tmux kill-server'
+%%
+bash -lc 'tmux kill-sess -t x'
+%%
+# M2: BSD env の -S は値をコマンド列として分割実行する
+env -S 'tmux kill-server'
+%%
+env -S"tmux kill-server"
+%%
+env --split-string='tmux kill-server'
+%%
+# M3: eval は残りの語を連ねてシェルに再解釈させる
+eval 'tmux kill-server'
+%%
+builtin eval tmux kill-server
+%%
+tmux -L awt-x kill-session -t x; eval 'tmux kill-server'
+%%
+eval "tmux kill-session -t x"
+%%
+# m1: tmux -c の値は既定シェル経由で実行される (実測: server は立たずコマンドだけ走る)
+tmux -c 'tmux kill-server'

@@ -160,6 +160,21 @@ final class AppModel: ObservableObject {
     WorktreeInventory(projectRoot: projectRoot, taskWorktrees: worktrees)
   }
 
+  /// 通常の Task Tab に並べる worktree (設計書 §3.2)。
+  var tabbedWorktrees: [TaskWorktree] { inventory.tabbedTaskWorktrees }
+
+  /// Active 化の導線に並べる worktree。状態は添えない — 添えると Inactive の pane を観測する
+  /// ことになり、タブから外した意味が無くなる (Issue #237)。
+  var inactiveWorktrees: [TaskWorktree] { inventory.inactiveTaskWorktrees }
+
+  /// `message` と分ける。あちらは起動時の失敗を載せる保存されたスロットなので、Inactive を
+  /// Active 化しても消えず、tmux 起動失敗と同じスロットである以上まとめてクリアもできない。
+  var emptyStateMessage: String? {
+    guard selectedIdentity == nil else { return nil }
+    guard projectRoot != nil || !worktrees.isEmpty else { return "worktree がありません。" }
+    return "タブに表示する worktree がありません。Inactive の一覧から Active にしてください。"
+  }
+
   func run() async {
     guard !didStart, let projectDirectory else { return }
     didStart = true
@@ -274,12 +289,18 @@ final class AppModel: ObservableObject {
     if let projectRoot {
       selectedIdentity = projectRoot.identity
       openedIdentities.insert(projectRoot.identity)
-    } else if let first = worktrees.first(where: \.detected.isReachable) {
+    } else if let first = firstSelectableWorktree {
       selectedIdentity = first.identity
       openedIdentities.insert(first.identity)
-    } else if message == nil {
-      message = worktrees.isEmpty ? "worktree がありません。" : "到達できる worktree がありません。"
     }
+    // 選べる worktree が無いことは `message` へ書かない。書くと Inactive を Active 化しても
+    // 消えないままになる (`emptyStateMessage`)。
+  }
+
+  /// タブに出ていない worktree を選ばない。Inactive はタブが無いので、選ぶと端末だけが
+  /// 生きたまま残り、切り替える手段が無くなる。
+  private var firstSelectableWorktree: TaskWorktree? {
+    worktrees.first { $0.activation == .active && $0.detected.isReachable }
   }
 
   private func report(scanFailure detail: String) {
@@ -294,7 +315,25 @@ final class AppModel: ObservableObject {
     guard activation != .active || worktree.detected.isReachable else { return }
     guard worktree.activation != activation else { return }
     worktrees[index] = TaskWorktree(detected: worktree.detected, activation: activation)
+    if activation == .inactive {
+      close(identity)
+    }
     save()
+  }
+
+  /// タブから外れた worktree の端末を残さない。残すと、表示されていない NSView が first
+  /// responder を持ち続け、打鍵が別 worktree の生きた session へ入る窓が開く (Issue #234)。
+  /// tmux session 自体は残す (設計書 §3.4)。
+  private func close(_ identity: WorktreeIdentity) {
+    openedIdentities.remove(identity)
+    guard selectedIdentity == identity else { return }
+    if projectRoot != nil {
+      selectProjectRoot()
+    } else if let next = firstSelectableWorktree {
+      select(next)
+    } else {
+      selectedIdentity = nil
+    }
   }
 
   func dismissWarning() {
@@ -364,8 +403,12 @@ final class AppModel: ObservableObject {
   /// `/private/tmp` でも exit 0 で session ができ、`pane_current_path` は `$HOME` になる)。そこで agent を走らせると、
   /// worktree の名前を持つタブが実際には別のディレクトリで作業することになる。しかも
   /// `new-session -A` なので、その誤った session に以後ずっと再 attach され続ける。
+  ///
+  /// Inactive を開かないのは、タブが無い worktree の端末を作らないためである (設計書 §3.2)。
+  /// Active 化そのものは open/attach を伴わず、session の用意はタブを選んだ時点に留める
+  /// (§3.3: session が無いときに Terminal が黙って作らない)。
   func select(_ worktree: TaskWorktree) {
-    guard worktree.detected.isReachable else { return }
+    guard worktree.activation == .active, worktree.detected.isReachable else { return }
     selectedIdentity = worktree.identity
     openedIdentities.insert(worktree.identity)
   }
@@ -384,9 +427,15 @@ final class AppModel: ObservableObject {
 
   /// pane の Agent 状態の観測経路。候補一覧の印 (§12.7) と送信可否 (§9.2.2) の両方がこれを見る。
   /// Project Root も含める — 含めないと Project Root タブで送信が恒久的に不可になる。
-  /// `nil` は「観測経路が無い」で、到達不能な worktree と tmux を使えない起動がここへ入る。
+  /// `nil` は「観測経路が無い」で、Inactive・到達不能な worktree と tmux を使えない起動が
+  /// ここへ入る。
+  ///
+  /// - Important: 可否の判定は `WorktreeInventory.observesPaneStates(of:)` に任せ、ここでは
+  ///   書き直さない。タブ側とドロワー側がそれぞれ条件を持つと、片方だけが Inactive を外して
+  ///   観測が走り続ける (Issue #237)。
   func agentPaneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
-    guard let paneStates, let detected = detectedWorktree(of: identity), detected.isReachable
+    guard let paneStates, inventory.observesPaneStates(of: identity),
+      let detected = detectedWorktree(of: identity)
     else { return nil }
     return paneStates(detected)
   }

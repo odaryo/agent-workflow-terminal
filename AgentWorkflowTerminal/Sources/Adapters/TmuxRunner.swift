@@ -76,10 +76,7 @@ public struct TmuxRunner: Sendable {
   private static let inheritedEnvironmentKeys = ["HOME", "PATH", "TMUX_TMPDIR"]
 
   /// サブコマンドより前に置く global option。`-L` を持たない `userDefault` では `-u` だけになる。
-  ///
-  /// この runner を経ずに tmux を撃つ経路 (server を起こす場合など) が、同じ server を
-  /// 指していることをコメントの約束ではなく値で保証できるように公開している。
-  public let serverArguments: [String]
+  private let serverArguments: [String]
   private let processRunner: any ProcessRunning
   private let executableURL: URL
   private let environment: [String: String]
@@ -161,6 +158,14 @@ public struct TmuxRunner: Sendable {
     // この入口は出力解析クライアント用だが、new-session も通せるため限定環境が server に
     // 保持され全 pane へ継承され得る。現状 API では防がず、分離は Issue #61 で設計する。
     self.environment = environment
+  }
+
+  /// この runner を経ずに tmux を撃つ経路 (server を起こす、端末へ attach の argv を渡す) が
+  /// 同じ server を指すための前置。`serverArguments` 自体を公開せず組み立てまで引き受けるのは、
+  /// 呼び出し側が前置を忘れても型が通ってしまい、接続先が黙って既定 server へ割れるためである
+  /// (Issue #235 で実際に起きた)。
+  public func serverScopedArguments(_ arguments: [String]) -> [String] {
+    serverArguments + arguments
   }
 
   public func run(

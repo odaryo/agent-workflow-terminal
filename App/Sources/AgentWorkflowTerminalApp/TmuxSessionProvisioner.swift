@@ -11,7 +11,7 @@ import TerminalCore
 ///
 /// - Important: server を起こす経路 (`startBootstrapSession`) だけは `TmuxRunner` を通さず argv を
 ///   自分で組む (限定環境を server へ焼き付けないため)。接続先が `create` と食い違わないよう、
-///   global option は `runner.serverArguments` をそのまま前置する — ここを自前で組むと
+///   global option は `runner.serverScopedArguments` を通す — ここを自前で組むと
 ///   `-L` を持つ runner で起こす server と `create` が見る server が割れる。
 struct TmuxSessionProvisioner: Sendable {
   /// server を起こすためだけに作って必ず消す session の名前。
@@ -55,8 +55,13 @@ struct TmuxSessionProvisioner: Sendable {
   /// 保証が掛かっていない session を surface が黙って作り直す経路を残さないため。
   /// `=` は前方一致でユーザー自身の session を掴まないための完全一致指定
   /// (`TmuxSessionOperations` の doc 参照)。
+  ///
+  /// global option を `runner` から取るのは、この argv を実行するのは surface であって
+  /// `runner` ではないためである。自前で `-u` と書くと、`-L` を持つ runner では
+  /// `create` が作った server と attach 先が割れる。
   private func attachCommand(for session: TmuxSessionName) -> [String] {
-    [tmuxExecutable.path, "-u", "attach-session", "-t", "=\(session.rawValue)"]
+    [tmuxExecutable.path]
+      + runner.serverScopedArguments(["attach-session", "-t", "=\(session.rawValue)"])
   }
 
   /// server が動いていないときだけ通る経路。`create` は server を起こさないと決めているので
@@ -110,8 +115,8 @@ struct TmuxSessionProvisioner: Sendable {
     environment["TMUX_PANE"] = nil
     _ = try? await FoundationProcessRunner().run(
       executableURL: tmuxExecutable,
-      arguments: runner.serverArguments
-        + ["new-session", "-d", "-s", Self.bootstrapSessionName, "-c", "/"],
+      arguments: runner.serverScopedArguments(
+        ["new-session", "-d", "-s", Self.bootstrapSessionName, "-c", "/"]),
       environment: environment,
       timeout: TmuxRunner.defaultTimeout
     )

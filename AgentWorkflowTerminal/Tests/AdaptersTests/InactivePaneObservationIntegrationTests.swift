@@ -10,6 +10,14 @@ private let isInactiveObservationIntegrationEnabled =
 /// (Issue #237)。判定を通した後の呼び出し回数を数えるのではなく、tmux 実行ファイルの位置に
 /// 置いたシムが受け取った argv を数える — 判定と実行の間に別の観測経路が挟まっていれば、
 /// モックでは見えずここでだけ見える。
+///
+/// - Important: **この計測の範囲は `list-panes` に閉じている。** ここで作る pane で走るのは
+///   `sleep 300` で、どの adapter も Agent と判定しないため、`capture-pane` と liveness は
+///   Active についても一度も実行されない。つまり「Inactive の session 名を含む tmux 起動が
+///   subcommand を問わず 0 件」までは示せるが、`capture-pane` が抑止されることの陽性対照は
+///   持っていない。
+/// - Important: モデル層の gate だけを覆う。SwiftUI の view 側 (Inactive は描画されないので
+///   `.task` が走らない) は構造的な保証で、ここでは測っていない。
 @Suite(
   "Inactive worktree の pane 観測抑止",
   .enabled(if: isInactiveObservationIntegrationEnabled)
@@ -19,7 +27,7 @@ struct InactivePaneObservationIntegrationTests {
   /// 「呼ばれない」を区別できない。
   private static let observationDuration = Duration.seconds(5)
 
-  @Test("Active の session だけが list-panes の対象になる")
+  @Test("list-panes の対象になるのは Active の session だけ")
   func neverInvokesTmuxForInactiveWorktrees() async throws {
     let realTmux = try #require(IsolatedTmuxServer.executableURL())
     let socketName = uniqueSocketName("inactive-feed")
@@ -41,6 +49,8 @@ struct InactivePaneObservationIntegrationTests {
       }
 
       let shim = try TmuxArgumentLog(realTmux: realTmux)
+      // body が途中で throw しても一時ディレクトリを残さない。
+      defer { shim.remove() }
       let shimRunner = try TmuxRunner(
         socketName: socketName,
         processRunner: FoundationProcessRunner(),
@@ -74,9 +84,7 @@ struct InactivePaneObservationIntegrationTests {
         subscription.cancel()
       }
       #expect(observed.map(\.identity) == [active.identity])
-      let lines = try shim.lines()
-      shim.remove()
-      return lines
+      return try shim.lines()
     }
 
     FileHandle.standardError.write(Data(("=== tmux argv log (\(log.count) 行)\n").utf8))
@@ -86,9 +94,12 @@ struct InactivePaneObservationIntegrationTests {
       let session = TmuxSessionName(identity: worktree.identity).rawValue
       #expect(log.filter { $0.contains(session) } == [])
     }
+    // Active 側は陽性対照。シムが起動せず空のログで vacuous に通る形を排除するのが役目で、
+    // **周期あたりの回数はこのテストの主張ではない** — 閾値を上げると並列負荷で落ちる
+    // 時間依存の主張になる (#319 と同型)。
     let activeSession = TmuxSessionName(identity: active.identity).rawValue
     let activeListPanes = log.filter { $0.contains("list-panes") && $0.contains(activeSession) }
-    #expect(activeListPanes.count >= 2)
+    #expect(activeListPanes.count >= 1)
   }
 }
 

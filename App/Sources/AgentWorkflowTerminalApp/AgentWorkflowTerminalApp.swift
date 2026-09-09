@@ -1,5 +1,4 @@
 import Adapters
-import AppKit
 import GhosttyRenderer
 import SwiftUI
 import TerminalCore
@@ -14,11 +13,20 @@ struct AgentWorkflowTerminalApp: App {
   }
 
   var body: some Scene {
-    WindowGroup("Agent Workflow Terminal") {
+    // `WindowGroup` にしない。複製された window は同じ `AppModel` を共有するため、開いている
+    // タブごとに `GhosttySurfaceView` が二重に生成され、同一 tmux session へ 2 client が
+    // attach する。tmux は最小の client に合わせるので、小さい方が既存の表示を縮める。main
+    // window の複製に意味を持たせるかは設計書 §25 で未確定であり、未確定のまま壊れた状態で
+    // 開けるようにはしない (Issue #238)。
+    Window("Agent Workflow Terminal", id: "main") {
       ProjectView(model: model)
         .frame(minWidth: 480, minHeight: 320)
     }
     .defaultSize(width: 900, height: 560)
+    // `Window` だけで File メニューごと消えることは probe で観測済みで、この行は多重防御。
+    // `WindowGroup` に戻して `.newItem` だけを外しても File メニューは同じく消えるため、
+    // 「⌘N だけ消して ⌘W を残す」形はこの 2 つの組み合わせでは作れない (Issue #238 の計測)。
+    .commands { CommandGroup(replacing: .newItem) {} }
   }
 }
 
@@ -93,7 +101,7 @@ private struct ProjectView: View {
         }
       }
     }
-    .task { await model.run() }
+    .task { model.run() }
     .onChange(of: model.selectedIdentity) { _, _ in
       keyboardFocus.tabSelectionChanged(drawerLayout: model.viewerDrawerLayout)
     }
@@ -471,24 +479,4 @@ private enum TerminalSessionPreparation {
   /// surface へ渡す attach の argv。
   case ready([String])
   case failed(String)
-}
-
-@MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
-  func applicationDidFinishLaunching(_ notification: Notification) {
-    NSApp.setActivationPolicy(.regular)
-    NSApp.activate(ignoringOtherApps: true)
-  }
-
-  func applicationDidBecomeActive(_ notification: Notification) {
-    setGhosttyApplicationFocus(true)
-  }
-
-  func applicationDidResignActive(_ notification: Notification) {
-    setGhosttyApplicationFocus(false)
-  }
-
-  func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-    true
-  }
 }

@@ -64,7 +64,7 @@ struct ClaudeCodeAdapterTests {
         .replacingOccurrences(of: "Do you want to ", with: "Confirm whether to ")
         .replacingOccurrences(of: "Esc to cancel · Tab to amend", with: "Escape cancels")
     }
-    for prefix in ["claude-permission", "claude-2.1.263-permission"] {
+    for prefix in ["claude-2.1.259-permission", "claude-2.1.263-permission"] {
       let fixture = try #require(AgentStateFixture.load(prefix: prefix).first)
       let mutated = AgentSignals(
         paneTitle: fixture.paneTitle,
@@ -80,7 +80,7 @@ struct ClaudeCodeAdapterTests {
 
   @Test("初回観測では残存完了マーカーを Completed と断言しない")
   func initialObservationIsNotCompleted() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "claude-completed").first)
+    let fixture = try #require(AgentStateFixture.load(prefix: "claude-2.1.259-completed").first)
     let signals = AgentSignals(
       paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
       secondsSinceScreenChange: nil, observedAt: .distantPast
@@ -91,7 +91,8 @@ struct ClaudeCodeAdapterTests {
 
   @Test("前ターンの done が残るターン開始直後でも、画面が動いていれば Working")
   func turnStartWithStaleDoneMarkerIsWorking() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "claude-working-turn-start").first)
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.259-working-turn-start").first)
     let result = ClaudeCodeAdapter().classify(
       signals: AgentSignals(
         paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
@@ -106,7 +107,8 @@ struct ClaudeCodeAdapterTests {
 
   @Test("画面変化から1.0秒までは Working、直後は Unknown")
   func workingThresholdBoundary() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "claude-working-streaming").first)
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.259-working-streaming").first)
     func classify(elapsed: TimeInterval) -> String {
       fixtureState(
         of: ClaudeCodeAdapter().classify(

@@ -4,9 +4,13 @@
     "permission"
   ],
   "note": "注意マーカーは [ . ] と [ ! ] を交互に描く。安定するのは \"Action Required\" の側だけ",
-  "source": "codex-permission-dot",
+  "source": "codex-0.152.1-permission-dot",
   "paneTitle": "[ . ] Action Required | gate3-work-codex",
   "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.152.1",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 2.0,
   "processNames": [
     "codex",

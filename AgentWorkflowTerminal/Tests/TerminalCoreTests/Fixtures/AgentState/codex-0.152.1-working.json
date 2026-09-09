@@ -4,9 +4,13 @@
     "working"
   ],
   "note": "タイトル先頭に braille spinner",
-  "source": "codex-working",
+  "source": "codex-0.152.1-working",
   "paneTitle": "⠹ gate3-work-codex",
   "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.152.1",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 0.5,
   "processNames": [
     "codex",

@@ -4,9 +4,13 @@
     "completed"
   ],
   "note": "ターン完了後の放置",
-  "source": "claude-completed",
+  "source": "claude-2.1.259-completed",
   "paneTitle": "✳ 1から20の数字リスト",
   "paneCurrentCommand": "2.1.259",
+  "agentVersion": "claude 2.1.259 (Claude Code)",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 2.0,
   "processNames": [
     "chrome-devtools-mcp",

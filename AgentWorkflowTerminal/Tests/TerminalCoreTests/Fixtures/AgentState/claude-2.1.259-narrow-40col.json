@@ -5,9 +5,13 @@
     "unknown"
   ],
   "note": "画面幅 40 桁で streaming 中。ステータス行が切れてパターンが外れるが、間違った状態を自信を持って返してはならない",
-  "source": "claude-narrow-40col",
+  "source": "claude-2.1.259-narrow-40col",
   "paneTitle": "✳ 1から20の数字と豆知識",
   "paneCurrentCommand": "2.1.259",
+  "agentVersion": "claude 2.1.259 (Claude Code)",
+  "tmuxVersion": "tmux 3.4",
+  "os": "macOS 26.5.2 (25F84) arm64",
+  "capturedAt": "2026-09-03",
   "secondsSinceScreenChange": 0.5,
   "processNames": [
     "caffeinate",

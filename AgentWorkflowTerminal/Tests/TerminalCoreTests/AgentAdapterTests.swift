@@ -78,6 +78,42 @@ struct AgentAdapterTests {
     }
   }
 
+  @Test("実測 fixture は版数をファイル名と JSON の双方に持ち、両者が食い違わない")
+  func fixturesRecordAgentVersion() throws {
+    // 第2成分を数字始まりに限る。単に `-` で切ると版数でない成分が通る (実測:
+    // `codex-cli-something` の "cli" は "codex-cli 0.152.1" に含まれる)。照合を部分文字列に
+    // しないのも同じ理由で、`claude-2-idle` の "2" は "claude 2.1.259 (Claude Code)" を通り、
+    // #217 が見逃した「接頭辞は合うが版数が違う」形をそのまま許してしまう。
+    let versionPattern = try Regex("^(?:claude|codex)-([0-9][0-9A-Za-z.]*)-")
+
+    for prefix in ["claude-", "codex-"] {
+      let fixtures = try AgentStateFixture.load(prefix: prefix)
+      #expect(!fixtures.isEmpty, Comment(rawValue: prefix))
+      for fixture in fixtures {
+        let label = Comment(rawValue: fixture.fileName)
+        #expect(!fixture.agentVersion.isEmpty, label)
+        #expect(!fixture.tmuxVersion.isEmpty, label)
+        #expect(!fixture.os.isEmpty, label)
+        #expect(!fixture.capturedAt.isEmpty, label)
+
+        guard
+          let match = try versionPattern.firstMatch(in: fixture.fileName),
+          let versionInFileName = match[1].substring
+        else {
+          Issue.record("ファイル名が <agent>-<版数>-<内容> の形でない: \(fixture.fileName)")
+          continue
+        }
+        #expect(
+          fixture.agentVersion.split(separator: " ").contains(versionInFileName),
+          Comment(
+            rawValue: """
+              ファイル名の版数 "\(versionInFileName)" が agentVersion \
+              "\(fixture.agentVersion)" のトークンに無い: \(fixture.fileName)
+              """))
+      }
+    }
+  }
+
   @Test("観測の Needs Attention category を代表状態まで保つ")
   func preservesObservationCategory() {
     let observation = AgentStateObservation(

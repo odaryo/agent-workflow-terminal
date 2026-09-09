@@ -116,7 +116,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 **Roles**
 - **Director** (the main Claude session): research, decisions, task decomposition, spec writing, progress judgment, reporting. Does not implement. Delegates read-only exploration and codebase lookups to the `explorer` subagent (`.claude/agents/explorer.md`, haiku).
 - **Implementer** (the Opus subagent defined in `.claude/agents/implementer.md`): receives the Director's spec and edits files. **It only edits — it never commits or pushes**, so the Director independently verifies the changes and commits them. Follow-ups go back to the same agent via `SendMessage` so it keeps its measurements and context; a fresh agent re-derives what the last one already established. **Codex is no longer used** (user decision, 2026-09-07) — do not call `codex exec` for implementation, and do not treat a Codex fallback as available. `AGENTS.md` stays a thin pointer to this file and `docs/coding-guidelines.md`, never a second copy of the rules.
-- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. A measurement that needs a process with a specific name (agent detection is name-based) needs a purpose-built binary: on macOS a renamed copy of a signed system binary such as `/bin/sleep` is SIGKILLed (exit 137) before it runs. Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
+- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. A measurement that needs a process with a specific name (agent detection is name-based) can use a **symlink** to a signed system binary: on macOS a renamed *copy* of `/bin/sleep` is SIGKILLed (exit 137) before it runs, but a symlink under the wanted name runs (the signature is verified against the target) and `ps -o comm=` reports the symlink's own path, so name-based detection matches. A hardlink fails when `/bin` and the temp directory are on different filesystems. This needs no compiler and no CI dependency (実測 2026-09-09、#239). Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
 
 **The loop**
 1. Director writes an Issue-style spec: 背景 / 要求 / スコープ (files allowed to change) / 完了条件 (the exact GREEN commands) / "on ambiguity or contradiction, stop and ask". Treat a reported workaround as a spec defect and widen the scope explicitly in the next round rather than blaming the implementer. The spec must forbid committing and pushing, because the implementer does neither.
@@ -221,6 +221,21 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
   構文エラーで exit 1 を返し (実測)、exit 2 以外は block しないので**ガードごと無効になる**
   — bash 実装では exit 2 になり全 Bash 呼び出しが拒否される逆向きの事故だったので、
   移行で向きが変わっている。CI の `shell-guard` が `py_compile` を別段で回すのはこのため。
+- **ローカルの tmux は 3.4、CI の tmux は 3.7c。片方での計測はもう片方の証拠にならない。** #239 は
+  3 ラウンドのレビューを Critical 無しで抜けた後、マージ直前の CI で落ちた — 監督の GREEN 再実行も
+  レビューアの実 tmux 計測も**全部 3.4 だけ**だったためである。原因は 3.7c が `#{pane_title}` を
+  展開する時点で backslash を二重化すること (3.4 はしない) で、**この変更とは無関係に main に
+  存在する欠陥**だった (#334)。tmux の挙動を観測に使う変更では、`brew` の bottle を
+  `/private/tmp` へ隔離展開して**両版で回すこと** (`brew upgrade tmux` はユーザーの環境を
+  変えるので使わない)。
+- **版数 fixture が通ることは、その版で正しいことの証拠ではない。** 上の欠陥は 3.7c の fixture が
+  実機と**バイト一致していた**のに見つからなかった。fixture の title に backslash が入って
+  いなかっただけである。「その版のテストが緑」は「fixture に入れた文字については緑」でしかない。
+- **backslash を含む session 名は `kill-session -t '=<名前>'` の完全一致から外れる。** tmux は
+  `sess\name` として保持するので、投入した文字列で `=` 完全一致を撃つと `can't find session` に
+  なり、**後始末が黙って失敗する** (#239 の計測で実際に socket を先に消して orphan を作った)。
+  そういう名前を作る計測では、**生成された正式名を `list-sessions` から読み直して**
+  `kill-session` に渡すこと。
 - **観測の範囲を超えた一般化を書かない。** 上の1文は当初「3.7c は escape を一切行わない」と書いていたが、
   試した入力について「生成しなかった」ことしか測っていない。この差は次に読む人が「では escape は
   考えなくてよい」と判断できるかどうかを分ける。#286 では逆向きの実例も出た — spec が「保存段の escape は

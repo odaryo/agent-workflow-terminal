@@ -11,6 +11,7 @@ import TerminalCore
 public struct GhosttyTerminalView: NSViewRepresentable {
   private let configuration: TerminalRendererConfiguration
   private let focusRequest: TerminalFocusRequest?
+  private let keyboardParticipation: TerminalKeyboardParticipation
   private let stateChanged: ((TerminalRendererState) -> Void)?
 
   /// `focusRequest` はキーボードフォーカスを取り直す要求。`nil` は「この端末は今画面に
@@ -23,11 +24,18 @@ public struct GhosttyTerminalView: NSViewRepresentable {
   /// この view の更新が終わった後の main queue で届く (`GhosttySurfaceView.notifyStateChange`
   /// にその理由がある)。`.exited` は端末内のプロセスだけが終わった状態であり、surface は
   /// 生きている (`TerminalRendererState` 参照) ので、受け側は覆う判断だけをする。
+  ///
+  /// - Important: `stateChanged` は**状態の全列ではない**。1回の呼び出しの中で状態が続けて
+  ///   進むと、途中の状態は通知されずに最後の1つだけが届く (`GhosttySurfaceView.send`)。
+  ///   例えば `restart()` から surface の生成が**同期に成功した**場合、`.awaitingSurface` は
+  ///   一度も届かない (生成が同期に成功しなかった場合は届く)。落ちない・重複しない・順序が
+  ///   狂わないのは落ち着いた先の状態についてであり、途中の状態を数えてはならない。
   public init(
     command: [String],
     workingDirectory: String? = nil,
     configurationFileURL: URL? = nil,
     focusRequest: TerminalFocusRequest? = nil,
+    keyboardParticipation: TerminalKeyboardParticipation = .normal,
     stateChanged: ((TerminalRendererState) -> Void)? = nil
   ) {
     configuration = TerminalRendererConfiguration(
@@ -36,6 +44,7 @@ public struct GhosttyTerminalView: NSViewRepresentable {
       configurationFileURL: configurationFileURL
     )
     self.focusRequest = focusRequest
+    self.keyboardParticipation = keyboardParticipation
     self.stateChanged = stateChanged
   }
 
@@ -43,7 +52,7 @@ public struct GhosttyTerminalView: NSViewRepresentable {
     let view = GhosttySurfaceView()
     // Why start より前: surface は window へ装着された時点で作られ、その中で first responder を
     // 取るかどうかをこの値で決める。最初の updateNSView はそれより後に来る。
-    view.applyFocusRequest(focusRequest)
+    view.applyFocusRequest(focusRequest, participation: keyboardParticipation)
     view.stateChanged = stateChanged
     do {
       try view.start(configuration: configuration)
@@ -54,9 +63,11 @@ public struct GhosttyTerminalView: NSViewRepresentable {
   }
 
   public func updateNSView(_ nsView: GhosttySurfaceView, context: Context) {
-    nsView.applyFocusRequest(focusRequest)
-    // Why 毎回入れ替える: 受け側の closure は body のたびに作られ、その時点の状態を捕まえている。
-    // 最初のものを持ち続けると、通知が古い世代の値へ届く。
+    nsView.applyFocusRequest(focusRequest, participation: keyboardParticipation)
+    // Why 毎回入れ替える: closure は body のたびに作り直され、そのたびに違うものになる。
+    // 最初のものを持ち続けると、受け側が後から変えた値 (この view の場合は世代番号) が
+    // 通知へ反映されない。**世代をまたぐ誤配送を防いでいるのはこの入れ替えではなく、
+    // 呼び出し側が付ける `.id(世代)` と、closure が世代番号を値で捕まえていること**である。
     nsView.stateChanged = stateChanged
   }
 
@@ -593,8 +604,24 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     updateDisplayID()
   }
 
-  func applyFocusRequest(_ request: TerminalFocusRequest?) {
-    wantsKeyboardFocus = request?.isTerminalAllowed == true
+  /// 要求と参加可否は同じ呼び出しで渡す。2つの setter に分けると適用順に依存し、順が
+  /// 入れ替わった側が「取りに行ってから明け渡す」あるいはその逆を撃つ。
+  func applyFocusRequest(
+    _ request: TerminalFocusRequest?,
+    participation: TerminalKeyboardParticipation
+  ) {
+    wantsKeyboardFocus = request?.isTerminalAllowed == true && participation == .normal
+    // 表示中のタブ (`request != nil`) が受け取れないときは、キーボードを端末から外す。
+    // Why not `isTerminalAllowed` も条件にする: それは「テキスト入力が主張しているなら
+    // first responder は端末ではない」という、**どこにも保証の無い不変条件**に頼ることに
+    // なる。Issue #278 が確立したのは逆向きの乖離 (AppKit 側の grab は SwiftUI の
+    // `@FocusState` を見ない) が起こりうるという事実であり、乖離した瞬間に Issue #234 の
+    // 誤送信が無音で戻る。テキスト入力から奪わないことは
+    // `withdrawKeyboardFromTerminals` の `is GhosttySurfaceView` が構造的に保証するので、
+    // ここを緩めても過剰発火は増えない。
+    if participation == .withdrawn, request != nil {
+      withdrawKeyboardFromTerminals()
+    }
     guard let request else {
       // Why not 覚えたままにする: 覚えたままだと、同じ要求番号のまま選び直されたタブが
       // first responder を取り直せない。
@@ -604,11 +631,28 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     // Why not 適用済みを忘れる: 忘れると主張が解けた瞬間に、主張より前の古い要求で
     // first responder を奪い返す。要求は保留したまま、主張が解けた時点で最新の1つだけが
     // 下の比較を通る (Issue #278 の規則 2・3)。
-    guard request.isTerminalAllowed else { return }
+    guard request.isTerminalAllowed, participation == .normal else { return }
     guard request.token != appliedFocusRequest else { return }
     appliedFocusRequest = request.token
     // window が無い間 (装着前) は記録だけしておき、surface 生成時に取る。
     window?.makeFirstResponder(self)
+  }
+
+  /// Why not 自分だけ降ろす: このアプリで first responder を動かすのは「選ばれたタブが
+  /// 取りに行く」経路だけで、降りる側は誰も resign しない (Issue #233 の実測。`opacity(0)` も
+  /// `allowsHitTesting(false)` も first responder を動かさない)。そのため
+  /// 「A が `.exited` → B へ切替 → A へ戻す」の後、**隠れた B が first responder のまま**に
+  /// なる。自分が持っているときだけ降ろす実装では、A を見ながらの打鍵が B の生きた
+  /// session へ入る経路 (Issue #234 の Critical) が残る。
+  ///
+  /// Why not `makeFirstResponder` の相手を名指しする: 覆いを出す SwiftUI 側の view を
+  /// AppKit の側から指せない。`nil` は window 自身を first responder にするので、打鍵は
+  /// どの端末へも入らなくなる。
+  private func withdrawKeyboardFromTerminals() {
+    guard let window, window.firstResponder is GhosttySurfaceView else { return }
+    // Why not 戻り値を見る: 降りる相手は上の guard により必ず `GhosttySurfaceView` で、その
+    // `resignFirstResponder` は `super` の答えをそのまま返す (拒否する分岐を持たない)。
+    window.makeFirstResponder(nil)
   }
 
   override public var acceptsFirstResponder: Bool { true }
@@ -631,6 +675,13 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   /// - Note: 通知の判定を `perform` の**後**に置くのは、`createSurface` がこの関数を再入して
   ///   `.creationSucceeded` を送るためである。再入側が先に最新の状態を通知して
   ///   `notifiedState` を進めるので、戻ってきた外側は差が無くなり、古い状態で上書きしない。
+  /// - Important: **その結果、途中の状態は通知されない。** 1回の `send` で状態が2つ進むと、
+  ///   届くのは最後の1つだけである。`restart()` の経路で `createSurface` が**同期に成功した**
+  ///   ときは (`.awaitingSurface` → 再入で `.running`)、`.awaitingSurface` が一度も通知
+  ///   されない。同期に成功しなかったとき — window へ未装着で `createSurface` が何もせずに
+  ///   戻る場合や、`ghostty_surface_new` が失敗して `.creationFailed` から再試行待ちになる
+  ///   場合 — は `.awaitingSurface` のまま通知される。通知は状態の全列ではなく、落ち着いた
+  ///   先を報せるものだと考えること。
   private func send(_ event: TerminalSurfaceLifecycleEvent) {
     perform(lifecycle.handle(event))
     notifyStateChange()
@@ -648,7 +699,10 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     DispatchQueue.main.async { [weak self] in
       // Why assumeIsolated: DispatchQueue の closure は MainActor 隔離とみなされない。
       MainActor.assumeIsolated {
-        // 届いた時点の最新の closure を読む。世代が入れ替わっていれば新しい方へ届く。
+        // Why 届いた時点で読む: 通知先は body のたびに入れ替わるため。**これは誤配送を防ぐ
+        // 仕掛けではない** — 世代をまたいで届かないことを保証しているのは、呼び出し側が
+        // 端末に付ける `.id(世代)` である。`.id` を外すと同じ NSView が使い回され、世代 N の
+        // `.exited` が世代 N+1 の closure へ届いて、作り直したばかりの端末を覆う。
         self?.stateChanged?(state)
       }
     }

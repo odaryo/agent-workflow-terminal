@@ -41,6 +41,20 @@ struct TmuxRunnerTests {
       await spy.invocations.first?.arguments == ["-u", "list-sessions", "-F", "#{session_name}"])
   }
 
+  @Test("runner を経ずに撃つ argv も、run と同じ接続先の global option を得る")
+  func serverScopedArgumentsMatchRunArguments() async throws {
+    let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+    let runner = try makeRunner(processRunner: spy)
+
+    _ = try await runner.run(arguments: ["attach-session", "-t", "=awt-x"])
+
+    // 前置を呼び出し側に組ませると接続先が黙って割れるので、`run` が実際に撃つ argv と
+    // バイト単位で一致することを比べる (Issue #235)。
+    #expect(
+      runner.serverScopedArguments(["attach-session", "-t", "=awt-x"])
+        == (await spy.invocations.first?.arguments))
+  }
+
   @Test("既定サーバでは socket 名の検証対象が無い")
   func skipsSocketNameValidationForUserDefaultServer() throws {
     let spy = ProcessRunnerSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))

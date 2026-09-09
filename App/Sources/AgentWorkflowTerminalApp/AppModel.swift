@@ -119,6 +119,8 @@ final class AppModel: ObservableObject {
   @Published private(set) var scanFailureWarning: String?
 
   let tmuxExecutable: URL?
+  /// `nil` は tmux を使えない起動。`tmuxExecutable` が `nil` の起動と同じ集合になる。
+  let sessions: TmuxSessionProvisioner?
   let paneStates: WorktreePaneStatesFeed?
   let diffModels = DiffViewerModelStore()
   let mainPanes: MainPaneCoordinator
@@ -143,6 +145,12 @@ final class AppModel: ObservableObject {
     projectDirectory = dependencies.projectDirectory
     applicationSupportDirectory = dependencies.applicationSupportDirectory
     tmuxExecutable = dependencies.tmuxExecutable
+    sessions =
+      if let runner = dependencies.tmuxRunner, let executable = dependencies.tmuxExecutable {
+        TmuxSessionProvisioner(runner: runner, tmuxExecutable: executable)
+      } else {
+        nil
+      }
     paneStates = dependencies.paneStates
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
     message = dependencies.projectError ?? dependencies.tmuxError

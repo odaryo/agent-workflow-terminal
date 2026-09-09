@@ -160,6 +160,14 @@ public struct TmuxRunner: Sendable {
     self.environment = environment
   }
 
+  /// この runner を経ずに tmux を撃つ経路 (server を起こす、端末へ attach の argv を渡す) が
+  /// 同じ server を指すための前置。`serverArguments` 自体を公開せず組み立てまで引き受けるのは、
+  /// 呼び出し側が前置を忘れても型が通ってしまい、接続先が黙って既定 server へ割れるためである
+  /// (Issue #235 で実際に起きた)。
+  public func serverScopedArguments(_ arguments: [String]) -> [String] {
+    serverArguments + arguments
+  }
+
   public func run(
     arguments: [String],
     timeout: Duration? = nil,

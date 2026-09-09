@@ -176,7 +176,7 @@ private struct TerminalTabs: View {
       {
         TerminalTabContent(
           worktree: projectRoot,
-          tmuxExecutable: model.tmuxExecutable,
+          sessions: model.sessions,
           focusRequest: focusRequest(for: projectRoot.identity)
         )
         .opacity(model.selectedIdentity == projectRoot.identity ? 1 : 0)
@@ -186,7 +186,7 @@ private struct TerminalTabs: View {
         if model.openedIdentities.contains(worktree.identity) {
           TerminalTabContent(
             worktree: worktree.detected,
-            tmuxExecutable: model.tmuxExecutable,
+            sessions: model.sessions,
             focusRequest: focusRequest(for: worktree.identity)
           )
           .opacity(model.selectedIdentity == worktree.identity ? 1 : 0)
@@ -306,24 +306,51 @@ private struct WorktreeTab: View {
 
 private struct TerminalTabContent: View {
   let worktree: DetectedWorktree
-  let tmuxExecutable: URL?
+  let sessions: TmuxSessionProvisioner?
   let focusRequest: TerminalFocusRequest?
+  @State private var preparation = TerminalSessionPreparation.preparing
 
   var body: some View {
-    if let tmuxExecutable {
-      GhosttyTerminalView(
-        command: [
-          tmuxExecutable.path, "-u", "new-session", "-A", "-s",
-          TmuxSessionName(identity: worktree.identity).rawValue,
-          "-c", worktree.worktreePath,
-        ],
-        workingDirectory: worktree.worktreePath,
-        focusRequest: focusRequest
-      )
-    } else {
-      ContentUnavailableView("tmux を利用できません", systemImage: "terminal")
+    Group {
+      if sessions == nil {
+        ContentUnavailableView("tmux を利用できません", systemImage: "terminal")
+      } else {
+        switch preparation {
+        case .preparing:
+          ProgressView("tmux session を用意しています")
+        case .ready(let command):
+          GhosttyTerminalView(
+            command: command,
+            workingDirectory: worktree.worktreePath,
+            focusRequest: focusRequest
+          )
+        case .failed(let reason):
+          ContentUnavailableView(
+            "tmux session を用意できません", systemImage: "exclamationmark.triangle",
+            description: Text(reason))
+        }
+      }
+    }
+    // タブごとに1回だけ走らせる。用意し直すと、その worktree の端末が動いている最中に
+    // surface を作り替えることになる。
+    .task(id: worktree.identity) {
+      guard let sessions, case .preparing = preparation else { return }
+      preparation =
+        switch await sessions.attachCommand(
+          for: worktree.identity, workingDirectory: worktree.worktreePath)
+        {
+        case .success(let command): .ready(command)
+        case .failure(let error): .failed(error.terminalTabDescription)
+        }
     }
   }
+}
+
+private enum TerminalSessionPreparation {
+  case preparing
+  /// surface へ渡す attach の argv。
+  case ready([String])
+  case failed(String)
 }
 
 @MainActor

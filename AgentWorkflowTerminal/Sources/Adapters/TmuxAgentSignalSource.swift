@@ -27,8 +27,11 @@ public enum TmuxCapturePane {
 /// プレースホルダと入力済みテキストを分ける唯一の手掛かりであり、plain 側はこれを剥がして
 /// 作る (Issue #217)。
 ///
-/// - Note: pane title は `display-message` ではなく `PaneSnapshot` (= `list-panes` 由来) から
-///   取る。どちらも同じ周期で更新されるので鮮度は変わらず、pane ごとの起動が1つ減る。
+/// - Note: pane title は画面と同じバッチのマーカーから取る (追加起動 0)。`PaneSnapshot.title`
+///   は使えない — `AgentAdapter` の既定 `observations(of:)` は毎周期**同じ snapshot 値**を渡し、
+///   `WorktreePaneFeedCoordinator` は `processID` / `currentCommand` / `isDead` が変わらない限り
+///   観測 Task を作り直さないので、title が観測開始時刻で凍る。`CodexAdapter` は title の
+///   spinner を画面判定より前に短絡するため、凍ると Working から抜けられなくなる。
 public actor TmuxAgentSignalSource: AgentSignalSource {
   private let processTable: ProcessTableSnapshotCache
   private let screenBatcher: TmuxPaneScreenBatcher
@@ -62,20 +65,32 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     do {
       captured = try await screenBatcher.screen(of: pane.id)
     } catch {
-      forgetScreen(of: pane.id)
+      // tmux 側の失敗は「見に行けなかった」であって pane が変わったわけではないので、
+      // 画面変化の基準は保つ (捨てると次の周期まで Unknown が伸びる)。
       throw TmuxAgentSignalSourceError.tmux(error)
     }
 
     let styledScreen: String?
+    let title: String
     switch captured.screen {
     case .paneNotFound:
       forgetScreen(of: pane.id)
       throw TmuxAgentSignalSourceError.paneNotFound(pane.id)
-    case .unavailable:
-      forgetScreen(of: pane.id)
-      styledScreen = nil
     case .captured(let text):
+      // title はマーカーから来るので、画面が取れた pane には必ず付く。欠けているのは想定外の
+      // 形なので、空文字を「title が空」として配らず画面ごと取得失敗へ倒す
+      // (Codex が Working を取りこぼす向きに黙って倒れるのを避ける)。
+      guard let capturedTitle = captured.snapshot.titles[pane.id] else {
+        styledScreen = nil
+        title = ""
+        break
+      }
       styledScreen = text
+      title = capturedTitle
+    case .unavailable:
+      // 「今回は見に行かなかった」。pane は生きているので変化追跡の基準は残す。
+      styledScreen = nil
+      title = ""
     }
 
     // 画面変化の計測は plain 側で行う。属性だけが変わったフレーム (spinner の色替えなど) を
@@ -88,7 +103,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
         screen: $0, paneID: pane.id, at: capturedAt, minimumChangedLines: minimumChangedLines)
     }
     return AgentSignals(
-      paneTitle: pane.title, screenText: screen, styledScreenText: styledScreen,
+      paneTitle: title, screenText: screen, styledScreenText: styledScreen,
       secondsSinceScreenChange: secondsSinceScreenChange,
       observedAt: captured.snapshot.observedAt
     )

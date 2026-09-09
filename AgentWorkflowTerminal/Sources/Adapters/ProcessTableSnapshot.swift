@@ -64,7 +64,13 @@ actor ProcessTableSnapshotCache {
   private let timeToLive: Duration
   private let timeSource: any ContinuousTimeSource
   private var latest: (snapshot: ProcessTableSnapshot, capturedAt: ContinuousClock.Instant)?
-  private var inFlight: Task<ProcessTableSnapshot?, Never>?
+  private var inFlight: InFlightRead?
+
+  /// 起動側と待ち手側で同じ時刻を刻むため、開始時刻を task と一緒に持つ。
+  private struct InFlightRead {
+    let task: Task<ProcessTableSnapshot?, Never>
+    let capturedAt: ContinuousClock.Instant
+  }
 
   init(
     processRunner: any ProcessRunning,
@@ -83,20 +89,30 @@ actor ProcessTableSnapshotCache {
     if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
       return latest.snapshot
     }
-    if let task = inFlight {
-      let value = await task.value
-      if inFlight == task { inFlight = nil }
+    if let inFlight {
+      let value = await inFlight.task.value
+      if self.inFlight?.task == inFlight.task {
+        complete(value, capturedAt: inFlight.capturedAt)
+      }
       return value
     }
     let capturedAt = timeSource.now
     let task = Task { [processRunner, executableURL] in
       await Self.read(processRunner: processRunner, executableURL: executableURL)
     }
-    inFlight = task
+    inFlight = InFlightRead(task: task, capturedAt: capturedAt)
     let value = await task.value
-    if inFlight == task { inFlight = nil }
-    if let value { latest = (value, capturedAt) }
+    if inFlight?.task == task { complete(value, capturedAt: capturedAt) }
     return value
+  }
+
+  private func complete(
+    _ value: ProcessTableSnapshot?, capturedAt: ContinuousClock.Instant
+  ) {
+    inFlight = nil
+    // 失敗はキャッシュしない。次の呼び出しで再試行できるようにする。
+    guard let value else { return }
+    latest = (value, capturedAt)
   }
 
   private static func read(

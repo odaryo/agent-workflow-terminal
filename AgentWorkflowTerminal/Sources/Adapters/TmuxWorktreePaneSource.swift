@@ -18,7 +18,14 @@ actor TmuxAllSessionPaneListCache {
   private let timeToLive: Duration
   private let timeSource: any ContinuousTimeSource
   private var latest: (panes: [TmuxPane], capturedAt: ContinuousClock.Instant)?
-  private var inFlight: Task<Result<[TmuxPane], TmuxWorktreePaneSourceError>, Never>?
+  private var inFlight: InFlightRead?
+
+  /// 起動側と待ち手側で同じ時刻を刻むため、開始時刻を task と一緒に持つ。待ち手が完了時刻を
+  /// 使うと、TTL が run にかかった時間ぶん伸びる。
+  private struct InFlightRead {
+    let task: Task<Result<[TmuxPane], TmuxWorktreePaneSourceError>, Never>
+    let capturedAt: ContinuousClock.Instant
+  }
 
   init(
     runner: TmuxRunner,
@@ -34,16 +41,18 @@ actor TmuxAllSessionPaneListCache {
     if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
       return latest.panes
     }
-    if let task = inFlight {
-      let result = await task.value
-      if inFlight == task { complete(result, capturedAt: timeSource.now) }
+    if let inFlight {
+      let result = await inFlight.task.value
+      if self.inFlight?.task == inFlight.task {
+        complete(result, capturedAt: inFlight.capturedAt)
+      }
       return try result.get()
     }
     let capturedAt = timeSource.now
     let task = Task { [runner] in await Self.read(runner: runner) }
-    inFlight = task
+    inFlight = InFlightRead(task: task, capturedAt: capturedAt)
     let result = await task.value
-    if inFlight == task { complete(result, capturedAt: capturedAt) }
+    if inFlight?.task == task { complete(result, capturedAt: capturedAt) }
     return try result.get()
   }
 

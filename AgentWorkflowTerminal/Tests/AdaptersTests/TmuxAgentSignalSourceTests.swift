@@ -8,15 +8,16 @@ import Testing
 struct TmuxAgentSignalSourceTests {
   private let paneID = PaneID(rawValue: "%7")
 
-  @Test("1回の tmux 起動で画面を取り、title は pane 一覧の値をそのまま使う")
-  func signalsUseOneLaunchAndListPanesTitle() async throws {
-    let spy = ObservationProcessSpy(screens: [paneID: ["screen\n"]])
+  @Test("1回の tmux 起動で画面と title の両方を取る")
+  func signalsUseOneLaunchForScreenAndTitle() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["screen\n"]], titles: [paneID: ["live title"]])
     let source = try makeSource(spy: spy, clock: ManualTimeSource())
 
     let signals = try await source.signals(
-      for: makePaneSnapshot(id: "%7", pid: 70, title: "title"), minimumChangedLines: 1)
+      for: makePaneSnapshot(id: "%7", pid: 70, title: "stale title"), minimumChangedLines: 1)
 
-    #expect(signals.paneTitle == "title")
+    #expect(signals.paneTitle == "live title")
     #expect(signals.screenText == "screen\n")
     #expect(signals.secondsSinceScreenChange == nil)
     let invocations = await spy.invocations
@@ -28,10 +29,66 @@ struct TmuxAgentSignalSourceTests {
           "capture-pane", "-e", "-p", "-t", "%7",
           ";", "display-message", "-t", "%7", "-p", marker,
         ])
-    #expect(marker.hasSuffix(" #{pane_id}"))
+    // marker は title 取得を相乗りさせるので、起動は増えない。
+    #expect(marker.hasSuffix(TmuxListPanes.agentPaneStatusFormat))
+    // `display-message -p` は template のリテラル部を strftime 展開する (tmux 3.4 実測)。
     #expect(!marker.contains("%"))
-    // title を取るためだけの `display-message` は無くなった。
-    #expect(!invocations.contains { $0.contains(TmuxListPanes.agentPaneStatusFormat) })
+  }
+
+  /// `AgentAdapter` の既定 `observations(of:)` は毎周期**同じ `PaneSnapshot` 値**を渡し、
+  /// `WorktreePaneFeedCoordinator` は `processID` / `currentCommand` / `isDead` が変わらない限り
+  /// 観測 Task を作り直さない。よって `PaneSnapshot.title` を信号に使うと、長寿命の agent pane で
+  /// title が観測開始時の値に凍る。
+  @Test("pane の title が変わったら次の周期の signals に反映される")
+  func reflectsLatestPaneTitle() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["a\n", "b\n"]], titles: [paneID: ["⠋ working", "codex"]])
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70, title: "⠋ working")
+
+    let first = try await source.signals(for: pane, minimumChangedLines: 1)
+    clock.advance(by: .seconds(2))
+    let second = try await source.signals(for: pane, minimumChangedLines: 1)
+
+    #expect(first.paneTitle == "⠋ working")
+    #expect(second.paneTitle == "codex")
+  }
+
+  /// F1 が利用者に見える形。`CodexAdapter` は title の spinner を画面判定より前に短絡するので、
+  /// title が凍ると Working から抜けられなくなる。
+  @Test("title の spinner が止まれば Codex の Working も外れる")
+  func codexLeavesWorkingWhenSpinnerStops() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["Ask Codex to do anything\n", "Ask Codex to do anything\n"]],
+      titles: [paneID: ["⠋ codex", "codex"]])
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70, title: "⠋ codex")
+    let codex = CodexAdapter()
+
+    let working = try await source.signals(
+      for: pane, minimumChangedLines: codex.minimumChangedLinesForScreenActivity)
+    clock.advance(by: .seconds(2))
+    let settled = try await source.signals(
+      for: pane, minimumChangedLines: codex.minimumChangedLinesForScreenActivity)
+
+    #expect(fixtureState(codex.classify(signals: working, liveness: .alive)) == "working")
+    #expect(fixtureState(codex.classify(signals: settled, liveness: .alive)) == "idle")
+  }
+
+  /// tmux 3.4 は出力段で `$` の前に `\` を足し、format 側の `s/\\/\\\\/` が値の backslash を
+  /// 二重化する。復号は `TmuxListPanes` の既存規則をそのまま通す。
+  @Test("title の backslash と $ を復号して返す")
+  func decodesEscapedTitle() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["a\n"]], titles: [paneID: [#"back\slash $dollar"#]])
+    let source = try makeSource(spy: spy, clock: ManualTimeSource())
+
+    let signals = try await source.signals(
+      for: makePaneSnapshot(id: "%7", pid: 70), minimumChangedLines: 1)
+
+    #expect(signals.paneTitle == #"back\slash $dollar"#)
   }
 
   @Test("登録済みの複数 pane を1プロセスでまとめて取る")
@@ -60,7 +117,12 @@ struct TmuxAgentSignalSourceTests {
     #expect(screens == ["s%1\n", "s%2\n", "s%3\n"])
   }
 
-  /// §7.5 の検出率は 2.0 秒 polling に対する値なので、キャッシュが実効間隔を伸ばしてはならない。
+  /// キャッシュが「同じバッチを2周期ぶん配る」ことは無い、という主張。
+  ///
+  /// - Important: これは**実効サンプル間隔が 2.0 秒以下であることを含意しない**。前回が
+  ///   バッチ捕捉直後、今回が TTL 満了直前だと間隔は `signals + TTL` (= 3.0s) まで伸びる。
+  ///   §7.5 の検出率が 2.0 秒 polling に対する値である以上、実効間隔の分布は別途計測が要る
+  ///   (Issue #239 のレビュー F6)。
   @Test("同じ pane が周期どおりに2回呼ぶと必ず別のバッチを読む")
   func consecutivePollsReadDistinctBatches() async throws {
     let spy = ObservationProcessSpy(screens: [paneID: ["a\n", "b\n", "c\n"]])
@@ -197,7 +259,7 @@ struct TmuxAgentSignalSourceTests {
   /// 「画面だけ無い」信号として Adapter へ渡す。
   @Test("バッチの起動上限に達した pane は画面利用不能として扱う")
   func exhaustedBatchBudgetIsScreenUnavailable() async throws {
-    let panes = (1...6).map { makePaneSnapshot(id: "%\($0)", pid: Int32($0)) }
+    let panes = (1...10).map { makePaneSnapshot(id: "%\($0)", pid: Int32($0)) }
     let spy = ObservationProcessSpy(
       screens: Dictionary(uniqueKeysWithValues: panes.map { ($0.id, ["s\n"]) }))
     let clock = ManualTimeSource()
@@ -207,8 +269,9 @@ struct TmuxAgentSignalSourceTests {
       clock.advance(by: .seconds(2))
     }
 
-    await spy.setMissing(Set(panes.prefix(5).map(\.id)))
-    let signals = try await source.signals(for: panes[5], minimumChangedLines: 1)
+    // 消えた pane 1件につき再バッチが1回。予算を超えたぶんは今回のバッチでは取れない。
+    await spy.setMissing(Set(panes.prefix(9).map(\.id)))
+    let signals = try await source.signals(for: panes[9], minimumChangedLines: 1)
 
     #expect(signals.screenText == nil)
     guard
@@ -219,6 +282,35 @@ struct TmuxAgentSignalSourceTests {
       return
     }
     #expect(observation.unknownReason == .screenUnavailable)
+  }
+
+  /// `.unavailable` は「見に行かなかった」であって「pane が変わった」ではない。基準を捨てると、
+  /// その周期の `.screenUnavailable` に加えて**次の周期も** `secondsSinceScreenChange == nil` に
+  /// なり、1回の取りこぼしが Unknown 2周期へ増幅する。
+  @Test("画面を1周期取りこぼしても変化追跡の基準を捨てない")
+  func unavailableKeepsScreenBaseline() async throws {
+    let panes = (1...2).map { makePaneSnapshot(id: "%\($0)", pid: Int32($0)) }
+    let spy = ObservationProcessSpy(
+      screens: Dictionary(uniqueKeysWithValues: panes.map { ($0.id, ["s\n"]) }))
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    for pane in panes {
+      _ = try await source.signals(for: pane, minimumChangedLines: 1)
+      clock.advance(by: .seconds(2))
+    }
+
+    // %2 だけ出力上限を超えさせて取りこぼす (pane は生きたまま)。
+    await spy.setOversized([panes[1].id])
+    let missed = try await source.signals(for: panes[1], minimumChangedLines: 1)
+    await spy.setOversized([])
+    clock.advance(by: .seconds(2))
+    let recovered = try await source.signals(for: panes[1], minimumChangedLines: 1)
+
+    #expect(missed.screenText == nil)
+    #expect(missed.secondsSinceScreenChange == nil)
+    // 基準が残っていれば、取り直した同じ画面は「変化なし」= 経過時間つきで返る。
+    #expect(recovered.screenText == "s\n")
+    #expect(recovered.secondsSinceScreenChange != nil)
   }
 
   @Test("pane_pid 自身が一致すれば子がいなくても alive")

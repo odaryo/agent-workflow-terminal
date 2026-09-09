@@ -40,26 +40,46 @@ actor ObservationProcessSpy: ProcessRunning {
 
   /// pane ごとの画面列。バッチ n 回目は `min(n, count - 1)` 番目を返す。
   private var screens: [PaneID: [String]]
+  /// pane ごとの title 列。画面と同じ規則で進む。
+  private var titles: [PaneID: [String]]
+  /// `capture-pane` の時点で消えている pane。列はここで exit 1 で止まる。
   private var missing: Set<PaneID>
+  /// capture は成功したが marker の時点で消えている pane。tmux 3.4 の `display-message` は
+  /// 存在しない pane でも exit 0 で空の `#{pane_id}` を返し、**列は止まらない** (実測)。
+  private var vanishingAfterCapture: Set<PaneID>
+  /// このいずれかを含むグループは `outputLimitExceeded` にする。
+  private var oversized: Set<PaneID>
   private let listPanesOutput: String
   private let processTableOutput: String
   private var listPanesFailure: ProcessRunResult?
 
   init(
     screens: [PaneID: [String]] = [:],
+    titles: [PaneID: [String]] = [:],
     missing: Set<PaneID> = [],
+    vanishingAfterCapture: Set<PaneID> = [],
+    oversized: Set<PaneID> = [],
     listPanesOutput: String = "",
     processTableOutput: String = "",
     listPanesFailure: ProcessRunResult? = nil
   ) {
     self.screens = screens
+    self.titles = titles
     self.missing = missing
+    self.vanishingAfterCapture = vanishingAfterCapture
+    self.oversized = oversized
     self.listPanesOutput = listPanesOutput
     self.processTableOutput = processTableOutput
     self.listPanesFailure = listPanesFailure
   }
 
   func setMissing(_ panes: Set<PaneID>) { missing = panes }
+
+  func setVanishingAfterCapture(_ panes: Set<PaneID>) { vanishingAfterCapture = panes }
+
+  func setOversized(_ panes: Set<PaneID>) { oversized = panes }
+
+  func setTitles(_ value: [PaneID: [String]]) { titles = value }
 
   func count(of kind: Kind) -> Int { kinds.filter { $0 == kind }.count }
 
@@ -78,6 +98,9 @@ actor ObservationProcessSpy: ProcessRunning {
       let request = Self.parseBatch(arguments)
       kinds.append(.captureBatch(paneCount: request.panes.count))
       defer { batchCount += 1 }
+      guard oversized.isDisjoint(with: request.panes) else {
+        throw .outputLimitExceeded(limit: outputLimit)
+      }
       return respond(to: request)
     }
     if arguments.contains("list-panes") {
@@ -89,7 +112,7 @@ actor ObservationProcessSpy: ProcessRunning {
     return ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
   }
 
-  private func respond(to request: (panes: [PaneID], nonce: String)) -> ProcessRunResult {
+  private func respond(to request: BatchRequest) -> ProcessRunResult {
     var stdout = ""
     for pane in request.panes {
       guard !missing.contains(pane) else {
@@ -98,14 +121,45 @@ actor ObservationProcessSpy: ProcessRunning {
       }
       let sequence = screens[pane] ?? ["\n"]
       stdout += sequence[min(batchCount, sequence.count - 1)]
-      stdout += "\(request.nonce) \(pane.rawValue)\n"
+      // 消えた pane では `#{pane_id}` も `#{pane_title}` も空になる (tmux 3.4 実測)。
+      let vanished = vanishingAfterCapture.contains(pane)
+      let titleSequence = titles[pane] ?? [""]
+      stdout += "\(request.nonce) "
+      stdout += Self.render(
+        format: request.format,
+        paneID: vanished ? "" : pane.rawValue,
+        title: vanished ? "" : titleSequence[min(batchCount, titleSequence.count - 1)])
+      stdout += "\n"
     }
     return ProcessRunResult(exitCode: 0, stdout: stdout, stderr: "")
   }
 
-  static func parseBatch(_ arguments: [String]) -> (panes: [PaneID], nonce: String) {
+  /// tmux 3.4 の format 展開のうち、marker が使う分だけを再現する。区切りの Unit Separator は
+  /// 非 control-mode 出力で `\037` になり、`s/\\/\\\\/` は値の backslash を二重化し、
+  /// 出力段は `$` の前に `\` を足す (いずれも実測)。
+  static func render(format: String, paneID: String, title: String) -> String {
+    let escapedTitle =
+      title
+      .replacingOccurrences(of: #"\"#, with: #"\\"#)
+      .replacingOccurrences(of: "$", with: #"\$"#)
+    return
+      format
+      .replacingOccurrences(of: "#{pane_id}", with: paneID)
+      .replacingOccurrences(of: #"#{s/\\/\\\\/:pane_title}"#, with: escapedTitle)
+      .replacingOccurrences(of: "\u{1F}", with: #"\037"#)
+  }
+
+  struct BatchRequest {
+    let panes: [PaneID]
+    let nonce: String
+    /// marker template から nonce と空白を除いた残り。実装が何を要求したかをそのまま映す。
+    let format: String
+  }
+
+  static func parseBatch(_ arguments: [String]) -> BatchRequest {
     var panes: [PaneID] = []
     var nonce = ""
+    var format = ""
     var index = 0
     while index < arguments.count {
       if arguments[index] == "capture-pane", index + 4 < arguments.count {
@@ -114,13 +168,16 @@ actor ObservationProcessSpy: ProcessRunning {
         continue
       }
       if arguments[index] == "display-message", index + 4 < arguments.count {
-        nonce = String(arguments[index + 4].split(separator: " ")[0])
+        let template = arguments[index + 4]
+        let parts = template.split(separator: " ", maxSplits: 1)
+        nonce = String(parts[0])
+        format = parts.count > 1 ? String(parts[1]) : ""
         index += 5
         continue
       }
       index += 1
     }
-    return (panes, nonce)
+    return BatchRequest(panes: panes, nonce: nonce, format: format)
   }
 }
 

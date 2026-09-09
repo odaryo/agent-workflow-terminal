@@ -33,9 +33,13 @@ private actor GateProcessRunner: ProcessRunning {
 }
 
 /// `async let` で始めた呼び出しが actor へ届くまでの猶予。届かないまま release すると
-/// 起動が2回になってテストが落ちるので、通らない方向へ倒れる。
-private func yieldRepeatedly() async {
-  for _ in 0..<500 { await Task.yield() }
+/// 起動が2回になってテストが落ちるので、見逃す方向へは倒れない。
+///
+/// `Task.yield()` の空回しで待たないのは、協調スレッドを占有して同じプロセスで並行に走る
+/// 他 suite の待ち合わせを飢えさせるため (実測: それで `WorktreePaneAgentStateFeedTests` が
+/// 10 回に 1 回落ちた)。`Task.sleep` はスレッドを手放す。
+private func waitForArrival() async throws {
+  try await Task.sleep(for: .milliseconds(50))
 }
 
 @Suite("観測スナップショットの共有")
@@ -50,10 +54,10 @@ struct ObservationSnapshotSharingTests {
       timeToLive: .zero, timeSource: ManualTimeSource())
 
     async let first = cache.snapshot()
-    await yieldRepeatedly()
+    try await waitForArrival()
     #expect(await runner.launches == 1)
     async let second = cache.snapshot()
-    await yieldRepeatedly()
+    try await waitForArrival()
     await runner.release()
     let names = await [first?.processTreeNames(of: 70), second?.processTreeNames(of: 70)]
 
@@ -100,10 +104,10 @@ struct ObservationSnapshotSharingTests {
       timeToLive: .zero, timeSource: ManualTimeSource())
 
     async let first: [TmuxPane] = cache.panes()
-    await yieldRepeatedly()
+    try await waitForArrival()
     #expect(await runner.launches == 1)
     async let second: [TmuxPane] = cache.panes()
-    await yieldRepeatedly()
+    try await waitForArrival()
     await runner.release()
     _ = try await [first, second]
 

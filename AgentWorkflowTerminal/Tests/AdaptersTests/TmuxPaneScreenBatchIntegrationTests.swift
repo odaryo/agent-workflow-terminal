@@ -74,6 +74,63 @@ struct TmuxPaneScreenBatchIntegrationTests {
     }
   }
 
+  /// バッチの失敗検出が exit code ではなくマーカーの中身に依存している理由そのもの。
+  /// この事実を忘れて exit code へ戻すと、capture と marker の間で消えた pane が
+  /// `.paneNotFound` にならず、そのグループの後続 pane がまとめて取れなくなる (F4)。
+  @Test("display-message は消えた pane でも exit 0 で空の pane_id を返す")
+  func displayMessageDoesNotFailForMissingPane() async throws {
+    try await IsolatedTmuxServer.withServer(
+      socketName: uniqueSocketName("screen-batch-marker")
+    ) { runner in
+      let marker = TmuxPaneScreenBatch.markerTemplate(nonce: "AWTPROBE")
+      let panes = try await IsolatedTmuxServer.paneIDs(runner)
+
+      let missing = try await runner.run(
+        arguments: ["display-message", "-t", "%9999", "-p", marker])
+      let live = try await runner.run(
+        arguments: ["display-message", "-t", panes[0].rawValue, "-p", marker])
+
+      // exit 0 で返るので、exit code では live と区別できない。
+      #expect(missing.exitCode == 0)
+      #expect(missing.stderr.isEmpty)
+      #expect(missing.stdout.hasPrefix("AWTPROBE "))
+      // 区別できるのはマーカーの中身だけ。消えた pane では pane ID が空になる。
+      #expect(
+        TmuxPaneScreenBatch.parse(
+          stdout: missing.stdout, nonce: "AWTPROBE", expected: [PaneID(rawValue: "%9999")]
+        ).isEmpty)
+      #expect(
+        TmuxPaneScreenBatch.parse(
+          stdout: live.stdout, nonce: "AWTPROBE", expected: [panes[0]]
+        ).count == 1)
+    }
+  }
+
+  /// title は画面と同じマーカーから来るので、鮮度は画面と一致する (F1)。
+  @Test("バッチのマーカーから実 tmux の pane title を取り出す")
+  func readsLivePaneTitleFromMarker() async throws {
+    try await IsolatedTmuxServer.withServer(
+      socketName: uniqueSocketName("screen-batch-title")
+    ) { runner in
+      let panes = try await IsolatedTmuxServer.paneIDs(runner)
+      // tmux は実物のまま、TTL の満了だけを手で進める。
+      let clock = ManualTimeSource()
+      let batcher = TmuxPaneScreenBatcher(
+        runner: runner, timeToLive: timeToLive, timeSource: clock)
+
+      _ = try await runner.run(
+        arguments: ["select-pane", "-t", panes[0].rawValue, "-T", #"first\title $x"#])
+      let first = try await batcher.screen(of: panes[0])
+      _ = try await runner.run(
+        arguments: ["select-pane", "-t", panes[0].rawValue, "-T", "second title"])
+      clock.advance(by: timeToLive)
+      let second = try await batcher.screen(of: panes[0])
+
+      #expect(first.snapshot.titles[panes[0]] == #"first\title $x"#)
+      #expect(second.snapshot.titles[panes[0]] == "second title")
+    }
+  }
+
   private func isCaptured(_ screen: TmuxPaneScreen) -> Bool {
     guard case .captured = screen else { return false }
     return true

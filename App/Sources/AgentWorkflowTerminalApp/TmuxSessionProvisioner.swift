@@ -10,9 +10,9 @@ import TerminalCore
 /// 3つとも本番に効いていなかった)。
 ///
 /// - Important: server を起こす経路 (`startBootstrapSession`) だけは `TmuxRunner` を通さず argv を
-///   自分で組むため、**`runner` の接続先が既定 server (`TmuxServer.userDefault`) であることを
-///   前提にしている。** `-L` を持つ runner を渡すと、起こす server と `create` が見る server が
-///   食い違う。`AppDependencies` は常に `.userDefault` で作る。
+///   自分で組む (限定環境を server へ焼き付けないため)。接続先が `create` と食い違わないよう、
+///   global option は `runner.serverArguments` をそのまま前置する — ここを自前で組むと
+///   `-L` を持つ runner で起こす server と `create` が見る server が割れる。
 struct TmuxSessionProvisioner: Sendable {
   /// server を起こすためだけに作って必ず消す session の名前。
   ///
@@ -110,7 +110,8 @@ struct TmuxSessionProvisioner: Sendable {
     environment["TMUX_PANE"] = nil
     _ = try? await FoundationProcessRunner().run(
       executableURL: tmuxExecutable,
-      arguments: ["-u", "new-session", "-d", "-s", Self.bootstrapSessionName, "-c", "/"],
+      arguments: runner.serverArguments
+        + ["new-session", "-d", "-s", Self.bootstrapSessionName, "-c", "/"],
       environment: environment,
       timeout: TmuxRunner.defaultTimeout
     )

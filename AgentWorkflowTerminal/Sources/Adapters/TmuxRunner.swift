@@ -76,7 +76,10 @@ public struct TmuxRunner: Sendable {
   private static let inheritedEnvironmentKeys = ["HOME", "PATH", "TMUX_TMPDIR"]
 
   /// サブコマンドより前に置く global option。`-L` を持たない `userDefault` では `-u` だけになる。
-  private let serverArguments: [String]
+  ///
+  /// この runner を経ずに tmux を撃つ経路 (server を起こす場合など) が、同じ server を
+  /// 指していることをコメントの約束ではなく値で保証できるように公開している。
+  public let serverArguments: [String]
   private let processRunner: any ProcessRunning
   private let executableURL: URL
   private let environment: [String: String]

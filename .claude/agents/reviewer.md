@@ -13,7 +13,7 @@ tools: Bash, Read, Grep, Glob, WebFetch, WebSearch
 
 ## 検証の手段は対象の種類で決まる
 
-- **外部 CLI の挙動** (tmux・git など) — 隔離したリソース上での**計測**で検証する。例: tmux なら専用ソケット `tmux -L <一時名>` を使い、終了後に `tmux -L <一時名> kill-server` でクリーンアップする。
+- **外部 CLI の挙動** (tmux・git など) — 隔離したリソース上での**計測**で検証する。tmux は専用ソケット `env -u TMUX tmux -L <一意な名前>` を使い、後始末は**自分が作った名前を指定して** `env -u TMUX tmux -L <一意な名前> kill-session -t '=<作った名前>'` で消す。**`TMUX_TMPDIR` を隔離手段にしない。`kill-server` を書かない** — 理由と実測は `CLAUDE.md`「外部 CLI を計測するときの作法」を読むこと (2026-09-09 にユーザーの既定 server を全 session ごと消した事故がある)。
 - **外部の仕様** (Claude Code の設定・API 仕様など、実行して確かめられないもの) — **公式ドキュメントを WebFetch** して検証する。記憶や推測を根拠にしない。
 
 ## 担当範囲外

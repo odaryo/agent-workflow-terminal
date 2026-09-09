@@ -158,6 +158,20 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 - **外界の版数差は、想定より広いことがある。** #286 は「区切りが escape されない」として起票されたが、
   実測では tmux 3.7c が `\ooo` / named escape / `\$` の**いずれも生成しなかった** — 区切りだけの話では
   なかった。Issue 本文の記述を実測が上書きしたら、**Issue 側を訂正してから**進めること。
+- **tmux の計測は `-L <一意な名前>` で隔離する。`TMUX_TMPDIR` を隔離手段にしない。** 2026-09-09 に
+  ユーザーの既定 server が全 session ごと消えた。原因は #235 の対照実験の後始末
+  `TMUX_TMPDIR="$TMUX_TMPDIR2" tmux -u kill-server` で、**`$TMUX` が `TMUX_TMPDIR` より優先して
+  socket を決める**ため、tmux pane の中で動くレーンのこの行は隔離 server ではなく既定 server へ
+  飛んだ (同じコマンド列でも server を起こす行だけは `env -i` が付いており、そちらは隔離できていた)。
+  隔離側の server は生き残り、既定 server が死んだことが証拠である。`TMUX_TMPDIR` にはもう1つ罠が
+  あり、**socket パスが長すぎると tmux は黙って既定 socket へフォールバックする** (実測: 200文字の
+  `TMUX_TMPDIR` で `list-sessions` がユーザーの session を返した)。scratchpad 配下のパスは容易に
+  この長さを超える。エラーにならないので、隔離したつもりの破壊操作が既定 server に着地する。
+- **後始末は名前指定で消す。`kill-server` を既定 socket に届きうる文脈で書かない。** 消すのは
+  `tmux -L <一時名> kill-session -t '=<作った名前>'` — `=` の完全一致で、自分が作ったものだけを撃つ。
+  `kill-server` を使うのは、`-L` で隔離した socket に対してテストの後始末 (`IsolatedTmuxServer`) が
+  撃つ場合に限る。`env -u TMUX` は行ごとに付ける — コマンド列の途中の1行だけ素の env に戻る書き方が
+  今回の事故そのものである。
 - **観測の範囲を超えた一般化を書かない。** 上の1文は当初「3.7c は escape を一切行わない」と書いていたが、
   試した入力について「生成しなかった」ことしか測っていない。この差は次に読む人が「では escape は
   考えなくてよい」と判断できるかどうかを分ける。#286 では逆向きの実例も出た — spec が「保存段の escape は

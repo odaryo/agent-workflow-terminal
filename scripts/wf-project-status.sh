@@ -58,7 +58,9 @@ project_line=$(gh project list --owner "$owner" --format json \
 [[ -n "$project_line" ]] || die "Project '$project_title' が owner '$owner' に見つかりません"
 IFS=$'\t' read -r project_number project_id <<<"$project_line"
 
-item_id=$(gh project item-list "$project_number" --owner "$owner" --format json --limit 200 \
+# limit は Project の全 item 数を超えていなければならない。超えていないと、溢れた分の Issue が
+# 「Project 内に見つかりません」として区別なく落ちる (実測: item 200 件で #314 が 200 に掛かった)。
+item_id=$(gh project item-list "$project_number" --owner "$owner" --format json --limit 2000 \
   --jq ".items[] | select(.content.number == $issue_number) | .id")
 [[ -n "$item_id" ]] || die "Issue #$issue_number が Project '$project_title' 内に見つかりません"
 

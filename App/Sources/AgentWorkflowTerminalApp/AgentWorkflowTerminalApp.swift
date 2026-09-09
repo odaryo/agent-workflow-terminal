@@ -309,6 +309,15 @@ private struct TerminalTabContent: View {
   let sessions: TmuxSessionProvisioner?
   let focusRequest: TerminalFocusRequest?
   @State private var preparation = TerminalSessionPreparation.preparing
+  /// attach の試行番号。**世代の識別子**であり、失敗の再試行回数ではない。
+  /// `.task(id:)` を再走させる鍵と、下の `exitedAttempt` の突き合わせに使う。
+  @State private var attempt = 0
+  /// `.exited` を観測した世代。`attempt` と一致するときだけ覆う。
+  ///
+  /// 真偽値にしないのは、通知が非同期で届くためである (`GhosttyTerminalView` の
+  /// `stateChanged`)。古い surface からの通知はその世代の番号を持って届くので、
+  /// 再 attach 後の新しい端末を覆ってしまうことがない。
+  @State private var exitedAttempt: Int?
 
   var body: some View {
     Group {
@@ -319,11 +328,7 @@ private struct TerminalTabContent: View {
         case .preparing:
           ProgressView("tmux session を用意しています")
         case .ready(let command):
-          GhosttyTerminalView(
-            command: command,
-            workingDirectory: worktree.worktreePath,
-            focusRequest: focusRequest
-          )
+          terminal(command: command, generation: attempt)
         case .failed(let reason):
           ContentUnavailableView(
             "tmux session を用意できません", systemImage: "exclamationmark.triangle",
@@ -331,9 +336,9 @@ private struct TerminalTabContent: View {
         }
       }
     }
-    // タブごとに1回だけ走らせる。用意し直すと、その worktree の端末が動いている最中に
-    // surface を作り替えることになる。
-    .task(id: worktree.identity) {
+    // 1つの世代につき1回だけ走らせる。用意し直すと、その worktree の端末が動いている最中に
+    // surface を作り替えることになる。世代が上がるのは、下の再 attach を押したときだけ。
+    .task(id: TerminalSessionAttempt(identity: worktree.identity, attempt: attempt)) {
       guard let sessions, case .preparing = preparation else { return }
       preparation =
         switch await sessions.attachCommand(
@@ -344,6 +349,67 @@ private struct TerminalTabContent: View {
         }
     }
   }
+
+  // Why 引数で受ける: `attempt` を**値として**渡すため。closure の中で `attempt` を読むと、
+  // `@State` は保存領域から現在値を返すので、通知が届いた時点の値になり、世代の
+  // 突き合わせにならない。
+  private func terminal(command: [String], generation: Int) -> some View {
+    let hasExited = exitedAttempt == generation
+    return ZStack {
+      GhosttyTerminalView(
+        command: command,
+        workingDirectory: worktree.worktreePath,
+        // プロセスが終わった端末にキーボードを渡さない。覆っている間は表示されていないのと
+        // 同じ扱いにする (`nil` の意味は `GhosttyTerminalView` の doc)。
+        focusRequest: hasExited ? nil : focusRequest,
+        stateChanged: { state in
+          guard state == .exited else { return }
+          exitedAttempt = generation
+        }
+      )
+      // 世代ごとに別の NSView にする。`GhosttySurfaceView` は `start()` の時点の argv を
+      // 保持するので、使い回されると再 attach の新しい argv が効かない。
+      .id(generation)
+      if hasExited { detachedOverlay }
+    }
+  }
+
+  /// surface を**完全に覆う**。libghostty が `wait-after-command` で出す
+  /// "Press any key to close the terminal." は、こちらからは消せず、押しても閉じない
+  /// (閉じるかどうかは上位の判断で、`GhosttySurfaceView.handleCloseRequest` は意図的に
+  /// 何もしない)。文言と挙動を一致させる手段は、その文言を操作対象から外すことだけである。
+  private var detachedOverlay: some View {
+    VStack(spacing: 10) {
+      Image(systemName: "bolt.horizontal.circle").font(.largeTitle)
+      Text("tmux session から切り離されました").font(.headline)
+      Text(
+        """
+        端末のプロセスは終了しましたが、session の中身は残っています。\
+        再 attach すると、同じ session に入り直します。
+        """
+      )
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      Button("再 attach") {
+        // 世代を上げて `.task` を再走させる。`restart()` (同じ argv の再実行) では復帰しない
+        // 場合がある — attach の argv は `-A` を持たないので、session が消えていると
+        // `can't find session` で終わる (隔離ソケットで実測、Issue #234)。provisioner を
+        // 通せば、残っていれば Resume、消えていれば §4.2 / §4.4 の保証付きで作り直しになる。
+        attempt += 1
+        preparation = .preparing
+      }
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // 不透明にする。半透明だと下の英文が透けて読め、押せない案内が押せるように見える。
+    .background(Color(nsColor: .windowBackgroundColor))
+  }
+}
+
+/// `.task(id:)` の鍵。worktree が同じでも世代が変われば用意をやり直す。
+private struct TerminalSessionAttempt: Equatable {
+  let identity: WorktreeIdentity
+  let attempt: Int
 }
 
 private enum TerminalSessionPreparation {

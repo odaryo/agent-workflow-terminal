@@ -11,17 +11,24 @@ import TerminalCore
 public struct GhosttyTerminalView: NSViewRepresentable {
   private let configuration: TerminalRendererConfiguration
   private let focusRequest: TerminalFocusRequest?
+  private let stateChanged: ((TerminalRendererState) -> Void)?
 
   /// `focusRequest` はキーボードフォーカスを取り直す要求。`nil` は「この端末は今画面に
   /// 出ていない」を意味し、first responder を取りに行かない。SwiftUI の `opacity` /
   /// `allowsHitTesting` は AppKit の first responder を動かさないので、切り替える側が
   /// 明示的に渡す必要がある (Issue #233)。取ってよいかどうかは表示の有無とは別の値
   /// (`isTerminalAllowed`) が持つ (Issue #278)。
+  ///
+  /// `stateChanged` は surface の状態が変わったときに呼ばれる。**呼び出しは常に非同期**で、
+  /// この view の更新が終わった後の main queue で届く (`GhosttySurfaceView.notifyStateChange`
+  /// にその理由がある)。`.exited` は端末内のプロセスだけが終わった状態であり、surface は
+  /// 生きている (`TerminalRendererState` 参照) ので、受け側は覆う判断だけをする。
   public init(
     command: [String],
     workingDirectory: String? = nil,
     configurationFileURL: URL? = nil,
-    focusRequest: TerminalFocusRequest? = nil
+    focusRequest: TerminalFocusRequest? = nil,
+    stateChanged: ((TerminalRendererState) -> Void)? = nil
   ) {
     configuration = TerminalRendererConfiguration(
       command: command,
@@ -29,6 +36,7 @@ public struct GhosttyTerminalView: NSViewRepresentable {
       configurationFileURL: configurationFileURL
     )
     self.focusRequest = focusRequest
+    self.stateChanged = stateChanged
   }
 
   public func makeNSView(context: Context) -> GhosttySurfaceView {
@@ -36,6 +44,7 @@ public struct GhosttyTerminalView: NSViewRepresentable {
     // Why start より前: surface は window へ装着された時点で作られ、その中で first responder を
     // 取るかどうかをこの値で決める。最初の updateNSView はそれより後に来る。
     view.applyFocusRequest(focusRequest)
+    view.stateChanged = stateChanged
     do {
       try view.start(configuration: configuration)
     } catch {
@@ -46,6 +55,9 @@ public struct GhosttyTerminalView: NSViewRepresentable {
 
   public func updateNSView(_ nsView: GhosttySurfaceView, context: Context) {
     nsView.applyFocusRequest(focusRequest)
+    // Why 毎回入れ替える: 受け側の closure は body のたびに作られ、その時点の状態を捕まえている。
+    // 最初のものを持ち続けると、通知が古い世代の値へ届く。
+    nsView.stateChanged = stateChanged
   }
 
   public static func dismantleNSView(_ nsView: GhosttySurfaceView, coordinator: ()) {
@@ -480,6 +492,10 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   private var contentScale = 1.0
   private var lifecycle = TerminalSurfaceLifecycle()
   private var retryWorkItem: DispatchWorkItem?
+  /// 状態が変わったときの通知先。SwiftUI 側の生成のたびに入れ替わる。
+  var stateChanged: ((TerminalRendererState) -> Void)?
+  /// 最後に通知した状態。`lifecycle` の初期値と揃えておく。
+  private var notifiedState = TerminalRendererState.notStarted
 
   init() {
     super.init(frame: .zero)
@@ -506,11 +522,11 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
       configurationFileURL: configuration.configurationFileURL
     )
     GhosttySurfaceRegistry.shared.register(self)
-    perform(lifecycle.handle(.start))
+    send(.start)
   }
 
   public func restart() {
-    perform(lifecycle.handle(.restartRequested))
+    send(.restartRequested)
   }
 
   public func resize(to size: TerminalPixelSize) {
@@ -528,7 +544,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   public func shutdown() {
-    perform(lifecycle.handle(.shutdown))
+    send(.shutdown)
     GhosttySurfaceRegistry.shared.unregister(self)
   }
 
@@ -538,14 +554,14 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   func environmentMayHaveChanged() {
-    perform(lifecycle.handle(.environmentMayHaveChanged))
+    send(.environmentMayHaveChanged)
   }
 
   func pollProcessExit() {
     guard lifecycle.state == .running, let surface,
       ghostty_surface_process_exited(surface)
     else { return }
-    perform(lifecycle.handle(.processExited))
+    send(.processExited)
   }
 
   func handleCloseRequest() {
@@ -609,6 +625,35 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     return accepted
   }
 
+  /// 状態機械への入口はここ1つだけにする。個々の呼び出し側で通知を足して回ると、後から
+  /// 増えた経路で通知が抜ける。
+  ///
+  /// - Note: 通知の判定を `perform` の**後**に置くのは、`createSurface` がこの関数を再入して
+  ///   `.creationSucceeded` を送るためである。再入側が先に最新の状態を通知して
+  ///   `notifiedState` を進めるので、戻ってきた外側は差が無くなり、古い状態で上書きしない。
+  private func send(_ event: TerminalSurfaceLifecycleEvent) {
+    perform(lifecycle.handle(event))
+    notifyStateChange()
+  }
+
+  private func notifyStateChange() {
+    guard lifecycle.state != notifiedState else { return }
+    notifiedState = lifecycle.state
+    let state = lifecycle.state
+    // Why 非同期: この経路は SwiftUI の view 更新の最中にも走る (`makeNSView` → `start()`)。
+    // 同期に呼ぶと受け側の `@State` を view 更新中に書き換えることになり、SwiftUI は未定義
+    // 動作として扱う。main queue は順序を保つので、状態の順序はこの hop で入れ替わらない。
+    // Why not `.exited` だけ通知する: 経路を状態で絞ると、絞った先の状態が要る日に同じ
+    // 未定義動作を再び踏む。危険なのは同期呼び出しであって、通知する状態の種類ではない。
+    DispatchQueue.main.async { [weak self] in
+      // Why assumeIsolated: DispatchQueue の closure は MainActor 隔離とみなされない。
+      MainActor.assumeIsolated {
+        // 届いた時点の最新の closure を読む。世代が入れ替わっていれば新しい方へ届く。
+        self?.stateChanged?(state)
+      }
+    }
+  }
+
   // Why 再入しても安全: createSurface は成否を同期に状態機械へ戻すため perform を再入するが、
   // 効果の列は必ず createSurface で終わるので、新しい効果が未適用の効果を追い越さない。
   private func perform(_ effects: [TerminalSurfaceLifecycleEffect]) {
@@ -642,7 +687,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
       MainActor.assumeIsolated {
         guard let self else { return }
         self.retryWorkItem = nil
-        self.perform(self.lifecycle.handle(.retryDeadlineReached(token: token)))
+        self.send(.retryDeadlineReached(token: token))
       }
     }
     retryWorkItem = workItem
@@ -669,7 +714,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     guard surface == nil else {
       assertionFailure("surface が生きているうちに createSurface が呼ばれた")
       NSLog("[app] surface が生きているうちに createSurface が呼ばれました")
-      perform(lifecycle.handle(.creationSucceeded))
+      send(.creationSucceeded)
       return
     }
     // Why not creationFailed を送る: window が無いのは生成の失敗ではない。ここで失敗として
@@ -702,7 +747,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
 
     guard surface != nil else {
       NSLog("[app] ghostty_surface_new が失敗しました。画面復帰後に再試行できます")
-      perform(lifecycle.handle(.creationFailed))
+      send(.creationFailed)
       return
     }
 
@@ -716,7 +761,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     if wantsKeyboardFocus { window?.makeFirstResponder(self) }
     ghostty_surface_set_focus(
       surface, window?.isKeyWindow == true && window?.firstResponder === self)
-    perform(lifecycle.handle(.creationSucceeded))
+    send(.creationSucceeded)
   }
 
   private func updateContentScaleFromWindow() {

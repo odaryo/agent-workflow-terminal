@@ -32,6 +32,12 @@ private struct ProjectView: View {
         WarningBar(text: warning) { model.dismissWarning() }
         Divider()
       }
+      // 観測失敗を上と同じスロットへ載せない (`AppModel.scanFailureWarning`)。2本同時に出ても
+      // 端末が潰れないのは、`WarningBar` がどちらも1行に丸めているためである。
+      if let scanFailureWarning = model.scanFailureWarning {
+        WarningBar(text: scanFailureWarning) { model.dismissScanFailureWarning() }
+        Divider()
+      }
       if model.projectRoot != nil || !model.worktrees.isEmpty {
         HStack(spacing: 0) {
           ScrollView(.horizontal) {
@@ -273,12 +279,20 @@ private struct WorktreeTab: View {
   private var stateLabel: String {
     // 到達不能な worktree では pane を観測していない。`Idle` と出すと観測できていない状態を
     // 観測した状態に丸めることになる (設計書 §12.3 の `Unknown` と同じ理由)。
-    guard worktree.detected.isReachable else { return "到達不能" }
+    // 「観測失敗」を「到達不能」と出さないのは、到達できないと確かめられていないものを
+    // 断定して見せないためである (Issue #243)。
+    switch worktree.detected.observation {
+    case .unreachable: return "到達不能"
+    case .observationFailed: return "観測失敗"
+    case .reachable: break
+    }
     guard let representativeState else { return "Idle" }
     return representativeState.state.displayLabel
   }
 
   private var stateColor: Color {
+    // 観測できていないことを `Unknown` と同じ色で示す (設計書 §12.3)。
+    if worktree.detected.observation == .observationFailed { return .orange }
     guard let representativeState else { return .secondary }
     return switch representativeState.category {
     case .needsAttention: .red

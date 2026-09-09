@@ -1,3 +1,16 @@
+/// 作業ツリーの観測結果 (設計書 §3.2)。
+///
+/// - Important: `unreachable` と `observationFailed` を1つの `false` に潰さない。前者は
+///   「作業ツリーへ到達できないと**確かめられた**」観測結果で、admin ディレクトリ側から安定 ID を
+///   引けている。後者は観測そのものが失敗した状態で、到達可能性も安定 ID も分かっていない
+///   (git の timeout や EACCES がここへ入る)。潰すと「観測できなかった」と「消えた」の区別が
+///   上位で失われ、§3.2 が禁じる自動 Active 化の事故に戻る。
+public enum WorktreeObservation: Sendable, Hashable {
+  case reachable
+  case unreachable
+  case observationFailed
+}
+
 /// git から観測したままの worktree。Active/Inactive は git の状態ではなく Terminal が持つ
 /// UI／運用状態 (設計書 §3.2) なので、この型には含めない。
 public struct DetectedWorktree: Sendable, Hashable {
@@ -12,13 +25,17 @@ public struct DetectedWorktree: Sendable, Hashable {
   /// main worktree であること。Project Root は Task worktree と別枠であり (§2.3)、
   /// Active/Inactive の対象にしない。
   public let isProjectRoot: Bool
-  /// `false` の間も安定 ID と Active/Inactive は保持する (設計書 §3.2)。
+  /// `reachable` でない間も安定 ID と Active/Inactive は保持する (設計書 §3.2)。
   ///
-  /// - Important: `false` は「作業ツリーが実在しない」ことの証明ではない。観測側の判定は
+  /// - Important: `unreachable` は「作業ツリーが実在しない」ことの証明ではない。観測側の判定は
   ///   作業ツリーのパスの metadata 読み取りに依存しており、macOS 26.5 実測では MAC ポリシーが
   ///   metadata の読み取りだけを拒否すると、`access(X_OK)` と `chdir` は成功する実在の worktree
   ///   でも `fileExists` が `false` になり、git も exit 128 になる。
-  public let isReachable: Bool
+  public let observation: WorktreeObservation
+
+  /// `observationFailed` を利用できる側へ倒さない。観測できていない worktree の Active 化と
+  /// tmux attach は、`unreachable` と同じ理由 (attach 先を確かめられていない) で認めない。
+  public var isReachable: Bool { observation == .reachable }
 
   public init(
     identity: WorktreeIdentity,
@@ -27,11 +44,37 @@ public struct DetectedWorktree: Sendable, Hashable {
     isProjectRoot: Bool,
     isReachable: Bool = true
   ) {
+    self.init(
+      identity: identity,
+      worktreePath: worktreePath,
+      branch: branch,
+      isProjectRoot: isProjectRoot,
+      observation: isReachable ? .reachable : .unreachable
+    )
+  }
+
+  public init(
+    identity: WorktreeIdentity,
+    worktreePath: String,
+    branch: String?,
+    isProjectRoot: Bool,
+    observation: WorktreeObservation
+  ) {
     self.identity = identity
     self.worktreePath = worktreePath
     self.branch = branch
     self.isProjectRoot = isProjectRoot
-    self.isReachable = isReachable
+    self.observation = observation
+  }
+
+  func observing(_ observation: WorktreeObservation) -> Self {
+    Self(
+      identity: identity,
+      worktreePath: worktreePath,
+      branch: branch,
+      isProjectRoot: isProjectRoot,
+      observation: observation
+    )
   }
 }
 
@@ -82,16 +125,22 @@ public struct WorktreeScanResult: Sendable, Hashable {
   /// 観測中に新しく現れ、自動的に Active 化した worktree (§3.2)。初回スキャンでは常に空。
   public let appeared: [WorktreeIdentity]
   /// 前回状態にあって今回検出されなかった worktree。Project Root も対象に含む。
+  /// 観測に失敗しただけの worktree は含めない (`unobserved`)。
   public let disappeared: [WorktreeIdentity]
+  /// 今回の観測に失敗し、前回の値のまま保持した worktree。Project Root も対象に含む。
+  /// 消失ではないので `disappeared` と排他であり、UI へ「観測できていない」と出すための一覧でもある。
+  public let unobserved: [WorktreeIdentity]
 
   public init(
     inventory: WorktreeInventory,
     appeared: [WorktreeIdentity],
-    disappeared: [WorktreeIdentity]
+    disappeared: [WorktreeIdentity],
+    unobserved: [WorktreeIdentity] = []
   ) {
     self.inventory = inventory
     self.appeared = appeared
     self.disappeared = disappeared
+    self.unobserved = unobserved
   }
 }
 
@@ -103,6 +152,17 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   ユーザーが意図して Inactive にしていた worktree が `.active` + `appeared` として復帰する**。
 ///   これは §3.2 の「自動 Active 化の対象は観測中に新しく現れた worktree に限る」に反する。
 ///   スキャンが失敗したときは、空の一覧を渡すのではなく、この関数を呼ばずに前回状態を保つ。
+/// - Important: entry 単位で観測に失敗した作業ツリーのパスは `unobserved` へ渡す。これが
+///   「渡されなかった安定 ID は存在しない」という権威的な解釈の唯一の例外で、渡さないと
+///   1回の観測失敗がそのまま消失になり、上の事故がそのまま起きる (Issue #243)。安定 ID ではなく
+///   作業ツリーのパスで渡すのは、観測に失敗した entry からは安定 ID を引けていないためである。
+///   `detected` にも載っているパスは検出できているので `unobserved` 側を無視する。
+///   `previous` のどれとも一致しないパスは保持しようが無いので何もしない (UI への通知は
+///   呼び出し側の責務)。
+/// - Note: 観測失敗として保持した worktree は、検出できた worktree の後ろへ回す。順序の権威は
+///   git の一覧出力であり、そこに載らなかった entry の位置を推定する根拠が無いためで、
+///   `restoreWorktreeInventory` が保存側の残りを末尾へ置くのと同じ規則である。観測が復帰すれば
+///   git の順序へ戻る。
 /// - Important: `previous` の `nil` は「前回状態が無い」= 初回スキャンを表し、空の
 ///   `WorktreeInventory` (前回は1件も無かった) とは区別する。初回スキャンでは検出された
 ///   Task worktree をすべて `.inactive` から始め、新規出現として数えない。Project 登録時点で
@@ -124,7 +184,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   現れた worktree」に限るため。
 public func reconcileDetectedWorktrees(
   detected: [DetectedWorktree],
-  previous: WorktreeInventory?
+  previous: WorktreeInventory?,
+  unobserved: [String] = []
 ) -> WorktreeScanResult {
   var projectRoot: DetectedWorktree?
   var taskWorktrees: [TaskWorktree] = []
@@ -149,7 +210,31 @@ public func reconcileDetectedWorktrees(
   }
 
   var disappeared: [WorktreeIdentity] = []
+  var unobservedIdentities: [WorktreeIdentity] = []
   if let previous {
+    let unobservedPaths = Set(unobserved).subtracting(detected.map(\.worktreePath))
+
+    if let retainedRoot = retainedProjectRoot(
+      previous: previous, detectedProjectRoot: projectRoot, seen: seen,
+      unobservedPaths: unobservedPaths)
+    {
+      projectRoot = retainedRoot
+      unobservedIdentities.append(retainedRoot.identity)
+    }
+
+    for task in previous.taskWorktrees
+    where !seen.contains(task.identity)
+      && unobservedPaths.contains(task.detected.worktreePath)
+    {
+      seen.insert(task.identity)
+      taskWorktrees.append(
+        TaskWorktree(
+          detected: task.detected.observing(.observationFailed),
+          activation: task.activation
+        ))
+      unobservedIdentities.append(task.identity)
+    }
+
     var retained = Set(taskWorktrees.map(\.identity))
     if let projectRoot {
       retained.insert(projectRoot.identity)
@@ -167,8 +252,25 @@ public func reconcileDetectedWorktrees(
   return WorktreeScanResult(
     inventory: WorktreeInventory(projectRoot: projectRoot, taskWorktrees: taskWorktrees),
     appeared: appeared,
-    disappeared: disappeared
+    disappeared: disappeared,
+    unobserved: unobservedIdentities
   )
+}
+
+/// 観測に失敗した Project Root を前回の値のまま保持する。保持できるのは今回どれも Project Root
+/// として検出されなかったときだけで、`projectRoot` は1件しか持てず、Task 側へ移すことは §2.3 が
+/// 禁じているためである。
+private func retainedProjectRoot(
+  previous: WorktreeInventory,
+  detectedProjectRoot: DetectedWorktree?,
+  seen: Set<WorktreeIdentity>,
+  unobservedPaths: Set<String>
+) -> DetectedWorktree? {
+  guard let previousProjectRoot = previous.projectRoot, detectedProjectRoot == nil,
+    !seen.contains(previousProjectRoot.identity),
+    unobservedPaths.contains(previousProjectRoot.worktreePath)
+  else { return nil }
+  return previousProjectRoot.observing(.observationFailed)
 }
 
 /// 自動 Active 化の対象を「観測中に新しく現れ、かつ到達できた worktree」に限る規則

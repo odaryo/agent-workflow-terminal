@@ -91,6 +91,54 @@ struct GitTestRepository {
     )
   }
 
+  /// 実プロセスの timeout を現実的な時間で起こすための detector。`GitRunner.defaultTimeout` は
+  /// 30 秒で、そのままでは 30 秒かかるテストになる。`executable` には `sleepingGitShim` の
+  /// 返す代役を渡す。
+  func detector(executable: URL, entryTimeout: Duration) throws -> GitWorktreeDetector {
+    let runner = processRunner
+    let candidates = [executable]
+    return GitWorktreeDetector(
+      projectRunner: try GitRunner(
+        repositoryDirectory: mainWorktree,
+        processRunner: runner,
+        executableCandidates: candidates
+      ),
+      makeRunner: { directory throws(GitRunnerError) in
+        try GitRunner(
+          repositoryDirectory: directory,
+          processRunner: runner,
+          executableCandidates: candidates
+        )
+      },
+      entryTimeout: entryTimeout
+    )
+  }
+
+  /// 指定した作業ツリーに対する `rev-parse` だけが応答しなくなる git の代役。`exec` で自分自身を
+  /// `sleep` に置き換えるのは、SIGTERM が届く相手を sleep 本体にするためである (`sh` の子として
+  /// 走らせると、親を殺しても sleep が pipe を掴んだまま残る)。
+  func sleepingGitShim(revParseIn worktreePath: String) throws -> URL {
+    let shim = root.appending(path: "git-shim-\(UUID().uuidString)")
+    let lines = [
+      "#!/bin/sh",
+      "directory=''",
+      "revparse=0",
+      "previous=''",
+      "for argument in \"$@\"; do",
+      "  if [ \"$previous\" = \"-C\" ]; then directory=\"$argument\"; fi",
+      "  if [ \"$argument\" = \"rev-parse\" ]; then revparse=1; fi",
+      "  previous=\"$argument\"",
+      "done",
+      "if [ \"$directory\" = '\(worktreePath)' ] && [ \"$revparse\" = 1 ]; then",
+      "  exec /bin/sleep 30",
+      "fi",
+      "exec '\(executableURL.path)' \"$@\"",
+    ]
+    try lines.joined(separator: "\n").write(to: shim, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim.path)
+    return shim
+  }
+
   /// 既定は main worktree での実行。`in:` に `root` からの相対名を渡すと別の作業ツリーで走る。
   func git(_ arguments: [String], in worktreeName: String? = nil) async throws {
     let result = try await gitExitCode(arguments, in: worktreeName)

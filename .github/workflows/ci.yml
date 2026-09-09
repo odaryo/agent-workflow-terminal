@@ -82,7 +82,7 @@ jobs:
       AWT_TMUX_INTEGRATION: "1"
       AWT_GIT_INTEGRATION: "1"
       AWT_RIPGREP_INTEGRATION: "1"
-      # 8 suite / 63 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
+      # 8 suite / 65 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
       # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       AWT_INTEGRATION_FILTER: >-
         TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|GitWorktreeDetectorIntegrationTests|RipgrepSearchIntegrationTests
@@ -135,7 +135,7 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --min-tests 63 \
+            --min-tests 65 \
             --suites 8
 
       # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では
@@ -196,6 +196,48 @@ jobs:
       - name: Build
         working-directory: App
         run: swift build
+
+  # PreToolUse (Bash) フックの判定本体を fixture で検査する。フックは Claude Code の設定から
+  # 呼ばれるだけでリポジトリのビルドには関与しないため、壊れても他の job は緑のまま通る
+  # (Issue #314)。
+  #
+  # runner は他の job と同じ macOS にする。フックが実運用で動くのは開発者の macOS なので、
+  # 同じ python3 / bash で fixture を回さないと、環境差が CI をすり抜ける。
+  shell-guard:
+    name: Shell guard (tmux kill)
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # shellcheck はランナーイメージに同梱されていればそれを使い、外れた場合だけ導入する
+      # (SwiftLint の job と同じ方針)。
+      - name: Install shellcheck if missing
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            brew install shellcheck
+          fi
+
+      - name: Show tool versions
+        run: |
+          bash --version | head -1
+          python3 --version
+          shellcheck --version | sed -n '2p'
+
+      # SC1091 は lib.sh を source する既存スクリプトが一律に出す info で、
+      # 静的解析からは追跡できないパスを指す (各スクリプト先頭の注釈のとおり)。
+      - name: ShellCheck
+        run: shellcheck -e SC1091 scripts/*.sh
+
+      # 判定本体に構文エラーがあると python3 自身が exit 1 を返し、フックは block しない
+      # (= 素通り) 側へ落ちる。コンパイルだけは必ず通っていることを別段で確かめる。
+      - name: Compile the guard
+        run: |
+          python3 -m py_compile scripts/guard_bash_tmux.py
+          python3 -m py_compile scripts/tests/tmux-kill-guard/make-perf-command.py
+
+      - name: Guard fixtures
+        run: scripts/check-tmux-kill-guard.sh
 
   format:
     name: swift-format

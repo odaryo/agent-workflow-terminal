@@ -1,0 +1,112 @@
+# exit 0 (通過) を期待するコマンド。誤検知でふつうの作業や統合テストを塞いでいないかを見る。
+# 書式は deny-commands.txt と同じ (`%%` 区切り)。
+%%
+env -u TMUX tmux -L awt-r-1 kill-session -t '=awt-r-1'
+%%
+tmux list-sessions
+%%
+tmux list-panes -a -F '#{pane_id}'
+%%
+rg kill-server
+%%
+git grep -n kill-server
+%%
+sed -n 160,175p CLAUDE.md
+%%
+scripts/wf-commit.sh -t "fix: kill-server ガード"
+%%
+AWT_TMUX_INTEGRATION=1 swift test --filter TmuxRunnerIntegrationTests
+%%
+gh issue view 314
+%%
+# ここから下は実装時に足した派生。隔離できている後始末と、kill-server を文字列として扱う操作。
+tmux -uL awt-x kill-session -t '=awt-x'
+%%
+tmux -Lawt-x kill-sess -t '=awt-x'
+%%
+env -u TMUX tmux -L awt-x -f /dev/null kill-session -t '=awt-x'
+%%
+env -u TMUX timeout 5 tmux -L awt-x kill-session -t '=awt-x'
+%%
+rg -n kill-session scripts/
+%%
+grep -rn kill-se .
+%%
+echo "tmux kill-server は禁止"
+%%
+scripts/wf-issue-comment.sh 314 -b "kill-server を止める"
+%%
+# ここから下は敵対的レビュー (#314) M3。事故を記録する文書・Issue 本文・コード例を heredoc で
+# 書く経路は日常的に使う。ここを塞ぐと、当たったエージェントは逃し道が無く停止する。
+cat > docs/note.md <<'EOF'
+tmux kill-server は禁止
+EOF
+%%
+scripts/wf-issue-comment.sh 314 -b "$(cat <<'MSG'
+tmux kill-server を Bash から打たない
+MSG
+)"
+%%
+cat <<-'EOF'
+	tmux kill-session -t x
+	EOF
+%%
+grep -q kill-server <<< "tmux kill-server"
+%%
+# C1 の修正が、行継続を挟んだ正当な後始末まで巻き込んでいないこと
+env -u TMUX \
+  tmux -L awt-x \
+  kill-session -t '=awt-x'
+%%
+# 予約語の読み飛ばしが、隔離できている後始末を通すこと (M1)
+if tmux -L awt-x has-session -t '=awt-x'; then tmux -L awt-x kill-session -t '=awt-x'; fi
+%%
+# M-A の修正が、末尾リダイレクトを伴う正当な後始末を巻き込んでいないこと
+env -u TMUX tmux -L awt-x kill-session -t "=awt-x" 2>/dev/null
+%%
+rg kill-server > /tmp/o 2>&1
+%%
+tmux -L awt-x kill-session -t "=awt-x" >> /tmp/log 2>&1
+%%
+# M-B: シェルに文字列やファイルを食わせる形は検査しない (決定)。`bash /tmp/x.sh` が
+# スコープ外である以上、ここだけ塞いでも境界にならないため、通ることを固定する。
+bash <<EOF
+tmux kill-server
+EOF
+%%
+bash <<'EOF'
+tmux kill-server
+EOF
+%%
+bash <<< "tmux kill-server"
+%%
+cat <<'EOF' | bash
+tmux kill-server
+EOF
+%%
+echo 'tmux kill-server' | sh
+%%
+# m2: escape された展開は bash も展開しないので拒否しない
+cat <<EOF
+\$(tmux kill-server)
+EOF
+%%
+# M-1 の修正が、正当な後始末の &> や >| を巻き込んでいないこと
+env -u TMUX tmux -L awt-x kill-session -t "=awt-x" &>/dev/null
+%%
+tmux -L awt-x kill-session -t "=awt-x" >|/tmp/o
+%%
+diff <(echo kill-server) /dev/null
+%%
+# 4 巡目の修正が、同じ綴りの無害な形を巻き込んでいないこと
+tmux -c 'echo x'
+%%
+eval 'rg kill-server'
+%%
+env -S 'rg kill-server'
+%%
+bash -euo pipefail -c 'rg kill-server'
+%%
+bash -euo pipefail -c "env -u TMUX tmux -L awt-x kill-session -t '=awt-x'"
+%%
+eval 'tmux -L awt-x kill-session -t "=awt-x"'

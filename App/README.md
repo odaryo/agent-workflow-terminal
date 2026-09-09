@@ -44,9 +44,12 @@ publish より先に PR を開くと、対応する Release アセットがま�
 何も読まず、libghostty のコンパイル既定で起動します。読み込みはプロセス起動時の 1 回だけで、
 編集を反映するにはアプリを再起動します。
 
-ghostty 本体の設定 (`~/.config/ghostty/config` などの `ghostty_config_load_default_files` が
-読む経路) は**読みません**。libghostty の bundle id はコンパイル時定数 `com.mitchellh.ghostty`
-なので、その経路には `~/Library/Application Support/com.mitchellh.ghostty/config` —
+このファイルの中に `config-file = ...` と書いても**黙って無視されます** (診断も出ません)。
+ghostty では一般的な書き方ですが、現状は再帰読み込みを行いません (Issue #105)。
+
+ghostty 本体の設定 (`ghostty_config_load_default_files` が読む 4 経路) は**読みません**。
+libghostty の bundle id はコンパイル時定数 `com.mitchellh.ghostty` なので、その 4 経路には
+`~/Library/Application Support/com.mitchellh.ghostty/config` と同 `config.ghostty` —
 つまり本物の Ghostty.app 向けに書かれた設定 — が含まれ、別アプリであるこの端末へ
 keybind や `scrollback-limit` が黙って効いてしまうためです (設計書 §21.6)。
 

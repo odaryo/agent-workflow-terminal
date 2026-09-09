@@ -349,11 +349,6 @@ private struct WorktreeTab: View {
   }
 }
 
-// Why not body のたびに解決: libghostty の設定はプロセスに1つで最初の初期化時に固定されるため、後から違う URL を渡すと端末が開かなくなる。ファイルの有無は実行中に変わり得る (設計書 §21.6)。
-private let terminalConfigurationFileURL = TerminalConfigurationFile.resolve(
-  environment: ProcessInfo.processInfo.environment,
-  fileExists: { FileManager.default.fileExists(atPath: $0) })
-
 private struct TerminalTabContent: View {
   let worktree: DetectedWorktree
   let sessions: TmuxSessionProvisioner?

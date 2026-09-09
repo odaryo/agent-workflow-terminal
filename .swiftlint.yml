@@ -8,6 +8,7 @@ included:
   - AgentWorkflowTerminal/Sources
   - AgentWorkflowTerminal/Tests
   - App/Sources
+  - App/Tests
   - App/Package.swift
 
 excluded:

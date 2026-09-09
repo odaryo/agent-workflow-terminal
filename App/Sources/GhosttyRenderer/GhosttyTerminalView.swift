@@ -30,10 +30,15 @@ public struct GhosttyTerminalView: NSViewRepresentable {
   ///   例えば `restart()` から surface の生成が**同期に成功した**場合、`.awaitingSurface` は
   ///   一度も届かない (生成が同期に成功しなかった場合は届く)。落ちない・重複しない・順序が
   ///   狂わないのは落ち着いた先の状態についてであり、途中の状態を数えてはならない。
+  ///
+  /// Why not `configurationFileURL` に既定値: 書き忘れてもコンパイルが通ると、2つ目の
+  /// 呼び出し側が `nil` を渡す形になり、`GhosttyRuntime` の初期化が
+  /// `configurationFileChanged` で失敗する。それは `makeNSView` の `catch` が NSLog へ
+  /// 流すだけなので、画面には**何も出ない端末**が残る (Issue #236)。
   public init(
     command: [String],
     workingDirectory: String? = nil,
-    configurationFileURL: URL? = nil,
+    configurationFileURL: URL?,
     focusRequest: TerminalFocusRequest? = nil,
     keyboardParticipation: TerminalKeyboardParticipation = .normal,
     stateChanged: ((TerminalRendererState) -> Void)? = nil

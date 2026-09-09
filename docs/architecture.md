@@ -178,7 +178,7 @@ Dedicated tmux session and Task Tab become available
 - Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
 - 検出できたが作業ツリーへ到達できないworktreeは`到達不能`として保持する。
 
-**`到達不能`はActive/Inactiveと直交する第3の軸ではなく、表示上はInactive相当として扱う。** タブは一覧から消さずに残し、グレーアウトして選択不可とする。attach先の作業ディレクトリが実在しない以上Active化できないが、可搬ボリュームやネットワーク共有へ置いたworktreeを`git worktree lock`することはgit自身が推奨しており、作業ツリーが一時的に消える運用は異常系ではなく通常運用に現れるためである。
+**`到達不能`はActive/Inactiveと直交する第3の軸ではなく、表示上はInactive相当として扱う。** 表示先はActive/Inactiveの区別に従う — **Activeかつ到達不能**は通常のタブ列に残し、グレーアウトして選択不可とする。**Inactiveかつ到達不能**はタブ列に出さず、Inactive worktreeの一覧に選択不可の項目として並べる (Inactiveをタブ列に出さない規則が到達不能によって覆らない、の意)。attach先の作業ディレクトリが実在しない以上Active化できないが、可搬ボリュームやネットワーク共有へ置いたworktreeを`git worktree lock`することはgit自身が推奨しており、作業ツリーが一時的に消える運用は異常系ではなく通常運用に現れるためである。
 
 **検出結果は「worktreeが消えた」と「今回は観測できなかった」を区別できる形で上位へ渡す。** 両者を同一視すると、ボリュームが戻ったときに同じworktreeが新規出現として扱われ、下記の自動Active化によってActive/Inactiveの区別が失われる。到達不能の間はTerminalが保持しているActive/Inactiveをそのまま保つ。
 
@@ -1869,7 +1869,7 @@ PR_READY
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
 - [x] Active/Inactiveは再起動を跨いで復元する。停止中に現れたworktreeはInactiveから始め、停止中に消えたworktreeは落とさず到達不能として保持する
 - [x] GRDB正式採用までの再起動を跨ぐ状態はApplication Support配下のJSONへ暫定保存する(schema／migrationの決定とはしない)
-- [x] 作業ツリーへ到達できないworktreeは`到達不能`として保持し、タブは残すがグレーアウトして選択不可。検出結果は消失と未観測を区別してActive/Inactiveを保つ
+- [x] 作業ツリーへ到達できないworktreeは`到達不能`として保持し、Activeならタブに残してグレーアウトし選択不可、InactiveならInactive一覧に選択不可で並べる。検出結果は消失と未観測を区別してActive/Inactiveを保つ
 - [x] bare repositoryをProject Rootに持つレイアウトではProject Rootを持たない(`projectRoot == nil`を正常系として扱う)
 - [x] Closeは4択(UIのみ／tmux session終了／worktree削除／マージ済みbranch削除)、削除系は未commit・未push・未mergeを検査して警告する
 - [x] 未merge検査が使うProjectの既定branchは`origin/HEAD`、無ければmain worktreeのbranch。壊れた値ではフォールバックせず、特定できなければ判定不能として警告する

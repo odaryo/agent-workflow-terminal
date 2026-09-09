@@ -121,7 +121,9 @@ final class AppModel: ObservableObject {
   let tmuxExecutable: URL?
   /// `nil` は tmux を使えない起動。`tmuxExecutable` が `nil` の起動と同じ集合になる。
   let sessions: TmuxSessionProvisioner?
-  let paneStates: WorktreePaneStatesFeed?
+  /// 公開しない。表示層から直に呼べると `agentPaneStates(of:)` の gate を迂回して Inactive の
+  /// pane を観測できてしまい、Issue #237 の状態がそのまま戻る。
+  private let paneStates: WorktreePaneStatesFeed?
   let diffModels = DiffViewerModelStore()
   let mainPanes: MainPaneCoordinator
   private let projectDirectory: URL?
@@ -131,6 +133,9 @@ final class AppModel: ObservableObject {
   /// ユーザーが手で復旧できる可能性まで消える。
   private var canSave = false
   private var didStart = false
+  /// `didStart` と分ける。あちらは `run()` の二重起動を防ぐ印で、スキャンが**終わった**ことは
+  /// 表さない。空の一覧を「worktree が無い」と読んでよいのは、この印が立った後だけである。
+  @Published private(set) var didCompleteInitialScan = false
   private var pendingSave: Task<Void, Never>?
   /// 直近のスキャンで観測に失敗した entry の要約。**毎回バナーへ代入しない**ための状態で、
   /// これが変わらない限り再表示しない。5 秒ごとの再スキャンで代入すると、ユーザーが閉じた
@@ -158,6 +163,32 @@ final class AppModel: ObservableObject {
 
   var inventory: WorktreeInventory {
     WorktreeInventory(projectRoot: projectRoot, taskWorktrees: worktrees)
+  }
+
+  /// 通常の Task Tab に並べる worktree (設計書 §3.2)。
+  var tabbedWorktrees: [TaskWorktree] { inventory.tabbedTaskWorktrees }
+
+  /// Active 化の導線に並べる worktree。状態は添えない — 添えると Inactive の pane を観測する
+  /// ことになり、タブから外した意味が無くなる (Issue #237)。
+  var inactiveWorktrees: [TaskWorktree] { inventory.inactiveTaskWorktrees }
+
+  /// `message` と分ける。あちらは起動時の失敗を載せる保存されたスロットなので、Inactive を
+  /// Active 化しても消えず、tmux 起動失敗と同じスロットである以上まとめてクリアもできない。
+  ///
+  /// - Important: 分岐は `WorktreeInventory.tabEmptyState` が持つ。ここに条件を書くと単体
+  ///   テストで押さえられず、初回スキャン前に「無い」と断定する退行を実際に見落とした
+  ///   (Issue #237 のレビュー M-1)。ここは文言への写像だけを担う。
+  var emptyStateMessage: String? {
+    let state = inventory.tabEmptyState(
+      hasSelection: selectedIdentity != nil,
+      didCompleteInitialScan: didCompleteInitialScan
+    )
+    return switch state {
+    case nil: nil
+    case .noWorktrees: "worktree がありません。"
+    case .noReachableWorktrees: "到達できる worktree がありません。"
+    case .noActiveWorktrees: "Active な worktree がありません。Inactive の一覧から Active にしてください。"
+    }
   }
 
   func run() async {
@@ -271,15 +302,22 @@ final class AppModel: ObservableObject {
   private func applyInitial(_ result: WorktreeScanResult) {
     projectRoot = result.inventory.projectRoot
     worktrees = result.inventory.taskWorktrees
+    didCompleteInitialScan = true
     if let projectRoot {
       selectedIdentity = projectRoot.identity
       openedIdentities.insert(projectRoot.identity)
-    } else if let first = worktrees.first(where: \.detected.isReachable) {
+    } else if let first = firstSelectableWorktree {
       selectedIdentity = first.identity
       openedIdentities.insert(first.identity)
-    } else if message == nil {
-      message = worktrees.isEmpty ? "worktree がありません。" : "到達できる worktree がありません。"
     }
+    // 選べる worktree が無いことは `message` へ書かない。書くと Inactive を Active 化しても
+    // 消えないままになる (`emptyStateMessage`)。
+  }
+
+  /// タブに出ていない worktree を選ばない。Inactive はタブが無いので、選ぶと端末だけが
+  /// 生きたまま残り、切り替える手段が無くなる。
+  private var firstSelectableWorktree: TaskWorktree? {
+    inventory.selectableTaskWorktrees.first
   }
 
   private func report(scanFailure detail: String) {
@@ -294,7 +332,28 @@ final class AppModel: ObservableObject {
     guard activation != .active || worktree.detected.isReachable else { return }
     guard worktree.activation != activation else { return }
     worktrees[index] = TaskWorktree(detected: worktree.detected, activation: activation)
+    if activation == .inactive {
+      close(identity)
+    }
     save()
+  }
+
+  /// タブから外れた worktree の端末を残さない。残すと、表示されていない NSView が first
+  /// responder を持ち続け、打鍵が別 worktree の生きた session へ入る窓が開く (Issue #234)。
+  /// tmux session 自体は残す (設計書 §3.4)。
+  private func close(_ identity: WorktreeIdentity) {
+    openedIdentities.remove(identity)
+    guard selectedIdentity == identity else { return }
+    // 到達不能な Project Root へは移さない。`selectProjectRoot()` は `select(_:)` と違って
+    // 到達可能性を見ないので、自動で呼ぶこの経路が「開けない Project Root を勝手に開く」
+    // 入口になる (`select(_:)` の doc コメントにある `$HOME` へ落ちる `new-session`)。
+    if projectRoot?.isReachable == true {
+      selectProjectRoot()
+    } else if let next = firstSelectableWorktree {
+      select(next)
+    } else {
+      selectedIdentity = nil
+    }
   }
 
   func dismissWarning() {
@@ -364,8 +423,12 @@ final class AppModel: ObservableObject {
   /// `/private/tmp` でも exit 0 で session ができ、`pane_current_path` は `$HOME` になる)。そこで agent を走らせると、
   /// worktree の名前を持つタブが実際には別のディレクトリで作業することになる。しかも
   /// `new-session -A` なので、その誤った session に以後ずっと再 attach され続ける。
+  ///
+  /// Inactive を開かないのは、タブが無い worktree の端末を作らないためである (設計書 §3.2)。
+  /// Active 化そのものは open/attach を伴わず、session の用意はタブを選んだ時点に留める
+  /// (§3.3: session が無いときに Terminal が黙って作らない)。
   func select(_ worktree: TaskWorktree) {
-    guard worktree.detected.isReachable else { return }
+    guard worktree.activation == .active, worktree.detected.isReachable else { return }
     selectedIdentity = worktree.identity
     openedIdentities.insert(worktree.identity)
   }
@@ -384,9 +447,15 @@ final class AppModel: ObservableObject {
 
   /// pane の Agent 状態の観測経路。候補一覧の印 (§12.7) と送信可否 (§9.2.2) の両方がこれを見る。
   /// Project Root も含める — 含めないと Project Root タブで送信が恒久的に不可になる。
-  /// `nil` は「観測経路が無い」で、到達不能な worktree と tmux を使えない起動がここへ入る。
+  /// `nil` は「観測経路が無い」で、Inactive・到達不能な worktree と tmux を使えない起動が
+  /// ここへ入る。
+  ///
+  /// - Important: 可否の判定は `WorktreeInventory.observesPaneStates(of:)` に任せ、ここでは
+  ///   書き直さない。タブ側とドロワー側がそれぞれ条件を持つと、片方だけが Inactive を外して
+  ///   観測が走り続ける (Issue #237)。
   func agentPaneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
-    guard let paneStates, let detected = detectedWorktree(of: identity), detected.isReachable
+    guard let paneStates, inventory.observesPaneStates(of: identity),
+      let detected = detectedWorktree(of: identity)
     else { return nil }
     return paneStates(detected)
   }

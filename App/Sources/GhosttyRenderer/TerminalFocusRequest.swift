@@ -14,3 +14,17 @@ public struct TerminalFocusRequest: Equatable, Sendable {
     self.isTerminalAllowed = isTerminalAllowed
   }
 }
+
+/// この端末がキーボードの持ち主になれるか (Issue #234)。
+///
+/// `TerminalFocusRequest` の `nil` や `isTerminalAllowed == false` とは**別の意味**である。
+/// それらは「今このタブは表示されていない」「今はテキスト入力が主張している」という、
+/// **解ければ端末へ戻る**一時的な状態を表す。こちらは端末そのものが受け取れない状態で、
+/// 戻るには端末を作り直すしかない。1つの値に兼ねさせると、タブを切り替えるたびに
+/// 非表示のタブが明け渡しを撃つことになる。
+public enum TerminalKeyboardParticipation: Sendable, Equatable {
+  case normal
+  /// プロセスが終わり、覆いが出ている状態。取りに行かないだけでなく、**端末が持っている
+  /// キーボードを明け渡す** (`GhosttySurfaceView.withdrawKeyboardFromTerminals`)。
+  case withdrawn
+}

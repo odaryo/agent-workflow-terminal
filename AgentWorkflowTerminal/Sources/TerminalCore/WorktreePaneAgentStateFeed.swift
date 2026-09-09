@@ -142,15 +142,34 @@ actor WorktreePaneFeedCoordinator {
     yieldIfChanged()
   }
 
-  func cancel() {
+  /// `AgentSignalSource` はアプリ全体で1個を共有し、pane ごとの登録集合をその内側に持つ
+  /// (`TmuxAgentSignalSource` は capture をバッチ化するため、`signals(for:)` を受けた pane を
+  /// 登録する)。よって feed を止める側には、登録した pane を解放する義務がある。怠ると、
+  /// 止めた worktree の pane が生きている worktree のバッチへ相乗りし続け、登録集合が
+  /// アプリの寿命で単調に増える。**外部プロセスの起動回数は増えない** (バッチは
+  /// `signals(for:)` からしか起きないので、feed が全部止まればバッチも止まる) が、
+  /// 1バッチあたりの捕捉対象と出力量が増え続ける。#331 が非アクティブ worktree の観測停止を
+  /// 常用経路にしたので、これは日常的に起きる。
+  ///
+  /// - Note: `isCancelled` を先に立てるので、`await` を挟んで再入しても `receive` /
+  ///   `setPollTask` はいずれも早期 return する。
+  /// - Note: 観測 Task の停止は非同期なので、`cancel()` の直前に始まっていた `signals(for:)`
+  ///   が解放の**後**に pane を再登録する窓は残る。これは `receive(_ panes:)` の削除経路が
+  ///   元から持っている窓と同じで、閉じるには観測 Task の完了待ちが要る。
+  func cancel() async {
     guard !isCancelled else { return }
     isCancelled = true
     pollTask?.cancel()
+    let released = entries.values.map(\.snapshot)
     for entry in entries.values {
       entry.task?.cancel()
     }
     entries.removeAll()
+    paneOrder.removeAll()
     continuation.finish()
+    for snapshot in released {
+      await signalSource.forget(snapshot)
+    }
   }
 
   private func startObservation(for pane: PaneSnapshot) async {

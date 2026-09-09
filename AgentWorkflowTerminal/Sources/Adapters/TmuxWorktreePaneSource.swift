@@ -4,39 +4,108 @@ public enum TmuxWorktreePaneSourceError: Error, Sendable, Equatable {
   case tmux(TmuxRunnerError)
 }
 
+/// 全 worktree の pane 一覧を `list-panes -a` 1回にまとめ、短い TTL の間だけ共有する
+/// (Issue #239 R3)。worktree ごとに `-t <session>` で撃つと、外部プロセス起動が worktree 数に
+/// 線形に増える。
+///
+/// - Important: TTL は呼び出し側の pane 一覧の再取得周期の**半分以下**を渡す。周期に近い値だと
+///   位相のずれた worktree の poll が畳めないまま、pane 集合の鮮度だけが落ちる。
+actor TmuxAllSessionPaneListCache {
+  /// 既定の pane 一覧周期 2s の半分。pane 集合の最悪鮮度は 2s + 1s = 3s になる。
+  static let defaultTimeToLive = Duration.seconds(1)
+
+  private let runner: TmuxRunner
+  private let timeToLive: Duration
+  private let timeSource: any ContinuousTimeSource
+  private var latest: (panes: [TmuxPane], capturedAt: ContinuousClock.Instant)?
+  private var inFlight: InFlightRead?
+
+  /// 起動側と待ち手側で同じ時刻を刻むため、開始時刻を task と一緒に持つ。待ち手が完了時刻を
+  /// 使うと、TTL が run にかかった時間ぶん伸びる。
+  private struct InFlightRead {
+    let task: Task<Result<[TmuxPane], TmuxWorktreePaneSourceError>, Never>
+    let capturedAt: ContinuousClock.Instant
+  }
+
+  init(
+    runner: TmuxRunner,
+    timeToLive: Duration = defaultTimeToLive,
+    timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
+  ) {
+    self.runner = runner
+    self.timeToLive = timeToLive
+    self.timeSource = timeSource
+  }
+
+  func panes() async throws(TmuxWorktreePaneSourceError) -> [TmuxPane] {
+    if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
+      return latest.panes
+    }
+    if let inFlight {
+      let result = await inFlight.task.value
+      if self.inFlight?.task == inFlight.task {
+        complete(result, capturedAt: inFlight.capturedAt)
+      }
+      return try result.get()
+    }
+    let capturedAt = timeSource.now
+    let task = Task { [runner] in await Self.read(runner: runner) }
+    inFlight = InFlightRead(task: task, capturedAt: capturedAt)
+    let result = await task.value
+    if inFlight?.task == task { complete(result, capturedAt: capturedAt) }
+    return try result.get()
+  }
+
+  private func complete(
+    _ result: Result<[TmuxPane], TmuxWorktreePaneSourceError>,
+    capturedAt: ContinuousClock.Instant
+  ) {
+    inFlight = nil
+    // 失敗はキャッシュしない。次の呼び出しで再試行できるようにする。
+    guard case .success(let panes) = result else { return }
+    latest = (panes, capturedAt)
+  }
+
+  private static func read(
+    runner: TmuxRunner
+  ) async -> Result<[TmuxPane], TmuxWorktreePaneSourceError> {
+    do {
+      let result = try await runner.run(
+        arguments: ["list-panes", "-a", "-F", TmuxListPanes.format])
+      return .success(TmuxListPanes.parse(output: result.stdout).panes)
+    } catch {
+      // server ごと居ない場合は「pane が無い」であって障害ではない。`-t` を渡していた頃に
+      // 必要だった `can't find window:` の分岐は、`-a` が session を指さないので要らなくなった
+      // (session 不在は「その名前の行が0件」として現れる)。
+      if error.isServerAbsent { return .success([]) }
+      return .failure(.tmux(error))
+    }
+  }
+}
+
 public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
   private let runner: TmuxRunner
+  private let paneList: TmuxAllSessionPaneListCache
 
   public init(runner: TmuxRunner) {
+    self.init(runner: runner, paneList: TmuxAllSessionPaneListCache(runner: runner))
+  }
+
+  init(runner: TmuxRunner, paneList: TmuxAllSessionPaneListCache) {
     self.runner = runner
+    self.paneList = paneList
   }
 
   public func panes(
     of worktree: WorktreeIdentity
   ) async throws(TmuxWorktreePaneSourceError) -> [PaneSnapshot] {
     let session = TmuxSessionName(identity: worktree)
-    do {
-      // `-t <session>` だけでは tmux が target-window として current window へ解決するため、
-      // session 配下の全 window を対象にする `-s` が必要になる (tmux 3.4 で実測)。
-      let result = try await runner.run(
-        arguments: [
-          "list-panes", "-s", "-t", "=\(session.rawValue)", "-F", TmuxListPanes.format,
-        ])
-      return TmuxListPanes.parse(output: result.stdout).panes.map(\.snapshot)
-    } catch {
-      // tmux 3.4 は session 不在を3通りとも exit code 1 で返す (実測)。生 stderr は server
-      // 稼働中が `can't find window: <name>\n`、未作成 socket が
-      // `error connecting to <path> (No such file or directory)\n`、停止後に socket が残る場合が
-      // `no server running on <path>\n`。前者は session target でも window 不在として報告するため、
-      // session 名まで完全一致で判定する。
-      if case .commandFailed(let exitCode, _, let stderr) = error,
-        exitCode == 1,
-        Self.isSessionAbsent(stderr, session: session)
-      {
-        return []
-      }
-      throw .tmux(error)
-    }
+    // `-a` は対象 server の全 session を返すので、ユーザー自身の session の pane が混ざる。
+    // 振り分けは String の完全一致だけで行う。前方一致・部分一致・正規化を挟むと、
+    // `TmuxSessionName` の生成名と重なる他の session を取り込む。
+    return try await paneList.panes()
+      .filter { $0.sessionName == session.rawValue }
+      .map(\.snapshot)
   }
 
   /// tmux server の同一性 (`#{pid}`)。`nil` は server が居ない、または値を読めなかったことを
@@ -61,11 +130,5 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
       if error.isServerAbsent { return nil }
       throw .tmux(error)
     }
-  }
-
-  private static func isSessionAbsent(_ stderr: String, session: TmuxSessionName) -> Bool {
-    if stderr == "can't find window: \(session.rawValue)\n" { return true }
-    // server ごと居ない場合も「この session の pane は無い」であって障害ではない。
-    return TmuxRunnerError.isServerAbsent(stderr: stderr)
   }
 }

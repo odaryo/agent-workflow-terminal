@@ -163,6 +163,45 @@ struct WorktreePaneAgentStateFeedTests {
     await coordinator.cancel()
   }
 
+  /// 解放の義務が feed 側にある理由は `WorktreePaneFeedCoordinator.cancel()` の doc に書いた。
+  /// `receive(_ panes:)` の削除経路だけが `forget` を呼ぶ状態だと、止めた worktree の pane が
+  /// 共有の登録集合に残り続ける。
+  @Test("coordinator を止めたら登録した pane をすべて解放する")
+  func cancelReleasesEveryRegisteredPane() async {
+    let channel = ObservationChannel()
+    let signals = FeedSignalSource(aliveNames: ["agent"])
+    let pair = AsyncStream<[PaneAgentState]>.makeStream()
+    let coordinator = WorktreePaneFeedCoordinator(
+      adapters: [FeedAdapter(id: "matched", processNames: ["agent"], channel: channel)],
+      fallback: FeedAdapter(id: "fallback", processNames: [], channel: channel),
+      intervals: .init(signals: .seconds(1), liveness: .seconds(1)),
+      continuation: pair.continuation, signalSource: signals)
+
+    await coordinator.receive([pane("%1"), pane("%2")])
+    await coordinator.cancel()
+
+    #expect(Set(await signals.forgotten) == [PaneID(rawValue: "%1"), PaneID(rawValue: "%2")])
+  }
+
+  @Test("stream の消費を止めたら登録した pane を解放する")
+  func terminatingStreamReleasesRegisteredPanes() async throws {
+    let context = try makeContext(panes: [.success([pane("%1")])])
+    let recorder = FeedOutputRecorder()
+    let consumer = Task {
+      for await value in context.stream { await recorder.append(value) }
+    }
+    await recorder.waitForCount(1)
+    await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
+
+    consumer.cancel()
+    // `onTermination` は解放を別 Task で行うので、観測できるまで待つ。
+    for _ in 0..<10_000 where await context.signals.forgotten.isEmpty {
+      await Task.yield()
+    }
+
+    #expect(await context.signals.forgotten == [PaneID(rawValue: "%1")])
+  }
+
   @Test("同じ合成結果を重複配信しない")
   func suppressesDuplicates() async throws {
     let unchanged = pane("%1")

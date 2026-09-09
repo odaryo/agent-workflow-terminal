@@ -138,6 +138,22 @@ public enum TmuxListPanes {
   /// 出るため、その値を含む pane は壊れた値を返さず failure にする。
   /// `pane_dead_status` / `pane_dead_signal` は tmux 管理値で、実測値域が空文字列・非負整数・
   /// signal token のため、ユーザー由来の生フィールドと異なり置換を重ねない。
+  ///
+  /// - Important: **`pane_title` だけは版をまたいで往復しない (未修正の既知の欠陥)。**
+  ///   tmux 3.7c は `#{pane_title}` を展開する時点で backslash を二重化する。実測 (置換を
+  ///   挟まない生の `#{pane_title}`、実 title は `t\itle`):
+  ///
+  ///   | 版 | 生 `#{pane_title}` | 置換後 | `decodeRawField` の結果 |
+  ///   | --- | --- | --- | --- |
+  ///   | 3.4 | `t\itle` | `t\\itle` | `t\itle` (正しい) |
+  ///   | 3.7c | `t\\itle` | `t\\\\itle` | `t\\itle` (backslash が倍) |
+  ///
+  ///   置換 `s/\\/\\\\/` 自体は**両版とも n→2n** で、上の「置換は版に依らず同一に効く」は
+  ///   正しい。ずれるのは `pane_title` の展開段だけで、`session_name` (両版とも展開段で
+  ///   二重化される) と `pane_current_path` (両版とも素通し) は往復する。`display-message`
+  ///   経由でも同じ挙動 (`TmuxPaneScreenBatch` のマーカー)。title に backslash を出す Agent は
+  ///   まだ観測していないため実害は出ていないが、**復号は版依存になっている**。修正は
+  ///   影響範囲が広いので別 Issue。
   public static let format = [
     "#{pane_id}",
     #"#{s/\\/\\\\/:session_name}"#,

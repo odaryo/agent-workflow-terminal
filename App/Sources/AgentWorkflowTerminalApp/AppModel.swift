@@ -112,6 +112,11 @@ final class AppModel: ObservableObject {
   /// 端末を出したまま伝えるべき失敗 (Active/Inactive の保存など) をあちらへ載せると、
   /// 致命的でない失敗で端末が消える。
   @Published private(set) var warning: String?
+  /// `warning` と分ける。同じスロットに載せると、`prepare(for:)` が立てた「この起動では
+  /// Active/Inactive を保存しません」がスキャンのたびに上書きされ、観測失敗が解消した時点で
+  /// 恒久的に消える (保存できないままユーザーへの通知だけが消える)。2つの通知は互いに
+  /// 独立していて、どちらも取り下げられない。
+  @Published private(set) var scanFailureWarning: String?
 
   let tmuxExecutable: URL?
   let paneStates: WorktreePaneStatesFeed?
@@ -125,6 +130,10 @@ final class AppModel: ObservableObject {
   private var canSave = false
   private var didStart = false
   private var pendingSave: Task<Void, Never>?
+  /// 直近のスキャンで観測に失敗した entry の要約。**毎回バナーへ代入しない**ための状態で、
+  /// これが変わらない限り再表示しない。5 秒ごとの再スキャンで代入すると、ユーザーが閉じた
+  /// バナーが閉じた直後に復活し、端末の上に貼り付いたままになる。
+  private var reportedScanFailures: Set<String> = []
 
   /// 再スキャンの間隔。P1 の暫定値で、根拠は pane 観測 (`makeWorktreePaneStatesFeed`) と同じく
   /// 「体感で追随し、git への負荷が無視できる」程度でしかない。
@@ -164,7 +173,13 @@ final class AppModel: ObservableObject {
       return
     case .success(let scan):
       let saved = await prepare(for: scan)
-      applyInitial(restoreWorktreeInventory(detected: scan.detected, saved: saved))
+      applyInitial(
+        restoreWorktreeInventory(
+          detected: scan.detected,
+          saved: saved,
+          unobserved: scan.failures.map(\.worktreePath)
+        ))
+      report(scanFailures: scan.failures)
     }
 
     await observe(with: detector)
@@ -214,7 +229,14 @@ final class AppModel: ObservableObject {
       // Inactive にしていた worktree が自動 Active 化される (同関数の doc 参照)。
       guard case .success(let scan) = await scan(with: detector) else { continue }
 
-      let updated = reconcileDetectedWorktrees(detected: scan.detected, previous: inventory)
+      report(scanFailures: scan.failures)
+      // 観測に失敗した entry を捨てて `detected` だけを渡すと、その worktree は消失扱いになり、
+      // ユーザーの Active 指定が保存から消える (Issue #243)。
+      let updated = reconcileDetectedWorktrees(
+        detected: scan.detected,
+        previous: inventory,
+        unobserved: scan.failures.map(\.worktreePath)
+      )
       guard updated.inventory != inventory else { continue }
       projectRoot = updated.inventory.projectRoot
       worktrees = updated.inventory.taskWorktrees
@@ -227,8 +249,8 @@ final class AppModel: ObservableObject {
   ) async -> Result<GitWorktreeScanResult, GitWorktreeScanError> {
     do {
       let scan = try await detector.scan()
-      // 失敗した entry は `detected` に載らないため、そのまま渡すと消失扱いになる。
-      // UI での扱いは Issue #137 の担当で、ここでは記録だけする。
+      // 失敗した entry は `detected` に載らないため、呼び出し側が `unobserved` として渡す。
+      // 原因の原文はバナーに載せきれないので、ここに残す。
       for failure in scan.failures {
         NSLog("[app] worktree の検出に失敗: \(String(describing: failure))")
       }
@@ -269,6 +291,48 @@ final class AppModel: ObservableObject {
 
   func dismissWarning() {
     warning = nil
+  }
+
+  func dismissScanFailureWarning() {
+    scanFailureWarning = nil
+  }
+
+  /// 失敗の集合が変わったときだけバナーを差し替える。集合が同じ間は、ユーザーが閉じた
+  /// バナーを 5 秒ごとに復活させない (`reportedScanFailures` を閉じても消さないのはこのため)。
+  ///
+  /// - Important: 保存の成否に触れない文言にする。この起動で Active/Inactive を保存できるとは
+  ///   限らず (`canSave`)、`previous` に居ないパスは保持のしようも無いため、「保持しています」は
+  ///   どちらの場合にも偽になる。ここで言えるのは「観測できなかった」ことと、それを消失として
+  ///   扱っていないことだけである。
+  private func report(scanFailures failures: [GitWorktreeEntryFailure]) {
+    let summaries = Set(failures.map(Self.summary(of:)))
+    guard summaries != reportedScanFailures else { return }
+    reportedScanFailures = summaries
+
+    guard !summaries.isEmpty else {
+      scanFailureWarning = nil
+      return
+    }
+    scanFailureWarning =
+      "\(summaries.count) 件の worktree を今回のスキャンで観測できませんでした。"
+      + "消えたものとしては扱っていません: "
+      + summaries.sorted().joined(separator: ", ")
+  }
+
+  private static func summary(of failure: GitWorktreeEntryFailure) -> String {
+    "\(failure.worktreePath) (\(summary(of: failure.reason)))"
+  }
+
+  /// git の生の出力はバナーに載せない (1行に収まらない)。原文は `NSLog` 側に残る。
+  private static func summary(of reason: GitWorktreeEntryFailure.Reason) -> String {
+    switch reason {
+    case .gitDirectory(.process(.timedOut)): "git が応答しません"
+    case .gitDirectory(.commandFailed(let exitCode, _, _)): "git が失敗しました (exit \(exitCode))"
+    case .gitDirectory: "git を実行できません"
+    case .unexpectedGitDirectoryOutput, .invalidGitDirectoryPath, .invalidCommonDirectoryPath:
+      "git の出力を解釈できません"
+    case .administrativeDirectoryNotFound: "管理ディレクトリを特定できません"
+    }
   }
 
   private func save() {

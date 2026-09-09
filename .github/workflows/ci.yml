@@ -82,7 +82,7 @@ jobs:
       AWT_TMUX_INTEGRATION: "1"
       AWT_GIT_INTEGRATION: "1"
       AWT_RIPGREP_INTEGRATION: "1"
-      # 8 suite / 63 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
+      # 8 suite / 65 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
       # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       AWT_INTEGRATION_FILTER: >-
         TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|GitWorktreeDetectorIntegrationTests|RipgrepSearchIntegrationTests
@@ -135,7 +135,7 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --min-tests 63 \
+            --min-tests 65 \
             --suites 8
 
       # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では

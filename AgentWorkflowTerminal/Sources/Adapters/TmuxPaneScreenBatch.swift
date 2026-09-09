@@ -11,6 +11,28 @@ enum TmuxPaneScreenBatch {
     let title: String
   }
 
+  /// 走査が `expected` を全部埋める前に止まった理由。**「消えた」と「観測できなかった」を
+  /// 混ぜない**ため (設計書 §12)。生きている pane を消失として報告すると、登録解除と
+  /// 画面変化の基準破棄まで巻き込む。
+  enum StopReason: Sendable, Equatable {
+    /// `expected` を全部埋めた。
+    case completed
+    /// マーカーは届いたが `#{pane_id}` が空、または期待した pane と違った。tmux 3.4 の
+    /// `display-message` は消えた pane を exit 0 + 空 `#{pane_id}` で返す (実測) ため、
+    /// これが exit 0 のまま pane の消失を検出できる唯一の手掛かりになる。
+    case paneIdentityMismatch
+    /// マーカーは届いたが pane ID 以外の復号に失敗した (画面に紛れた偽マーカー、将来版で
+    /// title に区切りが入った場合の field count 不一致など)。pane は生きている。
+    case malformedMarker
+    /// マーカーが届かないまま stdout が尽きた。列が失敗地点で止まった形。
+    case truncated
+  }
+
+  struct Output: Sendable, Equatable {
+    let entries: [Entry]
+    let stopReason: StopReason
+  }
+
   /// marker は pane ID に加えて title も運ぶ。`PaneSnapshot.title` を使うと、`AgentAdapter` の
   /// 既定 `observations(of:)` が毎周期同じ snapshot 値を渡すため title が観測開始時刻で凍る
   /// (`CodexAdapter` は title の spinner を画面判定より前に短絡するので Working に貼り付く)。
@@ -65,7 +87,7 @@ enum TmuxPaneScreenBatch {
   ///   更新されず、OSC 2 で LF を送ると LF だけが落ちて `oscsecond` になった。生 0x1F も同じく
   ///   落ちた)。将来の版で入り得るようになっても、区切りが増えて `parseAgentPaneStatus` が
   ///   field count で失敗するため、壊れた title を配らず「その pane が取れなかった」側へ倒れる。
-  static func parse(stdout: String, nonce: String, expected: [PaneID]) -> [Entry] {
+  static func parse(stdout: String, nonce: String, expected: [PaneID]) -> Output {
     let markerPrefix = nonce + " "
     var entries: [Entry] = []
     var pending: [Substring] = []
@@ -83,12 +105,19 @@ enum TmuxPaneScreenBatch {
       // マーカーが壊れていても列が止まらない経路がある。tmux 3.4 の `display-message` は
       // 存在しない pane を指しても **exit 0** で空の `#{pane_id}` を返す (実測)。
       // よって exit code ではなく「期待どおりのマーカーが届いたか」を完成の条件にする。
-      guard nextIndex < expected.count,
+      guard nextIndex < expected.count else {
+        return Output(entries: entries, stopReason: .paneIdentityMismatch)
+      }
+      guard
         let status = try? TmuxListPanes.parseAgentPaneStatus(
-          output: String(line.dropFirst(markerPrefix.count))),
-        status.paneID == expected[nextIndex]
+          output: String(line.dropFirst(markerPrefix.count)))
       else {
-        return entries
+        // pane ID の形が壊れている (空を含む) 場合だけが消失の証拠。それ以外の復号失敗は
+        // 「この pane は観測できなかった」に留める。
+        return Output(entries: entries, stopReason: paneIdentityStopReason(line, markerPrefix))
+      }
+      guard status.paneID == expected[nextIndex] else {
+        return Output(entries: entries, stopReason: .paneIdentityMismatch)
       }
       entries.append(
         Entry(
@@ -98,6 +127,22 @@ enum TmuxPaneScreenBatch {
       pending.removeAll(keepingCapacity: true)
       nextIndex += 1
     }
-    return entries
+    return Output(
+      entries: entries,
+      stopReason: nextIndex == expected.count ? .completed : .truncated)
+  }
+
+  /// `parseAgentPaneStatus` が投げた理由のうち、pane ID そのものの異常だけを消失として扱う。
+  private static func paneIdentityStopReason(
+    _ line: Substring, _ markerPrefix: String
+  ) -> StopReason {
+    do {
+      _ = try TmuxListPanes.parseAgentPaneStatus(
+        output: String(line.dropFirst(markerPrefix.count)))
+      return .malformedMarker
+    } catch {
+      guard case .invalidPaneID = error else { return .malformedMarker }
+      return .paneIdentityMismatch
+    }
   }
 }

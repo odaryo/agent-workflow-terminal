@@ -52,6 +52,39 @@ private actor FirstBatchGateRunner: ProcessRunning {
   }
 }
 
+/// 指定した pane のマーカーだけ、pane ID は正しいまま**区切りごと**壊して返す。
+/// exit code は 0 のままなので、判定は復号側にしかできない。
+private actor MalformedMarkerRunner: ProcessRunning {
+  private let malformed: PaneID
+  private let screens: [PaneID: String]
+
+  init(malformed: PaneID, screens: [PaneID: String]) {
+    self.malformed = malformed
+    self.screens = screens
+  }
+
+  func run(
+    executableURL: URL, arguments: [String], environment: [String: String],
+    timeout: Duration, outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    let request = ObservationProcessSpy.parseBatch(arguments)
+    var stdout = ""
+    for pane in request.panes {
+      stdout += screens[pane] ?? "\n"
+      if pane == malformed {
+        // 区切りが消えてフィールドが1つになった形 (`invalidFieldCount`)。
+        stdout += "\(request.nonce) \(pane.rawValue)\n"
+      } else {
+        stdout += "\(request.nonce) "
+        stdout += ObservationProcessSpy.render(
+          format: request.format, paneID: pane.rawValue, title: "t")
+        stdout += "\n"
+      }
+    }
+    return ProcessRunResult(exitCode: 0, stdout: stdout, stderr: "")
+  }
+}
+
 @Suite("capture-pane バッチの失敗経路")
 struct TmuxPaneScreenBatcherTests {
   private let first = PaneID(rawValue: "%1")
@@ -80,6 +113,30 @@ struct TmuxPaneScreenBatcherTests {
     let results = try await [firstScreen, secondScreen]
     #expect(results[0].screen == .captured("one\n"))
     #expect(results[1].screen == .captured("two\n"))
+    // 「refresh の回数を増やせば結果的に取れる」実装で緑にならないよう、起動回数も縛る。
+    // %1 のバッチ (%2 を含まない) と、%2 を含む2本目の 2 回で足りる。
+    #expect(await runner.launches == 2)
+  }
+
+  /// 「観測できなかった」と「消えた」を混ぜない (設計書 §12)。画面に紛れ込んだ偽マーカーや、
+  /// 将来版で title に区切りが入った場合の field count 不一致まで `.paneNotFound` に倒すと、
+  /// 生きている pane が登録解除され、変化追跡の基準も捨てられる。
+  @Test("pane ID 以外のマーカー破損は消失ではなく未取得として扱う")
+  func malformedMarkerFieldsAreUnavailableNotMissing() async throws {
+    let runner = MalformedMarkerRunner(
+      malformed: second, screens: [first: "one\n", second: "two\n", third: "three\n"])
+    let batcher = TmuxPaneScreenBatcher(
+      runner: try makeTmuxRunner(socketName: "batcher-test", processRunner: runner),
+      timeToLive: .seconds(30), timeSource: ManualTimeSource())
+
+    _ = try await batcher.screen(of: first)
+    _ = try await batcher.screen(of: second)
+    let thirdResult = try await batcher.screen(of: third)
+    let secondResult = try await batcher.screen(of: second)
+
+    #expect(secondResult.screen == .unavailable)
+    // 登録は外れないので、後続の pane も同じバッチで取れている。
+    #expect(thirdResult.screen == .captured("three\n"))
   }
 
   /// `display-message` は存在しない pane でも exit 0 で空の `#{pane_id}` を返す (tmux 3.4 実測)。

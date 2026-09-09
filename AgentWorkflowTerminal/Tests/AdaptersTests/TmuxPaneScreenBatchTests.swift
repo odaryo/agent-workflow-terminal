@@ -43,9 +43,10 @@ struct TmuxPaneScreenBatchTests {
       + "\n\n\nAWTNONCE %2\(separator)second title\n"
     let parsed = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: "AWTNONCE", expected: panes)
 
-    #expect(parsed.map(\.pane) == panes)
-    #expect(parsed.map(\.screen) == ["a\nb\n", "\n\n\n"])
-    #expect(parsed.map(\.title) == ["first title", "second title"])
+    #expect(parsed.entries.map(\.pane) == panes)
+    #expect(parsed.entries.map(\.screen) == ["a\nb\n", "\n\n\n"])
+    #expect(parsed.entries.map(\.title) == ["first title", "second title"])
+    #expect(parsed.stopReason == .completed)
   }
 
   /// 列の途中が失敗すると以降のコマンドは実行されず、失敗前の stdout だけが残る
@@ -55,27 +56,40 @@ struct TmuxPaneScreenBatchTests {
     let stdout = "a\nAWTNONCE %1\(separator)t\nhalf"
     let parsed = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: "AWTNONCE", expected: panes)
 
-    #expect(parsed.count == 1)
-    #expect(parsed[0].pane == panes[0])
-    #expect(parsed[0].screen == "a\n")
+    #expect(parsed.entries.count == 1)
+    #expect(parsed.entries[0].pane == panes[0])
+    #expect(parsed.entries[0].screen == "a\n")
+    #expect(parsed.stopReason == .truncated)
   }
 
-  @Test("引数と違う並びのマーカーが出たらそこで解釈を止める")
+  @Test("引数と違う並びのマーカーが出たらそこで解釈を止め、消失として扱う")
   func stopsAtUnexpectedMarkerOrder() {
     let stdout = "a\nAWTNONCE %9\(separator)t\nb\nAWTNONCE %2\(separator)t\n"
     let parsed = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: "AWTNONCE", expected: panes)
 
-    #expect(parsed.isEmpty)
+    #expect(parsed.entries.isEmpty)
+    #expect(parsed.stopReason == .paneIdentityMismatch)
   }
 
   /// tmux 3.4 の `display-message` は存在しない pane を指しても exit 0 で空の `#{pane_id}` を
   /// 返す (実測)。exit code では検出できないので、マーカーの中身で判定する。
-  @Test("pane ID が空のマーカーは完成とみなさない")
+  @Test("pane ID が空のマーカーは完成とみなさず、消失として扱う")
   func stopsAtEmptyPaneIDMarker() {
     let stdout = "a\nAWTNONCE \(separator)\nb\nAWTNONCE %2\(separator)t\n"
     let parsed = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: "AWTNONCE", expected: panes)
 
-    #expect(parsed.isEmpty)
+    #expect(parsed.entries.isEmpty)
+    #expect(parsed.stopReason == .paneIdentityMismatch)
+  }
+
+  /// pane ID は正しいのに区切りが失われた形。pane は生きているので消失にはしない。
+  @Test("pane ID 以外が壊れたマーカーは消失ではなく復号失敗として報告する")
+  func reportsMalformedMarkerWithoutClaimingDisappearance() {
+    let stdout = "a\nAWTNONCE %1\nb\nAWTNONCE %2\(separator)t\n"
+    let parsed = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: "AWTNONCE", expected: panes)
+
+    #expect(parsed.entries.isEmpty)
+    #expect(parsed.stopReason == .malformedMarker)
   }
 
   /// 出力段の escape は `TmuxListPanes` の既存規則で復号する。
@@ -85,6 +99,6 @@ struct TmuxPaneScreenBatchTests {
     let parsed = TmuxPaneScreenBatch.parse(
       stdout: stdout, nonce: "AWTNONCE", expected: [panes[0]])
 
-    #expect(parsed.map(\.title) == [#"back\slash $dollar"#])
+    #expect(parsed.entries.map(\.title) == [#"back\slash $dollar"#])
   }
 }

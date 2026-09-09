@@ -313,6 +313,28 @@ struct TmuxAgentSignalSourceTests {
     #expect(recovered.secondsSinceScreenChange != nil)
   }
 
+  /// G1 の実害。`forget` されない pane はバッチに相乗りし続け、1バッチの捕捉対象と出力量が
+  /// 単調に増える (起動回数は増えない — バッチは `signals` からしか起きないため)。
+  @Test("forget した pane は次のバッチの対象から外れる")
+  func forgottenPaneLeavesTheBatch() async throws {
+    let panes = (1...3).map { makePaneSnapshot(id: "%\($0)", pid: Int32($0)) }
+    let spy = ObservationProcessSpy(
+      screens: Dictionary(uniqueKeysWithValues: panes.map { ($0.id, ["s\n"]) }))
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    for pane in panes {
+      _ = try await source.signals(for: pane, minimumChangedLines: 1)
+      clock.advance(by: .seconds(2))
+    }
+
+    await source.forget(panes[1])
+    _ = try await source.signals(for: panes[0], minimumChangedLines: 1)
+
+    let invocations = await spy.invocations
+    let lastBatch = ObservationProcessSpy.parseBatch(invocations.last ?? [])
+    #expect(lastBatch.panes == [panes[0].id, panes[2].id])
+  }
+
   @Test("pane_pid 自身が一致すれば子がいなくても alive")
   func rootProcessIsAlive() async throws {
     let spy = ObservationProcessSpy(processTableOutput: "70 1 /opt/tools/agent\n")

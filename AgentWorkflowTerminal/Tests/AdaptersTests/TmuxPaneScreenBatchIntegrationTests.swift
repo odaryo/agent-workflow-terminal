@@ -98,11 +98,11 @@ struct TmuxPaneScreenBatchIntegrationTests {
       #expect(
         TmuxPaneScreenBatch.parse(
           stdout: missing.stdout, nonce: "AWTPROBE", expected: [PaneID(rawValue: "%9999")]
-        ).isEmpty)
+        ).entries.isEmpty)
       #expect(
         TmuxPaneScreenBatch.parse(
           stdout: live.stdout, nonce: "AWTPROBE", expected: [panes[0]]
-        ).count == 1)
+        ).entries.count == 1)
     }
   }
 

@@ -41,6 +41,19 @@ actor TmuxPaneScreenBatcher {
   /// 1回の捕捉で許す tmux 起動の追加ぶん。pane が消えた時の再バッチと、stdout 上限を超えた
   /// ときの分割がここから引かれ、尽きたら残りは `.unavailable` にして次の周期へ送る
   /// (無限ループ防止)。
+  ///
+  /// **8 の根拠**: 上限いっぱいの 16 pane グループを二分し続けて 1 pane まで縮めるには
+  /// 4 段 (16→8→4→2→1) を要し、各段で失敗する試行が1回ずつ積まれる。それを賄ったうえで、
+  /// 同じ捕捉の中で pane が数件消えた場合の再バッチにも余裕を残す値として選んだ。
+  /// 完走を保証する値ではない (16 pane を全部 1 pane まで割るには 31 起動が要る) — これは
+  /// 「どこで諦めるか」の上限であり、諦めた pane は `.unavailable` として次の周期で取り直す。
+  ///
+  /// **上振れの条件**: 10 pane なら 1 グループ + 8 = 最大 9 起動/捕捉。捕捉は `signals` 周期
+  /// (2s) に 1 回なので最悪 4.5 起動/秒となり、完了条件の「4 回/秒以下」を**原理的には
+  /// 超え得る**。到達するには (a) 8 MiB を超える単一 pane が居続ける、または
+  /// (b) 8 pane 以上が同じ捕捉の中で消える、のどちらかが要る。(a) は実測 (200×50 の全セル
+  /// 色違いで 113,346 バイト) から約 70 倍離れており、(b) は一過性である。実測した定常状態は
+  /// 10 pane / 20 秒で 26〜29 起動 = 1.3〜1.5 起動/秒。
   private static let extraLaunchAllowance = 8
 
   /// `screen(of:)` が1回の呼び出しで起こす refresh の上限。1回目は「自分を含まないバッチが
@@ -158,17 +171,15 @@ actor TmuxPaneScreenBatcher {
       }
 
       switch resolve(outcome: outcome, group: group, nonce: nonce) {
-      case .captured(let entries, let missing, let retry):
+      case .captured(let entries, let failed, let retry):
         for entry in entries {
           screens[entry.pane] = .captured(entry.screen)
           titles[entry.pane] = entry.title
         }
-        if let missing { screens[missing] = .paneNotFound }
+        if let failed { screens[failed.pane] = failed.screen }
         if !retry.isEmpty { pending.insert(retry, at: 0) }
       case .split(let groups):
         pending.insert(contentsOf: groups, at: 0)
-      case .unavailable(let pane):
-        screens[pane] = .unavailable
       case .fatal(let error):
         return .failure(error)
       }
@@ -180,12 +191,16 @@ actor TmuxPaneScreenBatcher {
         screens: screens, titles: titles, capturedAt: capturedAt, observedAt: observedAt))
   }
 
+  private struct FailedPane {
+    let pane: PaneID
+    /// `.paneNotFound` (消えた) か `.unavailable` (観測できなかった) のどちらか。
+    let screen: TmuxPaneScreen
+  }
+
   private enum GroupOutcome {
-    /// マーカーが届いた pane の結果と、その次の pane が消えていた場合の再試行。
-    case captured([TmuxPaneScreenBatch.Entry], missing: PaneID?, retry: [PaneID])
+    /// マーカーが届いた pane の結果、走査が止まった1件、および残りの再試行。
+    case captured([TmuxPaneScreenBatch.Entry], failed: FailedPane?, retry: [PaneID])
     case split([[PaneID]])
-    /// この pane だけ今回は読めない。他 pane の結果は捨てない。
-    case unavailable(PaneID)
     case fatal(TmuxRunnerError)
   }
 
@@ -193,31 +208,45 @@ actor TmuxPaneScreenBatcher {
     outcome: Result<String, TmuxRunnerError>, group: [PaneID], nonce: String
   ) -> GroupOutcome {
     let stdout: String
+    let commandFailed: Bool
     switch outcome {
     case .success(let text):
       stdout = text
+      commandFailed = false
     case .failure(.process(.outputLimitExceeded)) where group.count > 1:
       let middle = group.count / 2
       return .split([Array(group[..<middle]), Array(group[middle...])])
     case .failure(.process(.outputLimitExceeded)):
       // これ以上分割できない。1 pane の画面だけを諦め、他 pane の結果は残す。
-      return .unavailable(group[0])
+      return .captured([], failed: FailedPane(pane: group[0], screen: .unavailable), retry: [])
     case .failure(.commandFailed(_, let text, let stderr))
     where !TmuxRunnerError.isServerAbsent(stderr: stderr):
       // 列は失敗した地点で止まり、そこまでの stdout は残る (tmux 3.4 で実測)。
       stdout = text
+      commandFailed = true
     case .failure(let error):
       return .fatal(error)
     }
 
-    // exit code で分岐しない。`display-message` は消えた pane でも exit 0 を返すので、
-    // 「マーカーが届いた pane までが完全」という判定だけが両方の失敗を覆う (tmux 3.4 実測)。
-    let entries = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: nonce, expected: group)
-    guard entries.count < group.count else {
-      return .captured(entries, missing: nil, retry: [])
+    // exit code だけでは分岐できない。`display-message` は消えた pane でも exit 0 を返すため
+    // (tmux 3.4 実測)、走査が止まった理由は復号側から取る。
+    let output = TmuxPaneScreenBatch.parse(stdout: stdout, nonce: nonce, expected: group)
+    guard output.entries.count < group.count else {
+      return .captured(output.entries, failed: nil, retry: [])
     }
+    let screen: TmuxPaneScreen =
+      switch output.stopReason {
+      // マーカーの pane ID が空 / 食い違い = pane の消失。
+      case .paneIdentityMismatch: .paneNotFound
+      // マーカーが届かないまま列が止まるのは `capture-pane` が失敗したとき (= 消えたとき) だけ。
+      // exit 0 のまま尽きるのは想定外の形なので、消失側へは倒さない。
+      case .truncated: commandFailed ? .paneNotFound : .unavailable
+      // pane ID 以外の復号失敗。pane は生きているので登録も変化基準も残す。
+      case .malformedMarker, .completed: .unavailable
+      }
     return .captured(
-      entries, missing: group[entries.count],
-      retry: Array(group.dropFirst(entries.count + 1)))
+      output.entries,
+      failed: FailedPane(pane: group[output.entries.count], screen: screen),
+      retry: Array(group.dropFirst(output.entries.count + 1)))
   }
 }

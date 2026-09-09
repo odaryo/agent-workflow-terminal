@@ -248,6 +248,41 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
   )
 }
 
+/// - Precondition: `ghostty_init` が済んでいること。`ghostty_config_new` は libghostty の
+///   グローバル allocator を使う (`src/config/CApi.zig`)。
+/// - Important: `configurationFileURL` に無いパスを渡してはならない。存在判定は
+///   `TerminalConfigurationFile.resolve` が済ませている (設計書 §21.6)。
+///   ghostty 本体の default files (`ghostty_config_load_default_files`) は**呼ばない**。
+///   libghostty の bundle id はコンパイル時定数 `com.mitchellh.ghostty` なので、
+///   default files は本物の Ghostty.app 向けの設定を読み込むことになる。
+///
+/// Why not `GhosttyRuntime` の private method: この手順そのものをテストが叩くため
+/// (Issue #236)。テスト側に同じ手順を書き直すと、本番経路が腐っても緑のままになる。
+@MainActor
+func makeGhosttyConfiguration(configurationFileURL: URL?) throws -> ghostty_config_t {
+  guard let config = ghostty_config_new() else {
+    throw GhosttyRendererError.configurationCreationFailed
+  }
+  if let configurationFileURL {
+    configurationFileURL.path.withCString { path in
+      ghostty_config_load_file(config, path)
+    }
+  }
+  ghostty_config_finalize(config)
+  logGhosttyConfigurationDiagnostics(from: config)
+  return config
+}
+
+private func logGhosttyConfigurationDiagnostics(from config: ghostty_config_t) {
+  let count = ghostty_config_diagnostics_count(config)
+  for index in 0..<count {
+    let diagnostic = ghostty_config_get_diagnostic(config, index)
+    if let message = diagnostic.message {
+      NSLog("[app] ghostty config: \(String(cString: message))")
+    }
+  }
+}
+
 @MainActor
 private final class GhosttyRuntime {
   static let shared = GhosttyRuntime()
@@ -283,18 +318,8 @@ private final class GhosttyRuntime {
     guard ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == 0 else {
       throw GhosttyRendererError.initializationFailed
     }
-    guard let newConfig = ghostty_config_new() else {
-      throw GhosttyRendererError.configurationCreationFailed
-    }
+    let newConfig = try makeGhosttyConfiguration(configurationFileURL: configurationFileURL)
     config = newConfig
-
-    if let configurationFileURL {
-      configurationFileURL.path.withCString { path in
-        ghostty_config_load_file(newConfig, path)
-      }
-    }
-    ghostty_config_finalize(newConfig)
-    logDiagnostics(from: newConfig)
 
     var runtimeConfiguration = makeGhosttyRuntimeConfiguration()
 
@@ -331,16 +356,6 @@ private final class GhosttyRuntime {
   private func keyboardChanged() {
     guard let app else { return }
     ghostty_app_keyboard_changed(app)
-  }
-
-  private func logDiagnostics(from config: ghostty_config_t) {
-    let count = ghostty_config_diagnostics_count(config)
-    for index in 0..<count {
-      let diagnostic = ghostty_config_get_diagnostic(config, index)
-      if let message = diagnostic.message {
-        NSLog("[app] ghostty config: \(String(cString: message))")
-      }
-    }
   }
 
   fileprivate static func readClipboard(

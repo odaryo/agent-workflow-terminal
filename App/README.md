@@ -36,8 +36,19 @@ publish より先に PR を開くと、対応する Release アセットがま�
 
 `scripts/build-ghostty.sh` と `scripts/wf-ghostty-publish.sh` を使うのは、ghostty の ref を
 上げる担当者だけです。`build-ghostty.sh` には zig 0.15、Xcode、Metal Toolchain、`llvm-libtool-darwin` が必要です。
-ユーザーの `~/.config/ghostty/config` は自動では読みません。設定を使う場合は
-`TerminalRendererConfiguration.configurationFileURL` から明示的に指定します。
+
+## 端末の設定ファイル
+
+端末 (libghostty) の設定は `${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-terminal/config`
+から読みます。書式は ghostty の設定構文そのものです (例: `font-size = 15`)。ファイルが無ければ
+何も読まず、libghostty のコンパイル既定で起動します。読み込みはプロセス起動時の 1 回だけで、
+編集を反映するにはアプリを再起動します。
+
+ghostty 本体の設定 (`~/.config/ghostty/config` などの `ghostty_config_load_default_files` が
+読む経路) は**読みません**。libghostty の bundle id はコンパイル時定数 `com.mitchellh.ghostty`
+なので、その経路には `~/Library/Application Support/com.mitchellh.ghostty/config` —
+つまり本物の Ghostty.app 向けに書かれた設定 — が含まれ、別アプリであるこの端末へ
+keybind や `scrollback-limit` が黙って効いてしまうためです (設計書 §21.6)。
 
 ## ripgrep
 

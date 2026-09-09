@@ -349,6 +349,11 @@ private struct WorktreeTab: View {
   }
 }
 
+// Why not body のたびに解決: libghostty の設定はプロセスに1つで最初の初期化時に固定されるため、後から違う URL を渡すと端末が開かなくなる。ファイルの有無は実行中に変わり得る (設計書 §21.6)。
+private let terminalConfigurationFileURL = TerminalConfigurationFile.resolve(
+  environment: ProcessInfo.processInfo.environment,
+  fileExists: { FileManager.default.fileExists(atPath: $0) })
+
 private struct TerminalTabContent: View {
   let worktree: DetectedWorktree
   let sessions: TmuxSessionProvisioner?
@@ -403,6 +408,7 @@ private struct TerminalTabContent: View {
       GhosttyTerminalView(
         command: command,
         workingDirectory: worktree.worktreePath,
+        configurationFileURL: terminalConfigurationFileURL,
         focusRequest: focusRequest,
         // プロセスが終わった端末にキーボードを持たせない。`focusRequest` を `nil` に
         // すり替える形では塞がらない — `nil` は「取りに行かない」だけで、既に別のタブの

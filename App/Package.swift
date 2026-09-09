@@ -47,6 +47,13 @@ let package = Package(
       ],
       swiftSettings: commonSwiftSettings
     ),
+    .testTarget(
+      name: "GhosttyRendererTests",
+      dependencies: ["GhosttyRenderer", "GhosttyKit"],
+      swiftSettings: commonSwiftSettings + [
+        .unsafeFlags(["-Xcc", "-Wno-incomplete-umbrella"])
+      ]
+    ),
   ],
   swiftLanguageModes: [.v6]
 )

@@ -309,6 +309,11 @@ private struct TerminalTabContent: View {
   let sessions: TmuxSessionProvisioner?
   let focusRequest: TerminalFocusRequest?
   @State private var preparation = TerminalSessionPreparation.preparing
+  /// attach の試行番号。**世代の識別子**であり、失敗の再試行回数ではない。
+  /// `.task(id:)` を再走させる鍵と、覆う世代の突き合わせに使う。
+  @State private var attempt = 0
+  /// どの世代を覆うかの規則は `TerminalCore` が持つ。ここはその答えを表示へ配るだけ。
+  @State private var exitObservation = TerminalExitObservation()
 
   var body: some View {
     Group {
@@ -319,11 +324,7 @@ private struct TerminalTabContent: View {
         case .preparing:
           ProgressView("tmux session を用意しています")
         case .ready(let command):
-          GhosttyTerminalView(
-            command: command,
-            workingDirectory: worktree.worktreePath,
-            focusRequest: focusRequest
-          )
+          terminal(command: command, generation: attempt)
         case .failed(let reason):
           ContentUnavailableView(
             "tmux session を用意できません", systemImage: "exclamationmark.triangle",
@@ -331,19 +332,93 @@ private struct TerminalTabContent: View {
         }
       }
     }
-    // タブごとに1回だけ走らせる。用意し直すと、その worktree の端末が動いている最中に
-    // surface を作り替えることになる。
-    .task(id: worktree.identity) {
+    // 1つの世代につき1回だけ走らせる。用意し直すと、その worktree の端末が動いている最中に
+    // surface を作り替えることになる。世代が上がるのは、下の再 attach を押したときだけ。
+    .task(id: TerminalSessionAttempt(identity: worktree.identity, attempt: attempt)) {
       guard let sessions, case .preparing = preparation else { return }
+      let result = await sessions.attachCommand(
+        for: worktree.identity, workingDirectory: worktree.worktreePath)
+      // Why not 書いてしまう: cancel 後のこの task はもう古い世代のものであり、その結果で
+      // 新しい世代の用意を上書きすると、表示と argv の世代が食い違う。
+      guard !Task.isCancelled else { return }
       preparation =
-        switch await sessions.attachCommand(
-          for: worktree.identity, workingDirectory: worktree.worktreePath)
-        {
+        switch result {
         case .success(let command): .ready(command)
         case .failure(let error): .failed(error.terminalTabDescription)
         }
     }
   }
+
+  // Why 引数で受ける: `attempt` を**値として**渡すため。closure の中で `attempt` を読むと、
+  // `@State` は保存領域から現在値を返すので、通知が届いた時点の値になり、世代の
+  // 突き合わせにならない。
+  private func terminal(command: [String], generation: Int) -> some View {
+    let hasExited = exitObservation.isExited(generation: generation)
+    return ZStack {
+      GhosttyTerminalView(
+        command: command,
+        workingDirectory: worktree.worktreePath,
+        focusRequest: focusRequest,
+        // プロセスが終わった端末にキーボードを持たせない。`focusRequest` を `nil` に
+        // すり替える形では塞がらない — `nil` は「取りに行かない」だけで、既に別のタブの
+        // 端末が持っている first responder を誰も降ろさないため、覆いを見ながらの打鍵が
+        // 別 worktree の生きた session へ入る (Issue #234)。
+        keyboardParticipation: hasExited ? .withdrawn : .normal,
+        stateChanged: { state in exitObservation.observe(state, generation: generation) }
+      )
+      // 世代ごとに別の NSView にする。`GhosttySurfaceView` は `start()` の時点の argv を
+      // 保持するので、使い回されると再 attach の新しい argv が効かない。加えて、非同期に
+      // 届く状態通知が世代をまたがないことも、この `.id` が保証している。
+      .id(generation)
+      // 覆いが出ている間はマウスも端末へ通さない。SwiftUI の重ね順で足りるはずだが、実体は
+      // hosting view の subview である AppKit の NSView なので、重ね順だけに頼らない。
+      .allowsHitTesting(!hasExited)
+      if hasExited { exitedOverlay }
+    }
+  }
+
+  /// surface を**完全に覆う**。libghostty が `wait-after-command` で出す
+  /// "Press any key to close the terminal." は、こちらからは消せず、押しても閉じない
+  /// (閉じるかどうかは上位の判断で、`GhosttySurfaceView.handleCloseRequest` は意図的に
+  /// 何もしない)。文言と挙動を一致させる手段は、その文言を操作対象から外すことだけである。
+  ///
+  /// - Important: **終わった理由は名乗らない。** 観測できるのは「端末のプロセスが終わった」
+  ///   ことだけで、`detach` なのか最後の pane での `exit` なのかは区別できない
+  ///   (どちらも client の終了状態は 0。隔離ソケットで実測、Issue #234)。前者では session が
+  ///   残り、後者では session ごと消えて再 attach は新しい session を作る。区別できない
+  ///   ものを断定して見せない (設計書 §12.3 の `Unknown` と同じ理由)。
+  private var exitedOverlay: some View {
+    VStack(spacing: 10) {
+      Image(systemName: "bolt.horizontal.circle").font(.largeTitle)
+      Text("この端末のプロセスが終了しました").font(.headline)
+      Text(
+        """
+        tmux から detach したか、session が終了しています。再 attach すると session を\
+        用意し直します — 残っていれば同じ session に、消えていれば新しい session になります。
+        """
+      )
+      .foregroundStyle(.secondary)
+      .multilineTextAlignment(.center)
+      Button("再 attach") {
+        // 世代を上げて `.task` を再走させる。`restart()` (同じ argv の再実行) では復帰しない
+        // 場合がある — attach の argv は `-A` を持たないので、session が消えていると
+        // `can't find session` で終わる (隔離ソケットで実測、Issue #234)。provisioner を
+        // 通せば、残っていれば Resume、消えていれば §4.2 / §4.4 の保証付きで作り直しになる。
+        attempt += 1
+        preparation = .preparing
+      }
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    // 不透明にする。半透明だと下の英文が透けて読め、押せない案内が押せるように見える。
+    .background(Color(nsColor: .windowBackgroundColor))
+  }
+}
+
+/// `.task(id:)` の鍵。worktree が同じでも世代が変われば用意をやり直す。
+private struct TerminalSessionAttempt: Equatable {
+  let identity: WorktreeIdentity
+  let attempt: Int
 }
 
 private enum TerminalSessionPreparation {

@@ -24,9 +24,8 @@ public enum FileChangeEvent: Sendable, Hashable {
 public struct FileChangeWatcher: Sendable {
   public let path: URL
   public let interval: FileChangeObservationInterval
-  /// ポーリングが生きているかは外から観測できず、プロセス全体の CPU が唯一の代理だった。
-  /// macOS では SwiftPM が全テストターゲットを 1 つの xctest バンドル (= 1 プロセス) に束ねるため、
-  /// そこには同時に走る別ターゲットのテストの CPU が混ざり、主張の真偽と無関係に判定が揺れる (#319)。
+  /// 観測専用の seam で、製品経路では常に nil (#319)。監視 Task の上で周期ごとに同期に呼ばれるので、
+  /// 重い処理やブロックする処理を渡すとポーリング周期そのものが伸び、測っている量が変わる。
   let onPoll: (@Sendable () -> Void)?
 
   public init(path: URL, interval: FileChangeObservationInterval = .default) {

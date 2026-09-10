@@ -156,6 +156,8 @@ struct FileChangeWatcherIntegrationTests {
   /// 「止まっていない」側の観測回数まで一緒に小さくなるため (プロセス全体の CPU を基準に
   /// していた頃の #319 の揺れと同じ機序)。止めない watcher を 1 本残し、その観測回数を
   /// 物差しに使えば、負荷がどうであれ「止まっていなければ同じだけ観測されたはず」の量で測れる。
+  /// 打ち切る側を 1 本にしないのは、取りこぼしが確率的な実装 (例: 4 回に 1 回だけ打ち切り損なう)
+  /// に対して検出確率が漏れ率そのものになるため。まとめて打ち切って合算すると 1-(1-p)^N になる。
   @Test("キャンセルでポーリングが解放される", .timeLimit(.minutes(1)))
   func releasesPollingOnCancellation() async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
@@ -165,31 +167,38 @@ struct FileChangeWatcherIntegrationTests {
     try Data("aa".utf8).write(to: file)
     let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(1)))
 
+    let watcherCount = 32
+    let settleWindow = 20
+    let measurementWindow = 100
     let cancelledPolls = PollCounter()
     let witnessPolls = PollCounter()
-    let cancelledStream = FileChangeWatcher(
-      path: file, interval: interval, onPoll: { cancelledPolls.increment() }
-    ).events()
+    var cancelledTasks: [Task<Void, Never>] = []
+    for _ in 0..<watcherCount {
+      let stream = FileChangeWatcher(
+        path: file, interval: interval, onPoll: { cancelledPolls.increment() }
+      ).events()
+      cancelledTasks.append(Task { for await _ in stream {} })
+    }
     let witnessStream = FileChangeWatcher(
       path: file, interval: interval, onPoll: { witnessPolls.increment() }
     ).events()
-    let cancelledTask = Task { for await _ in cancelledStream {} }
     let witnessTask = Task { for await _ in witnessStream {} }
     defer { witnessTask.cancel() }
 
-    try await waitForPollCount(20, counter: cancelledPolls)
+    try await waitForPollCount(watcherCount * 5, counter: cancelledPolls)
     try await waitForPollCount(20, counter: witnessPolls)
-    cancelledTask.cancel()
-    await cancelledTask.value
+    for task in cancelledTasks { task.cancel() }
+    for task in cancelledTasks { await task.value }
 
     // キャンセルが producer へ伝わるまでの猶予も、実時間ではなく物差し側の周期数で取る。
-    try await waitForPollCount(witnessPolls.count + 20, counter: witnessPolls)
+    try await waitForPollCount(witnessPolls.count + settleWindow, counter: witnessPolls)
     let stopped = cancelledPolls.count
-    try await waitForPollCount(witnessPolls.count + 50, counter: witnessPolls)
+    try await waitForPollCount(witnessPolls.count + measurementWindow, counter: witnessPolls)
 
-    // 入れ違いで始まっていた 1 周期は数えうる。止まっていなければ物差しと同じ ~50 回増える。
+    // 猶予を挟んでも入れ違いの 1 周期は watcher ごとに数えうるので、上界は本数そのもの
+    // (実測では負荷の有無によらず 0)。1 本でも止まっていなければ物差しと同じ ~100 回増える。
     let extra = cancelledPolls.count - stopped
-    #expect(extra <= 1, "キャンセル後に \(extra) 回ポーリングした")
+    #expect(extra <= watcherCount, "キャンセル後に \(extra) 回ポーリングした")
   }
 
   @Test("正でない周期を拒否する", arguments: [Duration.zero, .milliseconds(-1)])
@@ -210,10 +219,12 @@ struct FileChangeWatcherIntegrationTests {
   }
 
   /// 期限は判定の物差しではなく、ポーリングが一切進まないまま吊るのを避けるための保険。
-  /// 1ms 周期に対して桁違いに緩いので、負荷で先に切れることはない。
+  /// `.timeLimit` より先に待ち全部が切れて診断が出揃う長さにする (30 秒だと 2 つ目を待つ間に
+  /// `.timeLimit` が発火し、肝心の判定まで到達しない)。待つ箇所を増やすときはこの上限も見直す。
+  /// 正常時の最悪は実測 359 ms (spinner 250 本、0.0% idle) なので、2 秒は 5.6 倍の余裕がある。
   private func waitForPollCount(_ count: Int, counter: PollCounter) async throws {
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .seconds(30))
+    let deadline = clock.now.advanced(by: .seconds(2))
     while counter.count < count {
       guard clock.now < deadline else {
         Issue.record("期限までに \(count) 回のポーリングが観測できなかった (\(counter.count) 回)")
@@ -241,7 +252,9 @@ private actor EventRecorder {
   func append(_ event: FileChangeEvent) { values.append(event) }
 }
 
-/// `onPoll` は監視 Task から同期に呼ばれるため actor へ hop できない (docs/coding-guidelines.md §1.2)。
+/// actor にして `Task { await … }` で hop すると、増分がポーリングと非同期になり、判定が読む
+/// スナップショットが在庫を取りこぼす (実測: 周期は変わらず、`stopped` が watcher 1 本あたり
+/// 1 回ぶん小さく出る)。不可分性が要る側なので lock を選ぶ (docs/coding-guidelines.md §1.2 の例外)。
 private final class PollCounter: Sendable {
   private let state = OSAllocatedUnfairLock(initialState: 0)
 

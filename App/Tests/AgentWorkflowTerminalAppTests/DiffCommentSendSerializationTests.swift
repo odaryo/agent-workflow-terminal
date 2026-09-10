@@ -94,6 +94,21 @@ struct DiffCommentSendSerializationTests {
     #expect(await fixture.processRunner.injectionCount == 2)
   }
 
+  /// T2b: 閾値そのものが長すぎないこと。T2 は `window` を参照して相対的に跨ぐので、定数が
+  /// 1 分に伸びても緑のまま通る (窓を上から挟めない)。要求「意図的な再送を妨げない」は
+  /// 窓の長さに直接かかっているので、実時間の絶対値で挟んでおく。
+  @Test("2 秒おいた同一要求は通る (閾値が長すぎないことの上限)")
+  func allowsIdenticalRequestAfterTwoSeconds() async throws {
+    let fixture = try await Fixture.make()
+    defer { fixture.cleanUp() }
+
+    await fixture.requestSend()
+    fixture.timeSource.advance(by: .seconds(2))
+    await fixture.requestSend()
+
+    #expect(await fixture.processRunner.injectionCount == 2)
+  }
+
   /// T3: 注入が失敗した直後の同一要求は通る。記録するのが成功時だけであることの回帰。
   @Test("注入が失敗した直後の同一要求は通る")
   func allowsIdenticalRequestRightAfterFailedInjection() async throws {

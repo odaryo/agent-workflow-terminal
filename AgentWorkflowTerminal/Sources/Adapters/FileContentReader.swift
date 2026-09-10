@@ -159,17 +159,20 @@ public struct FileContentReader: Sendable {
     let limit = min(byteCount, thresholds.absoluteMaximumByteCount)
     let isTruncated = limit < byteCount
     // バイナリ判定用のサンプルは絶対上限より先に読んでいるので、上限の方が短いことがある。
-    let data: Data
-    if isTruncated {
-      data =
-        sampleData.count >= limit
-        ? Data(sampleData.prefix(limit))
-        : sampleData + (try handle.read(upToCount: limit - sampleData.count) ?? Data())
-    } else {
-      data = sampleData + (try handle.readToEnd() ?? Data())
-    }
+    let data =
+      sampleData.count >= limit
+      ? Data(sampleData.prefix(limit))
+      : sampleData + (try Self.read(from: handle, upTo: limit - sampleData.count))
     guard data.count == limit else {
       throw FileContentReaderError.fileChanged(expected: limit, actual: data.count)
+    }
+    // 読取中に増大したファイルを `readToEnd()` で読み切ると、絶対上限が拒否の判定値にしかならず
+    // 読取量の上界にならない (#347: 上限 16 MiB に対し 32 MiB を読んでから拒否していた)。増大の
+    // 検知に要るのは 1 バイトだけ。打ち切った場合は上限の先にバイトが有るのが正常なので、
+    // 全量を読んだ場合に限って検知する。
+    if !isTruncated, let excess = try handle.read(upToCount: 1), !excess.isEmpty {
+      throw FileContentReaderError.fileChanged(
+        expected: limit, actual: Self.byteCount(of: handle, atLeast: limit + excess.count))
     }
     // 設計書に文字コード推測の要求が無いため、不正 UTF-8 は別 encoding ではなく binary とする。
     guard let decoded = Self.decodeUTF8(data, droppingIncompleteTail: isTruncated) else {
@@ -186,6 +189,28 @@ public struct FileContentReader: Sendable {
       observation: observation,
       decision: decision,
       text: decision == .display || confirmation == .confirmed ? text : nil)
+  }
+
+  /// 読む量を `count` で頭打ちにする。1回の `read(upToCount:)` が要求量を返さない場合に
+  /// `fileChanged` へ化けないよう EOF まで繰り返す (計測: ローカル APFS の通常ファイルでは
+  /// 40 MiB の要求が 1 回で返ったが、短い読みが起きないことまでは測れていない)。
+  private static func read(from handle: FileHandle, upTo count: Int) throws -> Data {
+    var data = Data()
+    while data.count < count {
+      guard let chunk = try handle.read(upToCount: count - data.count), !chunk.isEmpty else {
+        break
+      }
+      data.append(chunk)
+    }
+    return data
+  }
+
+  /// 増大後のサイズ。読んだバイト数は上限で頭打ちになるので、そこからは出せない。`fstat` が
+  /// 失敗した場合と、増大の検知後にさらに縮んだ場合に備えて、実際に読めた分を下限に使う。
+  private static func byteCount(of handle: FileHandle, atLeast lowerBound: Int) -> Int {
+    var info = stat()
+    guard fstat(handle.fileDescriptor, &info) == 0 else { return lowerBound }
+    return max(Int(info.st_size), lowerBound)
   }
 
   /// 絶対上限は文字境界を無視して切るため、末尾に不完全な UTF-8 列が残り得る。これを不正 UTF-8 =

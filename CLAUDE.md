@@ -57,6 +57,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
 | Create an Issue | `scripts/wf-issue-create.sh` |
 | Comment on an Issue | `scripts/wf-issue-comment.sh` |
+| Close an Issue that has no PR | `scripts/wf-issue-close.sh` |
 | Update Issue Project status | `scripts/wf-project-status.sh` |
 | Create / close a milestone, assign Issues to one | `scripts/wf-milestone.sh` |
 | Add / remove Issue labels | `scripts/wf-issue-label.sh` |

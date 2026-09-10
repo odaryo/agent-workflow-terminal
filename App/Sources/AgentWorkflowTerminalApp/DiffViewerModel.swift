@@ -86,6 +86,11 @@ final class DiffViewerModel: ObservableObject {
   /// 部分成功で落ちた分と、中身を読めなかった untracked。黙って捨てない。
   @Published private(set) var notices: [String] = []
 
+  /// 送信操作が進行中か。`requestSend` の入口から `inject` の完了までを覆う (Issue #276)。
+  /// `isSending` と別に持つのは、あちらが UI の無効化を通じて「今 pane へ注入している」を表して
+  /// おり、範囲を `resolve` まで広げるとボタンの無効化の意味が変わるため。
+  private var isSendInProgress = false
+
   /// ユーザーが選び直した base branch。タスクタブごとに覚え、次に開いても再判定しない (§9.1.1)。
   private var userSelectedBaseBranch: String?
   private var didLoadContext = false
@@ -195,6 +200,21 @@ final class DiffViewerModel: ObservableObject {
 
   // MARK: - 送信 (§9.2 / §12.7)
 
+  /// 送信操作を1つに直列化する入口。進行中の送信があれば `false` を返し、**その要求は捨てる**
+  /// (連打の意図は「1回送る」であって「2回送る」ではない。Issue #276)。
+  ///
+  /// `isSending` では代われない: あれが立つのは `inject` の前後だけで、`resolve` の中断中は
+  /// false のまま2度目の要求が同じ判定を通り、`inject` の完了直後にも同じ窓が開く。
+  private func beginSend() -> Bool {
+    guard !isSendInProgress else { return false }
+    isSendInProgress = true
+    return true
+  }
+
+  private func endSend() {
+    isSendInProgress = false
+  }
+
   /// 送信先が未登録、または登録先が消えていれば `paneSelectionRequest` を立てて選ばせる。
   /// 候補が1つでも自動では選ばない (§12.7 確定)。
   func requestSend(
@@ -203,7 +223,8 @@ final class DiffViewerModel: ObservableObject {
     mainPane: MainPaneCoordinator,
     agentPaneStates: [PaneAgentState]?
   ) async {
-    guard !isSending else { return }
+    guard beginSend() else { return }
+    defer { endSend() }
     dismissMessages()
     switch await mainPane.resolve(
       for: worktree, agentPaneIDs: Set((agentPaneStates ?? []).map(\.id)))
@@ -212,7 +233,9 @@ final class DiffViewerModel: ObservableObject {
       commentError = failure.message
     case .success(let observation):
       if case .registered(let registration, _) = observation.resolution {
-        await send(
+        // 入口で既に `beginSend` を通しているので、ここは guard を持たない `performSend` を呼ぶ。
+        // `send` を呼ぶと自分の送信を自分で捨てる。
+        await performSend(
           pending, to: registration, worktree: worktree, mainPane: mainPane,
           agentPaneStates: agentPaneStates)
         return
@@ -279,7 +302,21 @@ final class DiffViewerModel: ObservableObject {
     mainPane: MainPaneCoordinator,
     agentPaneStates: [PaneAgentState]?
   ) async {
-    guard !isSending else { return }
+    guard beginSend() else { return }
+    defer { endSend() }
+    await performSend(
+      pending, to: registration, worktree: worktree, mainPane: mainPane,
+      agentPaneStates: agentPaneStates)
+  }
+
+  /// 直列化を済ませた後の送信本体。**`beginSend()` を通した呼び出し元からだけ呼ぶ。**
+  private func performSend(
+    _ pending: PendingSend,
+    to registration: MainPaneRegistration,
+    worktree: WorktreeIdentity,
+    mainPane: MainPaneCoordinator,
+    agentPaneStates: [PaneAgentState]?
+  ) async {
     let pane = registration.pane
     mainPane.register(registration, for: worktree)
     paneSelectionRequest = nil

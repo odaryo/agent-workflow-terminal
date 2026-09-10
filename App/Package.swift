@@ -48,6 +48,15 @@ let package = Package(
       swiftSettings: commonSwiftSettings
     ),
     .testTarget(
+      name: "AgentWorkflowTerminalAppTests",
+      dependencies: [
+        "AgentWorkflowTerminalApp",
+        .product(name: "Adapters", package: "AgentWorkflowTerminal"),
+        .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
+      ],
+      swiftSettings: commonSwiftSettings
+    ),
+    .testTarget(
       name: "GhosttyRendererTests",
       dependencies: [
         "GhosttyRenderer",

@@ -92,16 +92,68 @@ struct GitSquashMergeCloseIntegrationTests {
     }
   }
 
-  @Test("走査する commit 数の上限を超えたら merged ではなく unmerged へ倒す")
-  func fallsBackToUnmergedBeyondScanLimit() async throws {
+  @Test("上限は新しい方から数える。上限内の squash は拾い、外は unmerged へ倒す")
+  func scansNewestCommitsWithinScanLimit() async throws {
+    try await withGitRepository { repository in
+      try await repository.addBranchWorktree("topic", commits: [["a.txt": "a1"]])
+      try await repository.commitOnDefaultBranch(files: ["unrelated.txt": "u1"])
+      try await repository.squashMerge("topic")
+
+      // 既定 branch 側は [squash(新), unrelated(古)]。上限 1 でも最新の squash は見る。
+      #expect(try await repository.branchMergeStatus("topic", scanLimit: 1) == .merged)
+    }
+  }
+
+  @Test("上限より古い位置にある squash は走査せず unmerged にする")
+  func stopsAtScanLimitWithoutReachingOlderSquash() async throws {
     try await withGitRepository { repository in
       try await repository.addBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.squashMerge("topic")
       try await repository.commitOnDefaultBranch(files: ["unrelated.txt": "u1"])
 
-      // squash commit は既定 branch の 2 件目。上限 1 では走査が届かない。
+      // 既定 branch 側は [unrelated(新), squash(古)]。上限 1 は squash に届かない。
       #expect(try await repository.branchMergeStatus("topic", scanLimit: 1) == .unmerged)
       #expect(try await repository.branchMergeStatus("topic", scanLimit: 2) == .merged)
+    }
+  }
+
+  @Test("共通祖先を持たない branch は判定不能ではなく unmerged")
+  func treatsUnrelatedHistoryAsUnmerged() async throws {
+    try await withGitRepository { repository in
+      // 共通祖先が無いと `merge-base` は rc 1 / 空出力を返す (git 2.50.1 実測)。異常終了と
+      // 同じ扱いにすると、修正前は `.unmerged` だった branch が `.unknown` へ格下げされる。
+      try await repository.addOrphanWorktree("alien", files: ["alien.txt": "x1"])
+
+      #expect(try await repository.branchMergeStatus("alien") == .unmerged)
+    }
+  }
+
+  @Test("既定 branch が無関係な履歴を取り込んでいても、未マージ branch を merged にしない")
+  func keepsUnmergedBranchUnmergedWithParentlessCommitInRange() async throws {
+    try await withGitRepository { repository in
+      // 取り込まれた root commit は親を持たず、「既定 branch へ何を持ち込んだか」を第1親との
+      // 差では書けない。走査から外す側が `.merged` に倒れると、この branch が消せてしまう。
+      try await repository.addBranchWorktree("topic", commits: [["a.txt": "a1"]])
+      try await repository.addOrphanWorktree("alien", files: ["alien.txt": "x1"])
+      try await repository.git(
+        ["merge", "-q", "--allow-unrelated-histories", "-m", "merge alien", "alien"])
+
+      #expect(try await repository.branchMergeStatus("topic") == .unmerged)
+    }
+  }
+
+  @Test("既定 branch 側の merge commit は第1親との差で突き合わせる")
+  func comparesMergeCommitAgainstItsFirstParent() async throws {
+    try await withGitRepository { repository in
+      // 同じ最終内容を別の刻み方で持つ branch が `--no-ff` で入った形。合成差分と一致するのは
+      // merge commit の第1親側だけで、第2親側の差は空になる。
+      try await repository.addBranchWorktree(
+        "topic", commits: [["a.txt": "a1"], ["a.txt": "a1\na2"]])
+      try await repository.addBranchWorktree(
+        "mirror", commits: [["a.txt": "a0"], ["a.txt": "a1\na2"]])
+      try await repository.git(["merge", "-q", "--no-ff", "-m", "merge mirror", "mirror"])
+
+      #expect(try await repository.branchMergeStatus("topic") == .merged)
     }
   }
 }
@@ -115,6 +167,13 @@ extension GitTestRepository {
     for files in commits {
       try await commitOnBranchWorktree(branch, files: files)
     }
+  }
+
+  /// 既定 branch と共通祖先を持たない branch。`--orphan` に commit-ish は渡せない
+  /// (git 2.50.1 実測: `fatal: option '--orphan' and commit-ish cannot be used together`)。
+  fileprivate func addOrphanWorktree(_ branch: String, files: [String: String]) async throws {
+    try await git(["worktree", "add", "-q", "--orphan", "-b", branch, "../\(branch)"])
+    try await commitOnBranchWorktree(branch, files: files)
   }
 
   fileprivate func commitOnBranchWorktree(

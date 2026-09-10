@@ -10,7 +10,11 @@ import Testing
 /// fixture では固定できない。判定は `merge-base` / `log` / `diff --raw` の**実 git の出力の
 /// 組み合わせ**であり、squash merge が既定 branch 側でどの blob 遷移になるかは実際に
 /// `merge --squash` を通さないと再現できない。
-@Suite("§3.4 実 git の squash merge を Close の merge 判定が拾う")
+// 12 件が並列に走ると実 git のプロセスが同時に十数本立ち、同じ job の中で
+// wall-clock の閾値を持つテスト (`GitWorktreeScanFailureIntegrationTests` の
+// entryTimeout 200 ミリ秒) を CI で押し出した (実測: main は緑、本 suite 追加で 2/2 赤)。
+// 直列化してこの suite が積む同時実行数を 1 に抑える。
+@Suite("§3.4 実 git の squash merge を Close の merge 判定が拾う", .serialized)
 struct GitSquashMergeCloseIntegrationTests {
   @Test("fast-forward で取り込んだ branch は ancestor 判定のまま merged")
   func detectsAncestorMerge() async throws {

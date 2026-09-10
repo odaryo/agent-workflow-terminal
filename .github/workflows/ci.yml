@@ -203,6 +203,32 @@ jobs:
         working-directory: App
         run: swift test
 
+  # session 名が正しいかは 2 段に分かれる。**規則** (安定 ID → 名前) が Swift の TmuxSessionName と
+  # 一致することと、**規則へ渡す安定 ID の取り方** (worktree → 管理ディレクトリ) が git と一致する
+  # こと。どちらがずれても wf-worktree-remove.sh は残骸を見落とすか別の session を指す (Issue #343)。
+  # 前者は静的な一覧で、後者は実際に組み立てた git リポジトリ群で検査する。
+  #
+  # Build & Test から分けているのは、落ちたときに「どちらの実装が壊れたか」ではなく
+  # 「両者がずれた」ことだけを示す job にしたいため。TerminalCore しかビルドしない。
+  session-name-parity:
+    name: Session name parity (bash vs Swift/git)
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          python3 --version
+          git --version
+
+      - name: Cross-check the naming rule
+        run: scripts/check-session-name-parity.sh
+
+      - name: Cross-check the stable ID (worktree admin dir)
+        run: scripts/check-worktree-admin-dir.sh
+
   # PreToolUse (Bash) フックの判定本体を fixture で検査する。フックは Claude Code の設定から
   # 呼ばれるだけでリポジトリのビルドには関与しないため、壊れても他の job は緑のまま通る
   # (Issue #314)。

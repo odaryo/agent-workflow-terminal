@@ -156,8 +156,8 @@ struct GitCloseSafetyInspectorTests {
     #expect(result.failures.isEmpty)
   }
 
-  @Test("detached HEAD では push と merge を問わない")
-  func skipsBranchChecksForDetachedHead() async throws {
+  @Test("detached HEAD の push と merge は判定不能であり、問う必要が無いのではない")
+  func reportsBranchChecksAsUnknownForDetachedHead() async throws {
     let stub = CloseInspectionProcessStub { arguments in
       #expect(
         [GitReadCommand.status().arguments, GitReadCommand.status(includeIgnored: true).arguments]
@@ -173,9 +173,9 @@ struct GitCloseSafetyInspectorTests {
 
     #expect(result.report.inspection.uncommittedChanges == .absent)
     #expect(result.report.inspection.ignoredFiles == .absent)
-    #expect(result.report.inspection.unpushedCommits == .notApplicable)
-    #expect(result.report.inspection.branchMerge == .notApplicable)
-    #expect(result.report.defaultBranch == .unresolved(reason: .notNeededForDetachedHead))
+    #expect(result.report.inspection.unpushedCommits == .unknown)
+    #expect(result.report.inspection.branchMerge == .unknown)
+    #expect(result.report.defaultBranch == .unresolved(reason: .detachedHead))
     #expect(result.failures.isEmpty)
   }
 

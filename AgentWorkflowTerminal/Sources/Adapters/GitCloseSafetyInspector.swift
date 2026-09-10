@@ -286,9 +286,14 @@ public struct GitCloseSafetyInspector: Sendable {
       mergeBaseOutput = try await runner.run(.mergeBase(target, destination)).stdout
         .trimmingCharacters(in: .whitespacesAndNewlines)
     } catch GitRunnerError.commandFailed(let exitCode, _, _) where exitCode == 1 {
-      // 共通祖先が無いという**答え**であって異常ではない (git 2.50.1 実測: rc=1 / stdout 空 /
-      // stderr 空。不正な ref は rc=128、option の誤りは rc=129 なので取り違えない)。
-      // 共通祖先が無ければ合成差分の起点が無く、squash merge され得ない。
+      // 共通祖先が無いという**答え**であって異常ではない (git 2.50.1 / 2.55.0 で実測:
+      // rc=1 / stdout 空 / stderr 空。不正な ref は rc=128、option の誤りは rc=129 なので
+      // 取り違えない)。plain な `merge-base` の EXIT STATUS は man に無く、rc=1 の意味は
+      // 契約ではなくこの 2 版での実測である。
+      //
+      // 共通祖先が無い branch も `--allow-unrelated-histories` を付ければ squash merge され得る
+      // (実測: 取り込んだ内容が既定 branch に入る)。それでも合成差分の起点が無いのでこの手法では
+      // 検出せず、安全側の `.unmerged` に倒す —— 検出漏れは削除が提示されないだけである。
       return (.unmerged, [])
     } catch {
       return (.unknown, [.init(check: .branchMerge, reason: .git(error))])
@@ -307,6 +312,8 @@ public struct GitCloseSafetyInspector: Sendable {
 
       // `log` は新しい順なので、上限は「新しい方から何件見るか」になる。上限に達したら
       // そこで打ち切り、見つからなかったものとして `.unmerged` に落ちる。
+      // `GitReadCommand.log` は 0 以下で `--max-count` を付けないため、上限 0 は
+      // 「走査しない」ではなく「全件走査」になる (この型の既定は 300)。
       let log = GitLog.parse(
         output: try await runner.run(
           .log(

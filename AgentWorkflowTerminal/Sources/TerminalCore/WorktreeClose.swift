@@ -46,7 +46,11 @@ public enum DefaultBranchResolution: Sendable, Hashable {
     case originHeadMissing
     case invalidOriginHead(String)
     case lookupFailed
-    case notNeededForDetachedHead
+    /// HEAD が branch を指していないため、照合する相手が無く既定 branch を解決しなかった。
+    ///
+    /// 「解決する必要が無かった」ではない。未merge検査そのものが判定不能であることは
+    /// `BranchMergeStatus.unknown` の側が担う (設計書 §3.4)。
+    case detachedHead
   }
 
   case originHead(branch: String)

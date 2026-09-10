@@ -56,16 +56,20 @@ public struct GitCloseSafetyInspector: Sendable {
     failures += ignoredCheck.failures
 
     guard let targetBranch else {
-      // branch が無ければ未mergeを問えないので、既定branchの問い合わせ自体を省く。
+      // detached HEAD では未push・未merge は「問う必要が無い」のではなく**問えない**。
+      // `.notApplicable` へ丸めると、entries が 0 件の detached worktree では §3.4 の 4 検査が
+      // すべて無警告になり、到達不能になる commit と中断中の rebase が黙って消える (Issue #244)。
+      // 既定 branch の問い合わせだけは省く —— 答えを得ても照合する branch が無いためで、
+      // 判定不能であること自体は `.unknown` の側が担う。
       return .init(
         report: .init(
           target: target,
           inspection: .init(
             uncommittedChanges: statusChecks.uncommittedChanges,
             ignoredFiles: ignoredCheck.status,
-            unpushedCommits: .notApplicable,
-            branchMerge: .notApplicable),
-          defaultBranch: .unresolved(reason: .notNeededForDetachedHead)),
+            unpushedCommits: statusChecks.unpushedCommits,
+            branchMerge: .unknown),
+          defaultBranch: .unresolved(reason: .detachedHead)),
         failures: failures)
     }
 
@@ -101,16 +105,13 @@ public struct GitCloseSafetyInspector: Sendable {
       output = try await runner.run(.status()).stdout
     } catch {
       let reason = GitCloseSafetyInspectionFailure.Reason.git(error)
-      var failures = [
-        GitCloseSafetyInspectionFailure(check: .uncommittedChanges, reason: reason)
-      ]
-      if targetBranch != nil {
-        failures.append(.init(check: .unpushedCommits, reason: reason))
-      }
       return .init(
         uncommittedChanges: .unknown,
-        unpushedCommits: targetBranch == nil ? .notApplicable : .unknown,
-        failures: failures)
+        unpushedCommits: .unknown,
+        failures: [
+          .init(check: .uncommittedChanges, reason: reason),
+          .init(check: .unpushedCommits, reason: reason),
+        ])
     }
 
     return interpretStatus(output, targetBranch: targetBranch)
@@ -161,7 +162,10 @@ public struct GitCloseSafetyInspector: Sendable {
     targetBranch: String?
   ) -> UnpushedInspection {
     guard targetBranch != nil else {
-      return .init(status: .notApplicable, failures: [])
+      // detached HEAD。upstream を持ち得ない以上 ahead/behind を問えないので判定不能であって、
+      // 「未push は無い」ではない (Issue #244)。git 2.50.1 実測でも `status --porcelain=v2` は
+      // `# branch.head (detached)` だけを吐き、`# branch.upstream` も `# branch.ab` も出ない。
+      return .init(status: .unknown, failures: [])
     }
     guard let branch = parsed.status.branch else {
       return .init(

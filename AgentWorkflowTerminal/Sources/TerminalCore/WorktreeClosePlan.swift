@@ -154,6 +154,21 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
   /// `terminateSession` を撃った**後**である。Project Root の常設 session (§2.3) を落として
   /// から失敗するのでは遅い。
   case projectRootIsNotClosable
+  /// HEAD が branch を指していない (detached HEAD) worktree を Close しようとした
+  /// (`DetectedWorktree.branch` が `nil`)。
+  ///
+  /// §3.4 が detached HEAD の Close を**選択肢1〜4のすべてで拒否する**と確定している
+  /// (2026-09-08)。下の3検査が「警告して続行可」なのに対しこれだけが拒否なのは、失われるのが
+  /// 到達不能になる commit と中断中の rebase／merge であり、復旧手段が reflog しか無いため。
+  /// 呼び出し側は、branch を作るか進行中の rebase／merge を完了するようユーザーへ促す。
+  ///
+  /// **`projectRootIsNotClosable` と同じく計画段階で弾く。** 選択肢1・2 には git の操作が無く、
+  /// 3・4 でも git は止めない (git 2.50.1 実測: detached HEAD に commit を積んだ worktree への
+  /// `worktree remove -- <path>` は `--force` 無しで rc=0、その commit は `branch --contains` の
+  /// どこにも現れず、`reflog expire --expire=now --all && gc --prune=now` の後は object ごと
+  /// 消える。中断中の rebase を持つ worktree も同じく rc=0 で `rebase-merge` ごと消える)。
+  /// つまり下の層には止める機会が無い。
+  case detachedHeadIsNotClosable
 }
 
 /// 設計書 §3.4 の4択を実行単位へ落とす。
@@ -180,6 +195,10 @@ public func planWorktreeClose(
   confirmation: WorktreeRemovalConfirmation?
 ) throws(WorktreeClosePlanError) -> WorktreeClosePlan {
   guard !worktree.isProjectRoot else { throw .projectRootIsNotClosable }
+  // 4択のすべてがここを通り、`WorktreeClosePlan` は他に作れない。選択肢1・2 は検査も確認も
+  // 要求しない (下の `case .terminateSession(.removeWorktree)` だけが確認を読む) ので、
+  // 検査層で detached HEAD を判定不能として返すだけでは 1・2 が素通りする。
+  guard worktree.branch != nil else { throw .detachedHeadIsNotClosable }
   let identity = worktree.identity
   switch choice {
   case .hideFromUI:

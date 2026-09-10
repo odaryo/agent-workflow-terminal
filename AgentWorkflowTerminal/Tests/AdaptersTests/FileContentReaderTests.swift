@@ -138,6 +138,53 @@ struct FileContentReaderTests {
     }
   }
 
+  @Test("読取中に増大しても絶対上限を超えて読まない")
+  func boundsReadWhenFileGrowsDuringRead() throws {
+    try withContentFile(Data(repeating: 65, count: 32)) { url in
+      let probe = try #require(OffsetProbe())
+      let reader = FileContentReader { (url: URL) throws(FileContentReaderError) in
+        let opened = try FileContentReader.openRegularFile(at: url)
+        appendBytes(count: 4_096, to: url)
+        probe.observe(opened.handle)
+        return opened
+      }
+
+      #expect(throws: FileContentReaderError.fileChanged(expected: 32, actual: 4_128)) {
+        _ = try reader.read(
+          url: url,
+          thresholds: FileViewThresholds(
+            maximumByteCount: 16, maximumLineCount: 50_000, absoluteMaximumByteCount: 64),
+          confirmation: .confirmed)
+      }
+      // 本文 32 バイトと、増大を検知するための 1 バイトだけ。修正前はここが 4_128 だった。
+      #expect(probe.readByteCount == 33)
+    }
+  }
+
+  @Test("打ち切る場合も読取中の増大につられて上限を超えて読まない")
+  func boundsReadWhenTruncatedFileGrowsDuringRead() throws {
+    // サンプル (8 KiB) は絶対上限より先に読むので、上限をそれより大きく取らないと
+    // 「上限までしか読んでいない」を offset で測れない。
+    try withContentFile(Data(repeating: 65, count: 20_000)) { url in
+      let probe = try #require(OffsetProbe())
+      let reader = FileContentReader { (url: URL) throws(FileContentReaderError) in
+        let opened = try FileContentReader.openRegularFile(at: url)
+        appendBytes(count: 40_000, to: url)
+        probe.observe(opened.handle)
+        return opened
+      }
+
+      let result = try reader.read(
+        url: url,
+        thresholds: FileViewThresholds(
+          maximumByteCount: 16, maximumLineCount: 50_000, absoluteMaximumByteCount: 12_000),
+        confirmation: .confirmed)
+      #expect(result.observation == .text(byteCount: 20_000, lineCount: nil))
+      #expect(result.text?.truncatedAtByteCount == 12_000)
+      #expect(probe.readByteCount == 12_000)
+    }
+  }
+
   @Test("通常ファイル以外は開かず種別を名指しする", .timeLimit(.minutes(1)))
   func rejectsNonRegularFiles() async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-content-\(UUID().uuidString)")
@@ -175,6 +222,42 @@ private func openReportingThreeBytes(
   _ url: URL
 ) throws(FileContentReaderError) -> OpenedRegularFile {
   OpenedRegularFile(handle: try FileContentReader.openRegularFile(at: url).handle, byteCount: 3)
+}
+
+/// reader が handle を閉じた後に「どこまで読み進めたか」を測るための複製。複製は元と同じ open
+/// file description を指すので offset を共有し、元を閉じた後も残る (計測: 元で 33 バイト読んだ
+/// 直後の複製の offset が 33、元を `close` した後も `lseek` と `read` が成功した)。
+///
+/// 番号を `/dev/null` で先に押さえて `dup2` するのは、複製を作るのが seam の `@Sendable`
+/// クロージャの中で、`dup(2)` が返す番号をその外へ書き出す先が無いため。番号を後から入れる
+/// `var` を持たせると `Sendable` 適合が通らない (実測: "stored property 'descriptor' of
+/// 'Sendable'-conforming class 'OffsetProbe' is mutable")。格納プロパティを不変に保てば、
+/// 可変なのは kernel の fd table 側だけになる。
+private final class OffsetProbe: Sendable {
+  private let descriptor: Int32
+
+  init?() {
+    let descriptor = open("/dev/null", O_RDONLY)
+    guard descriptor >= 0 else { return nil }
+    self.descriptor = descriptor
+  }
+
+  deinit { close(descriptor) }
+
+  func observe(_ handle: FileHandle) {
+    _ = dup2(handle.fileDescriptor, descriptor)
+  }
+
+  var readByteCount: Int { Int(lseek(descriptor, 0, SEEK_CUR)) }
+}
+
+/// 追記の失敗は握り潰す。追記されなければ呼び出し側の主張 (増大後のサイズ・読取量) が落ちる。
+private func appendBytes(count: Int, to url: URL) {
+  let descriptor = open(url.path, O_WRONLY | O_APPEND)
+  guard descriptor >= 0 else { return }
+  let bytes = [UInt8](repeating: 66, count: count)
+  _ = bytes.withUnsafeBytes { write(descriptor, $0.baseAddress, $0.count) }
+  close(descriptor)
 }
 
 /// `open(2)` は同期でキャンセルできないため、種別ガードが壊れると `.timeLimit` も `Task` の

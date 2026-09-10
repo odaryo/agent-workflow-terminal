@@ -2,6 +2,7 @@ import Adapters
 import Foundation
 import TerminalCore
 import Testing
+import os
 
 @testable import AgentWorkflowTerminalApp
 
@@ -10,16 +11,16 @@ import Testing
 /// 注入の**回数**は偽の `ProcessRunning` が数える。`MainPaneCoordinator` は `TmuxRunner` が持つ
 /// この protocol seam から丸ごと駆動できるので、本番コードへテスト用の口を足していない。
 /// 中断点の保持も同じ seam で行う: 偽の runner が任意の tmux サブコマンドの完了を保留するため、
-/// `resolve` の中断中に2度目の要求を届けられる。
-@Suite("Diff コメント送信の直列化 (Issue #276)", .serialized)
+/// 送信の途中で2度目の要求を届けられる。
+///
+/// coalescing の閾値だけは時刻源を差し替えて動かす。実時間を待つと CI で不安定になるため。
+@Suite("Diff コメント送信の直列化と coalescing (Issue #276)", .serialized)
 @MainActor
 struct DiffCommentSendSerializationTests {
 
-  /// 窓1: 1度目が `resolve` で中断している間に2度目の `requestSend` が届く。
-  /// 2度目の注入は1度目の注入が**終わった後**に着地するので、`send` 側の `isSending` では
-  /// 止まらない。
-  @Test("resolve の中断中に届いた2度目の requestSend は捨てられる")
-  func dropsSecondRequestArrivingDuringResolve() async throws {
+  /// 1度目が `resolve` で中断している間に、`requestSend` の入口へ届いた2度目。
+  @Test("進行中の送信があるとき requestSend の入口へ届いた要求は捨てられる")
+  func dropsSecondRequestArrivingWhileSendInProgress() async throws {
     let fixture = try await Fixture.make()
     defer { fixture.cleanUp() }
     let runner = fixture.processRunner
@@ -27,57 +28,113 @@ struct DiffCommentSendSerializationTests {
     // `resolve` は list-panes → display-message の2回撃つ。後者は pane 一覧のキャッシュを
     // 経由しないので、要求ごとに1つずつ保留できる。
     await runner.hold("display-message")
-    let first = Task { await fixture.requestSend() }
+    let first = SendTask { await fixture.requestSend() }
     try await runner.expectHeldCalls(1, of: "display-message")
 
-    let second = Task { await fixture.requestSend() }
+    let second = SendTask { await fixture.requestSend() }
     await Fixture.letPendingTasksRun()
 
-    // 1度目を注入の完了まで走らせきってから2度目を進める (窓2 と同じ着地順)。
-    await runner.resumeHeldCall(of: "display-message")
-    await first.value
     await runner.resume("display-message")
-    await second.value
+    try await first.expectFinished("1度目の requestSend")
+    try await second.expectFinished("2度目の requestSend")
 
     #expect(await runner.injectionCount == 1)
     #expect(fixture.model.isSending == false)
     #expect(fixture.sentComments == 1)
   }
 
-  /// 窓2: 2度目が `send` へ直接届く経路 (pane 選択 sheet の確定)。1度目が `resolve` で
-  /// 中断している間は `isSending` が false なので、`send` の guard は素通りする。
-  @Test("resolve の中断中に届いた2度目の send (pane 選択の確定) は捨てられる")
-  func dropsSecondDirectSendArrivingDuringResolve() async throws {
+  /// 同じことを、`requestSend` を経ない独立の入口 (pane 選択 sheet の確定 = `send`) で測る。
+  @Test("進行中の送信があるとき send の入口 (pane 選択の確定) へ届いた要求は捨てられる")
+  func dropsSecondDirectSendArrivingWhileSendInProgress() async throws {
     let fixture = try await Fixture.make()
     defer { fixture.cleanUp() }
     let runner = fixture.processRunner
 
     await runner.hold("display-message")
-    let first = Task { await fixture.requestSend() }
+    let first = SendTask { await fixture.requestSend() }
     try await runner.expectHeldCalls(1, of: "display-message")
 
-    let second = Task { await fixture.send() }
+    let second = SendTask { await fixture.send() }
     await Fixture.letPendingTasksRun()
 
     await runner.resume("display-message")
-    await first.value
-    await second.value
+    try await first.expectFinished("1度目の requestSend")
+    try await second.expectFinished("2度目の send")
 
     #expect(await runner.injectionCount == 1)
     #expect(fixture.model.isSending == false)
     #expect(fixture.sentComments == 1)
   }
 
-  /// 直列化が「捨てる」だけで終わらないこと。送信が終われば次の送信は通る。
-  @Test("送信が終わった後の2度目の要求は通る")
-  func allowsSendAfterPreviousSendCompleted() async throws {
+  /// T1: 1度目が**完了した後**に閾値内で届いた同一要求 (= 人のダブルクリック) は捨てられる。
+  @Test("送信が完了した後、閾値内に届いた同一要求は捨てられる")
+  func dropsIdenticalRequestWithinCoalescingWindow() async throws {
     let fixture = try await Fixture.make()
     defer { fixture.cleanUp() }
 
     await fixture.requestSend()
+    // ダブルクリックの間隔。macOS の既定閾値 0.8 秒より内側。
+    fixture.timeSource.advance(by: .milliseconds(200))
+    await fixture.requestSend()
+
+    #expect(await fixture.processRunner.injectionCount == 1)
+    #expect(fixture.sentComments == 1)
+  }
+
+  /// T2: 閾値を超えてからの同一要求は通る。「常に1回しか注入しない実装」を落とす陽性対照。
+  @Test("閾値を超えてから届いた同一要求は通る")
+  func allowsIdenticalRequestAfterCoalescingWindow() async throws {
+    let fixture = try await Fixture.make()
+    defer { fixture.cleanUp() }
+
+    await fixture.requestSend()
+    fixture.timeSource.advance(by: DiffCommentSendCoalescer.window + .milliseconds(1))
     await fixture.requestSend()
 
     #expect(await fixture.processRunner.injectionCount == 2)
+  }
+
+  /// T3: 注入が失敗した直後の同一要求は通る。記録するのが成功時だけであることの回帰。
+  @Test("注入が失敗した直後の同一要求は通る")
+  func allowsIdenticalRequestRightAfterFailedInjection() async throws {
+    let fixture = try await Fixture.make()
+    defer { fixture.cleanUp() }
+
+    await fixture.processRunner.failNextInjection()
+    await fixture.requestSend()
+    #expect(fixture.model.commentError != nil)
+    #expect(fixture.sentComments == 0)
+
+    // 時計を進めずに押し直す。失敗を記録していれば、この再試行が捨てられる。
+    await fixture.requestSend()
+
+    #expect(await fixture.processRunner.injectionCount == 2)
+    #expect(fixture.sentComments == 1)
+  }
+
+  /// T4: 中身の違う要求は閾値内でも通る。
+  @Test("別のコメントの要求は閾値内でも通る")
+  func allowsDifferentRequestWithinCoalescingWindow() async throws {
+    let fixture = try await Fixture.make()
+    defer { fixture.cleanUp() }
+
+    await fixture.requestSend(.single(fixture.comment))
+    await fixture.requestSend(.single(fixture.otherComment))
+
+    #expect(await fixture.processRunner.injectionCount == 2)
+  }
+
+  /// 同一判定が `.batch` の並び順に依存しないこと。合成 `==` は配列比較なのですり抜ける。
+  @Test("batch は並び順が違っても同一要求として捨てられる")
+  func dropsReorderedBatchWithinCoalescingWindow() async throws {
+    let fixture = try await Fixture.make()
+    defer { fixture.cleanUp() }
+
+    await fixture.requestSend(.batch([fixture.comment, fixture.otherComment]))
+    await fixture.requestSend(.batch([fixture.otherComment, fixture.comment]))
+
+    #expect(await fixture.processRunner.injectionCount == 1)
+    #expect(fixture.sentComments == 2)
   }
 }
 
@@ -92,8 +149,10 @@ extension DiffCommentSendSerializationTests {
     let model: DiffViewerModel
     let coordinator: MainPaneCoordinator
     let processRunner: GatedTmuxProcessRunner
+    let timeSource: TestTimeSource
     let worktree: WorktreeIdentity
     let comment: DiffReviewCommentID
+    let otherComment: DiffReviewCommentID
     let registration: MainPaneRegistration
     let agentPaneStates: [PaneAgentState]
     private let repositoryRoot: URL
@@ -104,6 +163,17 @@ extension DiffCommentSendSerializationTests {
 
     static func make() async throws -> Self {
       let repositoryRoot = try makeRepository()
+      do {
+        return try await make(in: repositoryRoot)
+      } catch {
+        // 組み立ての途中で落ちたときも temp リポジトリを残さない (呼び出し側の
+        // `defer { fixture.cleanUp() }` は make が返らないと登録されない)。
+        try? FileManager.default.removeItem(at: repositoryRoot)
+        throw error
+      }
+    }
+
+    private static func make(in repositoryRoot: URL) async throws -> Self {
       // 安定 ID は git の管理ディレクトリの絶対パス (§3.5)。session 名はここから決まる。
       let worktree = try #require(
         WorktreeIdentity(rawValue: repositoryRoot.appendingPathComponent(".git").path))
@@ -118,37 +188,50 @@ extension DiffCommentSendSerializationTests {
         pane: pane, processID: panePID, serverProcessID: serverPID)
       coordinator.register(registration, for: worktree)
 
-      let model = DiffViewerModel(worktreeRoot: repositoryRoot)
+      let timeSource = TestTimeSource()
+      let model = DiffViewerModel(worktreeRoot: repositoryRoot, timeSource: timeSource)
       model.kind = .commit
       await model.loadContext()
       await model.openSnapshot()
-      model.selectLine(1, side: .new)
-      model.commentDraft = "二重貼り付けの回帰テスト"
-      model.addComment()
-      let comment = try #require(model.currentSnapshotComments.first).id
+      let comments = try addComments(to: model)
 
       return Self(
-        model: model, coordinator: coordinator, processRunner: processRunner, worktree: worktree,
-        comment: comment, registration: registration,
+        model: model, coordinator: coordinator, processRunner: processRunner,
+        timeSource: timeSource, worktree: worktree,
+        comment: comments.first, otherComment: comments.second, registration: registration,
         agentPaneStates: [PaneAgentState(id: pane, state: .completed, lastUpdatedAt: Date())],
         repositoryRoot: repositoryRoot)
     }
 
-    /// 送信済みとして印が付いたコメントの数。二重送信では印は1つのままなので、注入回数と
+    /// HEAD の diff で追加された2行に、それぞれ1件ずつコメントを付ける。
+    private static func addComments(
+      to model: DiffViewerModel
+    ) throws -> (first: DiffReviewCommentID, second: DiffReviewCommentID) {
+      for line in [1, 2] {
+        model.selectLine(line, side: .new)
+        model.commentDraft = "二重貼り付けの回帰テスト \(line)"
+        model.addComment()
+      }
+      let ids = model.currentSnapshotComments.map(\.id)
+      try #require(ids.count == 2)
+      return (ids[0], ids[1])
+    }
+
+    /// 送信済みとして印が付いたコメントの数。二重送信では印は増えないので、注入回数と
     /// 合わせて見る (印だけを見ても二重貼り付けは見えない)。
     var sentComments: Int {
       model.currentSnapshotComments.count { $0.sentAt != nil }
     }
 
-    func requestSend() async {
+    func requestSend(_ pending: DiffViewerModel.PendingSend? = nil) async {
       await model.requestSend(
-        .single(comment), worktree: worktree, mainPane: coordinator,
+        pending ?? .single(comment), worktree: worktree, mainPane: coordinator,
         agentPaneStates: agentPaneStates)
     }
 
-    func send() async {
+    func send(_ pending: DiffViewerModel.PendingSend? = nil) async {
       await model.send(
-        .single(comment), to: registration, worktree: worktree, mainPane: coordinator,
+        pending ?? .single(comment), to: registration, worktree: worktree, mainPane: coordinator,
         agentPaneStates: agentPaneStates)
     }
 
@@ -167,14 +250,19 @@ extension DiffCommentSendSerializationTests {
       let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("awt-diff-send-\(UUID().uuidString)", isDirectory: true)
       try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-      try git(["init", "-q", "-b", "main"], in: root)
-      try write("base\n", to: root.appendingPathComponent("base.txt"))
-      try git(["add", "."], in: root)
-      try git(["commit", "-q", "-m", "base"], in: root)
-      // HEAD の diff を「追加された1行のファイル」にして、new 側 1 行目が必ず在る形にする。
-      try write("added\n", to: root.appendingPathComponent("added.txt"))
-      try git(["add", "."], in: root)
-      try git(["commit", "-q", "-m", "add"], in: root)
+      do {
+        try git(["init", "-q", "-b", "main"], in: root)
+        try write("base\n", to: root.appendingPathComponent("base.txt"))
+        try git(["add", "."], in: root)
+        try git(["commit", "-q", "-m", "base"], in: root)
+        // HEAD の diff を「追加された2行のファイル」にして、new 側 1・2 行目を必ず在る形にする。
+        try write("added\nsecond\n", to: root.appendingPathComponent("added.txt"))
+        try git(["add", "."], in: root)
+        try git(["commit", "-q", "-m", "add"], in: root)
+      } catch {
+        try? FileManager.default.removeItem(at: root)
+        throw error
+      }
       return root
     }
 
@@ -201,6 +289,49 @@ extension DiffCommentSendSerializationTests {
   }
 }
 
+/// 送信を走らせる `Task` と、その完了の**上限付き**の待ち合わせ。
+///
+/// `await task.value` を直接待たないのは、偽 runner が保留したまま解放されないコマンドを
+/// 撃たれた場合にテストが失敗ではなく**ハング**するため (Swift Testing に per-test の既定
+/// timeout は無い)。上限は実時間ではなく yield 回数で置く。
+@MainActor
+final class SendTask {
+  private var isFinished = false
+  private var task: Task<Void, Never>?
+
+  init(_ body: @escaping @MainActor () async -> Void) {
+    task = Task { [self] in
+      await body()
+      isFinished = true
+    }
+  }
+
+  func expectFinished(_ label: String) async throws {
+    for _ in 0..<100_000 {
+      if isFinished { return }
+      await Task.yield()
+    }
+    Issue.record("\(label) が完了しませんでした")
+    throw CancellationError()
+  }
+}
+
+/// 閾値の経過を実時間を待たずに動かすための時刻源。
+struct TestTimeSource: ContinuousTimeSource {
+  private let state = OSAllocatedUnfairLock(initialState: ContinuousClock().now)
+
+  var now: ContinuousClock.Instant { state.withLock { $0 } }
+
+  func advance(by duration: Duration) {
+    state.withLock { $0 = $0.advanced(by: duration) }
+  }
+
+  /// coalescing は待たずに捨てるだけなので、呼ばれたら想定外。
+  func sleep(until deadline: ContinuousClock.Instant) async throws {
+    Issue.record("coalescing は sleep しない")
+  }
+}
+
 /// tmux を起動しない `ProcessRunning`。呼ばれたサブコマンドを数え、指定したサブコマンドの
 /// 完了をテストが解放するまで保留する。
 actor GatedTmuxProcessRunner: ProcessRunning {
@@ -212,6 +343,7 @@ actor GatedTmuxProcessRunner: ProcessRunning {
   private var invocations: [[String]] = []
   private var heldCommands: Set<String> = []
   private var held: [String: [CheckedContinuation<Void, Never>]] = [:]
+  private var failingInjections = 0
 
   init(sessionName: String, pane: PaneID, panePID: Int32, serverPID: Int32) {
     self.sessionName = sessionName
@@ -221,20 +353,19 @@ actor GatedTmuxProcessRunner: ProcessRunning {
   }
 
   /// 注入1回につき `load-buffer` はちょうど1回撃たれる (`TmuxTextInjection.send`)。
+  /// 失敗させた注入も1回として数える。
   var injectionCount: Int {
     invocations.count { $0.contains("load-buffer") }
   }
 
-  func hold(_ command: String) {
-    heldCommands.insert(command)
+  /// 次の注入を「tmux server が居ない」で失敗させる。1バイトも届かない失敗なので、
+  /// ユーザーが押し直すのは正当な再試行になる。
+  func failNextInjection() {
+    failingInjections += 1
   }
 
-  /// 保留中の呼び出しのうち先頭の1つだけを解放する。以後の同じサブコマンドは保留したままにする。
-  func resumeHeldCall(of command: String) {
-    guard var pending = held[command], !pending.isEmpty else { return }
-    let first = pending.removeFirst()
-    held[command] = pending
-    first.resume()
+  func hold(_ command: String) {
+    heldCommands.insert(command)
   }
 
   /// 保留を解除し、待っている呼び出しをすべて解放する。
@@ -247,7 +378,7 @@ actor GatedTmuxProcessRunner: ProcessRunning {
   /// 期待した数の呼び出しが保留に入るまで待つ。入らないまま上限に達したら失敗させる
   /// (テストを無限に待たせない)。
   func expectHeldCalls(_ count: Int, of command: String) async throws {
-    for _ in 0..<10_000 {
+    for _ in 0..<100_000 {
       if held[command]?.count == count { return }
       await Task.yield()
     }
@@ -269,6 +400,11 @@ actor GatedTmuxProcessRunner: ProcessRunning {
       await withCheckedContinuation { continuation in
         held[command, default: []].append(continuation)
       }
+    }
+    if command == "load-buffer", failingInjections > 0 {
+      failingInjections -= 1
+      return ProcessRunResult(
+        exitCode: 1, stdout: "", stderr: "no server running on /private/tmp/awt-test.sock\n")
     }
     return ProcessRunResult(exitCode: 0, stdout: stdout(for: command), stderr: "")
   }

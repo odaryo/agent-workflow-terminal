@@ -7,6 +7,35 @@ import TerminalCore
 /// `DiffViewerModel` 本体から分けているのは、1ファイル・1型の行数上限に収めるため
 /// (`DiffViewerModelGit.swift` と同じ理由)。
 extension DiffViewerModel {
+  enum PendingSend: Equatable {
+    case single(DiffReviewCommentID)
+    case batch([DiffReviewCommentID])
+
+    /// `.batch` を集合として見るのは、同じ選択が UI の並び順で別要求に見えると連打が
+    /// すり抜けるため。合成 `==` は配列比較なのでこの判定には使えない。
+    func isSameRequest(as other: Self) -> Bool {
+      switch (self, other) {
+      case (.single(let lhs), .single(let rhs)): lhs == rhs
+      case (.batch(let lhs), .batch(let rhs)): Set(lhs) == Set(rhs)
+      case (.single, .batch), (.batch, .single): false
+      }
+    }
+  }
+
+  /// 未登録・登録先の消失のどちらでも、送る前にユーザーへ選ばせるための要求 (§12.7)。
+  struct PaneSelectionRequest: Identifiable {
+    let id = UUID()
+    let worktree: WorktreeIdentity
+    let candidates: [MainPaneCandidate]
+    /// 登録が残っているが、その pane を送信先として使えない場合だけ入る。「ID ごと消えた」と
+    /// 「ID は在るが別 pane」で文面を変えるため、`PaneID` へ潰さない。
+    let absence: MainPaneAbsence?
+    /// 送信操作の途中で選ばせている場合だけ入る。`nil` は送信先の選び直しだけを行う操作。
+    let pending: PendingSend?
+    /// 候補を観測したときの `#{pid}`。選ばれた候補と組にして登録を作る。
+    let serverProcessID: Int32?
+  }
+
   /// 送信操作を無効にする理由。`nil` は「状態では止めない」で、未登録のときも `nil`
   /// (送信先を選ぶのが先で、状態はその後に見る)。UI と `send` が同じ判定を通すための入口。
   func sendBlock(
@@ -89,5 +118,37 @@ extension DiffViewerModel {
     case .tmux(let error):
       return "tmux の実行に失敗しました: \(error)"
     }
+  }
+}
+
+/// 連打で同じコメントが2回貼られるのを止める、送信要求の短時間 coalescing (Issue #276)。
+///
+/// 進行中の送信を1つに直列化するだけでは足りない。1回の送信が撃つ tmux コマンド列は実測
+/// 34〜36 ms (tmux 3.4、隔離 socket) で終わる一方、macOS の
+/// `com.apple.mouse.doubleClickThreshold` は 0.8 秒なので、人のダブルクリックの2発目は
+/// ほぼ必ず「完了後の新しい要求」として届く。
+///
+/// - Important: 記録するのは**注入が成功した時点だけ**。失敗の直後にユーザーが押し直すのは
+///   正当な再試行であり、これを捨てると tmux が一時的に落ちていた場合に送り直せなくなる。
+/// - Important: 判定には単調増加クロックを使う。`Date()` は NTP 補正で後ろへ飛び得るため、
+///   閾値の判定には使えない (`markSent` の `Date()` は表示用の記録で判定に使っていない)。
+struct DiffCommentSendCoalescer {
+  /// ダブルクリック閾値 0.8 秒を含み、意図的な再送を妨げない程度に短い値。
+  static let window = Duration.seconds(1)
+
+  private let timeSource: any ContinuousTimeSource
+  private var lastSuccess: (request: DiffViewerModel.PendingSend, at: ContinuousClock.Instant)?
+
+  init(timeSource: any ContinuousTimeSource) {
+    self.timeSource = timeSource
+  }
+
+  func shouldDrop(_ pending: DiffViewerModel.PendingSend) -> Bool {
+    guard let lastSuccess, lastSuccess.request.isSameRequest(as: pending) else { return false }
+    return timeSource.now < lastSuccess.at.advanced(by: Self.window)
+  }
+
+  mutating func recordSuccess(_ pending: DiffViewerModel.PendingSend) {
+    lastSuccess = (pending, timeSource.now)
   }
 }

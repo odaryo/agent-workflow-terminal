@@ -224,10 +224,15 @@ private func openReportingThreeBytes(
   OpenedRegularFile(handle: try FileContentReader.openRegularFile(at: url).handle, byteCount: 3)
 }
 
-/// reader が handle を閉じた後にも「どこまで読んだか」を測る席。`dup2` の複製は同じ open file
-/// description を指すので offset を共有する。`/dev/null` を先に開くのは、複製先の番号を押さえる
-/// ためだけ (空いている番号を後から選ぶ手段が無い)。可変状態は kernel の fd table 側にあり、
-/// Swift 側の格納プロパティは不変なので `Sendable` に適合できる。
+/// reader が handle を閉じた後に「どこまで読み進めたか」を測るための複製。複製は元と同じ open
+/// file description を指すので offset を共有し、元を閉じた後も残る (計測: 元で 33 バイト読んだ
+/// 直後の複製の offset が 33、元を `close` した後も `lseek` と `read` が成功した)。
+///
+/// 番号を `/dev/null` で先に押さえて `dup2` するのは、複製を作るのが seam の `@Sendable`
+/// クロージャの中で、`dup(2)` が返す番号をその外へ書き出す先が無いため。番号を後から入れる
+/// `var` を持たせると `Sendable` 適合が通らない (実測: "stored property 'descriptor' of
+/// 'Sendable'-conforming class 'OffsetProbe' is mutable")。格納プロパティを不変に保てば、
+/// 可変なのは kernel の fd table 側だけになる。
 private final class OffsetProbe: Sendable {
   private let descriptor: Int32
 

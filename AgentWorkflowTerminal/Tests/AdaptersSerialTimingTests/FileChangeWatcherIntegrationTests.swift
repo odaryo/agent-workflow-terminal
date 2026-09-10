@@ -1,7 +1,8 @@
-import Adapters
-import Darwin
 import Foundation
 import Testing
+import os
+
+@testable import Adapters
 
 @Suite("§7.3 表示中ファイルの変更監視")
 struct FileChangeWatcherIntegrationTests {
@@ -150,7 +151,11 @@ struct FileChangeWatcherIntegrationTests {
   }
 
   /// キャンセルで監視が本当に止まったことは、イベントが来ないことだけでは示せない
-  /// (consumer が死んでいるだけでも成立する)。ポーリングの CPU 消費で確かめる。
+  /// (consumer が死んでいるだけでも成立する)。周期ごとの観測回数で確かめる。
+  /// 経過の物差しに実時間を使わないのは、機械が混むほど同じ実時間に走る周期の数が減り、
+  /// 「止まっていない」側の観測回数まで一緒に小さくなるため (プロセス全体の CPU を基準に
+  /// していた頃の #319 の揺れと同じ機序)。止めない watcher を 1 本残し、その観測回数を
+  /// 物差しに使えば、負荷がどうであれ「止まっていなければ同じだけ観測されたはず」の量で測れる。
   @Test("キャンセルでポーリングが解放される", .timeLimit(.minutes(1)))
   func releasesPollingOnCancellation() async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
@@ -160,17 +165,31 @@ struct FileChangeWatcherIntegrationTests {
     try Data("aa".utf8).write(to: file)
     let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(1)))
 
-    var tasks: [Task<Void, Never>] = []
-    for _ in 0..<200 {
-      let stream = FileChangeWatcher(path: file, interval: interval).events()
-      tasks.append(Task { for await _ in stream {} })
-    }
-    let activeCPU = try await processCPUTime(over: .milliseconds(500))
-    for task in tasks { task.cancel() }
-    try await ContinuousClock().sleep(for: .milliseconds(200))
-    let idleCPU = try await processCPUTime(over: .milliseconds(500))
+    let cancelledPolls = PollCounter()
+    let witnessPolls = PollCounter()
+    let cancelledStream = FileChangeWatcher(
+      path: file, interval: interval, onPoll: { cancelledPolls.increment() }
+    ).events()
+    let witnessStream = FileChangeWatcher(
+      path: file, interval: interval, onPoll: { witnessPolls.increment() }
+    ).events()
+    let cancelledTask = Task { for await _ in cancelledStream {} }
+    let witnessTask = Task { for await _ in witnessStream {} }
+    defer { witnessTask.cancel() }
 
-    #expect(idleCPU < activeCPU / 8, "active=\(activeCPU)s idle=\(idleCPU)s")
+    try await waitForPollCount(20, counter: cancelledPolls)
+    try await waitForPollCount(20, counter: witnessPolls)
+    cancelledTask.cancel()
+    await cancelledTask.value
+
+    // キャンセルが producer へ伝わるまでの猶予も、実時間ではなく物差し側の周期数で取る。
+    try await waitForPollCount(witnessPolls.count + 20, counter: witnessPolls)
+    let stopped = cancelledPolls.count
+    try await waitForPollCount(witnessPolls.count + 50, counter: witnessPolls)
+
+    // 入れ違いで始まっていた 1 周期は数えうる。止まっていなければ物差しと同じ ~50 回増える。
+    let extra = cancelledPolls.count - stopped
+    #expect(extra <= 1, "キャンセル後に \(extra) 回ポーリングした")
   }
 
   @Test("正でない周期を拒否する", arguments: [Duration.zero, .milliseconds(-1)])
@@ -190,17 +209,17 @@ struct FileChangeWatcherIntegrationTests {
     try await body(file, FileChangeWatcher(path: file, interval: interval))
   }
 
-  private func processCPUTime(over duration: Duration) async throws -> Double {
-    let before = try consumedCPUSeconds()
-    try await ContinuousClock().sleep(for: duration)
-    return try consumedCPUSeconds() - before
-  }
-
-  private func consumedCPUSeconds() throws -> Double {
-    var usage = rusage()
-    try #require(getrusage(RUSAGE_SELF, &usage) == 0)
-    return [usage.ru_utime, usage.ru_stime].reduce(0.0) {
-      $0 + Double($1.tv_sec) + Double($1.tv_usec) / 1_000_000
+  /// 期限は判定の物差しではなく、ポーリングが一切進まないまま吊るのを避けるための保険。
+  /// 1ms 周期に対して桁違いに緩いので、負荷で先に切れることはない。
+  private func waitForPollCount(_ count: Int, counter: PollCounter) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(30))
+    while counter.count < count {
+      guard clock.now < deadline else {
+        Issue.record("期限までに \(count) 回のポーリングが観測できなかった (\(counter.count) 回)")
+        return
+      }
+      try await clock.sleep(for: .milliseconds(1))
     }
   }
 
@@ -220,4 +239,13 @@ struct FileChangeWatcherIntegrationTests {
 private actor EventRecorder {
   private(set) var values: [FileChangeEvent] = []
   func append(_ event: FileChangeEvent) { values.append(event) }
+}
+
+/// `onPoll` は監視 Task から同期に呼ばれるため actor へ hop できない (docs/coding-guidelines.md §1.2)。
+private final class PollCounter: Sendable {
+  private let state = OSAllocatedUnfairLock(initialState: 0)
+
+  var count: Int { state.withLock { $0 } }
+
+  func increment() { state.withLock { $0 += 1 } }
 }

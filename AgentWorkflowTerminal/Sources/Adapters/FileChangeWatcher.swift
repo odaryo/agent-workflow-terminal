@@ -24,10 +24,21 @@ public enum FileChangeEvent: Sendable, Hashable {
 public struct FileChangeWatcher: Sendable {
   public let path: URL
   public let interval: FileChangeObservationInterval
+  /// ポーリングが生きているかは外から観測できず、プロセス全体の CPU が唯一の代理だった。
+  /// macOS では SwiftPM が全テストターゲットを 1 つの xctest バンドル (= 1 プロセス) に束ねるため、
+  /// そこには同時に走る別ターゲットのテストの CPU が混ざり、主張の真偽と無関係に判定が揺れる (#319)。
+  let onPoll: (@Sendable () -> Void)?
 
   public init(path: URL, interval: FileChangeObservationInterval = .default) {
+    self.init(path: path, interval: interval, onPoll: nil)
+  }
+
+  init(
+    path: URL, interval: FileChangeObservationInterval, onPoll: (@Sendable () -> Void)?
+  ) {
     self.path = path
     self.interval = interval
+    self.onPoll = onPoll
   }
 
   /// 比較の起点は監視 Task の開始前に読む。Task 開始後に読むと、その間の変更を取りこぼす。
@@ -42,6 +53,7 @@ public struct FileChangeWatcher: Sendable {
           while !Task.isCancelled {
             try await ContinuousClock().sleep(for: interval.duration)
             let current = FileChangeSignature.read(path: path)
+            onPoll?()
             guard current != previous else { continue }
             continuation.yield(current == nil ? .deleted : .modified)
             previous = current

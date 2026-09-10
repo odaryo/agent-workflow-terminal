@@ -165,8 +165,10 @@ TODO の正本は GitHub Issues / Project とし、このファイルには実�
 ## P3 セッション把握と判断待ち (進行中)
 
 - 対象: #188 → #189 / #190、長時間稼働の検証は既存 #27
-- 着手中: パーキングロットの #319 (FileChangeWatcher の flaky) / #244 (detached HEAD の Close 拒否)。
-  #244 は Close を App へ配線する前提なので、P3 の中核より先に片づける
+- 着手中: なし。Close を App へ配線する前提だったパーキングロットの #244 (detached HEAD の
+  Close 拒否) / #250 (squash merge の未検出) / #319 (FileChangeWatcher の flaky) は完了。
+  ただし配線の前に **#359 (`設計判断`) の決定が要る** — `.merged` と判定しても `git branch -d` が
+  squash merge を認めないため、選択肢4 は実行時に失敗する (#250 のレビューで判明)
 - 3プロジェクト各2〜3タスク、1タスク内の複数Agent paneで利用する。全paneの目的・現在地と
   状態アイコンを独立Overviewに表示し、タスク切替なしで閲覧し、対象paneへ直接戻れることを試す。
 - paneの応答終了をタスク完了と誤認せず、ハーネスの明示信号に基づくタスク完了通知と、

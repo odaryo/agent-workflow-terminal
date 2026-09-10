@@ -24,10 +24,20 @@ public enum FileChangeEvent: Sendable, Hashable {
 public struct FileChangeWatcher: Sendable {
   public let path: URL
   public let interval: FileChangeObservationInterval
+  /// 観測専用の seam で、製品経路では常に nil (#319)。監視 Task の上で周期ごとに同期に呼ばれるので、
+  /// 重い処理やブロックする処理を渡すとポーリング周期そのものが伸び、測っている量が変わる。
+  let onPoll: (@Sendable () -> Void)?
 
   public init(path: URL, interval: FileChangeObservationInterval = .default) {
+    self.init(path: path, interval: interval, onPoll: nil)
+  }
+
+  init(
+    path: URL, interval: FileChangeObservationInterval, onPoll: (@Sendable () -> Void)?
+  ) {
     self.path = path
     self.interval = interval
+    self.onPoll = onPoll
   }
 
   /// 比較の起点は監視 Task の開始前に読む。Task 開始後に読むと、その間の変更を取りこぼす。
@@ -42,6 +52,7 @@ public struct FileChangeWatcher: Sendable {
           while !Task.isCancelled {
             try await ContinuousClock().sleep(for: interval.duration)
             let current = FileChangeSignature.read(path: path)
+            onPoll?()
             guard current != previous else { continue }
             continuation.yield(current == nil ? .deleted : .modified)
             previous = current

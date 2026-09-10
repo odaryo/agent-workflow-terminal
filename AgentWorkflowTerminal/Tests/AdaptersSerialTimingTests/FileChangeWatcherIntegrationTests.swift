@@ -1,7 +1,8 @@
-import Adapters
-import Darwin
 import Foundation
 import Testing
+import os
+
+@testable import Adapters
 
 @Suite("§7.3 表示中ファイルの変更監視")
 struct FileChangeWatcherIntegrationTests {
@@ -150,7 +151,13 @@ struct FileChangeWatcherIntegrationTests {
   }
 
   /// キャンセルで監視が本当に止まったことは、イベントが来ないことだけでは示せない
-  /// (consumer が死んでいるだけでも成立する)。ポーリングの CPU 消費で確かめる。
+  /// (consumer が死んでいるだけでも成立する)。周期ごとの観測回数で確かめる。
+  /// 経過の物差しに実時間を使わないのは、機械が混むほど同じ実時間に走る周期の数が減り、
+  /// 「止まっていない」側の観測回数まで一緒に小さくなるため (プロセス全体の CPU を基準に
+  /// していた頃の #319 の揺れと同じ機序)。止めない watcher を 1 本残し、その観測回数を
+  /// 物差しに使えば、負荷がどうであれ「止まっていなければ同じだけ観測されたはず」の量で測れる。
+  /// 打ち切る側を 1 本にしないのは、取りこぼしが確率的な実装 (例: 4 回に 1 回だけ打ち切り損なう)
+  /// に対して検出確率が漏れ率そのものになるため。まとめて打ち切って合算すると 1-(1-p)^N になる。
   @Test("キャンセルでポーリングが解放される", .timeLimit(.minutes(1)))
   func releasesPollingOnCancellation() async throws {
     let root = URL(fileURLWithPath: "/private/tmp/awt-watch-\(UUID().uuidString)")
@@ -160,17 +167,38 @@ struct FileChangeWatcherIntegrationTests {
     try Data("aa".utf8).write(to: file)
     let interval = try #require(FileChangeObservationInterval(duration: .milliseconds(1)))
 
-    var tasks: [Task<Void, Never>] = []
-    for _ in 0..<200 {
-      let stream = FileChangeWatcher(path: file, interval: interval).events()
-      tasks.append(Task { for await _ in stream {} })
+    let watcherCount = 32
+    let settleWindow = 20
+    let measurementWindow = 100
+    let cancelledPolls = PollCounter()
+    let witnessPolls = PollCounter()
+    var cancelledTasks: [Task<Void, Never>] = []
+    for _ in 0..<watcherCount {
+      let stream = FileChangeWatcher(
+        path: file, interval: interval, onPoll: { cancelledPolls.increment() }
+      ).events()
+      cancelledTasks.append(Task { for await _ in stream {} })
     }
-    let activeCPU = try await processCPUTime(over: .milliseconds(500))
-    for task in tasks { task.cancel() }
-    try await ContinuousClock().sleep(for: .milliseconds(200))
-    let idleCPU = try await processCPUTime(over: .milliseconds(500))
+    let witnessStream = FileChangeWatcher(
+      path: file, interval: interval, onPoll: { witnessPolls.increment() }
+    ).events()
+    let witnessTask = Task { for await _ in witnessStream {} }
+    defer { witnessTask.cancel() }
 
-    #expect(idleCPU < activeCPU / 8, "active=\(activeCPU)s idle=\(idleCPU)s")
+    try await waitForPollCount(watcherCount * 5, counter: cancelledPolls)
+    try await waitForPollCount(20, counter: witnessPolls)
+    for task in cancelledTasks { task.cancel() }
+    for task in cancelledTasks { await task.value }
+
+    // キャンセルが producer へ伝わるまでの猶予も、実時間ではなく物差し側の周期数で取る。
+    try await waitForPollCount(witnessPolls.count + settleWindow, counter: witnessPolls)
+    let stopped = cancelledPolls.count
+    try await waitForPollCount(witnessPolls.count + measurementWindow, counter: witnessPolls)
+
+    // 猶予を挟んでも入れ違いの 1 周期は watcher ごとに数えうるので、上界は本数そのもの
+    // (実測では負荷の有無によらず 0)。1 本でも止まっていなければ物差しと同じ ~100 回増える。
+    let extra = cancelledPolls.count - stopped
+    #expect(extra <= watcherCount, "キャンセル後に \(extra) 回ポーリングした")
   }
 
   @Test("正でない周期を拒否する", arguments: [Duration.zero, .milliseconds(-1)])
@@ -190,17 +218,19 @@ struct FileChangeWatcherIntegrationTests {
     try await body(file, FileChangeWatcher(path: file, interval: interval))
   }
 
-  private func processCPUTime(over duration: Duration) async throws -> Double {
-    let before = try consumedCPUSeconds()
-    try await ContinuousClock().sleep(for: duration)
-    return try consumedCPUSeconds() - before
-  }
-
-  private func consumedCPUSeconds() throws -> Double {
-    var usage = rusage()
-    try #require(getrusage(RUSAGE_SELF, &usage) == 0)
-    return [usage.ru_utime, usage.ru_stime].reduce(0.0) {
-      $0 + Double($1.tv_sec) + Double($1.tv_usec) / 1_000_000
+  /// 期限は判定の物差しではなく、ポーリングが一切進まないまま吊るのを避けるための保険。
+  /// `.timeLimit` より先に待ち全部が切れて診断が出揃う長さにする (30 秒だと 2 つ目を待つ間に
+  /// `.timeLimit` が発火し、肝心の判定まで到達しない)。待つ箇所を増やすときはこの上限も見直す。
+  /// 正常時の最悪は実測 359 ms (spinner 250 本、0.0% idle) なので、2 秒は 5.6 倍の余裕がある。
+  private func waitForPollCount(_ count: Int, counter: PollCounter) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(2))
+    while counter.count < count {
+      guard clock.now < deadline else {
+        Issue.record("期限までに \(count) 回のポーリングが観測できなかった (\(counter.count) 回)")
+        return
+      }
+      try await clock.sleep(for: .milliseconds(1))
     }
   }
 
@@ -220,4 +250,15 @@ struct FileChangeWatcherIntegrationTests {
 private actor EventRecorder {
   private(set) var values: [FileChangeEvent] = []
   func append(_ event: FileChangeEvent) { values.append(event) }
+}
+
+/// actor にして `Task { await … }` で hop すると、増分がポーリングと非同期になり、判定が読む
+/// スナップショットが在庫を取りこぼす (実測: 周期は変わらず、`stopped` が watcher 1 本あたり
+/// 1 回ぶん小さく出る)。不可分性が要る側なので lock を選ぶ (docs/coding-guidelines.md §1.2 の例外)。
+private final class PollCounter: Sendable {
+  private let state = OSAllocatedUnfairLock(initialState: 0)
+
+  var count: Int { state.withLock { $0 } }
+
+  func increment() { state.withLock { $0 += 1 } }
 }

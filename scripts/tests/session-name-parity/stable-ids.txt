@@ -1,0 +1,61 @@
+# scripts/check-session-name-parity.sh の入力。1 行 1 件の安定 ID
+# (`git rev-parse --absolute-git-dir` の出力そのまま) を並べる。
+# 空行と `#` で始まる行は無視する (安定 ID は必ず `/` で始まるので曖昧にならない)。
+#
+# 件を減らすときは、その形を落としてよいか考えること。ここに並んでいるのは
+# bash 実装と Swift 実装がずれうる点そのもの (Unicode スカラ / バイト / 書記素の違い、
+# 空要素の扱い、`_git` の分岐、32 スカラの切り詰め位置) である。
+
+# 通常の worktree
+/Users/dev/repo/.git/worktrees/fix-foo
+/Users/dev/repo/.git/worktrees/UPPER-lower_09
+
+# Project Root (安定 ID は <repo>/.git なので、正規化後に _git となり 1 つ前の要素を使う)
+/Users/dev/repo/.git
+/.git
+# bare repository の <repo>.git は repo_git になり、_git の分岐に入らない
+/Users/dev/repo.git
+# 実在する _git という名前のディレクトリ (Project Root ではないが同じ分岐を通る)
+/Users/dev/repo/_git
+/_git
+
+# 空要素になる形 (Swift の split は空要素を落とす)
+/
+///
+//Users//dev///repo/.git//
+/Users/dev/repo/.git/worktrees/trailing/
+
+# 記号。生成名に . と : が出てはならない (TmuxSessionName の注記)
+/Users/dev/re.po/.git/worktrees/a.b
+/Users/dev/repo/.git/worktrees/a:b
+/Users/dev/repo/.git/worktrees/a b
+/Users/dev/repo/.git/worktrees/back\slash
+/Users/dev/repo/.git/worktrees/tilde~and%percent
+/Users/dev/repo/.git/worktrees/-leading-hyphen
+
+# 許可文字クラスの境界 (A / Z / a / z / 0 / 9 を slug に通す)
+/Users/dev/repo/.git/worktrees/AZaz09-boundary
+
+# 32 スカラの切り詰め (31 / 32 / 33)
+/a/0123456789012345678901234567890
+/a/01234567890123456789012345678901
+/a/012345678901234567890123456789012
+
+# 非 ASCII。事前合成 (1 スカラ) と結合文字列 (2 スカラ) は別の名前になる
+/Users/dev/repo/.git/worktrees/café
+/Users/dev/repo/.git/worktrees/café
+/Users/dev/リポジトリ/.git
+/Users/dev/repo/.git/worktrees/🍣寿司
+# 切り詰め位置に非 BMP が絡む形 (バイト単位・UTF-16 単位の実装とはここでずれる)
+/a/🍣🍣🍣🍣🍣xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+/a/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa🍣
+
+
+# 不正な UTF-8 (git の出力は byte 列であり、Swift 側も bash 側も U+FFFD へ lossy に置換する)
+/Users/dev/repo/.git/worktrees/caf�
+/Users/dev/repo/.git/worktrees/��
+/Users/dev/repo/.git/worktrees/�
+/�/.git
+/Users/dev/���/.git
+/Users/dev/repo/.git/worktrees/a��b
+

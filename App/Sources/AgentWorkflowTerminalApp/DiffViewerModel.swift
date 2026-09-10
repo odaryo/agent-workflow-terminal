@@ -27,25 +27,6 @@ final class DiffViewerModel: ObservableObject {
     var range: DiffLineRange
   }
 
-  enum PendingSend: Equatable {
-    case single(DiffReviewCommentID)
-    case batch([DiffReviewCommentID])
-  }
-
-  /// 未登録・登録先の消失のどちらでも、送る前にユーザーへ選ばせるための要求 (§12.7)。
-  struct PaneSelectionRequest: Identifiable {
-    let id = UUID()
-    let worktree: WorktreeIdentity
-    let candidates: [MainPaneCandidate]
-    /// 登録が残っているが、その pane を送信先として使えない場合だけ入る。「ID ごと消えた」と
-    /// 「ID は在るが別 pane」で文面を変えるため、`PaneID` へ潰さない。
-    let absence: MainPaneAbsence?
-    /// 送信操作の途中で選ばせている場合だけ入る。`nil` は送信先の選び直しだけを行う操作。
-    let pending: PendingSend?
-    /// 候補を観測したときの `#{pid}`。選ばれた候補と組にして登録を作る。
-    let serverProcessID: Int32?
-  }
-
   /// 再観測の間隔。agent の編集は `.git/index` を触らないので index の監視では拾えず、
   /// かといって 4 本の git を高頻度で回すわけにもいかないため、明示 Refresh と併用する前提の
   /// 粗いポーリングにしてある (§9.3)。
@@ -86,12 +67,24 @@ final class DiffViewerModel: ObservableObject {
   /// 部分成功で落ちた分と、中身を読めなかった untracked。黙って捨てない。
   @Published private(set) var notices: [String] = []
 
+  /// 送信操作が進行中か。`requestSend` の入口から `inject` の完了までを覆う (Issue #276)。
+  /// `isSending` と別に持つのは、あちらが UI の無効化を通じて「今 pane へ注入している」を表して
+  /// おり、範囲を `resolve` まで広げるとボタンの無効化の意味が変わるため。
+  private var isSendInProgress = false
+  private var sendCoalescer: DiffCommentSendCoalescer
+
   /// ユーザーが選び直した base branch。タスクタブごとに覚え、次に開いても再判定しない (§9.1.1)。
   private var userSelectedBaseBranch: String?
   private var didLoadContext = false
 
-  init(worktreeRoot: URL) {
+  /// `timeSource` を差し替えられるのは、coalescing の閾値の経過をテストが実時間を待たずに
+  /// 動かすため。既定は本番と同じ単調増加クロック。
+  init(
+    worktreeRoot: URL,
+    timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
+  ) {
     self.worktreeRoot = worktreeRoot
+    self.sendCoalescer = DiffCommentSendCoalescer(timeSource: timeSource)
   }
 
   var currentSnapshot: DiffSnapshot? {
@@ -195,6 +188,25 @@ final class DiffViewerModel: ObservableObject {
 
   // MARK: - 送信 (§9.2 / §12.7)
 
+  /// 送信操作を1つに直列化する入口。進行中の送信があれば `false` を返し、**その要求は捨てる**
+  /// (連打の意図は「1回送る」であって「2回送る」ではない。Issue #276)。
+  ///
+  /// `isSending` では代われない: あれが立つのは `inject` の前後だけで、`resolve` の中断中は
+  /// false のまま2度目の要求が同じ判定を通る。
+  ///
+  /// 進行中の送信が**無い**場合でも、直近に成功した同じ要求の繰り返しはここで捨てる
+  /// (`DiffCommentSendCoalescer`)。1回の送信は数十 ms で終わるので、進行中かどうかだけでは
+  /// 連打を捉えられない。
+  private func beginSend(_ pending: PendingSend) -> Bool {
+    guard !isSendInProgress, !sendCoalescer.shouldDrop(pending) else { return false }
+    isSendInProgress = true
+    return true
+  }
+
+  private func endSend() {
+    isSendInProgress = false
+  }
+
   /// 送信先が未登録、または登録先が消えていれば `paneSelectionRequest` を立てて選ばせる。
   /// 候補が1つでも自動では選ばない (§12.7 確定)。
   func requestSend(
@@ -203,7 +215,8 @@ final class DiffViewerModel: ObservableObject {
     mainPane: MainPaneCoordinator,
     agentPaneStates: [PaneAgentState]?
   ) async {
-    guard !isSending else { return }
+    guard beginSend(pending) else { return }
+    defer { endSend() }
     dismissMessages()
     switch await mainPane.resolve(
       for: worktree, agentPaneIDs: Set((agentPaneStates ?? []).map(\.id)))
@@ -212,7 +225,9 @@ final class DiffViewerModel: ObservableObject {
       commentError = failure.message
     case .success(let observation):
       if case .registered(let registration, _) = observation.resolution {
-        await send(
+        // 入口で既に `beginSend` を通しているので、ここは guard を持たない `performSend` を呼ぶ。
+        // `send` を呼ぶと自分の送信を自分で捨てる。
+        await performSend(
           pending, to: registration, worktree: worktree, mainPane: mainPane,
           agentPaneStates: agentPaneStates)
         return
@@ -279,7 +294,21 @@ final class DiffViewerModel: ObservableObject {
     mainPane: MainPaneCoordinator,
     agentPaneStates: [PaneAgentState]?
   ) async {
-    guard !isSending else { return }
+    guard beginSend(pending) else { return }
+    defer { endSend() }
+    await performSend(
+      pending, to: registration, worktree: worktree, mainPane: mainPane,
+      agentPaneStates: agentPaneStates)
+  }
+
+  /// 直列化を済ませた後の送信本体。**`beginSend()` を通した呼び出し元からだけ呼ぶ。**
+  private func performSend(
+    _ pending: PendingSend,
+    to registration: MainPaneRegistration,
+    worktree: WorktreeIdentity,
+    mainPane: MainPaneCoordinator,
+    agentPaneStates: [PaneAgentState]?
+  ) async {
     let pane = registration.pane
     mainPane.register(registration, for: worktree)
     paneSelectionRequest = nil
@@ -317,6 +346,8 @@ final class DiffViewerModel: ObservableObject {
 
     switch outcome {
     case .success:
+      // 記録は成功した注入だけ。失敗の直後は同じ要求をすぐ再試行できなければならない。
+      sendCoalescer.recordSuccess(pending)
       let now = Date()
       for comment in targets { comments.markSent(comment.id, at: now) }
       commentError = nil

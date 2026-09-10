@@ -55,7 +55,7 @@ struct GitCloseSafetyInspectorTests {
       case ["merge-base", "--is-ancestor", "refs/heads/refs/foo", "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
-        .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+        squashScanWithoutCandidates(commandArguments(arguments))
       }
     }
     let inspector = GitCloseSafetyInspector(
@@ -81,7 +81,7 @@ struct GitCloseSafetyInspectorTests {
       case ["merge-base", "--is-ancestor", "refs/heads/refs/heads/x", "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
-        .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+        squashScanWithoutCandidates(commandArguments(arguments))
       }
     }
     let inspector = GitCloseSafetyInspector(
@@ -140,7 +140,7 @@ struct GitCloseSafetyInspectorTests {
       case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
-        .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+        squashScanWithoutCandidates(commandArguments(arguments))
       }
     }
     let inspector = GitCloseSafetyInspector(
@@ -442,11 +442,11 @@ struct GitCloseSafetyInspectorTests {
 
 }
 
-private func commandArguments(_ arguments: [String]) -> [String] {
+func commandArguments(_ arguments: [String]) -> [String] {
   Array(arguments.dropFirst(4))
 }
 
-private actor CloseInspectionProcessStub: ProcessRunning {
+actor CloseInspectionProcessStub: ProcessRunning {
   private let handler: @Sendable ([String]) -> Result<ProcessRunResult, ProcessRunnerError>
 
   init(handler: @escaping @Sendable ([String]) -> Result<ProcessRunResult, ProcessRunnerError>) {

@@ -12,6 +12,7 @@ public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
   public enum Reason: Sendable, Equatable {
     case git(GitRunnerError)
     case statusParse([GitStatusParseFailure])
+    case logParse([GitLogParseFailure])
     case missingStatusBranch
     case invalidRevision(String)
   }
@@ -26,8 +27,15 @@ public struct GitCloseSafetyInspectionResult: Sendable, Equatable {
 }
 
 public struct GitCloseSafetyInspector: Sendable {
+  /// squash merge を探して走査する既定 branch 側 commit の上限。超えたら `.unmerged` (§3.4)。
+  /// 1 commit あたり `git diff` 1 回で、このリポジトリでの実測は 34 ms (146 commit / 5.03 秒) —
+  /// 上限に張り付いた最悪ケースで約 7 秒かかる。146 commit はこのリポジトリの main の 30 日分
+  /// (直近 7 日で 104) にあたるので、200 は worktree が 2 週間開いたままでも届く範囲になる。
+  static let defaultSquashScanCommitLimit = 200
+
   private let runner: GitRunner
   private let target: DetectedWorktree
+  private let squashScanCommitLimit: Int
 
   public init(
     target: DetectedWorktree,
@@ -39,11 +47,16 @@ public struct GitCloseSafetyInspector: Sendable {
       processRunner: processRunner,
       executableCandidates: executableCandidates)
     self.target = target
+    self.squashScanCommitLimit = Self.defaultSquashScanCommitLimit
   }
 
-  init(runner: GitRunner, target: DetectedWorktree) {
+  init(
+    runner: GitRunner, target: DetectedWorktree,
+    squashScanCommitLimit: Int = Self.defaultSquashScanCommitLimit
+  ) {
     self.runner = runner
     self.target = target
+    self.squashScanCommitLimit = squashScanCommitLimit
   }
 
   /// `projectRootBranch` は `GitWorktreeDetector` と同じく `refs/heads/` を除いた短縮名だけを受け取る。
@@ -239,10 +252,71 @@ public struct GitCloseSafetyInspector: Sendable {
       _ = try await runner.run(.isAncestor(target, of: destination))
       return (.merged, [])
     } catch GitRunnerError.commandFailed(let exitCode, _, _) where exitCode == 1 {
+      return await inspectSquashMerge(target: target, destination: destination)
+    } catch {
+      return (.unknown, [.init(check: .branchMerge, reason: .git(error))])
+    }
+  }
+
+  /// ancestor 判定に現れない squash merge を、branch の合成差分と既定 branch 側 commit の差分の
+  /// 同一性で拾う (§3.4)。検出漏れは「削除が提示されないだけ」なので `.unmerged` へ倒し、
+  /// 走査を完遂できなかったときも `.merged` は返さない。
+  ///
+  /// 比較には `diffFileSummaries` の raw + numstat を使う。git 2.50.1 の実測で、squash merge 前に
+  /// 既定 branch が**別のファイルを**変更していても、branch が触ったパスの前後 blob OID は
+  /// 変わらないため両者の出力はバイト一致した。同じ実測で `git cherry` は 2 commit 以上の branch を
+  /// 1 件も検出できず (全行が `+`)、`git patch-id` は引数のファイルを無視して stdin を待つため
+  /// `ProcessRunning` (stdin を渡さない) からは使えない。
+  private func inspectSquashMerge(
+    target: GitRevision,
+    destination: GitRevision
+  ) async -> (status: BranchMergeStatus, failures: [GitCloseSafetyInspectionFailure]) {
+    do {
+      let mergeBaseOutput = try await runner.run(.mergeBase(target, destination)).stdout
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      guard let mergeBase = GitRevision(mergeBaseOutput) else {
+        return (
+          .unknown, [.init(check: .branchMerge, reason: .invalidRevision(mergeBaseOutput))]
+        )
+      }
+      let branchChange = try await changeSummary(from: mergeBase, to: target)
+      // 内容差が空の branch は、既定 branch 側の空 commit と一致して `.merged` に化ける
+      // (実測: `commit --allow-empty` を1つ持つ既定 branch に対して出力が両方とも空になった)。
+      // commit そのものは既定 branch に無いので、これは「マージ済み」ではない。
+      guard !branchChange.isEmpty else { return (.unmerged, []) }
+
+      let log = GitLog.parse(
+        output: try await runner.run(
+          .log(
+            range: .twoDot(from: mergeBase, to: destination),
+            maxCount: squashScanCommitLimit + 1)
+        ).stdout)
+      guard log.failures.isEmpty else {
+        return (.unknown, [.init(check: .branchMerge, reason: .logParse(log.failures))])
+      }
+      guard log.commits.count <= squashScanCommitLimit else { return (.unmerged, []) }
+
+      for commit in log.commits {
+        // 第1親との差を見る。squash commit は merge commit ではないが、第1親で式を立てておけば
+        // 親を持たない commit (無関係な履歴の root) が範囲に混ざっても走査が止まらない。
+        guard let parentHash = commit.parentHashes.first,
+          let parent = GitRevision(parentHash),
+          let commitRevision = GitRevision(commit.hash)
+        else { continue }
+        if try await changeSummary(from: parent, to: commitRevision) == branchChange {
+          return (.merged, [])
+        }
+      }
       return (.unmerged, [])
     } catch {
       return (.unknown, [.init(check: .branchMerge, reason: .git(error))])
     }
+  }
+
+  private func changeSummary(
+    from: GitRevision, to: GitRevision
+  ) async throws(GitRunnerError) -> String {
+    try await runner.run(.diffFileSummaries(.range(.twoDot(from: from, to: to)))).stdout
   }
 
   private static func localBranchRevision(_ branch: String) -> String {

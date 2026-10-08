@@ -7,20 +7,20 @@ import TerminalCore
 @main
 struct AgentWorkflowTerminalApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-  @StateObject private var model: AppModel
+  @StateObject private var projects: ProjectsModel
 
   init() {
-    _model = StateObject(wrappedValue: AppModel(dependencies: AppDependencies.make()))
+    _projects = StateObject(wrappedValue: ProjectsModel(dependencies: AppDependencies.make()))
   }
 
   var body: some Scene {
     // `WindowGroup` にしない。複製された window は同じ `AppModel` を共有するため、開いている
     // タブごとに `GhosttySurfaceView` が二重に生成され、同一 tmux session へ 2 client が
     // attach する。tmux は最小の client に合わせるので、小さい方が既存の表示を縮める。main
-    // window の複製に意味を持たせるかは設計書 §25 で未確定であり、未確定のまま壊れた状態で
-    // 開けるようにはしない (Issue #238)。
+    // main window は1枚で選択中の1 Project を表示すると設計書 §25 で確定しており (2026-10-08)、
+    // 複製できる形にして壊れた状態で開けるようにはしない (Issue #238 / #372)。
     Window("Agent Workflow Terminal", id: "main") {
-      ProjectView(model: model)
+      ProjectsWindowContent(projects: projects)
         .frame(minWidth: 480, minHeight: 320)
     }
     .defaultSize(width: 900, height: 560)
@@ -42,7 +42,7 @@ struct AgentWorkflowTerminalApp: App {
   }
 }
 
-private struct ProjectView: View {
+struct ProjectView: View {
   @ObservedObject var model: AppModel
   @StateObject private var keyboardFocus = TerminalKeyboardFocus()
 
@@ -113,7 +113,6 @@ private struct ProjectView: View {
         }
       }
     }
-    .task { model.run() }
     .onChange(of: model.selectedIdentity) { _, _ in
       keyboardFocus.tabSelectionChanged(drawerLayout: model.viewerDrawerLayout)
     }
@@ -123,7 +122,7 @@ private struct ProjectView: View {
   }
 }
 
-private struct WarningBar: View {
+struct WarningBar: View {
   let text: String
   let dismiss: () -> Void
 

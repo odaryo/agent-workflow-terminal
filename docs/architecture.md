@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-09-07(目的の再確認。全paneの概要一覧、タスク完了の区別、通知優先のモバイル導入を反映)
+> 最終更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -47,7 +47,7 @@ TerminalはAgent開発フローの表示・操作・レビューを支援する�
 1. **1開発Task = 1 worktree = 1タブ**とする。
 2. 各worktreeは独立したtmux sessionを持つ。
 3. UIの主役は常に**Agent Terminal**とする。
-4. Code、Diff、Evidenceは必要時だけViewer Drawerで開く。
+4. Code、Diff、Evidenceは必要時だけViewer Drawerで開く。別窓では開かない(§1.2)。
 5. tmuxのpane構造と操作体系を活用し、独自のTerminal pane managerを再実装しない。
 6. Claude Code専用アプリにはせず、Agent Adapterで複数Agentを扱う。
 7. Gitの閲覧機能は強くするが、Git変更操作はAgentまたは通常Terminalに任せる。
@@ -67,9 +67,10 @@ TerminalはAgent開発フローの表示・操作・レビューを支援する�
 概要は「ログイン不具合を修正する｜設計相談中」程度とし、判断待ち・作業中・終了等は別のアイコンで表す。
 全プロジェクト・全タスクのAgent paneを、タスクを切り替えずに一覧で確認できることを中核要件とする(§13)。
 
-Diffは対象タスクと比較元を指定して別窓で閲覧したい。組み込み別窓と外部ツール連携はいずれも許容し、
-方式は未確定。Gitツリー表示は追加候補であり必須ではない。編集はviや外部IDEで行う。
-既存のViewer DrawerとP2の実装範囲は維持し、別窓への拡張は後続で扱う。
+Diffは対象タスクと比較元を指定して閲覧できるようにする。**表示先はViewer Drawerとし、別窓
+(組み込み別窓・外部ツール連携とも)は設けない — 確定(2026-10-08)。** 2026-09-07に記録した
+「別窓で閲覧したい」は撤回し、比較元の指定はDrawerの中で実現する。Code・Evidenceも同じくDrawerで開く(§6)。
+Gitツリー表示は追加候補であり必須ではない。編集はviや外部IDEで行う。
 
 ### 1.3 明示的に作らないもの
 
@@ -206,6 +207,24 @@ Active化するworktreeに既存tmux sessionがあればResumeする。session�
 
 worktreeのActive状態とtmux sessionの存在は独立して扱う。
 
+**Resume時の設定修復 — 確定(2026-10-08)。** 既存sessionへResumeするとき、Terminalがsession生成時に
+適用するはずのoption(§4.2の`window-size`など)が**未設定**なら適用し直し、ユーザーが別の値を設定して
+いれば上書きしない。生成が途中で中断されるとoptionを適用し損ねたsessionが残り、Resumeがそれを
+そのまま使い続けるためである(Issue #322)。`history-limit`(§4.4)は既存paneへ遡及しないので対象外とする。
+tmuxは未設定と空文字を同じに返すことがあるため、「未設定」の観測方法は実装前にtmux 3.4と3.7cの
+両方で計測して決める。
+
+**sessionの用意に失敗したタブ — 確定(2026-10-08)。** 失敗理由とともに`再試行`操作を表示し、
+ユーザーが押したときだけ外部プロセスを実行する。自動では再試行しない。一時的な失敗や権限の誤判定で
+タブがアプリの再起動まで使えなくなるのを防ぎつつ、失敗のたびに外部プロセスを撃ち続けるループを
+作らないためである(Issue #323)。
+
+**表示中にattachが終わったタブ — 確定(2026-10-08)。** detachやsessionの外部終了でattachが終わった
+タブは端末を覆って再接続の操作を出し、ユーザーの明示操作で再接続する。sessionが残っていればResumeし、
+消えていれば§4.2／§4.4を満たすsessionを作り直す。作り直したsessionに元のAgentプロセスは戻らない。
+自動では再attachしない — detachはtmux利用者の意図的な操作であり、自動で戻すとアプリ内からdetachする
+手段が無くなるためである(PR #327)。
+
 ### 3.4 完了とClose
 
 Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない。完了状態を表示し、PRレビュー後の追加修正を可能にする。
@@ -226,9 +245,32 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 既定branchへ入るため、ancestor判定だけでは検出できず、未マージのbranchが誤って削除不可のまま残るか
 検出漏れが起きる。判定は外部git CLIの出力に依存するため、実装時に隔離環境での計測で検証する。
 
+**選択肢4の削除は`git branch -D`で行い、対象はアプリが「マージ済み」と判定したbranchに限る —
+確定(2026-10-08)。** `git branch -d`はsquash mergeをマージ済みと認めず、上流branchが削除されて
+`git fetch --prune`された後(PRのマージ後にCloseする最も普通の状況)は削除を拒否する(git 2.50.1で実測)。
+判定と実行で「マージ済み」の定義が食い違ったままでは、選択肢4はsquash merge運用で必ず失敗する。
+そこでアプリ自身のancestor／patch同一性の判定を根拠に`-D`で削除する。squash mergeと判定したbranchでは、
+実行前の確認で「gitはこのbranchを未マージと見なしているが、squash mergeと判定したため強制削除する」
+ことを明示する。実行順(session終了→worktree削除→branch削除)と、最初の失敗でそれ以降を実行しない
+扱いは変えない。branchの削除だけが失敗してもbranchは残り、データは失われない(Issue #359)。
+
 **HEADがbranchを指していない(detached HEAD)worktreeでは、Closeそのものを拒否する — 確定(2026-09-08)。**
 選択肢1〜4のいずれを選んでも実行せず、ブランチを作るか進行中のrebase／mergeを完了するよう促す。
 下記の検査(警告して続行可)より強い扱いとして、確認では済ませない。
+
+**拒否の対象は、detached HEADに加えて作業が途中のworktree全般とする — 確定(2026-10-08)。**
+merge／cherry-pick／revert／rebase／bisectの途中状態が残っているworktreeは拒否する。merge・cherry-pickの
+衝突中はHEADがbranchを指したままで(`worktree list --porcelain`が`branch`行を出す。git 2.50.1で実測)、
+detached HEADの条件では捕まらず、未commit変更の警告を承諾すれば`--force`付きで削除されてしまうため
+である。途中の操作を完了または中止するよう促す。途中状態の観測手段(管理ディレクトリの`MERGE_HEAD`等を
+見るか、`git status`を読むか)は実装時に計測で決める(Issue #355)。
+
+**この拒否は計画時と実行直前の2回判定する — 確定(2026-10-08)。** 実行層はsessionを終了する前に
+対象worktreeのHEADと途中状態を読み直し、detached、計画時と別のbranch、作業途中のいずれかであれば
+何も実行せずに中止する。計画から実行までの間にAgentがrebaseを始めた場合や、保存から復元した陳腐化
+したbranchで計画を作った場合に、detached HEADのworktreeが削除されるためである。detachedには
+`git worktree remove`が`--force`なしでも成功し、そこに積んだcommitはgc後に失われる(git 2.50.1で実測、
+Issue #354)。読み直しから削除までの窓は残存リスクとして受け入れる。
 
 **3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
 
@@ -389,6 +431,12 @@ iPhone/iPadとMacの同時attachで**全クライアントが全内容を見ら�
 したがって3.5未満は**警告を出すのみ**とし、動作の制限や接続の拒否は行わない。3.4を切り捨てないのは、既存のCLI出力パーサの挙動根拠がすべて3.4の実測であり、Ubuntu 24.04 LTSの標準パッケージも3.4であるためである。
 
 Adapterは版数を検出する。版数を解釈できなかった場合は`Unknown`として保持し、**「サポート対象」にも「対象外」にも丸めない**(§12.3と同じ方針)。
+
+**tmuxが見つからない場合 — 確定(2026-10-08)。** 探した場所と導入手順(例: `brew install tmux`)を表示し、
+アプリからはインストールしない。設定でtmux実行ファイルのパスを上書きでき、既定の探索場所
+(`/opt/homebrew/bin`／`/usr/local/bin`／`/usr/bin`)以外に置いたtmuxも使える。アプリはユーザーの既定
+tmuxサーバを共有する(§4.1)ため、シェルと別のtmuxを拾うと版の違うクライアントが同じサーバへ接続する。
+パスの上書きは、ユーザーのシェルと同じtmuxを確実に使わせる手段でもある(実装はIssue #254)。
 
 ### 4.4 スクロールバック履歴とメモリ予算
 
@@ -607,6 +655,11 @@ snapshot内では出所を区別して表示する。区別はcommit済み／sta
 5種で、untrackedは新規ファイルとして全行追加で表示する。ignoredファイルは含めない
 (§7.1のFile Browserがignoredを列挙することとは別の判断で、Diffは対象外)。
 
+**submodule内のuntrackedファイルは観測しない — 確定(2026-10-08)。** `--ignore-submodules=untracked`
+(gitの既定と同じ値)を明示して観測する。ユーザーが自分の端末で`git diff`した結果と揃えるためで、
+値を明示するのはユーザーのgit設定に観測を左右させないためである。submodule内の追跡ファイルの変更で
+現れる`-dirty`のエントリを、通常のファイルではなくsubmoduleとして識別する修正は、この決定とは別にIssue #368で扱う。
+
 **競合(unmerged) — 確定(2026-09-08)。** マージ／rebase中の競合ファイルは一覧とDiffに表示するが、
 **コメント送信の対象外**とする。解決が進むにつれて行が動くファイルにコメントanchor(§9.2)を張らない
 ためである。§9.2のcomment anchorが持つ6要素の構造自体は変更しない。
@@ -703,7 +756,7 @@ Agentの実装サイクル、修正回、レビュー回の対応関係までは
 
 ## 10. Ask AgentとConsultation Log
 
-> 注: UI名称はAgent非依存の`Ask Agent`とすることで確定した(旧称: `Ask Claude`)。実行時にどのAgent CLIを使うかの選択方法は未確定。
+> 注: UI名称はAgent非依存の`Ask Agent`とすることで確定した(旧称: `Ask Claude`)。実行時に使うAgent CLIは、**起動のたびにユーザーが選ぶ — 確定(2026-10-08)**。Projectごとの既定は持たない。
 
 ### 10.1 質問の起点
 
@@ -775,7 +828,7 @@ worktree削除後もsnapshotで当時の質問対象を確認できる。Git参�
 - Permission
 - Agent Error
 - ハーネスが明示したタスク完了(§12.7)。paneの応答終了だけでは完了通知しない
-- 長時間継続する`Unknown`
+- 長時間継続する`Unknown`(既定OFF。下記)
 
 通知種別は個別にON/OFFできるようにする。
 
@@ -795,7 +848,16 @@ Push通知は、APNsへ橋渡しする軽量な通知中継をopt-inで利用す
 **モバイル初版の利用条件は、Mac側アプリを起動したまま、外出先でiPhoneをロックし、
 モバイルアプリを開いていない間にも判断待ちとタスク完了の通知が届くこと**とする。
 通知中継を有効にした構成で検証する。どのAgent paneの判断待ちも対象にできることを要求する。
-重複抑止、再接続時の再通知、通知から消失したpaneへ戻る場合の扱いは実装前に定める(§25)。
+**通知の重複・再接続・消失した対象 — 確定(2026-10-08)。**
+
+- 判断待ち(Question／Permission／Error)の通知は、その状態へ入った遷移1回につき1回とする。状態に
+  留まっている間は再通知せず、一度抜けて再び入ったときに新しく通知する。
+- モバイルの再接続時や通知中継の復旧時は、切断中に起きて未配達かつ未対応の判断待ちを「判断待ちがN件
+  あります」の1件にまとめて通知し、開くとOverview(§13)へ移る。配達済みの通知は数えない。
+- 通知を開いたとき対象paneが既に無ければ対象worktreeのタブを、worktreeも無ければOverviewを開き、
+  通知元が既に終了していることを表示する。
+- 長時間継続する`Unknown`の通知は既定でOFFとする。`Unknown`は判定できないことを表すだけで、人間の
+  対応が必要とは限らないためである。ONにした場合の既定の継続時間は10分とする。
 
 ## 12. Agent Adapterと状態モデル
 
@@ -939,8 +1001,21 @@ process fallbackについては、**process観測だけでは`Working`と`Idle`�
   (§9.2のコメント送信等)が未登録のworktreeで起きたときは、その場で候補paneを提示して選ばせ、
   選ばれたpaneをそのworktreeのメインpaneとして記憶する。以後は既定の送信先として使い、
   ユーザーはいつでも選び直せる。初回に選ばれるまでは送信操作を無効にし、候補が1つでも自動では選ばない。
-- 連携形式、セッションの識別と寿命、手入力と連携の優先順位、再実行時の完了解除、古いイベントの
-  排除方法は未確定。Terminal専用APIをハーネス実行の必須条件にしない(§32)。
+- **連携形式はtmuxのpaneユーザー変数とする — 確定(2026-10-08)。** ハーネスは自分のpane
+  (`$TMUX_PANE`)へ`tmux set-option -p`で現在地やタスク完了を書き、Terminalは`list-panes`で読む。
+  書き手は自分の環境変数だけでpaneを特定でき、Terminal専用APIもworktree内のファイルも要らない(§32)。
+  変数名、tmux版による差、値の表現は実装前にtmux 3.4と3.7cの両方で計測して決める。tmuxは未定義の
+  formatを空文字として返すため、「書かれていない」と「空を書いた」を区別できる表現(常に空でない値を
+  書く等)を計測で選ぶ。
+- **概要の優先順位は項目ごとに分ける — 確定(2026-10-08)。** 「目的」は手入力があれば手入力を優先する。
+  「現在地」は連携から得た値だけを使い、連携が無ければ空欄にする。手で書いた現在地が古くなって残り、
+  観測できない現在地を表示することを避けるためである。
+- **連携由来の情報の寿命はAgentプロセス単位とする — 確定(2026-10-08)。** pane内のAgentプロセスが
+  終了するか入れ替わったら、連携由来の現在地とタスク完了を破棄する(手入力の目的は残す)。タスク完了の
+  表示は、同じpaneが再び`Working`になったら解除する。信号はどのAgentプロセスが書いたかを識別できる
+  形にし、現在のプロセスと異なるものは古い信号として無視する。同じpaneでAgentを起動し直したときに、
+  前のAgentの完了や現在地が残るのを防ぐためである。
+- Terminal専用APIをハーネス実行の必須条件にしない(§32)。
 
 ### 12.8 trust promptとPermission信号 — 確定(2026-09-08)
 
@@ -1199,7 +1274,7 @@ Is previous worktree still Active and usable?
 
 候補は、人間対応が必要なAgent状態を最優先し、その後を最終操作順に並べる。
 
-対象tmux sessionだけが消えている場合は、Project／worktree画面へfallbackする。sessionを自動再作成するかは未確定。
+対象tmux sessionだけが消えている場合は、Project／worktree画面へfallbackする。sessionは自動では再作成せず、§3.3のとおりユーザーの明示操作で作り直す — 確定(2026-10-08)。
 
 ## 20. Mac hostとiPhone/iPad architecture
 
@@ -1616,24 +1691,17 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
 - keyboard shortcut体系
-- Overview以外のmulti-window対応(Diffは別窓を要求し、組み込み／外部連携の選択は未確定)
 
 ### Worktree／tmux
 
-- tmux未導入時のセットアップ
-- session消失時の再作成方針
-- detach時にrenderer surfaceのプロセスが終了する挙動を踏まえた、**タブ**のライフサイクル設計(Gate 1)。surface側の責務分担は§21.5で確定済みで、残るのは「上位レイヤがどう再生成を判断するか」(tmux sessionの存否確認、タブを閉じる条件)
+- detach／session消失後の**タブ**を閉じる条件(Gate 1)。surface側の責務分担は§21.5、再接続と再作成の判断は§3.3で確定済み
 
 ### Agent
 
 - 各Adapterが採用するsignalの組み合わせ(個々の信号の採用基準は§12.5で確定。どう合成して7状態へ落とすかは実装時に決める)
 - false positive／false negativeの許容条件(振動の可否とターン開始直後のfalse positiveは§12.2で決着済み)
 - 質問fallbackのデータ交換形式
-- `Ask Agent`実行時に使用するAgent CLIの選択方法
-- Unknown通知のデフォルト時間
-- 概要連携のschema、セッション識別と寿命、手入力との優先順位
-- タスク完了信号の関連付け、再実行時の解除、古い／重複イベントの排除
-- 通知の重複抑止、再接続時の再通知、消失したpaneへの通知導線
+- 概要連携のpane変数名と値の表現(形式はtmuxのpaneユーザー変数で確定。§12.7のとおり両版の計測で決める)
 
 ### Git／Diff
 
@@ -1856,7 +1924,7 @@ PR_READY
 - PR作成条件
 - Evidence撮影の必須条件
 - Agent-native質問UIとfile-based質問の使い分け
-- Terminalへの任意signal／registration API
+- ハーネスがTerminalへ概要・タスク完了を伝える条件(いつ・どの粒度で書くか)。伝える形式はtmuxのpaneユーザー変数として§12.7で確定済み
 - Claude CodeとCodexで共通Skillを使う方法
 
 ## 32. TerminalとAgent Skillsの統合原則
@@ -1897,6 +1965,9 @@ PR_READY
 - [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う
 - [x] 「マージ済み」の判定はancestor判定に加え、patch相当の同一性(squash merge)も検出する
 - [x] HEADがbranchを指していない(detached HEAD)worktreeはCloseそのものを拒否する(既存の警告して続行可な検査より強い扱い)
+- [x] Closeの拒否対象はmerge／cherry-pick／revert／rebase／bisectの途中状態を含む「作業途中」全般
+- [x] Closeの拒否条件は計画時と実行直前(session終了の前)の2回判定し、実行直前にHEADが変わっていれば何も実行しない
+- [x] 選択肢4のbranch削除は`git branch -D`で、アプリが「マージ済み」と判定したbranchに限る。squash mergeと判定したときは確認で強制削除を明示する
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは最大2分割
@@ -1909,11 +1980,12 @@ PR_READY
 - [x] worktree root直下の`.git`は列挙しない。サブモジュール配下はGit状態なし
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
+- [x] Code／Diff／EvidenceはViewer Drawerで開き、別窓は設けない。Diffの比較元の指定はDrawer内で行う
+- [x] submodule内のuntrackedファイルはDiffで観測しない(`--ignore-submodules=untracked`を明示)
 - [x] Diffはsnapshot、Refreshで新snapshot
 - [x] Base branchはupstream→`origin/HEAD`の既定branch→ユーザー選択の順で決め、結果をタスクタブごとに記憶する
 - [x] Base／Branch Diffのrangeはmerge-base起点 (base branchの進行分をレビュー範囲へ混ぜない)
 - [x] Base／Branch Diffはworking tree・staged・untrackedを含め、出所を5種(競合(unmerged)を含む)で区別表示する (ignoredは含めない)。競合(unmerged)は一覧とDiffに表示するがコメント送信の対象外
-- [x] コメントのanchorは`(snapshot ID, パス, old／new, 行範囲, 行テキストのハッシュ)`、新snapshotへの推測追従はしない
 - [x] Diffコメントは単体／batchでAgentへ送信
 - [x] Diffレビューコメントの送信は`Idle`と`Completed`のときだけ許可し、他状態(`Working`／`Question`／`Permission`／`Error`／`Unknown`)と状態エントリが無いpaneでは送信操作を無効化してコメントをUI側に保持する
 - [x] GitHub PR review連携はしない
@@ -1922,6 +1994,8 @@ PR_READY
 - [x] Agent-native質問UIを優先
 - [x] 全worktree横断Questions Inboxは作らない
 - [x] Mac／mobile通知とdeep link
+- [x] 判断待ち通知は状態へ入った遷移1回につき1回、再接続時は未配達・未対応分を1件にまとめてOverviewへ、消失した対象は1つ上の階層を開いて理由を表示
+- [x] 長時間`Unknown`の通知は既定OFF、ON時の既定は10分
 - [x] Agent Adapterで複数Agentを抽象化
 - [x] Unknownを正式状態として扱う
 - [x] Adapterの状態取得はevent購読が基本形、pollingはAdapter内部の実装詳細
@@ -1932,6 +2006,10 @@ PR_READY
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
 - [x] 複数device同時attach時の`window-size`は`smallest`、自分の作ったwindowごとに設定(`-g`は使わない)
 - [x] tmuxのサポート下限は3.4、3.5未満はZWJ表示の警告のみで機能制限なし
+- [x] tmuxが見つからなければ探した場所と導入手順を案内し、設定で実行ファイルのパスを上書きできる。アプリからインストールしない
+- [x] Resume時はTerminalが適用するはずのoptionが未設定のときだけ適用し直し、ユーザーが設定した値は上書きしない
+- [x] session用意に失敗したタブは`再試行`操作を出し、自動では再試行しない
+- [x] attachが終わったタブは明示操作で再接続し、sessionが消えていれば保証付きで作り直す。自動再attachはしない
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容
 - [x] `scrollback-limit` 10MBと`history-limit` 10000を製品既定として明示(tmux側はsession単位)
@@ -1961,8 +2039,12 @@ PR_READY
 - [x] Push通知はopt-inの軽量中継 + 最小payload(コード・出力は載せない)
 - [x] UI名称は`Ask Agent`(Agent非依存)
 - [x] Diffコメントの送信先は実装Agent pane
-- [x] コメントanchorは出所を含む6要素(snapshot ID／出所／パス／側／行範囲／テキストハッシュ)
+- [x] コメントanchorは出所を含む6要素(snapshot ID／出所／パス／側／行範囲／テキストハッシュ)、新snapshotへの推測追従はしない
 - [x] メインpane(= 実装Agent pane)はworktreeごとにユーザーが明示選択して登録し、自動決定しない
+- [x] ハーネス連携はtmuxのpaneユーザー変数で受け取る(変数名と値の表現は計測で決める)
+- [x] 概要の「目的」は手入力優先、「現在地」は連携値のみ(無ければ空欄)
+- [x] 連携由来の現在地とタスク完了はAgentプロセス単位の寿命で、完了表示は同じpaneが再び`Working`になったら解除する
+- [x] `Ask Agent`で使うAgent CLIは起動のたびに選ぶ
 - [x] Agent開発フローはReview独立sessionを含む4phase構成
 
 # 付録B. 現在の推奨構成チェックリスト

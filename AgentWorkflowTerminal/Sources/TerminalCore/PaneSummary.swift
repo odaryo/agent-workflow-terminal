@@ -108,12 +108,21 @@ public enum PaneSummaryFormatViolation: Sendable, Hashable, Codable {
   case agentProcessIDOutOfRange
   /// PID の後ろが空か空白だけ。
   case emptyText
-  /// 本文は1行 (§12.7)。改行に限らず Unicode の制御文字 (Cc: TAB / ESC / C1 を含む) を拒否する。
-  case containsControlCharacter
+  /// 本文は1行 (§12.7)。Unicode の制御文字 (Cc: LF / CR / TAB / ESC / U+0085 を含む C1) と
+  /// 行区切り・段落区切り (Zl: U+2028 / Zp: U+2029) を拒否する。
+  case containsLineBreakOrControlCharacter
+
+  /// 書き込み側 (目的の入力) も同じ判定を使う。読み取り側だけ広げると、書けたのに読めない値が出る。
+  public static func breaksSingleLine(_ scalar: Unicode.Scalar) -> Bool {
+    switch scalar.properties.generalCategory {
+    case .control, .lineSeparator, .paragraphSeparator: true
+    default: false
+    }
+  }
 
   static func textViolation(_ text: String) -> Self? {
-    if text.unicodeScalars.contains(where: { $0.properties.generalCategory == .control }) {
-      return .containsControlCharacter
+    if text.unicodeScalars.contains(where: breaksSingleLine) {
+      return .containsLineBreakOrControlCharacter
     }
     if text.allSatisfy(\.isWhitespace) { return .blank }
     return nil
@@ -214,35 +223,48 @@ public enum PaneTaskCompletionDisplay: Sendable, Hashable {
 
 /// タスク完了表示の解除 (§12.7: 同じ pane が再び `Working` になったら解除する)。
 ///
-/// - Important: 解除の契機は Working **への遷移**であって、Working であることではない。
-///   ハーネスは自分のターンの中で `@awt_done` を書くので、書かれた時点の pane はまだ Working
-///   である。「Working なら解除」にすると、完了がそのターンの中で消えて一度も表示されない。
-/// - Important: 記憶はアプリの寿命だけ持つ。再起動直後は解除の記憶が無いので、Working で
-///   ない pane に有効な token があれば完了として扱う (§12.7 に受け入れる残存挙動として記録)。
+/// - Important: 解除の契機は **`Idle` か `Completed` (応答終了) から `Working` への遷移**だけ。
+///   `Working` であること自体を契機にすると、ハーネスは自分のターンの中で `@awt_done` を書くので
+///   完了がそのターンの中で消える。`Question` / `Permission` からの `Working` は同じターンの
+///   続きなので、ユーザーが見る前に完了を消さないよう解除しない。`Error` / `Unknown` / 観測なし
+///   (`nil`) からの遷移も、直前が応答終了だったか判定できないので解除しない。
+/// - Important: 記憶はアプリの寿命だけ持つ。再起動直後は解除の記憶も直前の状態も無いので、
+///   pane の状態によらず有効な token を完了として扱い、次に応答終了から Working へ入るまで残す
+///   (§12.7 に受け入れる残存挙動として記録)。
+/// - Important: 現在の Agent プロセスを観測できなかった回 (ps を読めない・候補が複数で特定
+///   できない) は記憶を一切進めない。その回の token は分からないので、解除済みの token を空で上書きすると
+///   次の観測で解除済みの完了が復活し、遷移だけを消費すると解除の機会を失う。
 /// - Note: 解除済みかどうかは PID と token の組で覚える。同じ token 文字列でも、別の Agent
 ///   プロセスが書いたものは別の完了として扱う。
 public struct PaneTaskCompletionTracker: Sendable {
   private struct Entry: Sendable {
-    var wasWorking = false
+    var lastState: AgentState?
     var dismissed: AgentStampedValue?
   }
+
+  private static let turnEndingStates: Set<AgentState> = [.idle, .completed]
 
   private var entries: [PaneID: Entry] = [:]
 
   public init() {}
 
   /// `agentState` は adapter の観測そのもの (`PaneAgentState.state`) を渡す。`nil` は観測が
-  /// まだ無いか Agent が居ないことを表し、Working ではないとして扱う。
+  /// まだ無いか Agent が居ないことを表す。
   public mutating func update(
     paneID: PaneID, completion: PaneSummaryEntry<AgentStampedValue>, agentState: AgentState?
   ) -> PaneTaskCompletionDisplay {
+    switch completion {
+    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous): return .none
+    default: break
+    }
     var entry = entries[paneID] ?? Entry()
-    let isWorking = agentState == .working
     let current = completion.value
-    if isWorking, !entry.wasWorking {
+    if agentState == .working, let previous = entry.lastState,
+      Self.turnEndingStates.contains(previous)
+    {
       entry.dismissed = current
     }
-    entry.wasWorking = isWorking
+    entry.lastState = agentState
     entries[paneID] = entry
 
     guard let current else { return .none }

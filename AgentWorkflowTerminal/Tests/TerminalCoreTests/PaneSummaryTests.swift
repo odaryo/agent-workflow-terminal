@@ -62,12 +62,14 @@ struct PaneSummaryTests {
       ("2147483648 実装中", .agentProcessIDOutOfRange),
       ("42 ", .emptyText),
       ("42    ", .emptyText),
-      ("42 実装\n中", .containsControlCharacter),
-      ("42 実装\r中", .containsControlCharacter),
-      ("42 実装\t中", .containsControlCharacter),
-      ("42 \u{1B}[31m赤", .containsControlCharacter),
-      ("42 a\u{1F}b", .containsControlCharacter),
-      ("42 a\u{85}b", .containsControlCharacter),
+      ("42 実装\n中", .containsLineBreakOrControlCharacter),
+      ("42 実装\r中", .containsLineBreakOrControlCharacter),
+      ("42 実装\t中", .containsLineBreakOrControlCharacter),
+      ("42 \u{1B}[31m赤", .containsLineBreakOrControlCharacter),
+      ("42 a\u{1F}b", .containsLineBreakOrControlCharacter),
+      ("42 a\u{85}b", .containsLineBreakOrControlCharacter),
+      ("42 a\u{2028}b", .containsLineBreakOrControlCharacter),
+      ("42 a\u{2029}b", .containsLineBreakOrControlCharacter),
     ])
   func rejectsMalformedValue(raw: String, violation: PaneSummaryFormatViolation) {
     #expect(AgentStampedValue.parse(raw) == .malformed(violation))
@@ -161,7 +163,8 @@ struct PaneSummaryTests {
     arguments: [
       ("", PaneSummaryEntry<String>.unset),
       ("  ", .discarded(.malformed(.blank))),
-      ("1行目\n2行目", .discarded(.malformed(.containsControlCharacter))),
+      ("1行目\n2行目", .discarded(.malformed(.containsLineBreakOrControlCharacter))),
+      ("1行目\u{2028}2行目", .discarded(.malformed(.containsLineBreakOrControlCharacter))),
     ])
   func purposeEdgeCases(raw: String, expected: PaneSummaryEntry<String>) {
     #expect(summary(readings(purpose: raw)).purpose == expected)
@@ -207,7 +210,7 @@ struct PaneTaskCompletionTrackerTests {
   private static let first = AgentStampedValue(agentProcessID: 42, text: "t1")
   private static let second = AgentStampedValue(agentProcessID: 42, text: "t2")
 
-  @Test("Working でない pane に有効な token があれば完了として扱う (再起動直後を含む)")
+  @Test("解除の記憶が無い pane に有効な token があれば完了として扱う (再起動直後を含む)")
   func showsCompletionWithoutPriorMemory() {
     var tracker = PaneTaskCompletionTracker()
     #expect(
@@ -215,7 +218,7 @@ struct PaneTaskCompletionTrackerTests {
         == .completed(Self.first))
   }
 
-  @Test("同じ pane が Working になったら、その時点の token の完了を解除する")
+  @Test("Idle から Working に入ったら、その時点の token の完了を解除する")
   func dismissesOnTransitionToWorking() {
     var tracker = PaneTaskCompletionTracker()
     _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
@@ -265,12 +268,92 @@ struct PaneTaskCompletionTrackerTests {
         == .dismissed(Self.first))
   }
 
-  @Test("観測を始めた時点で Working なら、その時点の token は解除済みにする")
-  func firstObservationInWorkingDismisses() {
+  @Test("応答終了 (Completed) から Working に入っても解除する")
+  func dismissesOnTransitionFromCompleted() {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(
+      paneID: Self.pane, completion: .accepted(Self.first), agentState: .completed)
+
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .dismissed(Self.first))
+  }
+
+  @Test(
+    "応答終了でない状態から Working に戻っても解除しない",
+    arguments: [AgentState.question, .permission, .error, .unknown, nil])
+  func keepsCompletionWhenResumingFromNonTurnEnd(previous: AgentState?) {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(
+      paneID: Self.pane, completion: .accepted(Self.first), agentState: previous)
+
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .completed(Self.first))
+  }
+
+  @Test("同じターンの許可待ちを挟んでも、ターン中に書かれた完了は解除しない")
+  func keepsCompletionAcrossPermissionInTheSameTurn() {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+
+    // ターンの中で新しい token を書き、許可待ちを経て同じターンを続け、応答を終える。
+    let sequence: [(AgentState, PaneTaskCompletionDisplay)] = [
+      (.working, .completed(Self.second)),
+      (.permission, .completed(Self.second)),
+      (.working, .completed(Self.second)),
+      (.idle, .completed(Self.second)),
+    ]
+    for (state, expected) in sequence {
+      #expect(
+        tracker.update(paneID: Self.pane, completion: .accepted(Self.second), agentState: state)
+          == expected)
+    }
+    // 次のターンに入ったら解除する。
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.second), agentState: .working)
+        == .dismissed(Self.second))
+  }
+
+  @Test("観測を始めた時点で Working なら、直前が分からないので解除しない")
+  func firstObservationInWorkingDoesNotDismiss() {
     var tracker = PaneTaskCompletionTracker()
     #expect(
       tracker.update(
         paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .completed(Self.first))
+  }
+
+  private static let unidentified: [PaneSummaryEntry<AgentStampedValue>] = [
+    .discarded(.agentProcessUnobservable(written: 42)),
+    .discarded(.agentProcessAmbiguous(written: 42, candidates: [42, 43])),
+  ]
+
+  @Test("Agent プロセスを特定できなかった回は、解除済みの記憶を上書きしない", arguments: unidentified)
+  func unidentifiedRoundKeepsDismissal(unidentified: PaneSummaryEntry<AgentStampedValue>) {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
+
+    // 次のターンへの遷移を ps が読めない回に観測しても、解除済みの token を空で上書きしない。
+    #expect(
+      tracker.update(paneID: Self.pane, completion: unidentified, agentState: .working) == .none)
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .dismissed(Self.first))
+  }
+
+  @Test("Agent プロセスを特定できなかった回に起きた遷移は、次に特定できた回で解除する", arguments: unidentified)
+  func unidentifiedRoundDefersTransition(unidentified: PaneSummaryEntry<AgentStampedValue>) {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
+
+    #expect(
+      tracker.update(paneID: Self.pane, completion: unidentified, agentState: .working) == .none)
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
         == .dismissed(Self.first))
   }
 
@@ -316,8 +399,10 @@ struct PaneTaskCompletionTrackerTests {
   @Test("forget した pane は解除の記憶を失う")
   func forgetDropsMemory() {
     var tracker = PaneTaskCompletionTracker()
-    _ = tracker.update(
-      paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .dismissed(Self.first))
     tracker.forget(paneID: Self.pane)
 
     #expect(

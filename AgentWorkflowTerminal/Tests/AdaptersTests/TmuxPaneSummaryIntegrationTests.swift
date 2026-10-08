@@ -102,6 +102,8 @@ struct TmuxPaneSummaryIntegrationTests {
         "set-option -p -t \(hostile.rawValue) @awt_done " + #""4242 \377\\037x\\""# + "\n",
         runner: runner)
       try await Self.set(TmuxPaneSummaryOption.completion, "4242 a\u{1F}b", unitSeparator, runner)
+      // 結合文字で始まる値は、旗 `v` と1つの書記素になって出る。
+      try await Self.set(TmuxPaneSummaryOption.purpose, "\u{301}結合", unitSeparator, runner)
       try await Self.set(TmuxPaneSummaryOption.status, #"4242 a\b|c$d\037e\"#, plain, runner)
       try await Self.set(TmuxPaneSummaryOption.completion, japaneseAtLimit, plain, runner)
       try await Self.set(TmuxPaneSummaryOption.purpose, "#{pane_id},}## \u{1B}[31m", plain, runner)
@@ -120,7 +122,7 @@ struct TmuxPaneSummaryIntegrationTests {
         byPane[unitSeparator]
           == PaneSummaryReadings(
             status: .value(""), completion: .unreadable(.containsLineBreakOrUnitSeparator),
-            purpose: .value("")))
+            purpose: .value("\u{301}結合")))
       #expect(
         byPane[plain]
           == PaneSummaryReadings(
@@ -135,6 +137,11 @@ struct TmuxPaneSummaryIntegrationTests {
 
     let socketName = uniqueSocketName("pane-summary-cr")
     try await IsolatedTmuxServer.withServer(socketName: socketName) { runner in
+      // どの版の server で走ったかをログに残す。CR の出方は版で違い (3.4 は `\r`、3.7c は生)、
+      // client の版 (`tmux -V`) は server の版の証拠にならない。値は環境で変わるので主張しない。
+      let version = try await runner.run(arguments: ["display-message", "-p", "#{version}"])
+      FileHandle.standardError.write(
+        Data("=== tmux server version: \(version.stdout)".utf8))
       let session = TmuxSessionName(identity: worktree).rawValue
       let first = try await Self.newPane(session: session, runner: runner, createSession: true)
       // 別 window の pane は `list-panes -a` で最後の行になる。その最後のフィールド
@@ -179,7 +186,9 @@ struct TmuxPaneSummaryIntegrationTests {
       let writer = TmuxPanePurposeWriter(runner: runner)
       let atLimit = String(repeating: "設", count: 341) + "a"  // 1024 バイト
 
-      for text in [#"C:\work\設計 $HOME"#, "-u", "-x foo", "--", atLimit] {
+      // `;` は末尾でなければそのまま保存される (末尾の `;` は writer が拒否する)。
+      let texts = [#"C:\work\設計 $HOME"#, "-u", "-x foo", "--", "a;b", "a; ", "設計；", atLimit]
+      for text in texts {
         try await writer.setPurpose(text, of: pane)
         #expect(try await Self.readPurpose(worktree, pane: pane, runner: runner) == .accepted(text))
       }

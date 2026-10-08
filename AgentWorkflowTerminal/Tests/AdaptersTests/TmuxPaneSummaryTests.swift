@@ -120,6 +120,9 @@ struct TmuxListPanesSummaryTests {
       (#"va\"#, .unreadable(.malformedOutput)),
       (#"va\nb"#, .unreadable(.malformedOutput)),
       (#"va\\b\$c\033d"#, .value("a\\b$c\u{1B}d")),
+      // 値が結合文字で始まると、旗と1つの書記素になる。
+      ("v\u{301}結合", .value("\u{301}結合")),
+      ("X\u{301}", .unreadable(.malformedOutput)),
     ])
   func decodesSummaryFieldIndependently(field: String, expected: PaneUserOptionReading) throws {
     let line = try #require(
@@ -301,13 +304,31 @@ struct TmuxPanePurposeWriterTests {
 
   @Test(
     "改行などの制御文字を含む入力は書かずに拒否する (1行へ正規化しない)",
-    arguments: ["1行目\n2行目", "末尾改行\n", "a\tb", "a\u{1B}b"])
+    arguments: ["1行目\n2行目", "末尾改行\n", "a\tb", "a\u{1B}b", "a\u{2028}b", "a\u{2029}b"])
   func rejectsControlCharacters(text: String) async throws {
     let (writer, spy) = try makeWriter()
-    await #expect(throws: TmuxPanePurposeWriterError.containsControlCharacter) {
+    await #expect(throws: TmuxPanePurposeWriterError.containsLineBreakOrControlCharacter) {
       try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
     }
     #expect(await spy.invocations.isEmpty)
+  }
+
+  @Test(
+    "末尾が ; の目的は書かずに拒否する (tmux がコマンド区切りとして削るため)",
+    arguments: ["foo;", #"a\;"#, "end;;", ";", "設計 ;"])
+  func rejectsTrailingSemicolon(text: String) async throws {
+    let (writer, spy) = try makeWriter()
+    await #expect(throws: TmuxPanePurposeWriterError.endsWithSemicolon) {
+      try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
+    }
+    #expect(await spy.invocations.isEmpty)
+  }
+
+  @Test("途中の ; と末尾の全角；はそのまま書く", arguments: ["a;b", "a; ", "設計；"])
+  func writesInnerSemicolon(text: String) async throws {
+    let (writer, spy) = try makeWriter()
+    try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
+    #expect(await spy.invocations.last?.last == text)
   }
 
   @Test("読み取り側が落とす長さは書かない")

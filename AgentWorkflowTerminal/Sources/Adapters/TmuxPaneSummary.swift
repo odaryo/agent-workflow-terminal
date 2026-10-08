@@ -71,17 +71,21 @@ extension TmuxListPanes {
 
   /// 旗の意味は `formatWithSummary`。旗が1文字目に固定されているので、値がどんな文字列でも
   /// 旗を偽装できない。
+  ///
+  /// 旗はバイトで見る。`Character` で見ると、値が結合文字で始まるとき旗と1つの書記素になり
+  /// (`v` + U+0301)、読める値を落とす。
   private static func decodeSummaryField(_ field: String) -> PaneUserOptionReading {
-    switch field.first {
-    case "v":
+    let isFlagOnly = field.utf8.count == 1
+    switch field.utf8.first {
+    case UInt8(ascii: "v"):
       do {
-        return .value(try decodeRawField(String(field.dropFirst())))
+        return .value(try decodeRawField(String(decoding: field.utf8.dropFirst(), as: UTF8.self)))
       } catch {
         return .unreadable(.malformedOutput)
       }
-    case "X" where field.count == 1: return .unreadable(.tooLong)
-    case "L" where field.count == 1: return .unreadable(.containsLineBreakOrUnitSeparator)
-    case "U" where field.count == 1: return .unreadable(.invalidUTF8)
+    case UInt8(ascii: "X") where isFlagOnly: return .unreadable(.tooLong)
+    case UInt8(ascii: "L") where isFlagOnly: return .unreadable(.containsLineBreakOrUnitSeparator)
+    case UInt8(ascii: "U") where isFlagOnly: return .unreadable(.invalidUTF8)
     default: return .unreadable(.malformedOutput)
     }
   }
@@ -89,8 +93,10 @@ extension TmuxListPanes {
 
 public enum TmuxPanePurposeWriterError: Error, Sendable, Equatable {
   case invalidPaneID(PaneID)
-  /// 目的は1行 (§12.7)。改行を1行へ畳むなどの正規化はせず、呼び出し側へ返す。
-  case containsControlCharacter
+  /// 目的は1行 (§12.7)。改行を1行へ畳むなどの正規化はせず、呼び出し側へ返す。判定は読み取り側と
+  /// 同じ `PaneSummaryFormatViolation.breaksSingleLine`。
+  case containsLineBreakOrControlCharacter
+  case endsWithSemicolon
   /// 読み取り側 (`TmuxListPanes.formatWithSummary`) が値を落とす長さを書かない。
   case tooLong(byteCount: Int, limit: Int)
   case tmux(TmuxRunnerError)
@@ -114,10 +120,13 @@ public struct TmuxPanePurposeWriter: Sendable {
       try await clearPurpose(of: pane)
       return
     }
-    guard !text.unicodeScalars.contains(where: { $0.properties.generalCategory == .control })
-    else {
-      throw .containsControlCharacter
+    guard !text.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine) else {
+      throw .containsLineBreakOrControlCharacter
     }
+    // tmux は argv 要素の末尾の `;` をコマンド区切りとして取り、`--` でも防げない (3.4 / 3.7c
+    // とも実測: `foo;` は `foo`、`a\;` は `a;`、`end;;` は `end;` で保存され、`;` 単独は失敗)。
+    // 黙って削ると書いた値と保存される値がずれるので拒否する。
+    guard !text.hasSuffix(";") else { throw .endsWithSemicolon }
     let byteCount = text.utf8.count
     guard byteCount <= TmuxListPanes.summaryValueByteLimit else {
       throw .tooLong(byteCount: byteCount, limit: TmuxListPanes.summaryValueByteLimit)

@@ -16,11 +16,11 @@ struct WorktreeCloseExecutorTests {
         == ["worktree", "remove", "--force", "--", "/repo/wt"])
     #expect(
       GitCloseWriteCommand.deleteMergedBranch(name: "topic")?.arguments
-        == ["branch", "--delete", "--", "topic"])
+        == ["branch", "--delete", "--force", "--", "topic"])
     // `-` 始まりの値も `--` の後ろに置かれるので option としては解釈されない。
     #expect(
       GitCloseWriteCommand.deleteMergedBranch(name: "-D")?.arguments
-        == ["branch", "--delete", "--", "-D"])
+        == ["branch", "--delete", "--force", "--", "-D"])
   }
 
   @Test("絶対パスでない作業ツリーは command にしない", arguments: ["wt", "", "../wt"])
@@ -40,7 +40,7 @@ struct WorktreeCloseExecutorTests {
   func executesNothingForEmptyPlan() async throws {
     let harness = try WorktreeCloseHarness()
 
-    let outcome = try await harness.executor.execute(try harness.plan(.hideFromUI))
+    let outcome = try await harness.run(try harness.plan(.hideFromUI))
 
     #expect(outcome == WorktreeCloseOutcome(completed: [], failure: nil, skipped: []))
     #expect(await harness.tmux.invocations.isEmpty)
@@ -51,19 +51,21 @@ struct WorktreeCloseExecutorTests {
   func executesStepsInOrder() async throws {
     let harness = try WorktreeCloseHarness()
 
-    let outcome = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: .merged))
+    let outcome = try await harness.run(
+      try harness.plan(
+        .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(
       outcome.completed == [
-        .terminateSession, .removeWorktree(force: false), .deleteBranch(name: "topic"),
+        .terminateSession, .removeWorktree(force: false),
+        .deleteBranch(name: "topic", tip: try inspectedTip()),
       ])
     #expect(outcome.failure == nil)
     #expect(outcome.skipped.isEmpty)
     #expect(
-      await harness.git.invocations.map(\.arguments) == [
+      await harness.git.repositoryInvocations.map(\.arguments) == [
         gitArgv("worktree", "remove", "--", "/repo/wt"),
-        gitArgv("branch", "--delete", "--", "topic"),
+        gitArgv("branch", "--delete", "--force", "--", "topic"),
       ])
   }
 
@@ -82,7 +84,7 @@ struct WorktreeCloseExecutorTests {
   ) async throws {
     let harness = try WorktreeCloseHarness(identity: identity)
 
-    _ = try await harness.executor.execute(try harness.plan(.terminateSession(.keepWorktree)))
+    _ = try await harness.run(try harness.plan(.terminateSession(.keepWorktree)))
 
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
@@ -94,14 +96,14 @@ struct WorktreeCloseExecutorTests {
   func passesForceWhenConfirmed() async throws {
     let harness = try WorktreeCloseHarness()
 
-    let outcome = try await harness.executor.execute(
+    let outcome = try await harness.run(
       try harness.plan(
         .terminateSession(.removeWorktree(.keepBranch)), uncommitted: .present,
         continuation: .forcingAcknowledgedWarnings))
 
     #expect(outcome.completed == [.terminateSession, .removeWorktree(force: true)])
     #expect(
-      await harness.git.invocations.map(\.arguments)
+      await harness.git.repositoryInvocations.map(\.arguments)
         == [gitArgv("worktree", "remove", "--force", "--", "/repo/wt")])
   }
 
@@ -110,7 +112,7 @@ struct WorktreeCloseExecutorTests {
     for stderr in ["can't find session: awt-feature-a-219261c3\n"] + tmuxServerAbsentStderrs {
       let harness = try WorktreeCloseHarness(tmux: .init(result: stubFailure(stderr: stderr)))
 
-      let outcome = try await harness.executor.execute(
+      let outcome = try await harness.run(
         try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
       #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
@@ -122,28 +124,33 @@ struct WorktreeCloseExecutorTests {
   func stopsBeforeRemovalWhenSessionTerminationFails(stderr: String) async throws {
     let harness = try WorktreeCloseHarness(tmux: .init(result: stubFailure(stderr: stderr)))
 
-    let outcome = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: .merged))
+    let outcome = try await harness.run(
+      try harness.plan(
+        .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(outcome.completed.isEmpty)
     #expect(outcome.failure?.step == .terminateSession)
     #expect(
       outcome.failure?.reason
         == .tmux(.tmux(.commandFailed(exitCode: 1, stdout: "", stderr: stderr))))
-    #expect(outcome.skipped == [.removeWorktree(force: false), .deleteBranch(name: "topic")])
-    #expect(await harness.git.invocations.isEmpty)
+    #expect(
+      outcome.skipped == [
+        .removeWorktree(force: false), .deleteBranch(name: "topic", tip: try inspectedTip()),
+      ])
+    #expect(await harness.git.repositoryInvocations.isEmpty)
   }
 
   @Test("worktree remove が拒否されたら branch は消さない")
   func stopsBeforeBranchDeletionWhenRemovalIsRefused() async throws {
     let harness = try WorktreeCloseHarness(git: refusedRemovalGitStub())
 
-    let outcome = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: .merged))
+    let outcome = try await harness.run(
+      try harness.plan(
+        .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(outcome.completed == [.terminateSession])
     #expect(outcome.failure?.step == .removeWorktree(force: false))
-    #expect(outcome.skipped == [.deleteBranch(name: "topic")])
+    #expect(outcome.skipped == [.deleteBranch(name: "topic", tip: try inspectedTip())])
     #expect(!(await harness.git.arguments.contains { $0.contains("branch") }))
   }
 
@@ -155,7 +162,7 @@ struct WorktreeCloseExecutorTests {
   func reportsRetainedRegistrationWhenRemovalIsRefused() async throws {
     let harness = try WorktreeCloseHarness(git: refusedRemovalGitStub())
 
-    let outcome = try await harness.executor.execute(
+    let outcome = try await harness.run(
       try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
     #expect(
@@ -186,8 +193,9 @@ struct WorktreeCloseExecutorTests {
         removeWorktree: .init(exitCode: 255, stdout: "", stderr: stderr),
         worktreeList: .init(exitCode: 0, stdout: listed, stderr: "")))
 
-    let outcome = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: .merged))
+    let outcome = try await harness.run(
+      try harness.plan(
+        .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(outcome.completed == [.terminateSession])
     #expect(
@@ -195,7 +203,7 @@ struct WorktreeCloseExecutorTests {
         == .worktreeRemoval(
           .commandFailed(exitCode: 255, stdout: "", stderr: stderr),
           registration: .retainedButNotScannable))
-    #expect(outcome.skipped == [.deleteBranch(name: "topic")])
+    #expect(outcome.skipped == [.deleteBranch(name: "topic", tip: try inspectedTip())])
   }
 
   /// 1件目 —— **`worktree remove` は step として atomic ではない。** git 2.50.1 実測: clean な
@@ -222,15 +230,16 @@ struct WorktreeCloseExecutorTests {
           exitCode: 0, stdout: worktreeListOutput(targetPath: listedPath), stderr: "")),
       worktreePath: targetPath)
 
-    let outcome = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: .merged))
+    let outcome = try await harness.run(
+      try harness.plan(
+        .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(outcome.completed == [.terminateSession])
     #expect(
       outcome.failure?.reason
         == .worktreeRemoval(
           .commandFailed(exitCode: 255, stdout: "", stderr: stderr), registration: .dropped))
-    #expect(outcome.skipped == [.deleteBranch(name: "topic")])
+    #expect(outcome.skipped == [.deleteBranch(name: "topic", tip: try inspectedTip())])
   }
 
   @Test("登録の読み直しに失敗したら retained へ丸めない")
@@ -241,7 +250,7 @@ struct WorktreeCloseExecutorTests {
         removeWorktree: .init(exitCode: 255, stdout: "", stderr: "boom\n"),
         worktreeList: .init(exitCode: 128, stdout: "", stderr: listStderr)))
 
-    let outcome = try await harness.executor.execute(
+    let outcome = try await harness.run(
       try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
     #expect(
@@ -255,28 +264,30 @@ struct WorktreeCloseExecutorTests {
   func doesNotReadRegistrationWhenRemovalSucceeds() async throws {
     let harness = try WorktreeCloseHarness()
 
-    _ = try await harness.executor.execute(
+    _ = try await harness.run(
       try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
     #expect(!(await harness.git.arguments.contains { $0.contains("list") }))
   }
 
-  @Test("branch -d の拒否は失敗として返し、-D へ格上げしない")
-  func reportsBranchDeletionRefusalWithoutEscalating() async throws {
-    let stderr = "error: the branch 'topic' is not fully merged\n"
+  /// `-D` でも git が拒否する条件は残る。git 2.50.1 実測: 別の worktree が checkout している
+  /// branch への `branch --delete --force --` は rc=1 /
+  /// `error: cannot delete branch 'topic' used by worktree at '<path>'`。
+  @Test("branch -D の拒否は失敗として返す")
+  func reportsForcedBranchDeletionRefusal() async throws {
+    let stderr = "error: cannot delete branch 'topic' used by worktree at '/repo/other'\n"
     let harness = try WorktreeCloseHarness(
       git: gitStub(deleteBranch: .init(exitCode: 1, stdout: "", stderr: stderr)))
 
-    let outcome = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: .merged))
+    let outcome = try await harness.run(
+      try harness.plan(
+        .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
-    #expect(outcome.failure?.step == .deleteBranch(name: "topic"))
+    #expect(outcome.failure?.step == .deleteBranch(name: "topic", tip: try inspectedTip()))
     #expect(
       outcome.failure?.reason == .git(.commandFailed(exitCode: 1, stdout: "", stderr: stderr)))
     #expect(outcome.skipped.isEmpty)
-    let arguments = await harness.git.arguments
-    #expect(!arguments.contains { $0.contains("-D") || $0.contains("--force") })
   }
 
   @Test("消す worktree 自身を repository directory にはできない")
@@ -304,7 +315,7 @@ struct WorktreeCloseExecutorTests {
     let other = try WorktreeCloseHarness.detected(identity: "/repo/.git/worktrees/feature-b")
     let plan = try harness.plan(
       .terminateSession(.removeWorktree(.deleteBranch)), worktree: other, uncommitted: .present,
-      merge: .merged, continuation: .forcingAcknowledgedWarnings)
+      merge: try merged(.squash), continuation: .forcingAcknowledgedWarnings)
     #expect(plan.steps.contains(.removeWorktree(force: true)))
 
     await #expect(
@@ -320,17 +331,17 @@ struct WorktreeCloseExecutorTests {
   /// Close は完走したことになる。
   @Test("argv を組み立てられなかった step は成功として報告しない")
   func doesNotReportAnUnexecutedStepAsCompleted() async throws {
-    let harness = try WorktreeCloseHarness()
+    let harness = try WorktreeCloseHarness(git: gitStub(head: headOnBranch("")))
     // `isBranchDeletionAvailable` は空文字を通すが `deleteMergedBranch` は通さない。
     let plan = try harness.plan(
       .terminateSession(.removeWorktree(.deleteBranch)),
-      worktree: try WorktreeCloseHarness.detected(branch: ""), merge: .merged)
-    #expect(plan.steps.last == .deleteBranch(name: ""))
+      worktree: try WorktreeCloseHarness.detected(branch: ""), merge: try merged(.squash))
+    #expect(plan.steps.last == .deleteBranch(name: "", tip: try inspectedTip()))
 
-    let outcome = try await harness.executor.execute(plan)
+    let outcome = try await harness.run(plan)
 
     #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
-    #expect(outcome.failure?.step == .deleteBranch(name: ""))
+    #expect(outcome.failure?.step == .deleteBranch(name: "", tip: try inspectedTip()))
     #expect(outcome.failure?.reason == .invalidArguments)
     #expect(outcome.skipped.isEmpty)
     #expect(!(await harness.git.arguments.contains { $0.contains("branch") }))
@@ -343,158 +354,30 @@ struct WorktreeCloseExecutorTests {
     let harness = try WorktreeCloseHarness(
       git: refusedRemovalGitStub(), parentEnvironment: pollutedParentEnvironment)
 
-    _ = try await harness.executor.execute(
+    _ = try await harness.run(
       try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
-    let invocations = await harness.git.invocations
+    let invocations = await harness.git.repositoryInvocations
     #expect(invocations.map { $0.arguments.contains("list") } == [false, true])
     // 期待値を製品の定数で書くと、その定数を変える変異を落とせない。作業ツリーの実削除は
     // ファイル数に比例するので、書き込みは読み取りより長く待つ。
     expectFixedGitInvocation(invocations[0], timeout: .seconds(120))
     expectFixedGitInvocation(invocations[1], timeout: .seconds(30))
-  }
-}
-
-/// **新しく git / tmux 呼び出しを足したら、その1回について timeout と子プロセス環境を固定する。**
-/// Round 11・12・13 で3回続けて、新設した呼び出しだけが未固定のまま残った。`arguments` を見る
-/// テストは代わりにならない (`arguments.last` の検査は timeout の変異を落とさない)。環境は
-/// `LC_ALL=C` と `HOME` / `PATH` だけを通す —— `HOME` は `core.excludesFile` 経由で
-/// 「何が ignored か」、つまり `--force` 無しで消えるものを変えるので、落としてはいけない。
-/// **`outputLimit` はこの規約の外にある** (stub が記録もしない)。足すのは Issue #139 でこの
-/// ファイルを分割するときで、いまは `file_length` の上限に張り付いていて行を増やせない。
-private func expectFixedGitInvocation(
-  _ invocation: WorktreeCloseGitStub.Invocation,
-  timeout: Duration,
-  sourceLocation: SourceLocation = #_sourceLocation
-) {
-  #expect(
-    invocation.environment == ["LC_ALL": "C", "HOME": "/home/tester", "PATH": "/usr/bin"],
-    sourceLocation: sourceLocation)
-  #expect(invocation.timeout == timeout, sourceLocation: sourceLocation)
-}
-
-/// `LC_ALL` が上書きされ、`GIT_DIR` と `LANG` が落ちることを確かめるための親環境。
-private let pollutedParentEnvironment = [
-  "HOME": "/home/tester", "PATH": "/usr/bin", "LC_ALL": "ja_JP.UTF-8",
-  "GIT_DIR": "/elsewhere/.git", "LANG": "ja_JP.UTF-8",
-]
-
-private let removalRefusedStderr =
-  "fatal: '/repo/wt' contains modified or untracked files, use --force to delete it\n"
-
-private func refusedRemovalGitStub() -> WorktreeCloseGitStub {
-  gitStub(
-    removeWorktree: .init(exitCode: 128, stdout: "", stderr: removalRefusedStderr),
-    worktreeList: .init(exitCode: 0, stdout: worktreeListOutput(), stderr: ""))
-}
-
-private let listedHead = String(repeating: "e1", count: 20)
-private let listedTargetAttributes = ["HEAD \(listedHead)", "branch refs/heads/topic"]
-private let prunableAttribute = "prunable gitdir file points to non-existent location"
-
-/// `worktree list --porcelain -z` の出力。属性は `\0` 区切りで、record 間は空の属性で区切られる。
-/// `targetPath` が `nil` なら対象の record を置かない。生の出力は各テストの doc に写してある。
-private func worktreeListOutput(
-  targetPath: String? = "/repo/wt", targetAttributes: [String] = listedTargetAttributes
-) -> String {
-  var output = "worktree /repo\0HEAD \(listedHead)\0branch refs/heads/main\0\0"
-  guard let targetPath else { return output }
-  output += "worktree \(targetPath)\0" + targetAttributes.map { $0 + "\0" }.joined() + "\0"
-  return output
-}
-
-private func gitArgv(_ rest: String...) -> [String] {
-  ["--no-optional-locks", "-C", "/repo", "--no-pager"] + rest
-}
-
-private let gitSuccess = ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
-
-private func gitStub(
-  removeWorktree: ProcessRunResult = gitSuccess, worktreeList: ProcessRunResult = gitSuccess,
-  deleteBranch: ProcessRunResult = gitSuccess
-) -> WorktreeCloseGitStub {
-  WorktreeCloseGitStub { arguments in
-    if arguments.contains("remove") { return removeWorktree }
-    if arguments.contains("list") { return worktreeList }
-    return deleteBranch
-  }
-}
-
-private struct WorktreeCloseHarness {
-  let tmux: TmuxSessionRunnerStub
-  let git: WorktreeCloseGitStub
-  let worktree: DetectedWorktree
-  let executor: WorktreeCloseExecutor
-
-  init(
-    tmux: TmuxSessionRunnerStub = .init(result: stubSuccess()),
-    git: WorktreeCloseGitStub = gitStub(),
-    repositoryDirectory: URL = URL(fileURLWithPath: "/repo"),
-    identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
-    parentEnvironment: [String: String] = [:]
-  ) throws {
-    let worktree = try Self.detected(identity: identity, worktreePath: worktreePath)
-    self.tmux = tmux
-    self.git = git
-    self.worktree = worktree
-    self.executor = try WorktreeCloseExecutor(
-      repositoryDirectory: repositoryDirectory, worktree: worktree,
-      sessionOperations: TmuxSessionOperations(
-        runner: try TmuxRunner(
-          socketName: "awt-test", processRunner: tmux,
-          executableCandidates: [URL(fileURLWithPath: "/test/bin/tmux")], parentEnvironment: [:],
-          isExecutableFile: { _ in true })),
-      processRunner: git, executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
-      parentEnvironment: parentEnvironment, isExecutableFile: { _ in true })
-  }
-
-  func plan(
-    _ choice: WorktreeCloseChoice, worktree: DetectedWorktree? = nil,
-    uncommitted: UncommittedChangesStatus = .absent, merge: BranchMergeStatus = .unmerged,
-    continuation: WorktreeRemovalConfirmation.Continuation = .withoutForce
-  ) throws -> WorktreeClosePlan {
-    let wt = worktree ?? self.worktree
-    let ci = WorktreeCloseInspection(
-      uncommittedChanges: uncommitted, ignoredFiles: .absent, unpushedCommits: .absent,
-      branchMerge: merge)
-    let db = DefaultBranchResolution.originHead(branch: "main")
-    let rp: WorktreeCloseInspectionReport = .init(target: wt, inspection: ci, defaultBranch: db)
-    return try planWorktreeClose(
-      worktree: wt, choice: choice,
-      confirmation: .init(report: rp, continuation: continuation))
-  }
-
-  static func detected(
-    identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
-    branch: String? = "topic"
-  ) throws -> DetectedWorktree {
-    DetectedWorktree(
-      identity: try #require(WorktreeIdentity(rawValue: identity)), worktreePath: worktreePath,
-      branch: branch, isProjectRoot: false)
-  }
-}
-
-private actor WorktreeCloseGitStub: ProcessRunning {
-  struct Invocation: Sendable, Equatable {
-    let arguments: [String]
-    let environment: [String: String]
-    let timeout: Duration
-  }
-
-  private let handler: @Sendable ([String]) -> ProcessRunResult
-  private(set) var invocations: [Invocation] = []
-
-  var arguments: [[String]] { invocations.map(\.arguments) }
-
-  init(handler: @escaping @Sendable ([String]) -> ProcessRunResult) {
-    self.handler = handler
-  }
-
-  func run(
-    executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
-    outputLimit: Int
-  ) -> ProcessRunResult {
-    invocations.append(.init(arguments: arguments, environment: environment, timeout: timeout))
-    return handler(arguments)
+    // 実行直前の読み直し (管理ディレクトリで動く) も同じ規約に従う。
+    let preflight = await harness.git.preflightInvocations
+    #expect(preflight.count == 4)
+    for invocation in preflight {
+      expectFixedGitInvocation(invocation, timeout: .seconds(30))
+    }
+    // branch 削除を含む計画では先端の読み直しが1回増える (Issue #359)。
+    let deleting = try WorktreeCloseHarness(
+      git: refusedRemovalGitStub(), parentEnvironment: pollutedParentEnvironment)
+    _ = try await deleting.run(
+      try deleting.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: merged(.squash)))
+    let deletingPreflight = await deleting.git.preflightInvocations
+    #expect(deletingPreflight.count == 5)
+    for invocation in deletingPreflight {
+      expectFixedGitInvocation(invocation, timeout: .seconds(30))
+    }
   }
 }

@@ -52,7 +52,9 @@ struct GitCloseSafetyInspectorTests {
             exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/refs/foo", "refs/heads/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/refs/foo"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
         squashScanWithoutCandidates(commandArguments(arguments))
@@ -78,7 +80,9 @@ struct GitCloseSafetyInspectorTests {
             exitCode: 0, stdout: "# branch.oid abc\0# branch.head refs/heads/x\0", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/refs/heads/x", "refs/heads/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/refs/heads/x"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
         squashScanWithoutCandidates(commandArguments(arguments))
@@ -105,7 +109,9 @@ struct GitCloseSafetyInspectorTests {
             stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/remotes/origin/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/remotes/origin/main"]:
         .success(.init(exitCode: 0, stdout: "", stderr: ""))
       default:
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
@@ -119,7 +125,7 @@ struct GitCloseSafetyInspectorTests {
     #expect(result.report.inspection.uncommittedChanges == .present)
     #expect(result.report.inspection.ignoredFiles == .absent)
     #expect(result.report.inspection.unpushedCommits == .present)
-    #expect(result.report.inspection.branchMerge == .merged)
+    #expect(try merged(.ancestor) == result.report.inspection.branchMerge)
     #expect(result.report.defaultBranch == .originHead(branch: "main"))
     #expect(result.failures.isEmpty)
   }
@@ -137,7 +143,9 @@ struct GitCloseSafetyInspectorTests {
             stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/heads/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
         squashScanWithoutCandidates(commandArguments(arguments))
@@ -223,7 +231,9 @@ struct GitCloseSafetyInspectorTests {
         .failure(.outputLimitExceeded(limit: ProcessRunLimits.defaultOutputBytes))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/remotes/origin/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/remotes/origin/main"]:
         .success(.init(exitCode: 0, stdout: "", stderr: ""))
       default:
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
@@ -237,7 +247,7 @@ struct GitCloseSafetyInspectorTests {
     #expect(result.report.inspection.uncommittedChanges == .absent)
     #expect(result.report.inspection.ignoredFiles == .unknown)
     #expect(result.report.inspection.unpushedCommits == .absent)
-    #expect(result.report.inspection.branchMerge == .merged)
+    #expect(try merged(.ancestor) == result.report.inspection.branchMerge)
     #expect(result.failures.map(\.check) == [.ignoredFiles])
   }
 
@@ -359,7 +369,9 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/remotes/origin/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/remotes/origin/main"]:
         .success(.init(exitCode: 0, stdout: "", stderr: ""))
       default:
         .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
@@ -373,7 +385,7 @@ struct GitCloseSafetyInspectorTests {
     #expect(result.report.inspection.uncommittedChanges == .unknown)
     #expect(result.report.inspection.ignoredFiles == .absent)
     #expect(result.report.inspection.unpushedCommits == .unknown)
-    #expect(result.report.inspection.branchMerge == .merged)
+    #expect(try merged(.ancestor) == result.report.inspection.branchMerge)
     #expect(
       result.failures.map(\.check) == [.uncommittedChanges, .unpushedCommits])
   }

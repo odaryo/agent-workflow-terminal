@@ -263,18 +263,26 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 下記の検査(警告して続行可)より強い扱いとして、確認では済ませない。
 
 **拒否の対象は、detached HEADに加えて作業が途中のworktree全般とする — 確定(2026-10-08)。**
-merge／cherry-pick／revert／rebase／bisectの途中状態が残っているworktreeは拒否する。merge・cherry-pickの
+merge／cherry-pick／revert／rebase／bisect／`git am`の途中状態と、連続cherry-pick・revertの衝突を
+解決した後に残る未完了のsequencerを持つworktreeは拒否する。merge・cherry-pickの
 衝突中はHEADがbranchを指したままで(`worktree list --porcelain`が`branch`行を出す。git 2.50.1で実測)、
 detached HEADの条件では捕まらず、未commit変更の警告を承諾すれば`--force`付きで削除されてしまうため
-である。途中の操作を完了または中止するよう促す。途中状態の観測手段(管理ディレクトリの`MERGE_HEAD`等を
-見るか、`git status`を読むか)は実装時に計測で決める(Issue #355)。
+である。途中の操作を完了または中止するよう促す。途中状態は対象worktreeの管理ディレクトリ
+(`<common>/worktrees/<名前>`)で観測する。`MERGE_HEAD`／`CHERRY_PICK_HEAD`／`REVERT_HEAD`は
+`rev-parse --verify`でgitに問い(reftable形式のrepositoryでは後2者がファイルとして現れないため)、
+`rebase-merge`／`rebase-apply`／`BISECT_LOG`／`sequencer`はファイルの有無で見る。`git status`は使わない
+(porcelain出力ではmerge・cherry-pick・revertの衝突が区別できず、bisectは何も出さない。git 2.50.1で
+実測、Issue #355)。観測できなかった場合は作業途中として扱い、拒否する。
 
 **この拒否は計画時と実行直前の2回判定する — 確定(2026-10-08)。** 実行層はsessionを終了する前に
 対象worktreeのHEADと途中状態を読み直し、detached、計画時と別のbranch、作業途中のいずれかであれば
 何も実行せずに中止する。計画から実行までの間にAgentがrebaseを始めた場合や、保存から復元した陳腐化
 したbranchで計画を作った場合に、detached HEADのworktreeが削除されるためである。detachedには
 `git worktree remove`が`--force`なしでも成功し、そこに積んだcommitはgc後に失われる(git 2.50.1で実測、
-Issue #354)。読み直しから削除までの窓は残存リスクとして受け入れる。
+Issue #354)。branch削除を含む計画では、マージ判定に使ったbranch先端のcommitを計画に載せ、実行直前に
+先端がそれと一致することも確かめる。`-D`は未マージのcommitも消すので、判定の後にbranchへ積まれた
+commitをマージ済みという古い判定のまま削除しないためである(Issue #359)。読み直しから削除までの窓は
+残存リスクとして受け入れる。
 
 **3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
 
@@ -2032,8 +2040,8 @@ PR_READY
 - [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う
 - [x] 「マージ済み」の判定はancestor判定に加え、patch相当の同一性(squash merge)も検出する
 - [x] HEADがbranchを指していない(detached HEAD)worktreeはCloseそのものを拒否する(既存の警告して続行可な検査より強い扱い)
-- [x] Closeの拒否対象はmerge／cherry-pick／revert／rebase／bisectの途中状態を含む「作業途中」全般
-- [x] Closeの拒否条件は計画時と実行直前(session終了の前)の2回判定し、実行直前にHEADが変わっていれば何も実行しない
+- [x] Closeの拒否対象はmerge／cherry-pick／revert／rebase／bisect／`git am`の途中状態と未完了のsequencerを含む「作業途中」全般。観測できなければ拒否する
+- [x] Closeの拒否条件は計画時と実行直前(session終了の前)の2回判定し、実行直前にHEADが変わっていれば何も実行しない。branch削除を含む計画では、マージ判定に使ったbranch先端との一致も確かめる
 - [x] 選択肢4のbranch削除は`git branch -D`で、アプリが「マージ済み」と判定したbranchに限る。squash mergeと判定したときは確認で強制削除を明示する
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心

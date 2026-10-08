@@ -33,16 +33,19 @@ struct WorktreeClosePlanTests {
 
   @Test("UI だけの Close は何も実行しない")
   func planForHideFromUIHasNoStep() throws {
+    let target = try worktree()
     let plan = try planWorktreeClose(
-      worktree: try worktree(), choice: .hideFromUI, confirmation: nil)
+      worktree: target, progress: idle(target), choice: .hideFromUI, confirmation: nil)
 
     #expect(plan.steps.isEmpty)
   }
 
   @Test("session 終了だけの Close は検査結果を要求しない")
   func planForSessionTerminationNeedsNoConfirmation() throws {
+    let target = try worktree()
     let plan = try planWorktreeClose(
-      worktree: try worktree(), choice: .terminateSession(.keepWorktree), confirmation: nil)
+      worktree: target, progress: idle(target), choice: .terminateSession(.keepWorktree),
+      confirmation: nil)
 
     #expect(plan.steps == [.terminateSession])
   }
@@ -52,12 +55,14 @@ struct WorktreeClosePlanTests {
     let target = try worktree()
     #expect(throws: WorktreeClosePlanError.removalNotConfirmed) {
       try planWorktreeClose(
-        worktree: target, choice: .terminateSession(.removeWorktree(.keepBranch)),
+        worktree: target, progress: idle(target),
+        choice: .terminateSession(.removeWorktree(.keepBranch)),
         confirmation: nil)
     }
     #expect(throws: WorktreeClosePlanError.removalNotConfirmed) {
       try planWorktreeClose(
-        worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
+        worktree: target, progress: idle(target),
+        choice: .terminateSession(.removeWorktree(.deleteBranch)),
         confirmation: nil)
     }
   }
@@ -83,7 +88,8 @@ struct WorktreeClosePlanTests {
     let target = try worktree()
 
     let plan = try planWorktreeClose(
-      worktree: target, choice: .terminateSession(.removeWorktree(.keepBranch)),
+      worktree: target, progress: idle(target),
+      choice: .terminateSession(.removeWorktree(.keepBranch)),
       confirmation: confirmation(
         for: target, uncommitted: uncommitted, continuation: continuation))
 
@@ -95,7 +101,8 @@ struct WorktreeClosePlanTests {
     let target = try worktree()
 
     let plan = try planWorktreeClose(
-      worktree: target, choice: .terminateSession(.removeWorktree(.keepBranch)),
+      worktree: target, progress: idle(target),
+      choice: .terminateSession(.removeWorktree(.keepBranch)),
       confirmation: confirmation(
         for: target, ignored: .present, continuation: .forcingAcknowledgedWarnings))
 
@@ -107,34 +114,44 @@ struct WorktreeClosePlanTests {
     let target = try worktree()
 
     let plan = try planWorktreeClose(
-      worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
-      confirmation: confirmation(for: target, merge: .merged))
+      worktree: target, progress: idle(target),
+      choice: .terminateSession(.removeWorktree(.deleteBranch)),
+      confirmation: confirmation(for: target, merge: try merged(.squash)))
 
     #expect(
       plan.steps == [
-        .terminateSession, .removeWorktree(force: false), .deleteBranch(name: "topic"),
+        .terminateSession, .removeWorktree(force: false),
+        .deleteBranch(name: "topic", tip: try inspectedTip()),
       ])
   }
 
   @Test(
     "検査を通らない branch 削除は計画にならない",
     arguments: [
-      (BranchMergeStatus.unmerged, "topic", DefaultBranchResolution.originHead(branch: "main")),
+      (
+        BranchMergeStatus?.some(.unmerged), "topic",
+        DefaultBranchResolution.originHead(branch: "main")
+      ),
       (.unknown, "topic", .originHead(branch: "main")),
       (.notApplicable, "topic", .originHead(branch: "main")),
-      (.merged, "main", .originHead(branch: "main")),
-      (.merged, "topic", .unresolved(reason: .originHeadMissing)),
+      (fixtureTip.map { .merged(.squash, tip: $0) }, "main", .originHead(branch: "main")),
+      (
+        fixtureTip.map { .merged(.ancestor, tip: $0) }, "topic",
+        .unresolved(reason: .originHeadMissing)
+      ),
     ])
   func planRejectsBranchDeletionThatInspectionDoesNotPermit(
-    merge: BranchMergeStatus,
+    merge: BranchMergeStatus?,
     branch: String,
     defaultBranch: DefaultBranchResolution
   ) throws {
+    let merge = try #require(merge)
     let target = try worktree(branch: branch)
 
     #expect(throws: WorktreeClosePlanError.branchDeletionNotPermitted) {
       try planWorktreeClose(
-        worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
+        worktree: target, progress: idle(target),
+        choice: .terminateSession(.removeWorktree(.deleteBranch)),
         confirmation: confirmation(for: target, merge: merge, defaultBranch: defaultBranch))
     }
   }
@@ -148,15 +165,17 @@ struct WorktreeClosePlanTests {
     let target = try worktree(branch: "develop")
 
     let plan = try planWorktreeClose(
-      worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
-      confirmation: confirmation(for: target, merge: .merged))
+      worktree: target, progress: idle(target),
+      choice: .terminateSession(.removeWorktree(.deleteBranch)),
+      confirmation: confirmation(for: target, merge: try merged(.squash)))
 
-    #expect(plan.steps.last == .deleteBranch(name: "develop"))
+    #expect(plan.steps.last == .deleteBranch(name: "develop", tip: try inspectedTip()))
     #expect(throws: WorktreeClosePlanError.branchDeletionNotPermitted) {
       try planWorktreeClose(
-        worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
+        worktree: target, progress: idle(target),
+        choice: .terminateSession(.removeWorktree(.deleteBranch)),
         confirmation: confirmation(
-          for: target, merge: .merged, defaultBranch: .originHead(branch: "develop")))
+          for: target, merge: try merged(.squash), defaultBranch: .originHead(branch: "develop")))
     }
   }
 
@@ -175,7 +194,7 @@ struct WorktreeClosePlanTests {
 
     #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
       try planWorktreeClose(
-        worktree: target, choice: choice,
+        worktree: target, progress: idle(target), choice: choice,
         confirmation: confirmation(for: target, merge: .unknown))
     }
   }
@@ -184,21 +203,24 @@ struct WorktreeClosePlanTests {
   func withholdsBranchDeletionForReferenceLikeBranchValue() throws {
     #expect(
       !isBranchDeletionAvailable(
-        targetBranch: "refs/foo/bar", defaultBranch: .originHead(branch: "main"), merge: .merged))
+        targetBranch: "refs/foo/bar", defaultBranch: .originHead(branch: "main"),
+        merge: try merged(.squash)))
     #expect(
       !isBranchDeletionAvailable(
         targetBranch: "refs/heads/topic", defaultBranch: .originHead(branch: "main"),
-        merge: .merged))
+        merge: try merged(.squash)))
     // 途中に refs/ を含むだけの通常の branch 名は落とさない。
     #expect(
       isBranchDeletionAvailable(
-        targetBranch: "feat/refs/x", defaultBranch: .originHead(branch: "main"), merge: .merged))
+        targetBranch: "feat/refs/x", defaultBranch: .originHead(branch: "main"),
+        merge: try merged(.squash)))
 
     let target = try worktree(branch: "refs/foo/bar")
     #expect(throws: WorktreeClosePlanError.branchDeletionNotPermitted) {
       try planWorktreeClose(
-        worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
-        confirmation: confirmation(for: target, merge: .merged))
+        worktree: target, progress: idle(target),
+        choice: .terminateSession(.removeWorktree(.deleteBranch)),
+        confirmation: confirmation(for: target, merge: try merged(.squash)))
     }
   }
 
@@ -213,8 +235,8 @@ struct WorktreeClosePlanTests {
 
     for choice in choices {
       let plan = try planWorktreeClose(
-        worktree: target, choice: choice,
-        confirmation: confirmation(for: target, merge: .merged))
+        worktree: target, progress: idle(target), choice: choice,
+        confirmation: confirmation(for: target, merge: try merged(.squash)))
 
       #expect(plan.worktree == target.identity)
     }
@@ -237,7 +259,7 @@ struct WorktreeClosePlanTests {
     let target = try worktree("/repo/.git/worktrees/feature-a")
     let other = try worktree("/repo/.git/worktrees/feature-b")
     let confirmationForOther = confirmation(
-      for: other, uncommitted: .present, merge: .merged,
+      for: other, uncommitted: .present, merge: try merged(.squash),
       continuation: .forcingAcknowledgedWarnings)
 
     #expect(
@@ -245,7 +267,8 @@ struct WorktreeClosePlanTests {
         confirmation: other.identity, target: target.identity)
     ) {
       try planWorktreeClose(
-        worktree: target, choice: choice, confirmation: confirmationForOther)
+        worktree: target, progress: idle(target), choice: choice, confirmation: confirmationForOther
+      )
     }
   }
 
@@ -260,7 +283,8 @@ struct WorktreeClosePlanTests {
     let other = try worktree("/repo/.git/worktrees/feature-b")
 
     let plan = try planWorktreeClose(
-      worktree: target, choice: choice, confirmation: confirmation(for: other))
+      worktree: target, progress: idle(target), choice: choice,
+      confirmation: confirmation(for: other))
 
     #expect(plan.worktree == target.identity)
   }
@@ -269,7 +293,8 @@ struct WorktreeClosePlanTests {
   func plansForDifferentWorktreesAreNotEqual() throws {
     func plan(_ target: DetectedWorktree) throws -> WorktreeClosePlan {
       try planWorktreeClose(
-        worktree: target, choice: .terminateSession(.keepWorktree), confirmation: nil)
+        worktree: target, progress: idle(target), choice: .terminateSession(.keepWorktree),
+        confirmation: nil)
     }
 
     let first = try plan(try worktree("/repo/.git/worktrees/feature-a"))
@@ -287,10 +312,11 @@ struct WorktreeClosePlanTests {
     let target = try worktree("/repo/.git/worktrees/feature-b", branch: "feature-b")
 
     let plan = try planWorktreeClose(
-      worktree: target, choice: .terminateSession(.removeWorktree(.deleteBranch)),
-      confirmation: confirmation(for: target, merge: .merged))
+      worktree: target, progress: idle(target),
+      choice: .terminateSession(.removeWorktree(.deleteBranch)),
+      confirmation: confirmation(for: target, merge: try merged(.squash)))
 
-    #expect(plan.steps.last == .deleteBranch(name: "feature-b"))
+    #expect(plan.steps.last == .deleteBranch(name: "feature-b", tip: try inspectedTip()))
   }
 
   /// git は main working tree の削除を拒否するが (git 2.50.1 実測: `--force` の有無にかかわらず
@@ -310,9 +336,116 @@ struct WorktreeClosePlanTests {
 
     #expect(throws: WorktreeClosePlanError.projectRootIsNotClosable) {
       try planWorktreeClose(
-        worktree: target, choice: choice,
-        confirmation: confirmation(for: target, merge: .merged))
+        worktree: target, progress: idle(target), choice: choice,
+        confirmation: confirmation(for: target, merge: try merged(.squash)))
     }
+  }
+
+  private static let everyChoice: [WorktreeCloseChoice] = [
+    .hideFromUI, .terminateSession(.keepWorktree),
+    .terminateSession(.removeWorktree(.keepBranch)),
+    .terminateSession(.removeWorktree(.deleteBranch)),
+  ]
+
+  /// merge・cherry-pick の衝突中は HEAD が branch を指したままで (git 2.50.1 実測)、detached の
+  /// 条件では捕まらない。選択肢1・2 は確認を要求しないので、拒否は確認ではなく途中状態の観測から
+  /// 来なければならない。
+  @Test(
+    "作業途中の worktree の Close は選択肢1〜4のすべてで拒否し、種類を返す (設計書 §3.4)",
+    arguments: WorktreeInProgressOperation.allCases)
+  func planRejectsEveryChoiceForOperationInProgress(
+    operation: WorktreeInProgressOperation
+  ) throws {
+    let target = try worktree()
+    let progress = WorktreeOperationProgressReport(
+      target: target, progress: .observed([operation]))
+
+    for choice in Self.everyChoice {
+      #expect(throws: WorktreeClosePlanError.operationInProgress([operation])) {
+        try planWorktreeClose(
+          worktree: target, progress: progress, choice: choice,
+          confirmation: confirmation(for: target, merge: try merged(.squash)))
+      }
+    }
+  }
+
+  @Test("途中状態を観測できなければ、途中の作業は無いと見なさず拒否する")
+  func planRejectsEveryChoiceWhenProgressIsUnknown() throws {
+    let target = try worktree()
+    let progress = WorktreeOperationProgressReport(target: target, progress: .unknown)
+
+    for choice in Self.everyChoice {
+      #expect(throws: WorktreeClosePlanError.operationProgressUnknown) {
+        try planWorktreeClose(
+          worktree: target, progress: progress, choice: choice,
+          confirmation: confirmation(for: target, merge: try merged(.squash)))
+      }
+    }
+  }
+
+  /// 別の worktree の「途中の作業は無い」を渡せると、作業途中の worktree をどの選択肢でも
+  /// Close できる。削除を伴わない選択肢でも問うのは、§3.4 の拒否が選択肢1〜4のすべてに掛かるため。
+  @Test("別の worktree について観測した途中状態では計画できない")
+  func planRejectsProgressReportMadeForAnotherWorktree() throws {
+    let target = try worktree("/repo/.git/worktrees/feature-a")
+    let other = try worktree("/repo/.git/worktrees/feature-b")
+
+    for choice in Self.everyChoice {
+      #expect(
+        throws: WorktreeClosePlanError.progressReportIsForAnotherWorktree(
+          report: other.identity, target: target.identity)
+      ) {
+        try planWorktreeClose(
+          worktree: target, progress: idle(other), choice: choice,
+          confirmation: confirmation(for: target, merge: try merged(.squash)))
+      }
+    }
+  }
+
+  /// 実行層は step を撃つ前に HEAD を読み直し、計画時の branch と比べる (§3.4、Issue #354)。
+  @Test("どの選択肢の計画も、計画時に HEAD が指していた branch を持つ")
+  func planCarriesTheBranchAtPlanningTime() throws {
+    let target = try worktree(branch: "feature-x")
+
+    for choice in Self.everyChoice {
+      let plan = try planWorktreeClose(
+        worktree: target, progress: idle(target), choice: choice,
+        confirmation: confirmation(for: target, merge: try merged(.ancestor)))
+
+      #expect(plan.branch == "feature-x")
+    }
+  }
+
+  @Test("ancestor でも squash でも、マージ済みなら branch 削除を計画する")
+  func plansBranchDeletionForEitherMergeEvidence() throws {
+    let target = try worktree()
+
+    for evidence in [BranchMergeEvidence.ancestor, .squash] {
+      let plan = try planWorktreeClose(
+        worktree: target, progress: idle(target),
+        choice: .terminateSession(.removeWorktree(.deleteBranch)),
+        confirmation: confirmation(for: target, merge: try merged(evidence)))
+
+      #expect(plan.steps.last == .deleteBranch(name: "topic", tip: try inspectedTip()))
+    }
+  }
+
+  /// 計画は確認が持つ先端をそのまま step へ載せる。実行層が照合するのはこの値である (Issue #359)。
+  @Test("branch 削除の step は、マージ判定に使った先端を持つ")
+  func branchDeletionCarriesTheInspectedTip() throws {
+    let target = try worktree()
+    let tip = try #require(CommitObjectID(String(repeating: "b", count: 64)))
+
+    let plan = try planWorktreeClose(
+      worktree: target, progress: idle(target),
+      choice: .terminateSession(.removeWorktree(.deleteBranch)),
+      confirmation: confirmation(for: target, merge: .merged(.squash, tip: tip)))
+
+    #expect(plan.steps.last == .deleteBranch(name: "topic", tip: tip))
+  }
+
+  private func idle(_ worktree: DetectedWorktree) -> WorktreeOperationProgressReport {
+    WorktreeOperationProgressReport(target: worktree, progress: .observed([]))
   }
 
   private func worktree(
@@ -341,4 +474,15 @@ struct WorktreeClosePlanTests {
       defaultBranch: defaultBranch)
     return WorktreeRemovalConfirmation(report: report, continuation: continuation)
   }
+}
+
+/// 検査がマージ判定に使ったことにする先端。
+let fixtureTip = CommitObjectID(String(repeating: "a", count: 40))
+
+func inspectedTip() throws -> CommitObjectID {
+  try #require(fixtureTip)
+}
+
+func merged(_ evidence: BranchMergeEvidence) throws -> BranchMergeStatus {
+  .merged(evidence, tip: try inspectedTip())
 }

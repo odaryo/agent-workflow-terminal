@@ -19,8 +19,13 @@ enum IsolatedTmuxServer {
   private static let windowWidth = 200
   private static let windowHeight = 50
 
+  /// `PATH` を既定の候補より先に見る。tmux の版差 (ローカル 3.4 / CI 3.7c) を1台で測るとき、
+  /// 隔離展開した別版を `PATH` の先頭に置いて差し替えられるようにするため。
   static func executableURL() -> URL? {
-    TmuxRunner.defaultExecutableCandidates.first {
+    let pathCandidates = (ProcessInfo.processInfo.environment["PATH"] ?? "")
+      .split(separator: ":")
+      .map { URL(fileURLWithPath: String($0)).appending(path: "tmux") }
+    return (pathCandidates + TmuxRunner.defaultExecutableCandidates).first {
       FileManager.default.isExecutableFile(atPath: $0.path)
     }
   }

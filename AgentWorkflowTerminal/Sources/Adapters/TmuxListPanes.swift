@@ -24,6 +24,8 @@ public struct TmuxPane: Sendable, Hashable, Codable {
   /// tmux 3.4 は dead pane の値を空文字列にするため、空でも parse failure にしない。
   public let currentPath: String
   public let title: String
+  /// `formatWithSummary` で読んだときだけ値が入る。`format` で読んだ行は `nil`。
+  public let summaryReadings: PaneSummaryReadings?
 
   public init(
     paneID: PaneID,
@@ -37,7 +39,8 @@ public struct TmuxPane: Sendable, Hashable, Codable {
     termination: ProcessTermination?,
     tty: String,
     currentPath: String,
-    title: String
+    title: String,
+    summaryReadings: PaneSummaryReadings? = nil
   ) {
     self.paneID = paneID
     self.sessionName = sessionName
@@ -51,6 +54,7 @@ public struct TmuxPane: Sendable, Hashable, Codable {
     self.tty = tty
     self.currentPath = currentPath
     self.title = title
+    self.summaryReadings = summaryReadings
   }
 
   public var snapshot: PaneSnapshot {
@@ -66,50 +70,13 @@ public struct TmuxPane: Sendable, Hashable, Codable {
   }
 }
 
-public enum TmuxListPanesParseError: Error, Sendable, Equatable {
-  case invalidFieldCount(actual: Int)
-  case invalidPaneID(String)
-  case invalidWindowIndex(String)
-  case invalidWindowID(String)
-  case invalidPaneIndex(String)
-  case invalidPanePID(String)
-  case invalidPaneActive(String)
-  case invalidPaneDead(String)
-  case invalidPaneDeadStatus(String)
-  case invalidPaneTermination(status: String, signal: String)
-  case invalidSessionNameEscape(String)
-  case invalidRawFieldEscape(String)
-}
-
-public struct TmuxListPanesParseFailure: Error, Sendable, Equatable {
-  public let lineNumber: Int
-  public let line: String
-  public let error: TmuxListPanesParseError
-
-  public init(lineNumber: Int, line: String, error: TmuxListPanesParseError) {
-    self.lineNumber = lineNumber
-    self.line = line
-    self.error = error
-  }
-}
-
-public struct TmuxListPanesParseResult: Sendable, Equatable {
-  public let panes: [TmuxPane]
-  public let failures: [TmuxListPanesParseFailure]
-
-  public init(panes: [TmuxPane], failures: [TmuxListPanesParseFailure]) {
-    self.panes = panes
-    self.failures = failures
-  }
-}
-
 public struct TmuxAgentPaneStatus: Sendable, Equatable {
   public let paneID: PaneID
   public let title: String
 }
 
 public enum TmuxListPanes {
-  private static let formatSeparator = "\u{1F}"
+  static let formatSeparator = "\u{1F}"
   private static let encodedSeparator: [UInt8] = [0x5C, 0x30, 0x33, 0x37]
   private static let unitSeparator: UInt8 = 0x1F
   private static let backslash: UInt8 = 0x5C
@@ -199,10 +166,17 @@ public enum TmuxListPanes {
 
   public static func parse(line: String) throws(TmuxListPanesParseError) -> TmuxPane {
     let encodedFields = splitEncodedFields(line)
-    guard encodedFields.count == 14 else {
+    guard encodedFields.count == paneFieldCount else {
       throw .invalidFieldCount(actual: encodedFields.count)
     }
+    return try parse(paneFields: encodedFields, summaryReadings: nil)
+  }
 
+  static let paneFieldCount = 14
+
+  static func parse(
+    paneFields encodedFields: [String], summaryReadings: PaneSummaryReadings?
+  ) throws(TmuxListPanesParseError) -> TmuxPane {
     guard
       encodedFields[0].first == "%",
       let paneNumber = Int(encodedFields[0].dropFirst()),
@@ -248,13 +222,20 @@ public enum TmuxListPanes {
       termination: termination,
       tty: try decodeRawField(encodedFields[11]),
       currentPath: try decodeRawField(encodedFields[12]),
-      title: try decodeRawField(encodedFields[13])
+      title: try decodeRawField(encodedFields[13]),
+      summaryReadings: summaryReadings
     )
   }
 
   /// 非 control-mode の `tmux list-panes -F format` stdout 専用。LF をレコード終端として
   /// 扱うため、生 LF を含むフィールドを既に1レコードへ切り出した場合は `parse(line:)` を使う。
   public static func parse(output: String) -> TmuxListPanesParseResult {
+    parse(output: output, line: parse(line:))
+  }
+
+  static func parse(
+    output: String, line parseLine: (String) throws(TmuxListPanesParseError) -> TmuxPane
+  ) -> TmuxListPanesParseResult {
     guard !output.isEmpty else {
       return TmuxListPanesParseResult(panes: [], failures: [])
     }
@@ -268,7 +249,7 @@ public enum TmuxListPanes {
     var failures: [TmuxListPanesParseFailure] = []
     for (index, line) in lines.enumerated() {
       do {
-        panes.append(try parse(line: line))
+        panes.append(try parseLine(line))
       } catch {
         failures.append(
           TmuxListPanesParseFailure(lineNumber: index + 1, line: line, error: error)
@@ -334,7 +315,7 @@ public enum TmuxListPanes {
   /// 他方の版の出力には現れないため、版を判定せず両方を受理して曖昧さが出ない。3.7c 側は
   /// 置換により値の `\` 列が必ず偶数になることが根拠で、生 0x1F は区切りか、値に紛れ込んだ
   /// 0x1F (= フィールド数がずれて failure) のどちらかにしかならない。
-  private static func splitEncodedFields(_ line: String) -> [String] {
+  static func splitEncodedFields(_ line: String) -> [String] {
     let bytes = Array(line.utf8)
     var fields: [String] = []
     var fieldStart = 0
@@ -406,7 +387,7 @@ public enum TmuxListPanes {
     return String(decoding: decoded, as: UTF8.self)
   }
 
-  private static func decodeRawField(
+  static func decodeRawField(
     _ field: String
   ) throws(TmuxListPanesParseError) -> String {
     let bytes = Array(field.utf8)

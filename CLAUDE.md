@@ -89,7 +89,7 @@ A macOS terminal app that runs multiple AI agents in parallel, one per Git workt
 These are recorded as **確定** (decided) in `docs/architecture.md` and should be treated as fixed unless the user changes them:
 
 - **1 development task = 1 Git worktree = 1 task tab = 1 dedicated tmux session.** The Project Root gets its own separate permanent tmux session, outside the task-tab model.
-- **The Agent Terminal is always the primary interaction UI.** All Agent panes' summaries and states can also stay visible in an independent Overview window (§13). P2 keeps the Viewer Drawer (max 2 panes); later Diff viewing must support a separate window, embedded or external (§1.2).
+- **The Agent Terminal is always the primary interaction UI.** All Agent panes' summaries and states can also stay visible in an independent Overview window (§13). Code, Diff, and Evidence open only in the Viewer Drawer (max 2 panes) — no separate windows; choosing the Diff base happens inside the Drawer (§1.2, decided 2026-10-08).
 - **Do not reimplement tmux.** Pane splitting, key bindings, and session management stay in tmux; the app exposes only a minimal operation set (split, close, select, zoom) and reads pane/process/agent state.
 - **tmux and git are driven as external CLI processes**, not as embedded libraries (no libgit2). Rationale: the app must observe the same entities the user sees in their own terminal, and version differences get absorbed at an adapter boundary.
 - **Git is read-heavy, write-free.** Viewing (file browser, code viewer, diff, history/blame) is rich; commit/merge/rebase/worktree-creation is delegated to the agent or a plain shell. Worktree creation belongs to the agent because naming/placement rules are project-specific.

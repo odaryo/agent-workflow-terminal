@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映)
+> 最終更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、ハーネスが現在地・タスク完了を書く条件、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先pathを反映)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -225,6 +225,10 @@ tmuxは未設定と空文字を同じに返すことがあるため、「未設�
 自動では再attachしない — detachはtmux利用者の意図的な操作であり、自動で戻すとアプリ内からdetachする
 手段が無くなるためである(PR #327)。
 
+**attachが終わったタブは自動では閉じない — 確定(2026-10-08)。** detachでもsessionの消失でも、タブは
+上の再接続の操作を出したまま残る。タブが消えるのは人が`Close`したとき(§3.4)だけである。上の
+「自動では再attachしない」と§3.4の「人がCloseを実行したときだけInactiveへ移す」から導かれる。
+
 ### 3.4 完了とClose
 
 Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない。完了状態を表示し、PRレビュー後の追加修正を可能にする。
@@ -367,9 +371,11 @@ Project Rootのsessionも同じ規則で導出し、別体系の命名規則を�
 slugは`git worktree move`後に実際のディレクトリ名とずれ得る。管理ディレクトリ名は移動しても
 作成時の名前のままだからである。可読性より決定性を優先した結果として受け入れる。
 
-### 3.6 未確定事項
+### 3.6 Close後のActive化 — 確定(2026-10-08)
 
-- `Close`後にActiveへ戻す具体的UI
+`Close`でInactiveへ移したworktreeは、タブ列の`Inactive`メニューから選んでActiveへ戻す。§3.2の
+「既存Inactive worktreeの再利用は人が選択する」と同じ導線であり、Close専用の復帰画面は設けない。
+到達不能のworktreeは§3.2のとおり選択不可で並ぶ。
 
 ## 4. tmuxモデル
 
@@ -495,7 +501,16 @@ Task Tabには次を圧縮表示する。
   - clean
   - unpushed commits等
 
-詳細なアイコン体系、色、アクセシビリティ表現は未確定。
+**状態表示の原則 — 確定(2026-10-08)。** Task TabとOverview(§13)の状態表示は、SF Symbolsの固定
+セットを使い、状態ごとに形を変える。色は補助であり、色だけで状態を区別させない。accessibility labelは
+状態名をそのまま使う。`Unknown`には専用の形を与え、他の状態の形を流用しない(§12.3)。paneの応答終了と
+タスク完了(§12.7)も別の形にする。状態と記号・色の具体的な対応表は、Overviewの実装時(Issue #189)に決める。
+
+### 5.4 キーボードショートカットの原則 — 確定(2026-10-08)
+
+⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵(⌘を伴わないキー)にはアプリの操作を
+割り当てない。Agent Terminalが操作の中心であり、端末へ届くはずの打鍵をアプリが横取りしないためである。
+個々のショートカットの一覧は未確定(§25)。
 
 ## 6. Viewer Drawer
 
@@ -843,7 +858,24 @@ worktree削除後もsnapshotで当時の質問対象を確認できる。Git参�
 
 通知上でAllow／Denyなどを直接実行する機能は対象外とする。
 
-Push通知は、APNsへ橋渡しする軽量な通知中継をopt-inで利用する方式とする(確定)。中継へ送るpayloadはworktree ID・通知種別などの最小限に留め、コードやTerminal出力を含めない。中継を有効にしない場合は、hostへ接続中のローカル通知のみとなる。中継の具体的な実装・提供形態(自前hosting等)は未確定。
+Push通知は、APNsへ橋渡しする軽量な通知中継をopt-inで利用する方式とする(確定)。中継へ送るpayloadはworktree ID・通知種別などの最小限に留め、コードやTerminal出力を含めない。中継を有効にしない場合は、hostへ接続中のローカル通知のみとなる。
+
+**通知中継はApple CloudKitに担わせ、自前の中継サーバは置かない — 確定(2026-10-08)。** Macアプリは
+利用者自身のiCloud private databaseへ通知recordを書き、iPhoneアプリはCloudKitのsubscriptionで受け取る。
+APNsの鍵もdevice tokenの受け渡しも持たない。利用者が増えてもPush配信の費用が増えないことを要求した
+ためである — 自前の中継は利用者数に比例して運用費が増え、MacからAPNsへ直接送る方式は、配布すると
+利用者ごとに有料のApple Developer Programと鍵が要る(公開側の鍵は利用者のMacへ配れない)。CloudKitの
+費用は利用者自身のiCloud側に数十バイトのrecordとして載るだけで、開発者側はProgramの年会費のみである。
+
+- recordに載せるのはworktree ID・通知種別・Mac名だけとし、上の最小payloadの原則を保つ。
+- pairingは同じApple IDでのサインインで代替する。v1のHostはMac 1台を前提とするが、機種変更に備えて
+  利用者が付けたMac名をrecordに含めて通知に表示し、同じApple IDで複数のMacが動いていても拒否・調停は
+  しない。機種変更は、新しいMacで同じApple IDにサインインし、古いMacのアプリを終了すれば済む。
+- MacアプリにiCloud entitlementとprovisioning profileが要る。ad-hoc署名のビルド(`scripts/build-app.sh`の
+  現状)では、この機能を無効にして起動する。
+- CloudKitのsubscription通知には配達の保証が無く、間引かれ得る。下の「遷移1回につき1回」がロック画面で
+  成立するか、およびMacアプリをDeveloper ID署名で配布する場合にCloudKitが使えるかはIssue #191で実測し、
+  成立しなければこの決定を見直す。
 
 **モバイル初版の利用条件は、Mac側アプリを起動したまま、外出先でiPhoneをロックし、
 モバイルアプリを開いていない間にも判断待ちとタスク完了の通知が届くこと**とする。
@@ -914,7 +946,7 @@ worktreeを開かずにOverviewでも確認できる(§13)。この代表状態�
 - 保持時間を0〜30秒のどの値にしても、`Needs Attention`／`Ready for Review`の遷移時刻は保持なしの場合と一致する。保持時間を延ばしても人の対応が要る通知は遅れない。
 - 数字は記録の250msサンプリング上のもので、**表示遷移の頻度は製品の予測値ではない**。Gate 3 §7.5は250msのpollingが成立しないと結論しており、`AgentObservationIntervals.signals`はこれより粗くなる。中断70件のうち55件が0.77秒以下なので、この粗さはベースライン側を大きく動かす。一方、閾値の根拠であるテール(7.90秒と9.89秒)はサンプリング間隔に対して頑健である。
 - 保持を`Working`からの降格だけに限ると、`Idle`表示中に`Unknown`が一瞬入る往復が残る(5秒未満で入れ替わる`Idle`／`Unknown`表示が9秒保持で28回)。遷移元を問わない形にすると14回へ減る。これが遷移元を限定しない理由である。残る14回の大半は各runの先頭フレームで、画面の変化量を測る比較対象がまだ無く`Unknown`から始まることによる。
-- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.995**、残る誤判定は**`Ready for Review`を1 poll分だけ先に出す2フレーム(443中0.45%)**だけである。250ms pollingではrecall 0.867で、取りこぼしは`Ready for Review`ではなくすべて`Unknown`になる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。**ターン開始直後の検出については、この0.45%を許容する**(許容条件そのものは§12.6・§25のとおり未確定である)。
+- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.995**、残る誤判定は**`Ready for Review`を1 poll分だけ先に出す2フレーム(443中0.45%)**だけである。250ms pollingではrecall 0.867で、取りこぼしは`Ready for Review`ではなくすべて`Unknown`になる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。**ターン開始直後の検出については、この0.45%を許容する**(判断待ちの検出の偏りは§12.6で確定)。
 - 同じpollingの粗さは、`Working`の検出率を上げる代わりに`Idle`の検出率を下げる。同じ`--score`出力で`Idle`区間のrecallは250msの0.892から2.0秒では0.763へ落ち、455フレーム中98が`Working`になる。さらに製品の`WorktreeRepresentativeStateStabilizer`(保持9秒)を同じidle真値区間へ当てると、GUARDを除いた23.0秒のうち表示が`Working`のままの時間が12.8〜22.5秒を占める(5 run×8位相、2.0秒polling)。
 - 原因は、画面が変化した=出力があった、という仮定が成り立たないことである。250ms分解能で数え直すと、idle真値区間の独立した画面変化は**5 run合計10件で全件が1行**(GUARD 1.0秒。GUARDを外すと14件)であり、周期的な入れ替えではなく**起動直後に一回限りで起きるステータス行の遷移**がrunあたり2件あるだけである。**`completed-left`(ターン後の放置、55秒×5 run)の画面変化は0件**で、放置中の`Ready for Review`は元から正しく表示できていた。
 - **この記録で測れているのは起動後25秒のidle区間だけである。** claudeの`idle`真値区間は各runに1本(25.0秒)しか存在せず、日常の長い待機はGate 3の記録に含まれない。以下の数字をその範囲を超えて一般化しない。
@@ -983,7 +1015,12 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 - `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーが未計測であることを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
-- false positive／false negativeの許容条件(表示の振動を許容しないこと、およびターン開始直後のfalse positiveは§12.2で決着済み)
+
+**判断待ちの検出は取りこぼしを避ける側へ倒す — 確定(2026-10-08)。** `Question`／`Permission`／`Error`は、
+判断待ちの区間を別の状態と読む取りこぼしを避け、判断待ちでない区間を判断待ちと読む誤検出は1 poll分
+(製品のpolling間隔2.0秒)まで許容する。誤検出による通知の重複は§11.2の「状態へ入った遷移1回につき1回」で
+抑える。取りこぼした判断待ちは、利用者がOverviewを見るまで気づかれないためである。`Completed`の先出しは
+§12.2で許容した1 poll分(0.45%)を基準とする。表示の振動を許容しないこと(§12.2)は変えない。
 
 process fallbackについては、**process観測だけでは`Working`と`Idle`を区別できない**ことがGate 3で実測された。fallbackは推測せず`Unknown`を返す(§12.3)。
 
@@ -1046,8 +1083,15 @@ Project A
 ```
 
 paneを選択すると対象worktreeと該当paneへ直接移動する。質問回答、Agent停止、Close、PR操作などは
-Overviewから行わない。概要の入力UIの配置は未確定。状態はアイコンで示し、色だけに依存せず
-accessibility labelで意味を伝える。paneの応答終了とタスク完了は別表示にする。
+Overviewから行わない。状態はアイコンで示し、色だけに依存せず
+accessibility labelで意味を伝える(原則は§5.3)。paneの応答終了とタスク完了は別表示にする。
+
+**概要の入力とウィンドウの形態 — 確定(2026-10-08)。**
+
+- paneの「目的」(§12.7)の手入力は、Overviewの該当行で直接編集する。入力箇所はここ1つに限り、Terminal側に
+  別の入口を設けない。概要の編集は、上の「Overviewから行わない」操作に含まれない。
+- Overviewは通常のウィンドウ1枚とし、位置とサイズを記憶する。常に最前面には置かない。開く操作は⌘修飾の
+  ショートカット1つを割り当てる(§5.4)。
 
 並び順は次のとおり。
 
@@ -1311,6 +1355,9 @@ iPhone / iPad
 
 Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMacとなる。他OSのPC host対応は未確定。
 
+**対応OSの初期version — 確定(2026-10-08)。** macOS 14以上、iOS／iPadOS 17以上とする。SwiftPM package
+(`AgentWorkflowTerminal/`・`App/`)のplatforms指定と一致させる。
+
 ### 20.2 Mobile Terminal UX
 
 - 最終形は専用アプリ内Terminalとする。
@@ -1336,9 +1383,15 @@ Swift／SwiftUI推奨構成を採る場合、実装上のhost対象はまずMac�
 - 最終構成は専用iOS/iPadOSアプリ内でSSH接続し、tmuxへattachする。
 - Moshは外部アプリとして使うことは許容するが、プロダクト本体へは組み込まない。
 
+**iOSアプリの配布経路 — 確定(2026-10-08)。** v1のiOSアプリは、XcodeからDevelopment署名で実機へ
+直接インストールする。APNsとCloudKit(§11.2)はDevelopment環境を使い、Macアプリも同じ環境へ揃える。
+TestFlight／App Storeでの配布はv1の対象外とし、App Store審査上の確認もv1では行わない。通知を受ける
+最小のiOSアプリを先に作るため(P4)、iOSアプリのtarget(Xcode project等)をrepositoryへ持ち込む。
+Macアプリの配布経路はこの決定に含まない(§25)。
+
 ## 21. 現在の推奨技術アーキテクチャ
 
-> この章は**確定仕様ではなく、PoC通過を条件とする現在の第一候補**である。ただし章内で明示的に**確定**と記した項目(§21.5のrenderer方針)は除く。
+> この章は**確定仕様ではなく、PoC通過を条件とする現在の第一候補**である。ただし章内で明示的に**確定**と記した項目(§21.5のrenderer方針とlibghosttyの版数固定)は除く。
 
 ### 21.1 推奨構成
 
@@ -1449,7 +1502,11 @@ TerminalRenderer
 └─ MobileRenderer             # iOS/iPadOS、未確定
 ```
 
-libghosttyの配布方法と固定versionの方針は**未確定**(§25)。Gate 1のスパイクはタグ`v1.3.1`にピン留めして実施したが、この版数固定を製品としての方針にするか、upstream追随に切り替えるかは決めていない。
+**確定(2026-10-08)**: libghosttyは`App/ghostty-ref`に記したtag(現在`v1.3.1`)へ固定し、upstreamへ自動では
+追随しない。事前ビルドした`GhosttyKit.xcframework`をGitHub Release assetとして配布し、`App/ghostty-kit.sha256`で
+照合してから使う(`scripts/fetch-ghostty.sh`)。版数を上げるときは、ref更新担当者が`App/ghostty-ref`を書き換え、
+`scripts/build-ghostty.sh` → `scripts/wf-ghostty-publish.sh` → 更新されたsha256を含むPR、の順で進める。
+Gate 1を通過した版数から黙ってずれないこと、CIがxcframeworkを自前ビルドしないことを優先した結果である。
 
 モバイル側rendererの**候補**(列挙のみ。選定は未確定、§25):
 
@@ -1499,7 +1556,7 @@ macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-term
 
 ```text
 Application Support/
-└─ <app>/
+└─ AgentWorkflowTerminal/
    ├─ app.sqlite
    └─ projects/
       └─ <project-id>/
@@ -1508,6 +1565,11 @@ Application Support/
             ├─ diff-reviews/
             └─ consultations/
 ```
+
+**Application Support上の正式path — 確定(2026-10-08)。** アプリのデータは
+`~/Library/Application Support/AgentWorkflowTerminal/`に置き、Project別のデータは`projects/<project-id>/`配下に
+置く。§3.2.1の暫定JSON(`projects/<project-id>/worktree-inventory.json`)が既にこの配置で動いている。
+決めたのはディレクトリの位置だけで、その下のDB・ファイル構成は上の図を含めて現在の推奨に留まる。
 
 SQLite候補テーブル:
 
@@ -1680,26 +1742,20 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Product／scope
 
 - プロダクト名
-- 対応OSの初期version
 - Mac専用から他PC hostへ広げるか
 - v1、v2の正式な機能境界
 
 ### UI
 
-- Project／Task Tab／Overviewの詳細レイアウト
-- 状態アイコン、色、accessibility label
+- Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定)
+- 状態と記号・色の対応表(原則は§5.3で確定。Overviewの実装時に決める)
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
-- keyboard shortcut体系
-
-### Worktree／tmux
-
-- detach／session消失後の**タブ**を閉じる条件(Gate 1)。surface側の責務分担は§21.5、再接続と再作成の判断は§3.3で確定済み
+- keyboard shortcutの一覧(⌘修飾をアプリが使い端末への打鍵に触れない原則は§5.4で確定)
 
 ### Agent
 
 - 各Adapterが採用するsignalの組み合わせ(個々の信号の採用基準は§12.5で確定。どう合成して7状態へ落とすかは実装時に決める)
-- false positive／false negativeの許容条件(振動の可否とターン開始直後のfalse positiveは§12.2で決着済み)
 - 質問fallbackのデータ交換形式
 - 概要連携のpane変数名と値の表現(形式はtmuxのpaneユーザー変数で確定。§12.7のとおり両版の計測で決める)
 
@@ -1713,15 +1769,13 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - モバイル側Terminal rendererの選定(`libghostty-vt` + 自前描画／SwiftTerm等の既存renderer／外部SSHアプリ連携)
 - iOS認証情報の安全な保存方法
 - SSH接続設定の同期範囲
-- Push通知中継の具体的な実装・提供形態(自前hosting等)
-- Host発見、pairing、複数Host
+- Host発見(pairingはApple IDで代替し、複数Macは拒否・調停しないことを§11.2で確定)
 - 推奨するVPN構成の具体例とドキュメント化
 - Host Core CLI protocol
 
 ### Storage
 
 - DB schemaとmigration
-- Application Support上の正式path
 - encryption at restの要否
 - soft limitの初期値と適用単位
 - cleanup候補の選び方
@@ -1732,9 +1786,8 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - Contributor License Agreement／DCOの要否
 - license scan tool
 - SBOM形式
-- libghostty配布方法と固定version(Gate 1のスパイクはタグ`v1.3.1`にピン留めして実施。製品としてこの版数を固定するか、upstream追随に切り替えるかは未決定)
 - Ghostty attribution文言
-- App Store審査上の確認
+- Macアプリの配布経路(Developer ID等)。iOSはv1でApp Storeを使わないことを§20.3で確定
 
 ---
 
@@ -1813,6 +1866,20 @@ Review Session (fresh context)
 - Human回答が必要なときだけ処理を中断する。
 
 何を設計判断とし、何を要件判断とするかの境界は未確定である。
+
+### 28.4 現在地とタスク完了を書く条件 — 確定(2026-10-08)
+
+ハーネスがTerminalへ伝える現在地とタスク完了(§12.7)を、いつ書くかを次のとおりとする。
+
+- タスクの完了条件はタスクごとに異なる。完了条件は要件定義phaseで決め、人の承認(§28.1)の対象に含める。
+  PR作成が目的のタスクはPR作成が完了条件になり、それ以外のタスクはそのタスクの受け入れ条件に従う。
+- ハーネスは、Review sessionが完了条件の充足を確認した後に、タスク完了を1回だけ書く。PR作成が目的の
+  タスクではPR作成の後に書く。Review NGで新しいImplementation sessionへ戻るときは書かない。
+- 現在地は、phaseが変わるたびに「phase名｜短文1行」で書く。
+- Terminalは完了条件の中身を知らない。書く手段は§12.7のpaneユーザー変数であり、Terminal専用APIを
+  必要としない(§32)。
+
+各phaseの入力・出力・終了条件、および完了条件を記録するartifactのfile名とschema(§29)は未確定のまま残す。
 
 ## 29. Artifact案 — 未確定
 
@@ -1924,7 +1991,6 @@ PR_READY
 - PR作成条件
 - Evidence撮影の必須条件
 - Agent-native質問UIとfile-based質問の使い分け
-- ハーネスがTerminalへ概要・タスク完了を伝える条件(いつ・どの粒度で書くか)。伝える形式はtmuxのpaneユーザー変数として§12.7で確定済み
 - Claude CodeとCodexで共通Skillを使う方法
 
 ## 32. TerminalとAgent Skillsの統合原則
@@ -2010,6 +2076,8 @@ PR_READY
 - [x] Resume時はTerminalが適用するはずのoptionが未設定のときだけ適用し直し、ユーザーが設定した値は上書きしない
 - [x] session用意に失敗したタブは`再試行`操作を出し、自動では再試行しない
 - [x] attachが終わったタブは明示操作で再接続し、sessionが消えていれば保証付きで作り直す。自動再attachはしない
+- [x] attachが終わったタブは自動では閉じず、消えるのは人がCloseしたときだけ
+- [x] Closeしたworktreeはタブ列の`Inactive`メニューからActiveへ戻す
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容
 - [x] `scrollback-limit` 10MBと`history-limit` 10000を製品既定として明示(tmux側はsession単位)
@@ -2019,6 +2087,9 @@ PR_READY
 - [x] tmuxコマンドの組み立てと実行を分離し、ローカル実行の型はhost platformに限定
 - [x] mobileは同じTerminal TUI + 汎用補助キーバー
 - [x] macOS版の`TerminalRenderer`にlibghostty(完全版)を採用(PoC Gate 1通過、2026-08-31)
+- [x] libghosttyは`App/ghostty-ref`のtag(現在`v1.3.1`)へ固定し、事前ビルドしたxcframeworkをRelease assetとsha256照合で配布する。upstreamへ自動追随しない
+- [x] 対応OSの初期versionはmacOS 14以上、iOS／iPadOS 17以上
+- [x] Application Support上の保存先は`AgentWorkflowTerminal/`、Project別データは`projects/<project-id>/`配下(DB・ファイル構成は未確定)
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
 - [x] surfaceのプロセス終了後に作り直すかは上位レイヤが決める(rendererは状態と`restart`を公開するだけ、生成失敗のリトライはrenderer内部の責務)
 - [x] Project登録はlocal選択またはclone
@@ -2037,6 +2108,9 @@ PR_READY
 - [x] リモート到達性は既存VPNへ委譲、独自リレー／NAT越えは持たない
 - [x] 構造化データ提供はMacアプリ(Host Core)起動中のみ、独立daemonは作らない
 - [x] Push通知はopt-inの軽量中継 + 最小payload(コード・出力は載せない)
+- [x] 通知中継はApple CloudKit(利用者のprivate database + subscription)が担い、自前の中継サーバ・APNs鍵・device tokenの受け渡しを持たない(配達の確実さは#191で実測)
+- [x] pairingは同じApple IDで代替し、v1のHostはMac 1台を前提とする。recordにMac名を含めて通知に表示し、複数Macは拒否・調停しない
+- [x] v1のiOSアプリはXcodeからDevelopment署名で実機へ直接入れ、TestFlight／App Store配布とApp Store審査はv1対象外
 - [x] UI名称は`Ask Agent`(Agent非依存)
 - [x] Diffコメントの送信先は実装Agent pane
 - [x] コメントanchorは出所を含む6要素(snapshot ID／出所／パス／側／行範囲／テキストハッシュ)、新snapshotへの推測追従はしない
@@ -2045,12 +2119,17 @@ PR_READY
 - [x] 概要の「目的」は手入力優先、「現在地」は連携値のみ(無ければ空欄)
 - [x] 連携由来の現在地とタスク完了はAgentプロセス単位の寿命で、完了表示は同じpaneが再び`Working`になったら解除する
 - [x] `Ask Agent`で使うAgent CLIは起動のたびに選ぶ
+- [x] 概要の「目的」の手入力はOverviewの行で直接編集し、入力箇所はそこ1つに限る
+- [x] Overviewは通常のウィンドウ1枚で位置とサイズを記憶し、常に最前面には置かない
+- [x] 状態表示はSF Symbolsの固定セットで状態ごとに形を変え、色は補助、accessibility labelは状態名。`Unknown`に専用の形(対応表は#189で決める)
+- [x] ⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵には割り当てない
+- [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する
 - [x] Agent開発フローはReview独立sessionを含む4phase構成
+- [x] タスクの完了条件は要件定義phaseでタスクごとに決め、ハーネスはReviewが充足を確認した後(PRが目的ならPR作成後)に完了を1回だけ書く。現在地はphase遷移ごとに書く
 
 # 付録B. 現在の推奨構成チェックリスト
 
 - [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
-- [ ] libghosttyの配布方法と固定versionの方針を決定 — スパイクは`v1.3.1`ピン留め、製品方針は未確定(§25)
 - [ ] モバイルTerminal rendererを選定 — 候補比較とGate 2 PoC待ち(§25)
 - [ ] tmux CLI Adapterを正式採用 — version検証待ち
 - [ ] git CLI Adapterを正式採用 — output parsing設計待ち

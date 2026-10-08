@@ -82,13 +82,13 @@ struct GitWorktreeProgressReaderTests {
     let git = gitStub()
     _ = try await inspect(git: git)
 
-    let prefix = ["--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager"]
-    #expect(
-      await git.arguments == [
-        prefix + ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
-      ])
+    let prefix: [String] = [
+      "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
+    ]
+    let references = ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"]
+    let expected: [[String]] = references.map { prefix + ["rev-parse", "--verify", "--quiet", $0] }
+    let actual: [[String]] = await git.arguments
+    #expect(actual == expected)
   }
 
   /// rc=1 は「無い」という答えだが、rc=128 は答えではない (git 2.50.1 実測: 管理ディレクトリが

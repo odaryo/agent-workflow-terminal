@@ -83,15 +83,19 @@ struct WorktreeCloseExecutorPreflightTests {
         .terminateSession(.removeWorktree(.deleteBranch)), merge: try merged(.squash)))
 
     #expect(outcome.failure == nil)
-    let prefix = ["--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager"]
-    #expect(
-      await harness.git.preflightInvocations.map(\.arguments) == [
-        prefix + ["symbolic-ref", "--quiet", "HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "refs/heads/topic"],
-      ])
+    let prefix: [String] = [
+      "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
+    ]
+    let commands: [[String]] = [
+      ["symbolic-ref", "--quiet", "HEAD"],
+      ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+      ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
+      ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
+      ["rev-parse", "--verify", "--quiet", "refs/heads/topic"],
+    ]
+    let expected: [[String]] = commands.map { prefix + $0 }
+    let actual: [[String]] = await harness.git.preflightInvocations.map(\.arguments)
+    #expect(actual == expected)
   }
 
   /// `branch -D` は未マージの commit も消す。判定の後に積まれた commit はマージ済みと

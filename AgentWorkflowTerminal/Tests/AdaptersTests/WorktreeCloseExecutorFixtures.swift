@@ -89,13 +89,16 @@ func tipOutput(_ hex: String) -> ProcessRunResult {
 func gitStub(
   removeWorktree: ProcessRunResult = gitSuccess, worktreeList: ProcessRunResult = gitSuccess,
   deleteBranch: ProcessRunResult = gitSuccess, head: ProcessRunResult = headOnBranch("topic"),
-  references: [String: ProcessRunResult] = [:], tip: ProcessRunResult = tipOutput(fixtureTipHex)
+  references: [String: ProcessRunResult] = [:], tip: ProcessRunResult = tipOutput(fixtureTipHex),
+  tipBeforeDeletion: ProcessRunResult? = nil
 ) -> WorktreeCloseGitStub {
   WorktreeCloseGitStub { arguments in
     if arguments.contains("symbolic-ref") { return head }
     if arguments.contains("rev-parse") {
       let reference = arguments.last ?? ""
-      return reference.hasPrefix("refs/heads/") ? tip : references[reference] ?? gitNotFound
+      guard reference.hasPrefix("refs/heads/") else { return references[reference] ?? gitNotFound }
+      // `branch -D` の直前の読み直しは `repositoryDirectory` (`/repo`) で撃つ。
+      return arguments.starts(with: gitArgv()) ? tipBeforeDeletion ?? tip : tip
     }
     if arguments.contains("remove") { return removeWorktree }
     if arguments.contains("list") { return worktreeList }

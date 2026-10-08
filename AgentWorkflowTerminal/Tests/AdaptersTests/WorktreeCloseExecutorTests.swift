@@ -65,6 +65,7 @@ struct WorktreeCloseExecutorTests {
     #expect(
       await harness.git.repositoryInvocations.map(\.arguments) == [
         gitArgv("worktree", "remove", "--", "/repo/wt"),
+        gitArgv("rev-parse", "--verify", "--quiet", "refs/heads/topic"),
         gitArgv("branch", "--delete", "--force", "--", "topic"),
       ])
   }

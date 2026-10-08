@@ -41,6 +41,22 @@ func localBranchTip(from output: String) -> CommitObjectID? {
   CommitObjectID(output.hasSuffix("\n") ? String(output.dropLast()) : output)
 }
 
+/// `refs/heads/` は全 worktree で共有なので、`runner` は管理ディレクトリで動くものでも
+/// Project Root で動くものでもよい。
+func readLocalBranchTip(
+  _ branch: String, with runner: GitRunner
+) async throws(GitWorktreeProgressReadError) -> CommitObjectID {
+  guard let revision = localBranchRevision(branch) else { throw .invalidBranchName(branch) }
+  let output: String
+  do {
+    output = try await runner.run(.resolveCommit(revision)).stdout
+  } catch {
+    throw .git(error)
+  }
+  guard let tip = localBranchTip(from: output) else { throw .unexpectedTipOutput(output) }
+  return tip
+}
+
 /// 短縮 local branch 名を、`GitCloseSafetyInspector` が merge 判定で問うのと同じ ref にする。
 func localBranchRevision(_ branch: String) -> GitRevision? {
   GitRevision("refs/heads/\(branch)")
@@ -116,8 +132,13 @@ struct GitWorktreeProgressReader: Sendable {
 
   func operations() async throws(GitWorktreeProgressReadError) -> Set<WorktreeInProgressOperation> {
     var operations: Set<WorktreeInProgressOperation> = []
+    // ファイルがあれば、git が ref として読めなくても途中とみなす。git 2.50.1 実測: 衝突中の
+    // `MERGE_HEAD` / `CHERRY_PICK_HEAD` を空や `garbage` に書き換えると `rev-parse --verify` は
+    // rc=1 (= 無い) を返すが、`git status` は `You have unmerged paths.` のままだった。
+    // reftable 形式では `CHERRY_PICK_HEAD` / `REVERT_HEAD` がファイルにならないので git にも問う。
     for reference in GitInProgressReference.allCases {
-      guard try await exists(reference) else { continue }
+      let present = exists(reference.rawValue) ? true : try await exists(reference)
+      guard present else { continue }
       operations.insert(reference.operation)
     }
     if exists("rebase-merge") {
@@ -140,15 +161,7 @@ struct GitWorktreeProgressReader: Sendable {
   }
 
   func tip(ofBranch branch: String) async throws(GitWorktreeProgressReadError) -> CommitObjectID {
-    guard let revision = localBranchRevision(branch) else { throw .invalidBranchName(branch) }
-    let output: String
-    do {
-      output = try await runner.run(.resolveCommit(revision)).stdout
-    } catch {
-      throw .git(error)
-    }
-    guard let tip = localBranchTip(from: output) else { throw .unexpectedTipOutput(output) }
-    return tip
+    try await readLocalBranchTip(branch, with: runner)
   }
 
   private func exists(
@@ -175,7 +188,8 @@ struct GitWorktreeProgressReader: Sendable {
 /// 計画から実行までの間に Agent が rebase を始めた場合や、保存から復元した陳腐化した branch で
 /// 計画を作った場合に、detached HEAD の worktree が消えるのを止める —— detached には
 /// `worktree remove` が `--force` 無しでも成功し、積んだ commit は gc 後に失われる (git 2.50.1 実測)。
-/// 読み直しから削除までの窓は残存リスクとして受け入れている。
+/// HEAD と途中状態は、読み直しから worktree 削除までの窓を残存リスクとして受け入れている。先端は
+/// `branch -D` の直前にもう一度確かめる (`WorktreeCloseStepFailure.Reason.branchTipMoved`)。
 public enum WorktreeClosePreflightRefusal: Sendable, Equatable {
   case detachedHead
   /// HEAD が計画時 (`WorktreeClosePlan.branch`) と別の branch を指している。`current` は

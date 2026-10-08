@@ -47,6 +47,22 @@ struct GitWorktreeProgressReaderTests {
     #expect(result.report.progress == .observed(expected))
   }
 
+  /// git 2.50.1 実測: 衝突中の `MERGE_HEAD` を空にすると `rev-parse --verify` は rc=1 を返すが、
+  /// `git status` は `You have unmerged paths.` のままだった。`CHERRY_PICK_HEAD` も同じ。
+  @Test(
+    "git が ref として読めなくても、ファイルがあれば途中とみなす",
+    arguments: [
+      ("MERGE_HEAD", WorktreeInProgressOperation.merge), ("CHERRY_PICK_HEAD", .cherryPick),
+      ("REVERT_HEAD", .revert),
+    ])
+  func treatsAnUnreadableReferenceFileAsInProgress(
+    name: String, expected: WorktreeInProgressOperation
+  ) async throws {
+    let result = try await inspect(existingFiles: [name])
+
+    #expect(result.report.progress == .observed([expected]))
+  }
+
   /// 衝突中の連続 cherry-pick は `CHERRY_PICK_HEAD` と `sequencer` を両方持つ (git 2.50.1 実測)。
   @Test("種類が分かっているときは sequence を重ねない")
   func doesNotAddSequenceWhenThePickIsKnown() async throws {

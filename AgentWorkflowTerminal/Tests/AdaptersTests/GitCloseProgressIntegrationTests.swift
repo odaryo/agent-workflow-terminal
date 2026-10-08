@@ -156,6 +156,69 @@ struct GitCloseProgressIntegrationTests {
     }
   }
 
+  /// session を終了するまで Agent は動いている。冒頭の照合の後に積まれた commit を、`-D` の直前の
+  /// 読み直しで止める (Issue #359)。worktree はその時点でもう無いので、commit は
+  /// `commit-tree` + `update-ref` で branch へ直接積む —— `worktree remove` の直後、`-D` の前に。
+  @Test("worktree 削除の後に branch へ commit が積まれたら、-D を撃たず branch と commit が残る")
+  func keepsTheBranchWhenTheTipMovesAfterWorktreeRemoval() async throws {
+    try await withGitRepository { repository in
+      try await repository.addWorktree("topic")
+      let target = try await repository.detected(branch: "topic")
+      let plan = try await repository.branchDeletionPlan(for: target)
+      let plannedTip = try await repository.branchTip("topic")
+      let committer = try repository.runner(
+        globalConfig: "[user]\n\tname = awt\n\temail = awt@example.invalid\n")
+      let lateCommit = LateCommit()
+      let harness = try repository.closeHarness(
+        for: target,
+        processRunner: AfterWorktreeRemovalRunner {
+          let tree = try await committer.run(
+            GitReadCommand(arguments: ["rev-parse", "\(plannedTip.rawValue)^{tree}"])
+          ).stdout.trimmingCharacters(in: .newlines)
+          let late = try await committer.run(
+            GitReadCommand(arguments: [
+              "commit-tree", tree, "-p", plannedTip.rawValue, "-m", "late",
+            ])
+          ).stdout.trimmingCharacters(in: .newlines)
+          try await repository.git(["update-ref", "refs/heads/topic", late, plannedTip.rawValue])
+          await lateCommit.set(late)
+        })
+
+      let execution = try await harness.executor.execute(plan)
+
+      let lateHex = try #require(await lateCommit.value)
+      let late = try #require(CommitObjectID(lateHex))
+      let outcome = try #require(execution.outcome)
+      #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
+      #expect(outcome.failure?.reason == .branchTipMoved(planned: plannedTip, current: late))
+      #expect(!FileManager.default.fileExists(atPath: target.worktreePath))
+      #expect(try await repository.branchTip("topic") == late)
+    }
+  }
+
+  /// git 2.50.1 実測: 衝突中の `MERGE_HEAD` を空にすると `rev-parse --verify` は rc=1 (= 無い) を
+  /// 返すが、`git status` は `You have unmerged paths.` のままだった。
+  @Test("空にした MERGE_HEAD でも、merge の途中として拒否する")
+  func rejectsCloseWithAnEmptiedMergeHead() async throws {
+    try await withGitRepository { repository in
+      try await repository.addWorktree("wt")
+      try await InProgressScenario.conflictedMerge.interrupt(in: "wt", of: repository)
+      let target = try await repository.detected(branch: "wt")
+      let mergeHead = target.identity.rawValue + "/MERGE_HEAD"
+      try Data().write(to: URL(fileURLWithPath: mergeHead))
+      // 前提の対照: git はもう MERGE_HEAD を ref として読まない。
+      #expect(
+        try await repository.gitExitCode(
+          ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"], in: "wt"
+        )
+        .exitCode == 1)
+
+      let progress = try await repository.progressReport(for: target)
+
+      #expect(progress.progress == .observed([.merge]))
+    }
+  }
+
   /// 保存から復元した `DetectedWorktree` は、観測できなかった間に detached になっていても
   /// 保存時の branch を持つ (`restoreWorktreeInventory` の leftover)。計画段階の detached の
   /// 判定はこの値を見るので素通りし、止めるのは実行直前の読み直しである。
@@ -361,7 +424,9 @@ extension GitTestRepository {
 
   /// 実 git と tmux の stub で動く実行層。git は偽の `HOME` (空の `.gitconfig`) で起動する ——
   /// `runner(globalConfig:)` と同じく、実行環境の `~/.gitconfig` を読ませないため。
-  func closeHarness(for target: DetectedWorktree) throws -> RealGitCloseHarness {
+  func closeHarness(
+    for target: DetectedWorktree, processRunner: any ProcessRunning = FoundationProcessRunner()
+  ) throws -> RealGitCloseHarness {
     let home = root.appending(path: "home-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
     try "".write(to: home.appending(path: ".gitconfig"), atomically: true, encoding: .utf8)
@@ -373,7 +438,7 @@ extension GitTestRepository {
           socketName: "awt-test", processRunner: tmux,
           executableCandidates: [URL(fileURLWithPath: "/test/bin/tmux")], parentEnvironment: [:],
           isExecutableFile: { _ in true })),
-      processRunner: FoundationProcessRunner(),
+      processRunner: processRunner,
       executableCandidates: GitRunner.defaultExecutableCandidates,
       parentEnvironment: [
         "HOME": home.path, "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin",
@@ -393,4 +458,39 @@ extension GitTestRepository {
 struct RealGitCloseHarness {
   let tmux: TmuxSessionRunnerStub
   let executor: WorktreeCloseExecutor
+}
+
+/// `worktree remove` を撃った直後に1回だけ `afterRemoval` を走らせる。失敗はテストの issue にする。
+struct AfterWorktreeRemovalRunner: ProcessRunning {
+  let afterRemoval: @Sendable () async throws -> Void
+  private let base = FoundationProcessRunner()
+
+  init(afterRemoval: @escaping @Sendable () async throws -> Void) {
+    self.afterRemoval = afterRemoval
+  }
+
+  func run(
+    executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
+    outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    let result = try await base.run(
+      executableURL: executableURL, arguments: arguments, environment: environment,
+      timeout: timeout, outputLimit: outputLimit)
+    if arguments.contains("worktree"), arguments.contains("remove") {
+      do {
+        try await afterRemoval()
+      } catch {
+        Issue.record("worktree remove の後の commit に失敗した: \(error)")
+      }
+    }
+    return result
+  }
+}
+
+actor LateCommit {
+  private(set) var value: String?
+
+  func set(_ value: String) {
+    self.value = value
+  }
 }

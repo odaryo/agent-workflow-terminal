@@ -137,6 +137,51 @@ struct WorktreeCloseExecutorPreflightTests {
     #expect(await harness.tmux.invocations.isEmpty)
   }
 
+  /// session を終了するまで Agent は動いている。冒頭の照合の後、`kill-session` までに積まれた
+  /// commit は冒頭の照合をすり抜けるので、`-D` の直前にもう一度読む (Issue #359)。
+  @Test("branch -D の直前に先端が動いていたら、-D を撃たずに branch 削除の失敗として返す")
+  func skipsBranchDeletionWhenTheTipMovesBeforeIt() async throws {
+    let moved = String(repeating: "b", count: 40)
+    let harness = try WorktreeCloseHarness(git: gitStub(tipBeforeDeletion: tipOutput(moved)))
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: merged(.squash)))
+
+    #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
+    #expect(outcome.failure?.step == .deleteBranch(name: "topic", tip: try inspectedTip()))
+    #expect(
+      outcome.failure?.reason
+        == .branchTipMoved(
+          planned: try inspectedTip(), current: try #require(CommitObjectID(moved))))
+    #expect(!(await harness.git.arguments.contains { $0.contains("branch") }))
+  }
+
+  @Test("branch -D の直前に先端を読めなければ、-D を撃たない")
+  func skipsBranchDeletionWhenTheTipCannotBeReadBeforeIt() async throws {
+    let harness = try WorktreeCloseHarness(git: gitStub(tipBeforeDeletion: gitNotFound))
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: merged(.squash)))
+
+    #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
+    #expect(
+      outcome.failure?.reason
+        == .branchTipUnverified(.git(.commandFailed(exitCode: 1, stdout: "", stderr: ""))))
+    #expect(!(await harness.git.arguments.contains { $0.contains("branch") }))
+  }
+
+  @Test("branch -D の直前の読み直しも timeout と子プロセス環境を固定して撃つ")
+  func fixesTimeoutAndEnvironmentForTheTipRereadBeforeDeletion() async throws {
+    let harness = try WorktreeCloseHarness(parentEnvironment: pollutedParentEnvironment)
+
+    _ = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: merged(.squash)))
+
+    let reread = try #require(
+      await harness.git.repositoryInvocations.first { $0.arguments.contains("rev-parse") })
+    expectFixedGitInvocation(reread, timeout: .seconds(30))
+  }
+
   /// 先端の照合は `-D` の巻き込みを止めるためのもので、branch を残す計画では問わない。
   @Test("branch を消さない計画では、先端が動いていても照合しない")
   func doesNotCompareTheTipWithoutBranchDeletion() async throws {

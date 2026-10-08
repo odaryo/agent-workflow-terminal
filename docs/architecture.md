@@ -1225,6 +1225,13 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 
 親ディレクトリ監視によるProject自動登録／discoveryは行わない。これはworktree自動検出とは別である。
 
+**登録の永続化と登録解除 — 確定(2026-10-08)。** 登録済みProjectの一覧と選択中のProjectは
+Application Support(§22.1)に保存し、再起動を跨いで復元する。登録解除は一覧から外すだけで、
+repositoryのディスク上の内容とtmux sessionには触れない(Issue #372)。
+
+**Clone Repositoryの経路は後回しにする(2026-10-08)。** 上の2経路の限定は変えず、先に既存Local
+Repositoryの経路だけを実装する。
+
 ### 16.2 Git認証
 
 - 認証はOS、Git、SSH agent、Git Credential Manager等の既存環境へ完全委譲する。
@@ -1763,7 +1770,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### UI
 
-- Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定)
+- Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定。メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替えることは確定(2026-10-08))
 - 状態と記号・色の対応表(原則は§5.3で確定。Overviewの実装時に決める)
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
@@ -2095,6 +2102,7 @@ PR_READY
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
 - [x] surfaceのプロセス終了後に作り直すかは上位レイヤが決める(rendererは状態と`restart`を公開するだけ、生成失敗のリトライはrenderer内部の責務)
 - [x] Project登録はlocal選択またはclone
+- [x] 登録済みProjectの一覧と選択はApplication Supportに保存して復元し、登録解除はディスクとtmux sessionに触れない
 - [x] Git認証は既存環境へ完全委譲
 - [x] Git GUIは閲覧中心
 - [x] UI状態はdeviceごとに独立復元
@@ -2126,6 +2134,7 @@ PR_READY
 - [x] `Ask Agent`で使うAgent CLIは起動のたびに選ぶ
 - [x] 概要の「目的」の手入力はOverviewの行で直接編集し、入力箇所はそこ1つに限る
 - [x] Overviewは通常のウィンドウ1枚で位置とサイズを記憶し、常に最前面には置かない
+- [x] メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替える
 - [x] 状態表示はSF Symbolsの固定セットで状態ごとに形を変え、色は補助、accessibility labelは状態名。`Unknown`に専用の形(対応表は#189で決める)
 - [x] ⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵には割り当てない
 - [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する

@@ -3,9 +3,11 @@ import Foundation
 import SwiftUI
 import TerminalCore
 
+/// Project に依存しない、起動ごとに1つだけ作るもの (Issue #372)。Project ごとの `AppModel` は
+/// これを共有する。
 struct AppDependencies: Sendable {
-  let projectDirectory: URL?
-  let projectError: String?
+  /// `--project` / `AWT_PROJECT_DIR` で指定された Project。登録して選択する。
+  let launchProject: LaunchProjectArgument
   let tmuxExecutable: URL?
   let tmuxError: String?
   let paneStates: WorktreePaneStatesFeed?
@@ -17,7 +19,7 @@ struct AppDependencies: Sendable {
   let applicationSupportDirectory: URL?
 
   static func make() -> Self {
-    let project = resolveProjectDirectory()
+    let launchProject = resolveLaunchProject()
     let applicationSupport = try? FileManager.default.url(
       for: .applicationSupportDirectory,
       in: .userDomainMask,
@@ -29,8 +31,7 @@ struct AppDependencies: Sendable {
     }
     guard let executable else {
       return Self(
-        projectDirectory: project.directory,
-        projectError: project.error,
+        launchProject: launchProject,
         tmuxExecutable: nil,
         tmuxError: "tmux 実行ファイルが見つかりません。tmux をインストールしてください。",
         paneStates: nil,
@@ -50,8 +51,7 @@ struct AppDependencies: Sendable {
         processRunner: FoundationProcessRunner()
       )
       return Self(
-        projectDirectory: project.directory,
-        projectError: project.error,
+        launchProject: launchProject,
         tmuxExecutable: executable,
         tmuxError: nil,
         paneStates: makeWorktreePaneStatesFeed(runner: runner, signalSource: signalSource),
@@ -60,8 +60,7 @@ struct AppDependencies: Sendable {
       )
     } catch {
       return Self(
-        projectDirectory: project.directory,
-        projectError: project.error,
+        launchProject: launchProject,
         tmuxExecutable: nil,
         tmuxError: "tmux を利用できません: \(error)",
         paneStates: nil,
@@ -71,33 +70,30 @@ struct AppDependencies: Sendable {
     }
   }
 
-  private static func resolveProjectDirectory() -> (directory: URL?, error: String?) {
+  /// 指定が無いことはエラーにしない。登録済みの Project を開く (Issue #372)。
+  private static func resolveLaunchProject() -> LaunchProjectArgument {
     let arguments = ProcessInfo.processInfo.arguments
     let path: String?
     if let argumentIndex = arguments.indices.first(where: { arguments[$0] == "--project" }) {
       guard arguments.indices.contains(argumentIndex + 1) else {
-        return (nil, "--project に絶対パスを指定してください。")
+        return .invalid("--project に絶対パスを指定してください。")
       }
       path = arguments[argumentIndex + 1]
     } else {
       path = ProcessInfo.processInfo.environment["AWT_PROJECT_DIR"]
     }
-    guard let path, !path.isEmpty else {
-      return (nil, "Project が指定されていません。--project <絶対パス> または AWT_PROJECT_DIR を設定してください。")
-    }
+    guard let path, !path.isEmpty else { return .none }
     guard path.hasPrefix("/") else {
-      return (nil, "Project には絶対パスを指定してください: \(path)")
+      return .invalid("Project には絶対パスを指定してください: \(path)")
     }
-    var isDirectory: ObjCBool = false
-    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
-      isDirectory.boolValue,
-      FileManager.default.isReadableFile(atPath: path),
-      FileManager.default.isExecutableFile(atPath: path)
-    else {
-      return (nil, "Project のパスを利用できません: \(path)")
-    }
-    return (URL(fileURLWithPath: path).standardizedFileURL, nil)
+    return .directory(URL(fileURLWithPath: path))
   }
+}
+
+enum LaunchProjectArgument: Sendable {
+  case none
+  case directory(URL)
+  case invalid(String)
 }
 
 @MainActor
@@ -126,7 +122,8 @@ final class AppModel: ObservableObject {
   private let paneStates: WorktreePaneStatesFeed?
   let diffModels = DiffViewerModelStore()
   let mainPanes: MainPaneCoordinator
-  private let projectDirectory: URL?
+  let project: RegisteredProject
+  private let projectDirectory: URL
   private let applicationSupportDirectory: URL?
   private var store: WorktreeInventoryStore?
   /// 保存されたファイルを読めなかった起動では `false`。読めなかったファイルを上書きすると、
@@ -146,8 +143,9 @@ final class AppModel: ObservableObject {
   /// 「体感で追随し、git への負荷が無視できる」程度でしかない。
   private static let rescanInterval = Duration.seconds(5)
 
-  init(dependencies: AppDependencies) {
-    projectDirectory = dependencies.projectDirectory
+  init(project: RegisteredProject, dependencies: AppDependencies) {
+    self.project = project
+    projectDirectory = URL(fileURLWithPath: project.directory)
     applicationSupportDirectory = dependencies.applicationSupportDirectory
     tmuxExecutable = dependencies.tmuxExecutable
     sessions =
@@ -158,7 +156,7 @@ final class AppModel: ObservableObject {
       }
     paneStates = dependencies.paneStates
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
-    message = dependencies.projectError ?? dependencies.tmuxError
+    message = dependencies.tmuxError
   }
 
   var inventory: WorktreeInventory {
@@ -195,8 +193,14 @@ final class AppModel: ObservableObject {
   /// 止まり、§3.2 確定の「観測中に新規出現した worktree の自動 Active 化」が働かなくなる
   /// (Issue #238)。ループはアプリの生存期間そのものなので、`self` を握ったままにする。
   func run() {
-    guard let projectDirectory else { return }
+    let projectDirectory = projectDirectory
     rescan.start { await self.scanAndObserve(projectDirectory: projectDirectory) }
+  }
+
+  /// 登録を解除した Project の再スキャンを止める (Issue #372)。止めないと一覧から外した
+  /// Project へ git を撃ち続け、その保存ファイルを書き続ける。
+  func stop() {
+    rescan.cancel()
   }
 
   private func scanAndObserve(projectDirectory: URL) async {

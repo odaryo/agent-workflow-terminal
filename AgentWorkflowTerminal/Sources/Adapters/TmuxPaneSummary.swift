@@ -125,8 +125,9 @@ public struct TmuxPanePurposeWriter: Sendable {
     }
     // tmux は argv 要素の末尾の `;` をコマンド区切りとして取り、`--` でも防げない (3.4 / 3.7c
     // とも実測: `foo;` は `foo`、`a\;` は `a;`、`end;;` は `end;` で保存され、`;` 単独は失敗)。
-    // 黙って削ると書いた値と保存される値がずれるので拒否する。
-    guard !text.hasSuffix(";") else { throw .endsWithSemicolon }
+    // 黙って削ると書いた値と保存される値がずれるので拒否する。判定はバイトで行う — `hasSuffix`
+    // は書記素で比べるので、U+0600 などの Prepend 文字と `;` が1つの書記素になるとすり抜ける。
+    guard text.utf8.last != UInt8(ascii: ";") else { throw .endsWithSemicolon }
     let byteCount = text.utf8.count
     guard byteCount <= TmuxListPanes.summaryValueByteLimit else {
       throw .tooLong(byteCount: byteCount, limit: TmuxListPanes.summaryValueByteLimit)

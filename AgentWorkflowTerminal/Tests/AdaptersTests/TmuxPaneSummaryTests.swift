@@ -315,7 +315,8 @@ struct TmuxPanePurposeWriterTests {
 
   @Test(
     "末尾が ; の目的は書かずに拒否する (tmux がコマンド区切りとして削るため)",
-    arguments: ["foo;", #"a\;"#, "end;;", ";", "設計 ;"])
+    // U+0600 / U+06DD (Prepend) は直後の `;` と1つの書記素になり、`hasSuffix(";")` では見えない。
+    arguments: ["foo;", #"a\;"#, "end;;", ";", "設計 ;", "a\u{600};", "\u{6DD};"])
   func rejectsTrailingSemicolon(text: String) async throws {
     let (writer, spy) = try makeWriter()
     await #expect(throws: TmuxPanePurposeWriterError.endsWithSemicolon) {

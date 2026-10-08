@@ -280,7 +280,7 @@ struct PaneTaskCompletionTrackerTests {
   }
 
   @Test(
-    "応答終了でない状態から Working に戻っても解除しない",
+    "直前の既知の状態が応答終了でなければ、Working に入っても解除しない",
     arguments: [AgentState.question, .permission, .error, .unknown, nil])
   func keepsCompletionWhenResumingFromNonTurnEnd(previous: AgentState?) {
     var tracker = PaneTaskCompletionTracker()
@@ -338,8 +338,10 @@ struct PaneTaskCompletionTrackerTests {
     _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
 
     // 次のターンへの遷移を ps が読めない回に観測しても、解除済みの token を空で上書きしない。
+    // 表示は直前のまま返す (completed → none → completed と揺れると完了通知が二重になる)。
     #expect(
-      tracker.update(paneID: Self.pane, completion: unidentified, agentState: .working) == .none)
+      tracker.update(paneID: Self.pane, completion: unidentified, agentState: .working)
+        == .dismissed(Self.first))
     #expect(
       tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
         == .dismissed(Self.first))
@@ -351,10 +353,70 @@ struct PaneTaskCompletionTrackerTests {
     _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle)
 
     #expect(
-      tracker.update(paneID: Self.pane, completion: unidentified, agentState: .working) == .none)
+      tracker.update(paneID: Self.pane, completion: unidentified, agentState: .working)
+        == .completed(Self.first))
     #expect(
       tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
         == .dismissed(Self.first))
+  }
+
+  @Test("Agent プロセスを特定できなかった回が最初の観測なら、表示しない", arguments: unidentified)
+  func unidentifiedFirstRoundShowsNothing(unidentified: PaneSummaryEntry<AgentStampedValue>) {
+    var tracker = PaneTaskCompletionTracker()
+    #expect(tracker.update(paneID: Self.pane, completion: unidentified, agentState: .idle) == .none)
+    // 特定できなかった回は記憶を進めないので、次の回が最初の観測と同じに扱われる。
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .completed(Self.first))
+  }
+
+  // MARK: - Unknown / 観測なしの回
+
+  @Test("Claude Code の通常の流れ: 応答終了 → 次のプロンプト入力中 (Unknown) → Working で解除する")
+  func dismissesWhenUserTypesNextPrompt() {
+    var tracker = PaneTaskCompletionTracker()
+    // ハーネスは自分のターンの中で完了を書く。次のプロンプトを打っている間、ClaudeCodeAdapter は
+    // Unknown を返す (fixture `claude-2.1.263-typed-not-dim.json`)。
+    let sequence: [(AgentState, PaneTaskCompletionDisplay)] = [
+      (.working, .completed(Self.first)),
+      (.completed, .completed(Self.first)),
+      (.unknown, .completed(Self.first)),
+      (.working, .dismissed(Self.first)),
+      (.completed, .dismissed(Self.first)),
+    ]
+    for (state, expected) in sequence {
+      #expect(
+        tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: state)
+          == expected)
+    }
+  }
+
+  @Test(
+    "Unknown と観測なしの回は直前の既知の状態を保ち、応答終了からの遷移として解除する",
+    arguments: [AgentState.idle, .completed], [AgentState.unknown, nil])
+  func unknownRoundKeepsTurnEnd(turnEnd: AgentState, between: AgentState?) {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: turnEnd)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: between)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: between)
+
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .dismissed(Self.first))
+  }
+
+  @Test(
+    "Unknown と観測なしの回を挟んでも、同じターンの続きは解除しない",
+    arguments: [AgentState.question, .permission], [AgentState.unknown, nil])
+  func unknownRoundKeepsInTurnState(inTurn: AgentState, between: AgentState?) {
+    var tracker = PaneTaskCompletionTracker()
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: inTurn)
+    _ = tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: between)
+
+    #expect(
+      tracker.update(paneID: Self.pane, completion: .accepted(Self.first), agentState: .working)
+        == .completed(Self.first))
   }
 
   @Test("同じ token 文字列でも別の Agent プロセスが書いたものは別の完了")

@@ -223,23 +223,29 @@ public enum PaneTaskCompletionDisplay: Sendable, Hashable {
 
 /// タスク完了表示の解除 (§12.7: 同じ pane が再び `Working` になったら解除する)。
 ///
-/// - Important: 解除の契機は **`Idle` か `Completed` (応答終了) から `Working` への遷移**だけ。
-///   `Working` であること自体を契機にすると、ハーネスは自分のターンの中で `@awt_done` を書くので
-///   完了がそのターンの中で消える。`Question` / `Permission` からの `Working` は同じターンの
-///   続きなので、ユーザーが見る前に完了を消さないよう解除しない。`Error` / `Unknown` / 観測なし
-///   (`nil`) からの遷移も、直前が応答終了だったか判定できないので解除しない。
+/// - Important: 解除の契機は **直前の既知の状態が `Idle` か `Completed` (応答終了) で、
+///   `Working` に入った遷移**だけ。`Working` であること自体を契機にすると、ハーネスは自分の
+///   ターンの中で `@awt_done` を書くので完了がそのターンの中で消える。`Question` /
+///   `Permission` からの `Working` は同じターンの続きなので、ユーザーが見る前に完了を消さない
+///   よう解除しない。`Error` からの遷移も、直前が応答終了だったか判定できないので解除しない。
+/// - Important: `Unknown` と観測なし (`nil`) の回は直前の既知の状態を保つ。Claude Code では
+///   ユーザーが次のプロンプトを打っている間 adapter が `Unknown` を返すので、通常の流れが
+///   `Completed` → `Unknown` → `Working` になる。`Unknown` で直前を上書きすると、完了が一度も
+///   解除されない。
 /// - Important: 記憶はアプリの寿命だけ持つ。再起動直後は解除の記憶も直前の状態も無いので、
 ///   pane の状態によらず有効な token を完了として扱い、次に応答終了から Working へ入るまで残す
 ///   (§12.7 に受け入れる残存挙動として記録)。
-/// - Important: 現在の Agent プロセスを観測できなかった回 (ps を読めない・候補が複数で特定
-///   できない) は記憶を一切進めない。その回の token は分からないので、解除済みの token を空で上書きすると
-///   次の観測で解除済みの完了が復活し、遷移だけを消費すると解除の機会を失う。
+/// - Important: 現在の Agent プロセスを特定できなかった回 (ps を読めない・候補が複数) は記憶を
+///   一切進めず、直前の表示をそのまま返す。その回の token は分からないので、解除済みの token を
+///   空で上書きすると次の観測で解除済みの完了が復活し、遷移だけを消費すると解除の機会を失う。
+///   表示を `.none` にすると completed → none → completed と揺れ、完了の通知が二重になる。
 /// - Note: 解除済みかどうかは PID と token の組で覚える。同じ token 文字列でも、別の Agent
 ///   プロセスが書いたものは別の完了として扱う。
 public struct PaneTaskCompletionTracker: Sendable {
   private struct Entry: Sendable {
-    var lastState: AgentState?
+    var lastKnownState: AgentState?
     var dismissed: AgentStampedValue?
+    var display = PaneTaskCompletionDisplay.none
   }
 
   private static let turnEndingStates: Set<AgentState> = [.idle, .completed]
@@ -254,21 +260,28 @@ public struct PaneTaskCompletionTracker: Sendable {
     paneID: PaneID, completion: PaneSummaryEntry<AgentStampedValue>, agentState: AgentState?
   ) -> PaneTaskCompletionDisplay {
     switch completion {
-    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous): return .none
+    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous):
+      return entries[paneID]?.display ?? .none
     default: break
     }
     var entry = entries[paneID] ?? Entry()
     let current = completion.value
-    if agentState == .working, let previous = entry.lastState,
+    if agentState == .working, let previous = entry.lastKnownState,
       Self.turnEndingStates.contains(previous)
     {
       entry.dismissed = current
     }
-    entry.lastState = agentState
+    if let agentState, agentState != .unknown {
+      entry.lastKnownState = agentState
+    }
+    entry.display =
+      switch current {
+      case nil: .none
+      case let current? where current == entry.dismissed: .dismissed(current)
+      case let current?: .completed(current)
+      }
     entries[paneID] = entry
-
-    guard let current else { return .none }
-    return current == entry.dismissed ? .dismissed(current) : .completed(current)
+    return entry.display
   }
 
   public mutating func forget(paneID: PaneID) {

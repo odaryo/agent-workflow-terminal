@@ -132,12 +132,16 @@ struct GitWorktreeProgressReader: Sendable {
 
   func operations() async throws(GitWorktreeProgressReadError) -> Set<WorktreeInProgressOperation> {
     var operations: Set<WorktreeInProgressOperation> = []
-    // ファイルがあれば、git が ref として読めなくても途中とみなす。git 2.50.1 実測: 衝突中の
-    // `MERGE_HEAD` / `CHERRY_PICK_HEAD` を空や `garbage` に書き換えると `rev-parse --verify` は
-    // rc=1 (= 無い) を返すが、`git status` は `You have unmerged paths.` のままだった。
-    // reftable 形式では `CHERRY_PICK_HEAD` / `REVERT_HEAD` がファイルにならないので git にも問う。
+    // `MERGE_HEAD` だけは、ファイルがあれば git が ref として読めなくても途中とみなす。git 2.50.1
+    // 実測: 衝突中の `MERGE_HEAD` を空にすると `rev-parse --verify` は rc=1 (= 無い) を返すが、
+    // `git status` は `You have unmerged paths.` のままで、`merge --abort` がファイルごと消した。
+    // `CHERRY_PICK_HEAD` / `REVERT_HEAD` は同じことをすると git 自身が途中と扱わず (`status` は
+    // clean、`cherry-pick --abort` は `error: no cherry-pick or revert in progress`)、
+    // `reset --hard` でも消えないので、ファイルで拒否すると「中止せよ」という案内が実行できない。
+    // reftable 形式ではこの2つがファイルにならないこともあり、git に問うだけにする。
     for reference in GitInProgressReference.allCases {
-      let present = exists(reference.rawValue) ? true : try await exists(reference)
+      let present =
+        reference == .mergeHead && exists(reference.rawValue) ? true : try await exists(reference)
       guard present else { continue }
       operations.insert(reference.operation)
     }

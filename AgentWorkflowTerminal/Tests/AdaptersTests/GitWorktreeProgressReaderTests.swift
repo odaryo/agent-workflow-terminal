@@ -48,19 +48,24 @@ struct GitWorktreeProgressReaderTests {
   }
 
   /// git 2.50.1 実測: 衝突中の `MERGE_HEAD` を空にすると `rev-parse --verify` は rc=1 を返すが、
-  /// `git status` は `You have unmerged paths.` のままだった。`CHERRY_PICK_HEAD` も同じ。
+  /// `git status` は `You have unmerged paths.` のままで、`merge --abort` で消えた。
+  @Test("MERGE_HEAD は git が ref として読めなくても、ファイルがあれば途中とみなす")
+  func treatsAnUnreadableMergeHeadFileAsInProgress() async throws {
+    let result = try await inspect(existingFiles: ["MERGE_HEAD"])
+
+    #expect(result.report.progress == .observed([.merge]))
+  }
+
+  /// git 2.50.1 実測: 空の `CHERRY_PICK_HEAD` を git は途中と扱わず (`status` は clean、
+  /// `cherry-pick --abort` は rc=128 で失敗)、`reset --hard` でもファイルは残った。拒否すると
+  /// 抜け出す手段が git に無い。
   @Test(
-    "git が ref として読めなくても、ファイルがあれば途中とみなす",
-    arguments: [
-      ("MERGE_HEAD", WorktreeInProgressOperation.merge), ("CHERRY_PICK_HEAD", .cherryPick),
-      ("REVERT_HEAD", .revert),
-    ])
-  func treatsAnUnreadableReferenceFileAsInProgress(
-    name: String, expected: WorktreeInProgressOperation
-  ) async throws {
+    "CHERRY_PICK_HEAD / REVERT_HEAD は git に問い、ファイルだけでは途中とみなさない",
+    arguments: ["CHERRY_PICK_HEAD", "REVERT_HEAD"])
+  func doesNotTreatAPickHeadFileAloneAsInProgress(name: String) async throws {
     let result = try await inspect(existingFiles: [name])
 
-    #expect(result.report.progress == .observed([expected]))
+    #expect(result.report.progress == .observed([]))
   }
 
   /// 衝突中の連続 cherry-pick は `CHERRY_PICK_HEAD` と `sequencer` を両方持つ (git 2.50.1 実測)。

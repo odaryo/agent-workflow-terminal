@@ -21,6 +21,23 @@ public struct WorktreeCloseInspectionReport: Sendable, Hashable {
   }
 }
 
+/// 対象 worktree に途中の作業 (merge／rebase など) が残っているか (設計書 §3.4、Issue #355)。
+///
+/// 削除を伴わない選択肢1・2 も含め、`planWorktreeClose` が**すべての選択肢で**要求する。
+/// §3.4 は作業途中の worktree の Close を選択肢1〜4のすべてで拒否すると確定しており、
+/// 選択肢1・2 は `WorktreeRemovalConfirmation` を要求しないので、そちらに相乗りさせると素通りする。
+public struct WorktreeOperationProgressReport: Sendable, Hashable {
+  public let worktree: WorktreeIdentity
+  public let progress: WorktreeOperationProgress
+
+  /// `WorktreeCloseInspectionReport` と同じ理由で `package` に限定する —— `App` の糊が
+  /// 別の worktree の観測結果を詰め替えられないようにするため。
+  package init(target: DetectedWorktree, progress: WorktreeOperationProgress) {
+    self.worktree = target.identity
+    self.progress = progress
+  }
+}
+
 /// 検査結果を見たうえで続行を選んだ、という事実 (設計書 §3.4)。
 ///
 /// §3.4 の検査結果は「実行を機械的に禁止する条件」ではなく「確認のうえ続行できる警告」である。
@@ -47,8 +64,9 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   /// untracked ファイルを持つ worktree への `worktree remove -- <path>` は rc=128 /
   /// `fatal: '<path>' contains modified or untracked files, use --force to delete it` で止まるが、
   /// `--force` を足すと rc=0 で作業ツリーごと消え、未commit変更も untracked ファイルも残らなかった。
-  /// つまり A の未commit変更が、ユーザーが警告を一度も見ないまま消える。`.deleteBranch` 側は
-  /// `branch -d` が未merge branch を拒否するので同じ形の素通しにはならない。
+  /// つまり A の未commit変更が、ユーザーが警告を一度も見ないまま消える。`.deleteBranch` も
+  /// 同じ形で素通りする —— 選択肢4は `branch -D` で消す (§3.4、Issue #359) ので、git 側に
+  /// 未merge を拒否する防波堤が無い。
   ///
   /// - Important: **担保できるのは report を作るときに渡された `DetectedWorktree` から identity が
   ///   導かれたことまでである。** 実際にその対象を検査した結果かどうかは確かめられず、同じ
@@ -56,9 +74,10 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
   ///
   ///   照合できるのは「どの worktree か」だけで、**「いつの検査か」は照合できない。** 同じ
   ///   worktree の古い確認は通る。承諾の後にユーザーが新しく変更を加えれば、その変更について
-  ///   警告を一度も見ないまま `--force` が撃たれる。他の step には git 側の防波堤があり
-  ///   (`branch -d` は未merge を拒否する、終了する session は executor 自身の識別子から導出する)、
-  ///   **古さが実害になるのは `--force` だけである。** 確認を使い回さないのは呼び出し側の責務。
+  ///   警告を一度も見ないまま `--force` が撃たれる。古さが実害にならないのは session 終了
+  ///   (executor 自身の識別子から導出する) と、`branch -D` である —— 後者は判定に使った先端を
+  ///   step が持ち、実行層が直前に先端の一致を確かめる (`WorktreeCloseStep.deleteBranch`)。
+  ///   未commit変更の確認を使い回さないのは呼び出し側の責務。
   public let worktree: WorktreeIdentity
   public let inspection: WorktreeCloseInspection
   /// `inspection.branchMerge` を計算した既定 branch。
@@ -103,9 +122,14 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
 public enum WorktreeCloseStep: Sendable, Hashable {
   case terminateSession
   case removeWorktree(force: Bool)
-  /// 短縮 local branch 名。`git branch -d` は完全修飾した形を受け付けない
-  /// (git 2.50.1 実測: `branch -d refs/heads/x` は rc=1 `error: branch 'refs/heads/x' not found`)。
-  case deleteBranch(name: String)
+  /// `name` は短縮 local branch 名。`git branch -D` は完全修飾した形を受け付けない
+  /// (git 2.50.1 実測: `branch --delete --force -- refs/heads/x` は rc=1
+  /// `error: branch 'refs/heads/x' not found`)。
+  ///
+  /// `tip` はマージ判定に使った先端 (`BranchMergeStatus.merged`)。`-D` は未マージの commit も
+  /// 消すので、検査から実行までの間に branch へ積まれた commit を巻き込まないよう、実行層は
+  /// step を撃つ前に先端がまだこれであることを確かめる (§3.4、Issue #359)。
+  case deleteBranch(name: String, tip: CommitObjectID)
 }
 
 /// `planWorktreeClose` でしか作れない。任意の step 列を組み立てて実行層へ渡す経路があると、
@@ -120,18 +144,24 @@ public struct WorktreeClosePlan: Sendable, Hashable {
   ///
   /// - Note: 安定 ID だけで足りるのは、実行層が撃つ値 —— 作業ツリーのパスと tmux session 名 ——
   ///   をすべて実行層自身の `DetectedWorktree` から導くためである。計画から実行層へ渡る値のうち
-  ///   対象に依存するのは `.deleteBranch(name:)` だけで、それは同じ安定 ID の
+  ///   対象に依存するのは `.deleteBranch(name:tip:)` だけで、それは同じ安定 ID の
   ///   `DetectedWorktree.branch` から来ている。
-  /// - Note: 「いつの検査か」(検査から実行までの間に worktree が変わる) はこの値では扱えない。
-  ///   計画と実行層が**別のスキャン**から来た場合、安定 ID が一致していても branch は
-  ///   切り替わり得るので、`.deleteBranch` は計画時点の branch 名を消しにいく。
   public let worktree: WorktreeIdentity
+  /// 計画を立てた時点で HEAD が指していた branch (`DetectedWorktree.branch`)。detached HEAD は
+  /// 計画段階で拒否するので常にある。
+  ///
+  /// 実行層は step を撃つ前に HEAD を読み直し、これと違えば何もせずに中止する (§3.4、Issue #354)。
+  /// 計画と実行の間に Agent が branch を切り替えた場合や、`DetectedWorktree` が保存から復元した
+  /// 陳腐化した値だった場合に、`.deleteBranch` が今の HEAD とは別の branch を消しにいくのを止める。
+  public let branch: String
   public let steps: [WorktreeCloseStep]
 
   // 明示的な access level が「検査を通っていない branch 削除を実行層へ渡せない」保証そのものになる。
+  // `.deleteBranch` は `git branch -D` になり、git 側に未merge を拒否する防波堤は無い (Issue #359)。
   // swiftlint:disable:next unneeded_synthesized_initializer
-  init(worktree: WorktreeIdentity, steps: [WorktreeCloseStep]) {
+  init(worktree: WorktreeIdentity, branch: String, steps: [WorktreeCloseStep]) {
     self.worktree = worktree
+    self.branch = branch
     self.steps = steps
   }
 }
@@ -169,6 +199,18 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
   /// 消える。中断中の rebase を持つ worktree も同じく rc=0 で `rebase-merge` ごと消える)。
   /// つまり下の層には止める機会が無い。
   case detachedHeadIsNotClosable
+  /// 作業途中 (merge／cherry-pick／revert／rebase／bisect など) の worktree を Close しようとした
+  /// (§3.4、確定 2026-10-08)。detached HEAD と同じく選択肢1〜4のすべてで拒否する。呼び出し側は
+  /// 途中の操作を完了または中止するよう促す。
+  ///
+  /// detached と別の理由にするのは、merge・cherry-pick の衝突中は HEAD が branch を指したままで
+  /// detached の条件では捕まらず、未commit変更の警告を承諾すれば `--force` 付きで削除されるため
+  /// である (git 2.50.1 実測)。種類を持つのは UI が操作名を出せるようにするため。
+  case operationInProgress(Set<WorktreeInProgressOperation>)
+  /// 作業途中かどうかを観測できなかった。「途中の作業は無い」へ丸めず拒否する。
+  case operationProgressUnknown
+  /// 別の worktree について作られた途中状態の観測を渡した。
+  case progressReportIsForAnotherWorktree(report: WorktreeIdentity, target: WorktreeIdentity)
 }
 
 /// 設計書 §3.4 の4択を実行単位へ落とす。
@@ -191,6 +233,7 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
 ///   (`WorktreeRemovalConfirmation.defaultBranch`)。
 public func planWorktreeClose(
   worktree: DetectedWorktree,
+  progress: WorktreeOperationProgressReport,
   choice: WorktreeCloseChoice,
   confirmation: WorktreeRemovalConfirmation?
 ) throws(WorktreeClosePlanError) -> WorktreeClosePlan {
@@ -198,13 +241,14 @@ public func planWorktreeClose(
   // 4択のすべてがここを通り、`WorktreeClosePlan` は他に作れない。選択肢1・2 は検査も確認も
   // 要求しない (下の `case .terminateSession(.removeWorktree)` だけが確認を読む) ので、
   // 検査層で detached HEAD を判定不能として返すだけでは 1・2 が素通りする。
-  guard worktree.branch != nil else { throw .detachedHeadIsNotClosable }
+  guard let branch = worktree.branch else { throw .detachedHeadIsNotClosable }
   let identity = worktree.identity
+  try requireNoOperationInProgress(progress, target: identity)
   switch choice {
   case .hideFromUI:
-    return WorktreeClosePlan(worktree: identity, steps: [])
+    return WorktreeClosePlan(worktree: identity, branch: branch, steps: [])
   case .terminateSession(.keepWorktree):
-    return WorktreeClosePlan(worktree: identity, steps: [.terminateSession])
+    return WorktreeClosePlan(worktree: identity, branch: branch, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
     guard let confirmation else { throw .removalNotConfirmed }
     // 対象の一致を問うのは確認を読むここだけである。§3.4 が検査と確認を課すのは選択肢3・4 だけで、
@@ -216,15 +260,30 @@ public func planWorktreeClose(
       .terminateSession, .removeWorktree(force: confirmation.forcesWorktreeRemoval),
     ]
     guard afterRemoval == .deleteBranch else {
-      return WorktreeClosePlan(worktree: identity, steps: steps)
+      return WorktreeClosePlan(worktree: identity, branch: branch, steps: steps)
     }
     guard
-      let branch = worktree.branch,
       isBranchDeletionAvailable(
         targetBranch: branch, defaultBranch: confirmation.defaultBranch,
-        merge: confirmation.inspection.branchMerge)
+        merge: confirmation.inspection.branchMerge),
+      case .merged(_, let tip) = confirmation.inspection.branchMerge
     else { throw .branchDeletionNotPermitted }
-    steps.append(.deleteBranch(name: branch))
-    return WorktreeClosePlan(worktree: identity, steps: steps)
+    steps.append(.deleteBranch(name: branch, tip: tip))
+    return WorktreeClosePlan(worktree: identity, branch: branch, steps: steps)
+  }
+}
+
+/// 観測できなかったことを「途中の作業は無い」と読まない (`Unknown` は第一級の状態)。
+private func requireNoOperationInProgress(
+  _ progress: WorktreeOperationProgressReport, target: WorktreeIdentity
+) throws(WorktreeClosePlanError) {
+  guard progress.worktree == target else {
+    throw .progressReportIsForAnotherWorktree(report: progress.worktree, target: target)
+  }
+  switch progress.progress {
+  case .unknown: throw .operationProgressUnknown
+  case .observed(let operations) where !operations.isEmpty:
+    throw .operationInProgress(operations)
+  case .observed: break
   }
 }

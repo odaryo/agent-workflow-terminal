@@ -35,9 +35,69 @@ public enum UnpushedCommitsStatus: Sendable, Hashable {
 }
 
 public enum BranchMergeStatus: Sendable, Hashable {
-  case merged
+  /// `tip` はマージ判定に使った branch 先端の commit。判定は ref 名ではなくこの OID に対して
+  /// 行う —— 判定の途中や判定の後に branch が進んでも、答えがどの commit についてのものかが
+  /// 変わらないようにするため。選択肢4の実行直前に、branch の先端がまだこれであることを確かめる
+  /// (§3.4、Issue #359)。
+  case merged(BranchMergeEvidence, tip: CommitObjectID)
   case unmerged
   case notApplicable
+  case unknown
+}
+
+/// 「マージ済み」と判定した根拠 (設計書 §3.4)。
+///
+/// 選択肢4は根拠によらず `git branch -D` で消す (確定 2026-10-08、Issue #359) ので、実行の可否は
+/// これで変わらない。持つのは、`.squash` のとき実行前の確認で「git はこの branch を未マージと
+/// 見なしているが、squash merge と判定したため強制削除する」と明示するためである。git 2.50.1 実測:
+/// squash merge した branch の upstream を削除して `fetch --prune` した後、`branch -d` は rc=1 /
+/// `error: the branch 'topic' is not fully merged` で拒否し、`branch -D` は rc=0 で消した。
+public enum BranchMergeEvidence: Sendable, Hashable {
+  /// 既定 branch から到達できる (`merge-base --is-ancestor`)。
+  case ancestor
+  /// ancestor 判定には現れないが、既定 branch 側に同じ変更を持ち込んだ commit がある。
+  case squash
+}
+
+/// commit の object ID。小文字 16 進の 40 桁 (SHA-1) か 64 桁 (SHA-256)。git が出力する完全な
+/// 形だけを受け付け、短縮形は受け付けない —— 比較を文字列の一致で済ませるため。
+public struct CommitObjectID: Sendable, Hashable {
+  public let rawValue: String
+
+  public init?(_ rawValue: String) {
+    guard rawValue.utf8.count == 40 || rawValue.utf8.count == 64,
+      rawValue.utf8.allSatisfy({ (0x30...0x39).contains($0) || (0x61...0x66).contains($0) })
+    else { return nil }
+    self.rawValue = rawValue
+  }
+}
+
+/// 設計書 §3.4 が Close を拒否する「作業途中」の種類 (確定 2026-10-08、Issue #355)。
+///
+/// detached HEAD とは別に持つ。merge・cherry-pick・revert・bisect・`git am` の途中では HEAD が
+/// branch を指したままで (git 2.50.1 実測: `worktree list --porcelain` は `branch` 行を出す)、
+/// detached の条件では捕まらない。
+public enum WorktreeInProgressOperation: Sendable, Hashable, CaseIterable {
+  case merge
+  case cherryPick
+  case revert
+  case rebase
+  /// `git am`。`rebase --apply` と同じ管理ディレクトリ (`rebase-apply`) を使うが、HEAD は
+  /// detach しない (git 2.50.1 実測)。UI が「rebase の途中」と誤って言わないよう分ける。
+  case mailboxApply
+  case bisect
+  /// 複数 commit の cherry-pick／revert で、衝突した1件を素の `git commit` で解決した後に残る
+  /// 状態。`CHERRY_PICK_HEAD` も `REVERT_HEAD` も消えるが `sequencer` が残り、`git status` は
+  /// 「Cherry-pick currently in progress.」と表示する (git 2.50.1 実測)。cherry-pick か revert
+  /// かは `sequencer/todo` の中身でしか分からず、そのファイル形式までは読まない。
+  case sequence
+}
+
+/// 観測できなかった (`unknown`) を「途中の作業は無い」へ丸めない。§3.4 の拒否が守るのは
+/// 削除で消えると戻らない途中状態であり、判定できないものは拒否の側へ倒す。
+public enum WorktreeOperationProgress: Sendable, Hashable {
+  /// 空集合なら途中の作業は無い。
+  case observed(Set<WorktreeInProgressOperation>)
   case unknown
 }
 
@@ -101,7 +161,7 @@ public func isBranchDeletionAvailable(
   defaultBranch: DefaultBranchResolution,
   merge: BranchMergeStatus
 ) -> Bool {
-  guard merge == .merged, let targetBranch, let defaultBranch = defaultBranch.branch else {
+  guard case .merged = merge, let targetBranch, let defaultBranch = defaultBranch.branch else {
     return false
   }
   // 暫定措置 (Issue #142 が `DetectedWorktree.branch` の契約を決めるまで)。この値は短縮 local

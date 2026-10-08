@@ -23,7 +23,8 @@ struct GitSquashMergeCloseIntegrationTests {
       try await repository.addBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.git(["merge", "-q", "--ff-only", "topic"])
 
-      #expect(try await repository.branchMergeStatus("topic") == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(try await repository.branchMergeStatus("topic") == .merged(.ancestor, tip: tip))
     }
   }
 
@@ -33,7 +34,8 @@ struct GitSquashMergeCloseIntegrationTests {
       try await repository.addBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.squashMerge("topic")
 
-      #expect(try await repository.branchMergeStatus("topic") == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(try await repository.branchMergeStatus("topic") == .merged(.squash, tip: tip))
     }
   }
 
@@ -46,7 +48,8 @@ struct GitSquashMergeCloseIntegrationTests {
         "topic", commits: [["a.txt": "a1"], ["a.txt": "a1\na2"], ["b.txt": "b1"]])
       try await repository.squashMerge("topic")
 
-      #expect(try await repository.branchMergeStatus("topic") == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(try await repository.branchMergeStatus("topic") == .merged(.squash, tip: tip))
     }
   }
 
@@ -58,7 +61,8 @@ struct GitSquashMergeCloseIntegrationTests {
       try await repository.commitOnDefaultBranch(files: ["unrelated.txt": "u1"])
       try await repository.squashMerge("topic")
 
-      #expect(try await repository.branchMergeStatus("topic") == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(try await repository.branchMergeStatus("topic") == .merged(.squash, tip: tip))
     }
   }
 
@@ -105,7 +109,9 @@ struct GitSquashMergeCloseIntegrationTests {
       try await repository.squashMerge("topic")
 
       // 既定 branch 側は [squash(新), unrelated(古)]。上限 1 でも最新の squash は見る。
-      #expect(try await repository.branchMergeStatus("topic", scanLimit: 1) == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(
+        try await repository.branchMergeStatus("topic", scanLimit: 1) == .merged(.squash, tip: tip))
     }
   }
 
@@ -118,7 +124,9 @@ struct GitSquashMergeCloseIntegrationTests {
 
       // 既定 branch 側は [unrelated(新), squash(古)]。上限 1 は squash に届かない。
       #expect(try await repository.branchMergeStatus("topic", scanLimit: 1) == .unmerged)
-      #expect(try await repository.branchMergeStatus("topic", scanLimit: 2) == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(
+        try await repository.branchMergeStatus("topic", scanLimit: 2) == .merged(.squash, tip: tip))
     }
   }
 
@@ -158,7 +166,8 @@ struct GitSquashMergeCloseIntegrationTests {
         "mirror", commits: [["a.txt": "a0"], ["a.txt": "a1\na2"]])
       try await repository.git(["merge", "-q", "--no-ff", "-m", "merge mirror", "mirror"])
 
-      #expect(try await repository.branchMergeStatus("topic") == .merged)
+      let tip = try await repository.branchTip("topic")
+      #expect(try await repository.branchMergeStatus("topic") == .merged(.squash, tip: tip))
     }
   }
 }

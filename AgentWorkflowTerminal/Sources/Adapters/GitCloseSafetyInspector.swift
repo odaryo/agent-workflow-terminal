@@ -227,7 +227,7 @@ public struct GitCloseSafetyInspector: Sendable {
       }
       return .init(
         resolution: .projectRoot(branch: projectRootBranch),
-        revision: Self.localBranchRevision(projectRootBranch),
+        revision: "refs/heads/\(projectRootBranch)",
         failures: [])
     } catch {
       return .init(
@@ -241,10 +241,10 @@ public struct GitCloseSafetyInspector: Sendable {
     targetBranch: String,
     defaultRevision: String
   ) async -> (status: BranchMergeStatus, failures: [GitCloseSafetyInspectionFailure]) {
-    let targetRevision = Self.localBranchRevision(targetBranch)
-    guard let target = GitRevision(targetRevision) else {
+    guard let reference = localBranchRevision(targetBranch) else {
       return (
-        .unknown, [.init(check: .branchMerge, reason: .invalidRevision(targetRevision))]
+        .unknown,
+        [.init(check: .branchMerge, reason: .invalidRevision("refs/heads/\(targetBranch)"))]
       )
     }
     guard let destination = GitRevision(defaultRevision) else {
@@ -252,11 +252,27 @@ public struct GitCloseSafetyInspector: Sendable {
         .unknown, [.init(check: .branchMerge, reason: .invalidRevision(defaultRevision))]
       )
     }
+    // 判定は ref 名ではなく、ここで1回読んだ先端の OID に対して行う。ref 名のまま問うと、
+    // ancestor 判定と squash 走査がそれぞれ違う時点の先端を読み得るうえ、計画へ載せる先端
+    // (`BranchMergeStatus.merged` の `tip`) が判定に使った値だと言えなくなる。
+    let tip: CommitObjectID
+    do {
+      let output = try await runner.run(.resolveCommit(reference)).stdout
+      guard let resolved = localBranchTip(from: output) else {
+        return (.unknown, [.init(check: .branchMerge, reason: .invalidRevision(output))])
+      }
+      tip = resolved
+    } catch {
+      return (.unknown, [.init(check: .branchMerge, reason: .git(error))])
+    }
+    guard let target = GitRevision(tip.rawValue) else {
+      return (.unknown, [.init(check: .branchMerge, reason: .invalidRevision(tip.rawValue))])
+    }
     do {
       _ = try await runner.run(.isAncestor(target, of: destination))
-      return (.merged, [])
+      return (.merged(.ancestor, tip: tip), [])
     } catch GitRunnerError.commandFailed(let exitCode, _, _) where exitCode == 1 {
-      return await inspectSquashMerge(target: target, destination: destination)
+      return await inspectSquashMerge(tip: tip, target: target, destination: destination)
     } catch {
       return (.unknown, [.init(check: .branchMerge, reason: .git(error))])
     }
@@ -278,6 +294,7 @@ public struct GitCloseSafetyInspector: Sendable {
   /// 一致したので、これは raw 比較に固有の取りこぼしである。並列レーン運用では main が同じ
   /// ファイルを触るのは日常なので、検出率はここで頭打ちになる。
   private func inspectSquashMerge(
+    tip: CommitObjectID,
     target: GitRevision,
     destination: GitRevision
   ) async -> (status: BranchMergeStatus, failures: [GitCloseSafetyInspectionFailure]) {
@@ -334,7 +351,7 @@ public struct GitCloseSafetyInspector: Sendable {
           let commitRevision = GitRevision(commit.hash)
         else { continue }
         if try await changeSummary(from: parent, to: commitRevision) == branchChange {
-          return (.merged, [])
+          return (.merged(.squash, tip: tip), [])
         }
       }
       return (.unmerged, [])
@@ -347,10 +364,6 @@ public struct GitCloseSafetyInspector: Sendable {
     from: GitRevision, to: GitRevision
   ) async throws(GitRunnerError) -> String {
     try await runner.run(.diffFileSummaries(.range(.twoDot(from: from, to: to)))).stdout
-  }
-
-  private static func localBranchRevision(_ branch: String) -> String {
-    "refs/heads/\(branch)"
   }
 
   private static func remoteBranchName(from revision: String) -> String? {

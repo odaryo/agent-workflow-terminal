@@ -1098,6 +1098,9 @@ accessibility labelで意味を伝える(原則は§5.3)。paneの応答終了�
 - Overviewは通常のウィンドウ1枚とし、位置とサイズを記憶する。常に最前面には置かない。開く操作は⌘修飾の
   ショートカット1つを割り当てる(§5.4)。
 
+**対象とするProject — 確定(2026-10-08)。** Overviewと通知(§11.2)は、選択中のProjectに限らず
+登録済みの全Project(§16.1)を対象にする(Issue #372)。
+
 並び順は次のとおり。
 
 1. 人間の対応が必要な状態
@@ -1225,12 +1228,14 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 
 親ディレクトリ監視によるProject自動登録／discoveryは行わない。これはworktree自動検出とは別である。
 
-**登録の永続化と登録解除 — 確定(2026-10-08)。** 登録済みProjectの一覧と選択中のProjectは
-Application Support(§22.1)に保存し、再起動を跨いで復元する。登録解除は一覧から外すだけで、
-repositoryのディスク上の内容とtmux sessionには触れない(Issue #372)。
+**登録の永続化 — 確定(2026-10-08)。** 登録済みProjectの一覧はApplication Support(§22.1)に保存し、
+再起動を跨いで復元する(Issue #372)。
 
-**Clone Repositoryの経路は後回しにする(2026-10-08)。** 上の2経路の限定は変えず、先に既存Local
-Repositoryの経路だけを実装する。
+**選択中Projectの復元と登録解除 — 現在の推奨。** 選択中のProjectも同じ場所に保存して復元する。
+登録解除は一覧から外すだけで、repositoryのディスク上の内容とtmux sessionには触れない。
+
+**Clone Repositoryの経路 — 未確定。** 上の2経路の限定は変えず、先に既存Local Repositoryの経路だけを
+実装する(2026-10-08)。Clone経路の実装時期と詳細は決まっていない。
 
 ### 16.2 Git認証
 
@@ -1767,6 +1772,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - プロダクト名
 - Mac専用から他PC hostへ広げるか
 - v1、v2の正式な機能境界
+- Clone RepositoryによるProject登録の経路(§16.1。既存Local Repositoryの経路を先に実装した)
 
 ### UI
 
@@ -2102,7 +2108,7 @@ PR_READY
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
 - [x] surfaceのプロセス終了後に作り直すかは上位レイヤが決める(rendererは状態と`restart`を公開するだけ、生成失敗のリトライはrenderer内部の責務)
 - [x] Project登録はlocal選択またはclone
-- [x] 登録済みProjectの一覧と選択はApplication Supportに保存して復元し、登録解除はディスクとtmux sessionに触れない
+- [x] 登録済みProjectの一覧はApplication Supportに保存して再起動を跨いで復元する
 - [x] Git認証は既存環境へ完全委譲
 - [x] Git GUIは閲覧中心
 - [x] UI状態はdeviceごとに独立復元
@@ -2135,6 +2141,7 @@ PR_READY
 - [x] 概要の「目的」の手入力はOverviewの行で直接編集し、入力箇所はそこ1つに限る
 - [x] Overviewは通常のウィンドウ1枚で位置とサイズを記憶し、常に最前面には置かない
 - [x] メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替える
+- [x] Overviewと通知は登録済みの全Projectを対象にする(選択中のProjectに限らない)
 - [x] 状態表示はSF Symbolsの固定セットで状態ごとに形を変え、色は補助、accessibility labelは状態名。`Unknown`に専用の形(対応表は#189で決める)
 - [x] ⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵には割り当てない
 - [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する
@@ -2151,6 +2158,7 @@ PR_READY
 - [ ] ripgrep CLIを正式採用 — bundle／host依存方針待ち
 - [ ] hostctl over SSHを正式採用 — protocol PoC待ち
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
+- [ ] 選択中Projectの復元と、登録解除でディスクとtmux sessionに触れないこと — ユーザー確認待ち(§16.1)
 
 # 付録C. 参照先
 

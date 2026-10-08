@@ -116,7 +116,15 @@ final class ProjectsModel: ObservableObject {
       if case .unavailable = slots[project.commonDirectory],
         let existing = registry.project(project.commonDirectory)
       {
-        slots[project.commonDirectory] = await makeSlot(for: existing)
+        let slot = await makeSlot(for: existing)
+        // await の間に同じ Project の追加が先に終わっていたり、登録解除されていたりする。
+        // まだ到達不能のときだけ差し替え、そうでなければ作ったモデルを止めて捨てる —
+        // 残すと同じ Project の AppModel が2つ rescan を回す。
+        if case .unavailable = slots[project.commonDirectory] {
+          slots[project.commonDirectory] = slot
+        } else if case .available(let model) = slot {
+          model.stop()
+        }
       }
     }
     registry.reselect(selectable: isSelectable)

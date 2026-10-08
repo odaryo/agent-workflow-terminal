@@ -87,8 +87,11 @@ private struct ProjectMenu: View {
           set: { _ in projects.select(project.commonDirectory) }
         ))
     case .unavailable(let reason):
-      Button("\(project.displayName) (到達不能: \(reason))") {}
-        .disabled(true)
+      // 到達不能な Project は選択できないので、選択中の Project 向けの「登録を解除」からは外せない。
+      // 項目ごとのサブメニューに解除を置く (全 Project が到達不能で選択が無いときもここから外せる)。
+      Menu("\(project.displayName) (到達不能: \(reason))") {
+        Button("登録を解除") { projects.unregister(project.commonDirectory) }
+      }
     case nil:
       Button(project.displayName) {}
         .disabled(true)

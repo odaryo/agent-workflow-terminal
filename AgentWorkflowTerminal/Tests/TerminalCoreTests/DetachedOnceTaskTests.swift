@@ -114,6 +114,33 @@ struct DetachedOnceTaskTests {
     #expect(subject.start { observation.yield(Self.secondBodyMarker) } == false)
   }
 
+  /// 登録を解除した Project の再スキャンを止める経路 (Issue #372)。止められないと、一覧から
+  /// 外した Project へ git を撃ち続け、その保存ファイルを書き続ける。
+  @Test("cancel で本体がキャンセルされ、その後の start も再入させない")
+  func cancelStopsBodyAndKeepsItStopped() async {
+    let (inputs, input) = AsyncStream.makeStream(of: Int.self)
+    let (observed, observation) = AsyncStream.makeStream(of: Int.self)
+    var iterator = observed.makeAsyncIterator()
+    let subject = DetachedOnceTask()
+
+    subject.start {
+      for await value in inputs { observation.yield(value) }
+      observation.yield(Self.loopEndedMarker)
+    }
+    input.yield(1)
+    #expect(await iterator.next() == 1)
+
+    subject.cancel()
+    // `AsyncStream` の反復はキャンセルで `nil` を返す。入力側は閉じていないので、終了印が
+    // 届くのはキャンセルが本体へ伝わった場合だけである。
+    #expect(await iterator.next() == Self.loopEndedMarker)
+    #expect(subject.start { observation.yield(Self.secondBodyMarker) } == false)
+
+    input.finish()
+    observation.finish()
+    #expect(await iterator.next() == nil)
+  }
+
   /// ループが終わったことを観測するための、入力値と衝突しない番兵。
   private static let loopEndedMarker = -1
   /// 起動してはならない本体が走ったときだけ流れる値。

@@ -4,8 +4,8 @@
 ///
 /// - Important: 本体は unstructured な `Task` で起動する。`async let` や task group で起動すると
 ///   構造化された子になり、呼び出し元のキャンセルがそのまま伝播して同じ問題に戻る。
-/// - Important: 起動した本体を止める手段は持たない。止められる必要が出たときに足すこと —
-///   「アプリの生存期間だけ回るループ」以外へ広げると、寿命の所在がここと呼び出し元に分かれる。
+/// - Important: 止める手段は `cancel()` だけで、呼ぶのは本体の寿命を持つ側 (登録を解除した
+///   Project のモデル、Issue #372) に限る。view の消滅で止める経路へ戻すと Issue #238 に戻る。
 @MainActor
 public final class DetachedOnceTask {
   private var task: Task<Void, Never>?
@@ -23,5 +23,11 @@ public final class DetachedOnceTask {
     guard task == nil else { return false }
     task = Task { await body() }
     return true
+  }
+
+  /// 本体へキャンセルを伝える。止まるのは本体がキャンセルを見たときで、ここでは待たない。
+  /// キャンセル後も `start` は再入させない。
+  public func cancel() {
+    task?.cancel()
   }
 }

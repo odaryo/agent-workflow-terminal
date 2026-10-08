@@ -1805,6 +1805,8 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 # Part II. Agent Skills／AI開発フロー内部設計
 
+> この部はTerminalアプリの仕様ではなく、アプリとは独立してAgentの中で動く開発フロー(Agent Skills)の設計案であり、このリポジトリ自体の開発ルール(`CLAUDE.md`)でもない。TerminalはAgentを制御せず、ここに書かれた内容に依存しない — 両者の接点はpaneユーザー変数による連携(§12.7)と§32の原則だけである。
+
 ## 26. Terminal本体との責務分離
 
 Agent Skillsの内部設計は、Terminalアプリ本体の仕様とは別に管理する。

@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、ハーネスが現在地・タスク完了を書く条件、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先pathを反映)
+> 最終更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -83,7 +83,7 @@ Gitツリー表示は追加候補であり必須ではない。編集はviや外
 - リモートデスクトップ／VNC機能
 - Claude Code出力を解析して再構成する独自Chat UI
 - 独自Remote Terminal protocol
-- Git認証情報、SSH鍵、アクセストークンの管理機能
+- Git認証情報、SSH鍵、アクセストークンの管理機能(iOSアプリがhostへ接続するための鍵を端末内で1つ生成・保持することは除く。§20.4)
 - マルチユーザー／チーム共有機能(アカウント、権限管理、複数人での同一Host共有)
 - 独自のリレーサーバやNAT越えインフラ(到達性は既存VPNへ委譲する)
 
@@ -829,6 +829,11 @@ worktree削除後もsnapshotで当時の質問対象を確認できる。Git参�
 2. AgentネイティブUIが使えない場合だけ、Terminal共通Questions UIをfallbackとして利用する。
 3. TerminalはAgentの質問システムを置き換えない。
 
+**fallbackの受け取り方 — 確定(2026-10-08)。** Terminal共通Questions UIは、Agent側が自分のpaneの
+ユーザー変数(§12.7と同じ経路)へ書いた質問を読んで表示し、人が書いた回答をテキスト注入(§9.2.1)で
+そのpaneへ送る。worktree内のファイルは読まない。値の表現は§12.7と同じく、tmux 3.4と3.7cの両方で計測して
+決める。Agent側がどの場合にネイティブUIではなくfallbackを使うか(§31)は、Terminalの仕様では扱わない。
+
 全worktree横断のQuestions Inboxは作らない。質問待ちはTask Tabの状態で把握し、対象worktreeを開いて対応する。
 
 質問待ちタブを開くと、Terminal表示を維持したまま質問カードをoverlayする。閉じれば通常Terminal操作へ戻れる。
@@ -1389,6 +1394,17 @@ TestFlight／App Storeでの配布はv1の対象外とし、App Store審査上�
 最小のiOSアプリを先に作るため(P4)、iOSアプリのtarget(Xcode project等)をrepositoryへ持ち込む。
 Macアプリの配布経路はこの決定に含まない(§25)。
 
+### 20.4 モバイルからhostへの接続 — 確定(2026-10-08)
+
+- **接続鍵は端末で生成し、端末の外へ出さない。** iOSアプリは端末ごとに鍵を1つ生成し、Keychainへ
+  この端末限り(ThisDeviceOnly)で保持する。iCloud Keychainへは同期しない。秘密鍵の取り込み・書き出しや
+  複数の鍵を扱う機能は作らない(§1.3)。アプリは公開鍵を表示するだけで、Macの`authorized_keys`への登録は
+  利用者が行う。Git認証を既存環境へ委譲するのと同じ線引きである(§16.2)。
+- **同期するのは接続先だけとする。** host・user・portとMac名の対応だけを、通知と同じCloudKit private
+  database(§11.2)で端末間に同期する。鍵と`known_hosts`は同期しない。
+- **文書化するVPNの例はTailscaleだけとする。** P5で検証するVPNもこれ1つに絞る。他のVPNを使えなく
+  するものではなく、検証と推奨の対象にしないという意味である。
+
 ## 21. 現在の推奨技術アーキテクチャ
 
 > この章は**確定仕様ではなく、PoC通過を条件とする現在の第一候補**である。ただし章内で明示的に**確定**と記した項目(§21.5のrenderer方針とlibghosttyの版数固定)は除く。
@@ -1756,7 +1772,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Agent
 
 - 各Adapterが採用するsignalの組み合わせ(個々の信号の採用基準は§12.5で確定。どう合成して7状態へ落とすかは実装時に決める)
-- 質問fallbackのデータ交換形式
 - 概要連携のpane変数名と値の表現(形式はtmuxのpaneユーザー変数で確定。§12.7のとおり両版の計測で決める)
 
 ### Git／Diff
@@ -1767,10 +1782,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### Mobile／remote
 
 - モバイル側Terminal rendererの選定(`libghostty-vt` + 自前描画／SwiftTerm等の既存renderer／外部SSHアプリ連携)
-- iOS認証情報の安全な保存方法
-- SSH接続設定の同期範囲
 - Host発見(pairingはApple IDで代替し、複数Macは拒否・調停しないことを§11.2で確定)
-- 推奨するVPN構成の具体例とドキュメント化
 - Host Core CLI protocol
 
 ### Storage
@@ -1866,20 +1878,6 @@ Review Session (fresh context)
 - Human回答が必要なときだけ処理を中断する。
 
 何を設計判断とし、何を要件判断とするかの境界は未確定である。
-
-### 28.4 現在地とタスク完了を書く条件 — 確定(2026-10-08)
-
-ハーネスがTerminalへ伝える現在地とタスク完了(§12.7)を、いつ書くかを次のとおりとする。
-
-- タスクの完了条件はタスクごとに異なる。完了条件は要件定義phaseで決め、人の承認(§28.1)の対象に含める。
-  PR作成が目的のタスクはPR作成が完了条件になり、それ以外のタスクはそのタスクの受け入れ条件に従う。
-- ハーネスは、Review sessionが完了条件の充足を確認した後に、タスク完了を1回だけ書く。PR作成が目的の
-  タスクではPR作成の後に書く。Review NGで新しいImplementation sessionへ戻るときは書かない。
-- 現在地は、phaseが変わるたびに「phase名｜短文1行」で書く。
-- Terminalは完了条件の中身を知らない。書く手段は§12.7のpaneユーザー変数であり、Terminal専用APIを
-  必要としない(§32)。
-
-各phaseの入力・出力・終了条件、および完了条件を記録するartifactのfile名とschema(§29)は未確定のまま残す。
 
 ## 29. Artifact案 — 未確定
 
@@ -1991,6 +1989,7 @@ PR_READY
 - PR作成条件
 - Evidence撮影の必須条件
 - Agent-native質問UIとfile-based質問の使い分け
+- ハーネスがTerminalへ概要・タスク完了を伝える条件(いつ・どの粒度で書くか)。伝える形式はtmuxのpaneユーザー変数として§12.7で確定済み
 - Claude CodeとCodexで共通Skillを使う方法
 
 ## 32. TerminalとAgent Skillsの統合原則
@@ -2058,6 +2057,7 @@ PR_READY
 - [x] Consultationはfresh contextが基本、paneは再利用
 - [x] Consultation LogはProject単位で永続化し、Gitには載せない
 - [x] Agent-native質問UIを優先
+- [x] fallbackの質問はpaneユーザー変数から読み、回答はテキスト注入で送る。worktree内のファイルは読まない
 - [x] 全worktree横断Questions Inboxは作らない
 - [x] Mac／mobile通知とdeep link
 - [x] 判断待ち通知は状態へ入った遷移1回につき1回、再接続時は未配達・未対応分を1件にまとめてOverviewへ、消失した対象は1つ上の階層を開いて理由を表示
@@ -2111,6 +2111,9 @@ PR_READY
 - [x] 通知中継はApple CloudKit(利用者のprivate database + subscription)が担い、自前の中継サーバ・APNs鍵・device tokenの受け渡しを持たない(配達の確実さは#191で実測)
 - [x] pairingは同じApple IDで代替し、v1のHostはMac 1台を前提とする。recordにMac名を含めて通知に表示し、複数Macは拒否・調停しない
 - [x] v1のiOSアプリはXcodeからDevelopment署名で実機へ直接入れ、TestFlight／App Store配布とApp Store審査はv1対象外
+- [x] iOSアプリの接続鍵は端末ごとに生成してKeychain(ThisDeviceOnly)に保持し、端末の外へ出さない。公開鍵の表示のみで、鍵の管理機能は作らない
+- [x] 端末間で同期するのは接続先(host・user・portとMac名)だけで、CloudKitで同期する。鍵と`known_hosts`は同期しない
+- [x] 文書化・検証するVPNの例はTailscaleだけとする
 - [x] UI名称は`Ask Agent`(Agent非依存)
 - [x] Diffコメントの送信先は実装Agent pane
 - [x] コメントanchorは出所を含む6要素(snapshot ID／出所／パス／側／行範囲／テキストハッシュ)、新snapshotへの推測追従はしない
@@ -2125,7 +2128,6 @@ PR_READY
 - [x] ⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵には割り当てない
 - [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する
 - [x] Agent開発フローはReview独立sessionを含む4phase構成
-- [x] タスクの完了条件は要件定義phaseでタスクごとに決め、ハーネスはReviewが充足を確認した後(PRが目的ならPR作成後)に完了を1回だけ書く。現在地はphase遷移ごとに書く
 
 # 付録B. 現在の推奨構成チェックリスト
 

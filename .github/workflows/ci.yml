@@ -82,10 +82,10 @@ jobs:
       AWT_TMUX_INTEGRATION: "1"
       AWT_GIT_INTEGRATION: "1"
       AWT_RIPGREP_INTEGRATION: "1"
-      # 11 suite / 88 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
+      # 12 suite / 99 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
       # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       AWT_INTEGRATION_FILTER: >-
-        TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|RipgrepSearchIntegrationTests
+        TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests
     steps:
       - uses: actions/checkout@v4
 
@@ -135,8 +135,8 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --min-tests 88 \
-            --suites 11
+            --min-tests 99 \
+            --suites 12
 
       # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では
       # ないのは、concurrency の cancel-in-progress で途中で殺された回にも走ってしまい、

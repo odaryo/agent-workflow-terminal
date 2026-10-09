@@ -432,11 +432,12 @@ actor GatedTmuxProcessRunner: ProcessRunning {
     }
   }
 
-  /// `TmuxListPanes.format` と同じ 14 フィールドを Unit Separator で並べた1行。
+  /// `TmuxListPanes.formatWithSummary` と同じ 17 フィールド (14 + 連携変数3つ、いずれも未設定の
+  /// `v`) を Unit Separator で並べた1行。
   private var paneListLine: String {
     [
       pane.rawValue, sessionName, "0", "@0", "0", "\(panePID)", "1", "zsh", "0", "", "",
-      "/dev/ttys001", "/tmp", "title",
+      "/dev/ttys001", "/tmp", "title", "v", "v", "v",
     ].joined(separator: "\u{1F}")
   }
 }

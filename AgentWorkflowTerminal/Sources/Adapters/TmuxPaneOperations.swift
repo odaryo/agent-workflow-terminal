@@ -83,6 +83,19 @@ public struct TmuxPaneOperations: Sendable {
     _ = try await run(["select-pane", "-t", pane.rawValue], pane: pane)
   }
 
+  /// `select(pane:)` と違い、その pane の window を session の current window にもする
+  /// (tmux 3.4 / 3.7c とも実測: 別 window の非 active pane を指すと current window と active pane の
+  /// 両方がその pane へ移り、他の session は変わらない)。session に attach している全 client の
+  /// 表示が動く。
+  ///
+  /// argv の `;` で2コマンドを1回の起動に載せる。tmux はこの列を原子的には扱わず、後ろの
+  /// `select-pane` が失敗しても前の `select-window` は効いたまま残る (両版で実測)。同じ pane を
+  /// 指すので、pane が無ければ前の `select-window` が `can't find pane: %N` で失敗し、何も変わらない。
+  public func selectWindowAndPane(pane: PaneID) async throws(TmuxPaneOperationError) {
+    _ = try await run(
+      ["select-window", "-t", pane.rawValue, ";", "select-pane", "-t", pane.rawValue], pane: pane)
+  }
+
   /// tmux 3.4 は window の端で反対側へ回り込む (実測: 左右3分割の左端から `.left` すると
   /// 右端が選ばれる)。その方向に他の pane が1つも無いときだけ、回り込み先が自分自身になって
   /// 選択が変わらない。どちらも exit 0 なので、移動したかは戻り値では分からない。

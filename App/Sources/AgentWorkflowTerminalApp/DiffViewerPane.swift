@@ -43,6 +43,9 @@ struct DiffViewerPane: View {
       for await panes in states {
         paneStates = panes
       }
+      // 購読が終わるのは観測が止まったとき (worktree が Inactive・到達不能になった)。最後の値を
+      // 観測中のものとして送信可否に使い続けない。
+      isObservingPanes = false
     }
     .sheet(item: $model.paneSelectionRequest) { request in
       MainPanePicker(request: request) { candidate in

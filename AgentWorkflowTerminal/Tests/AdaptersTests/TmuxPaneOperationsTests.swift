@@ -83,6 +83,42 @@ struct TmuxPaneOperationsTests {
       await stub.invocations.first?.arguments == prefix + ["select-pane", "-t", "%3", flag])
   }
 
+  @Test("window ごと選ぶ pane 選択は、select-window と select-pane を1回の tmux 起動で渡す")
+  func selectsWindowAndPane() async throws {
+    let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+    let operations = try makeOperations(stub)
+
+    try await operations.selectWindowAndPane(pane: pane)
+
+    #expect(await stub.invocations.count == 1)
+    #expect(
+      await stub.invocations.first?.arguments
+        == prefix + ["select-window", "-t", "%3", ";", "select-pane", "-t", "%3"])
+  }
+
+  @Test("window ごと選ぶ pane 選択も、対象が無ければ不在エラーにする")
+  func selectWindowAndPaneMapsMissingPane() async throws {
+    let stub = ProcessRunnerStub(
+      result: .success(.init(exitCode: 1, stdout: "", stderr: "can't find pane: %3\n")))
+    let operations = try makeOperations(stub)
+
+    await #expect(throws: TmuxPaneOperationError.paneNotFound(pane)) {
+      try await operations.selectWindowAndPane(pane: pane)
+    }
+  }
+
+  @Test("window ごと選ぶ pane 選択は、pane ID でない値を tmux へ渡さない")
+  func selectWindowAndPaneRejectsMalformedPaneID() async throws {
+    let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+    let operations = try makeOperations(stub)
+    let malformed = PaneID(rawValue: "%1 ; kill-pane")
+
+    await #expect(throws: TmuxPaneOperationError.invalidPaneID(malformed)) {
+      try await operations.selectWindowAndPane(pane: malformed)
+    }
+    #expect(await stub.invocations.isEmpty)
+  }
+
   @Test("zoom は、既に zoom 対象なら状態を変えない分岐ごと1回で tmux へ渡る")
   func zoomsPane() async throws {
     let stub = ProcessRunnerStub(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))

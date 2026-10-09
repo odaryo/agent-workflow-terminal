@@ -19,9 +19,10 @@ struct TmuxWorktreePaneSourceTests {
     let invocation = try #require(await spy.invocations.first)
     #expect(
       invocation == [
-        "-u", "-L", "pane-source-test", "list-panes", "-a", "-F", TmuxListPanes.format,
+        "-u", "-L", "pane-source-test", "list-panes", "-a", "-F",
+        TmuxListPanes.formatWithSummary,
       ])
-    #expect(panes == TmuxListPanes.parse(output: output).panes.map(\.snapshot))
+    #expect(panes == TmuxListPanes.parseWithSummary(output: output).panes.map(\.snapshot))
   }
 
   /// `-a` は対象 server の全 session を返すので、ユーザー自身の session の pane が必ず混ざる。
@@ -85,7 +86,7 @@ struct TmuxWorktreePaneSourceTests {
 
     let panes = try await makeSource(spy).panes(of: worktree)
 
-    #expect(panes == TmuxListPanes.parse(output: valid).panes.map(\.snapshot))
+    #expect(panes == TmuxListPanes.parseWithSummary(output: valid).panes.map(\.snapshot))
   }
 
   @Test("TTL の内側なら worktree が違っても list-panes は1回だけ起動する")
@@ -122,15 +123,18 @@ struct TmuxWorktreePaneSourceTests {
       runner: try makeTmuxRunner(socketName: "pane-source-test", processRunner: spy))
   }
 
-  /// fixture の session 名と pane ID だけを差し替える。`\037` 区切りの1行なので、
-  /// 置換対象はどちらも行内に1度しか現れない。
+  /// `formatWithSummary` で採った fixture の先頭行 (pane `%0`) の session 名と pane ID だけを
+  /// 差し替える。`\037` 区切りの1行で、session 名は行内に1度、pane ID は行頭にだけ現れる。
   private func fixture(session: String, paneID: String = "%11") throws -> String {
     let url = try #require(
       Bundle.module.url(
-        forResource: "tmux-3.4-list-panes-dead.txt", withExtension: nil, subdirectory: "Fixtures"))
-    return try String(contentsOf: url, encoding: .utf8)
-      .replacingOccurrences(of: "dead-r3", with: session)
-      .replacingOccurrences(of: "%11", with: paneID)
+        forResource: "tmux-3.4-list-panes-summary-hostile.txt", withExtension: nil,
+        subdirectory: "Fixtures"))
+    let line = try #require(
+      try String(contentsOf: url, encoding: .utf8).split(separator: "\n").first)
+    #expect(line.hasPrefix("%0\\037"))
+    return paneID + line.dropFirst(2).replacingOccurrences(of: "summary-fixture", with: session)
+      + "\n"
   }
 }
 

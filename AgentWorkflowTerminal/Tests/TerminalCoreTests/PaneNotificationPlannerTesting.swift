@@ -17,6 +17,11 @@ extension PaneNotificationPlannerTesting {
       enabledKinds: PaneNotificationSettings().enabledKinds.union([.prolongedUnknown]))
   }
 
+  static var withoutUnspecified: PaneNotificationSettings {
+    PaneNotificationSettings(
+      enabledKinds: PaneNotificationSettings().enabledKinds.subtracting([.attentionUnspecified]))
+  }
+
   static func identities() throws -> (worktree: WorktreeIdentity, other: WorktreeIdentity) {
     (
       try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/a")),
@@ -49,7 +54,8 @@ extension PaneNotificationPlannerTesting {
     settings: PaneNotificationSettings = PaneNotificationSettings()
   ) -> PaneNotificationPlanner {
     var planner = baselined([], settings: settings)
-    _ = planner.observeCompletions(Self.keyed(displays), in: worktree, at: Self.clock.now)
+    _ = planner.observeCompletions(
+      Self.keyed(displays), undetermined: [], in: worktree, at: Self.clock.now)
     return planner
   }
 
@@ -65,10 +71,14 @@ extension PaneNotificationPlannerTesting {
     planner.observeStates(complete(panes), in: worktree, at: Self.clock.now)
   }
 
+  /// `undetermined` は Agent プロセスを特定できなかった pane。
   func completions(
-    _ planner: inout PaneNotificationPlanner, _ displays: [String: PaneTaskCompletionDisplay]
+    _ planner: inout PaneNotificationPlanner, _ displays: [String: PaneTaskCompletionDisplay],
+    undetermined: Set<String> = []
   ) -> [PaneNotification] {
-    planner.observeCompletions(Self.keyed(displays), in: worktree, at: Self.clock.now)
+    planner.observeCompletions(
+      Self.keyed(displays), undetermined: Set(undetermined.map(PaneID.init(rawValue:))),
+      in: worktree, at: Self.clock.now)
   }
 
   func event(

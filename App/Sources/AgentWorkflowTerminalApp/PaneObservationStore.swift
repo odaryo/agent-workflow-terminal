@@ -239,6 +239,7 @@ final class PaneObservationStore: ObservableObject {
     var processIDs: [PaneID: Int32] = [:]
     var entries: [PaneID: PaneSummaryEntry<AgentStampedValue>] = [:]
     var displays: [PaneID: PaneTaskCompletionDisplay] = [:]
+    var undetermined: Set<PaneID> = []
     var summaries: [PaneSummary] = []
     for item in located {
       let snapshot = item.readings
@@ -267,6 +268,9 @@ final class PaneObservationStore: ObservableObject {
         agentState: rawStates[summary.paneID])
       entries[summary.paneID] = summary.completion
       displays[summary.paneID] = display
+      if PaneTaskCompletionTracker.isUndetermined(summary.completion) {
+        undetermined.insert(summary.paneID)
+      }
       details[summary.paneID]?.isTaskCompleted = display.isCompleted
     }
     for paneID in current.details.keys where details[paneID] == nil {
@@ -279,7 +283,7 @@ final class PaneObservationStore: ObservableObject {
     if observed[identity] != current {
       observed[identity] = current
     }
-    notifier?.completionsObserved(displays, in: identity)
+    notifier?.completionsObserved(displays, undetermined: undetermined, in: identity)
   }
 
   private static func hasValue(_ reading: PaneUserOptionReading) -> Bool {

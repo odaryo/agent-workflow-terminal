@@ -19,7 +19,8 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
 
     #expect(
       planner.observeCompletions(
-        [PaneID(rawValue: "%1"): .completed(Self.first)], in: worktree, at: Self.clock.now
+        [PaneID(rawValue: "%1"): .completed(Self.first)], undetermined: [], in: worktree,
+        at: Self.clock.now
       ).isEmpty)
     #expect(completions(&planner, ["%1": .completed(Self.first)]).isEmpty)
   }
@@ -98,12 +99,77 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
 
     #expect(
       planner.observeCompletions(
-        [PaneID(rawValue: "%1"): .completed(Self.first)], in: worktree, at: start
+        [PaneID(rawValue: "%1"): .completed(Self.first)], undetermined: [], in: worktree, at: start
       ).isEmpty)
     #expect(
       planner.observeCompletions(
-        [PaneID(rawValue: "%1"): .completed(Self.second)], in: worktree, at: start)
+        [PaneID(rawValue: "%1"): .completed(Self.second)], undetermined: [], in: worktree, at: start
+      )
         == [event("%1", .taskCompleted, completion: Self.second)])
+  }
+
+  @Test("Agent プロセスを特定できなかった読み取りは基準にせず、最初に判定できた読み取りを基準にする")
+  func undeterminedReadingIsNotBaseline() {
+    var planner = baselined([])
+
+    #expect(completions(&planner, ["%1": .none], undetermined: ["%1"]).isEmpty)
+    #expect(completions(&planner, ["%1": .none], undetermined: ["%1"]).isEmpty)
+    // 起動前に書かれた token。判定できた最初の読み取りなので基準にする。
+    #expect(completions(&planner, ["%1": .completed(Self.first)]).isEmpty)
+    #expect(
+      completions(&planner, ["%1": .completed(Self.second)])
+        == [event("%1", .taskCompleted, completion: Self.second)])
+  }
+
+  @Test("基準の時点で判定できた pane は、後で判定できない回があっても基準を取り直さない")
+  func determinedBaselineIsKept() {
+    var planner = completionBaselined(["%1": .none])
+
+    #expect(completions(&planner, ["%1": .none], undetermined: ["%1"]).isEmpty)
+    #expect(
+      completions(&planner, ["%1": .completed(Self.first)])
+        == [event("%1", .taskCompleted, completion: Self.first)])
+  }
+
+  @Test("基準の後に現れた pane は、最初の読み取りを判定できなくても後の token を通知する")
+  func undeterminedNewPaneIsNotBaselined() {
+    var planner = completionBaselined(["%1": .none])
+
+    #expect(completions(&planner, ["%1": .none, "%2": .none], undetermined: ["%2"]).isEmpty)
+    #expect(
+      completions(&planner, ["%1": .none, "%2": .completed(Self.first)])
+        == [event("%2", .taskCompleted, completion: Self.first)])
+  }
+
+  @Test("ps を読めない起動直後の読み取りの後に、起動前の token を鳴らさない (tracker と合わせて)")
+  func staleTokenAfterUnobservableStart() {
+    var tracker = PaneTaskCompletionTracker()
+    var planner = baselined([])
+    let paneID = PaneID(rawValue: "%1")
+    let readings: [PaneSummaryEntry<AgentStampedValue>] = [
+      .discarded(.agentProcessUnobservable(written: 42)), .accepted(Self.first),
+    ]
+
+    for reading in readings {
+      let display = tracker.update(paneID: paneID, completion: reading, agentState: .completed)
+      let undetermined: Set<String> =
+        PaneTaskCompletionTracker.isUndetermined(reading) ? ["%1"] : []
+      #expect(completions(&planner, ["%1": display], undetermined: undetermined).isEmpty)
+    }
+  }
+
+  @Test(
+    "Agent プロセスを特定できなかった読み取りだけを判定できないものとする",
+    arguments: [
+      (PaneSummaryEntry<AgentStampedValue>.discarded(.agentProcessUnobservable(written: 42)), true),
+      (.discarded(.agentProcessAmbiguous(written: 42, candidates: [42, 43])), true),
+      (.discarded(.agentProcessMismatch(written: 42, current: 43)), false),
+      (.discarded(.agentProcessNotRunning(written: 42)), false),
+      (.accepted(AgentStampedValue(agentProcessID: 42, text: "t1")), false),
+      (.unset, false),
+    ])
+  func undeterminedReadings(entry: PaneSummaryEntry<AgentStampedValue>, expected: Bool) {
+    #expect(PaneTaskCompletionTracker.isUndetermined(entry) == expected)
   }
 
   // MARK: - 長時間の Unknown

@@ -87,14 +87,20 @@ public enum PaneNotification: Sendable, Hashable {
 ///   保つ (`PaneTaskCompletionTracker` と同じ扱い)。保たないと `Question` → `Unknown` →
 ///   `Question` のたびに鳴る。
 /// - Important: 種別不明の注意状態 (§12.4.3) と種類の分かる判断待ちの行き来は、同じ判断待ちの
-///   続きとして再通知しない。Codex は画面の捕捉と title の Action Required がずれると、同じ
-///   確認画面の間に両者を行き来する。
+///   続きとして再通知しない。ただし続きとみなすのは、その判断待ちを**既に知らせた**場合だけ
+///   (通知を出した、または前面時の抑止で消費した。基準の時点の判断待ちはまとめ通知に数える
+///   種類なら知らせたものとする)。無効な種類で始まった判断待ちが有効な種類へ移ったら新しい
+///   遷移として通知する — 続きとみなすと、無効にした種類が有効な種類の通知を飲み込む。
+///   知らせたかどうかはその時点の設定で決まり、後から設定を変えても遡って変わらない。
 /// - Important: worktree ごとの最初の観測は基準であり遷移とみなさない。状態の基準は
 ///   `WorktreePaneAgentStates.isComplete` が初めて真になった観測で、それより前の観測は捨てる
 ///   — feed の最初の yield は adapter の結果が無いので `[]` になり、それを基準にすると次の観測で
 ///   判断待ちの pane が全部個別に鳴る (#387)。完了表示の基準は最初の `observeCompletions` で、
 ///   その時点で有効な token は鳴らさない (再起動のたびに古い完了が鳴るのを防ぐ。アプリ停止中に
-///   書かれた完了は鳴らない)。
+///   書かれた完了は鳴らない)。Agent プロセスを特定できなかった読み取り (`undetermined`) は
+///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
+///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
+///   飲み込むため。
 /// - Important: 基準の時点で判断待ちの pane は個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
 ///   起動直後は Project ごと・worktree ごとに基準を取る時刻がずれるので、まとめ通知は
 ///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 worktree が基準を取り終えた時点で
@@ -127,7 +133,11 @@ public struct PaneNotificationPlanner: Sendable {
     var lastKnown: KnownState?
     var unknownSince: ContinuousClock.Instant?
     var didNotifyUnknown = false
+    /// いまの判断待ちを知らせたか。判断待ちを抜けたら下ろす。
+    var isAttentionAnnounced = false
     var notifiedCompletions: Set<AgentStampedValue> = []
+    /// 完了表示の基準の時点に在ったが、Agent プロセスを特定できず基準を取れていない。
+    var awaitsCompletionBaseline = false
     /// 基準の時点で判断待ちだった。まとめ通知を出すまでの間だけ立つ。
     var isSummaryMember = false
   }
@@ -218,10 +228,11 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   /// `displays` はその worktree の全 pane (Agent でない pane を含む) の完了表示。ここにも直近の
-  /// 状態の観測にも無い pane は消えたものとして記憶を捨てる。
+  /// 状態の観測にも無い pane は消えたものとして記憶を捨てる。`undetermined` はこの回 Agent
+  /// プロセスを特定できなかった pane (`PaneTaskCompletionTracker.isUndetermined`)。
   public mutating func observeCompletions(
-    _ displays: [PaneID: PaneTaskCompletionDisplay], in worktree: WorktreeIdentity,
-    at instant: ContinuousClock.Instant
+    _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
+    in worktree: WorktreeIdentity, at instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
     guard var memory = worktrees[worktree] else { return [] }
     panes = panes.filter { paneID, pane in
@@ -234,6 +245,15 @@ public struct PaneNotificationPlanner: Sendable {
 
     var notifications: [PaneNotification] = []
     for (paneID, display) in displays.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+      var isSilent = isBaseline
+      if isBaseline || panes[paneID]?.awaitsCompletionBaseline == true {
+        if undetermined.contains(paneID) {
+          panes[paneID, default: PaneMemory(worktree: worktree)].awaitsCompletionBaseline = true
+          continue
+        }
+        panes[paneID]?.awaitsCompletionBaseline = false
+        isSilent = true
+      }
       let value: AgentStampedValue
       switch display {
       case .none: continue
@@ -245,7 +265,7 @@ public struct PaneNotificationPlanner: Sendable {
       }
       let inserted = panes[paneID, default: PaneMemory(worktree: worktree)]
         .notifiedCompletions.insert(value).inserted
-      if inserted, !isBaseline, settings.enabledKinds.contains(.taskCompleted) {
+      if inserted, !isSilent, settings.enabledKinds.contains(.taskCompleted) {
         notifications.append(
           .pane(
             PaneNotificationEvent(
@@ -268,7 +288,9 @@ public struct PaneNotificationPlanner: Sendable {
     memory.lastKnown = Self.known(pane)
     memory.unknownSince = Self.isPlainUnknown(pane) ? instant : nil
     memory.didNotifyUnknown = false
-    memory.isSummaryMember = memory.lastKnown?.attentionKind != nil
+    let kind = memory.lastKnown?.attentionKind
+    memory.isSummaryMember = kind != nil
+    memory.isAttentionAnnounced = kind.map(settings.enabledKinds.contains) ?? false
     panes[pane.id] = memory
     if memory.isSummaryMember, summaryStartedAt == nil {
       summaryStartedAt = instant
@@ -294,14 +316,16 @@ public struct PaneNotificationPlanner: Sendable {
 
     guard let current = Self.known(pane) else { return nil }
     let previous = memory.lastKnown
-    guard current.attentionKind != nil else {
+    guard let kind = current.attentionKind else {
       memory.lastKnown = current
       memory.isSummaryMember = false
+      memory.isAttentionAnnounced = false
       return nil
     }
+    let crossesUnspecified =
+      current == .attentionUnspecified || previous == .attentionUnspecified
     if previous?.attentionKind != nil,
-      current == previous || current == .attentionUnspecified
-        || previous == .attentionUnspecified
+      current == previous || (crossesUnspecified && memory.isAttentionAnnounced)
     {
       // 同じ判断待ちの続き。種類が分かったら、分かった方を覚える。
       if current != .attentionUnspecified { memory.lastKnown = current }
@@ -309,10 +333,8 @@ public struct PaneNotificationPlanner: Sendable {
     }
     memory.lastKnown = current
     memory.isSummaryMember = false
-    guard let kind = current.attentionKind, settings.enabledKinds.contains(kind) else {
-      return nil
-    }
-    return kind
+    memory.isAttentionAnnounced = settings.enabledKinds.contains(kind)
+    return memory.isAttentionAnnounced ? kind : nil
   }
 
   private mutating func due(at instant: ContinuousClock.Instant) -> [PaneNotification] {

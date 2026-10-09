@@ -259,10 +259,8 @@ public struct PaneTaskCompletionTracker: Sendable {
   public mutating func update(
     paneID: PaneID, completion: PaneSummaryEntry<AgentStampedValue>, agentState: AgentState?
   ) -> PaneTaskCompletionDisplay {
-    switch completion {
-    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous):
+    if Self.isUndetermined(completion) {
       return entries[paneID]?.display ?? .none
-    default: break
     }
     var entry = entries[paneID] ?? Entry()
     let current = completion.value
@@ -282,6 +280,15 @@ public struct PaneTaskCompletionTracker: Sendable {
       }
     entries[paneID] = entry
     return entry.display
+  }
+
+  /// 現在の Agent プロセスを特定できなかった読み取り。`update` はこの回の記憶を進めず直前の表示を
+  /// 返すので、その表示はこの回の token を表していない。
+  public static func isUndetermined(_ completion: PaneSummaryEntry<AgentStampedValue>) -> Bool {
+    switch completion {
+    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous): true
+    default: false
+    }
   }
 
   public mutating func forget(paneID: PaneID) {

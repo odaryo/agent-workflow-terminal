@@ -54,12 +54,16 @@ final class PaneNotifier {
     deliver(planner.observeStates(snapshot, in: worktree, at: clock.now))
   }
 
-  /// `displays` はその worktree の全 pane の完了表示。
+  /// `displays` はその worktree の全 pane の完了表示。`undetermined` は Agent プロセスを
+  /// 特定できなかった pane。
   func completionsObserved(
-    _ displays: [PaneID: PaneTaskCompletionDisplay], in worktree: WorktreeIdentity
+    _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
+    in worktree: WorktreeIdentity
   ) {
     refreshSettings()
-    deliver(planner.observeCompletions(displays, in: worktree, at: clock.now))
+    deliver(
+      planner.observeCompletions(
+        displays, undetermined: undetermined, in: worktree, at: clock.now))
   }
 
   // MARK: - 出す

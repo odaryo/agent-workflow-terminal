@@ -240,6 +240,61 @@ struct PaneNotificationPlannerTests: PaneNotificationPlannerTesting {
     #expect(observe(&planner, [pane("%1", .question)]) == [event("%1", .question)])
   }
 
+  @Test("種別不明を無効にしていても、その後に入った有効な種類の判断待ちは通知する (S1)")
+  func disabledUnspecifiedDoesNotSwallowEnabledKind() {
+    var planner = baselined([pane("%1", .working)], settings: Self.withoutUnspecified)
+
+    #expect(observe(&planner, [attentionUnknown("%1")]).isEmpty)
+    #expect(observe(&planner, [pane("%1", .permission)]) == [event("%1", .permission)])
+    // 知らせた後は、種別不明との行き来を続きとして扱う。
+    #expect(observe(&planner, [attentionUnknown("%1")]).isEmpty)
+    #expect(observe(&planner, [pane("%1", .permission)]).isEmpty)
+  }
+
+  @Test("基準の時点の種別不明が無効な種類なら、その後の有効な種類の判断待ちを通知する (S1b)")
+  func disabledUnspecifiedAtBaselineDoesNotSwallowEnabledKind() {
+    var planner = baselined([attentionUnknown("%1")], settings: Self.withoutUnspecified)
+
+    #expect(observe(&planner, [pane("%1", .permission)]) == [event("%1", .permission)])
+  }
+
+  @Test("基準の時点の種別不明が有効な種類なら、まとめ通知で知らせたので後の種類の判明は続き")
+  func enabledUnspecifiedAtBaselineIsContinued() {
+    var planner = baselined([attentionUnknown("%1")])
+
+    #expect(observe(&planner, [pane("%1", .permission)]).isEmpty)
+  }
+
+  @Test("無効な種類の判断待ちが種別不明に移ったら、種別不明として通知する")
+  func disabledKindDoesNotSwallowUnspecified() {
+    let settings = PaneNotificationSettings(
+      enabledKinds: PaneNotificationSettings().enabledKinds.subtracting([.question]))
+    var planner = baselined([pane("%1", .working)], settings: settings)
+
+    #expect(observe(&planner, [pane("%1", .question)]).isEmpty)
+    #expect(observe(&planner, [attentionUnknown("%1")]) == [event("%1", .attentionUnspecified)])
+    #expect(observe(&planner, [pane("%1", .question)]).isEmpty)
+  }
+
+  @Test("知らせた判断待ちは、後から種別不明を無効にしても続きのまま (設定は遡らない)")
+  func announcedEpisodeSurvivesDisabling() {
+    var planner = baselined([pane("%1", .working)])
+    _ = observe(&planner, [attentionUnknown("%1")])
+    planner.settings = Self.withoutUnspecified
+
+    #expect(observe(&planner, [pane("%1", .permission)]).isEmpty)
+  }
+
+  @Test("知らせなかった判断待ちは、後から有効にしても遡って鳴らさず、有効な種類へ移ったら鳴らす")
+  func unannouncedEpisodeAfterEnabling() {
+    var planner = baselined([pane("%1", .working)], settings: Self.withoutUnspecified)
+    _ = observe(&planner, [attentionUnknown("%1")])
+    planner.settings = PaneNotificationSettings()
+
+    #expect(observe(&planner, [attentionUnknown("%1")]).isEmpty)
+    #expect(observe(&planner, [pane("%1", .permission)]) == [event("%1", .permission)])
+  }
+
   @Test("基準より前の観測では、判断待ちへの遷移があっても通知しない")
   func nothingBeforeBaseline() {
     let start = Self.clock.now
@@ -302,7 +357,7 @@ struct PaneNotificationPlannerTests: PaneNotificationPlannerTesting {
         .isEmpty)
     #expect(
       planner.observeCompletions(
-        [PaneID(rawValue: "%1"): .completed(Self.first)], in: worktree, at: start
+        [PaneID(rawValue: "%1"): .completed(Self.first)], undetermined: [], in: worktree, at: start
       ).isEmpty)
   }
 

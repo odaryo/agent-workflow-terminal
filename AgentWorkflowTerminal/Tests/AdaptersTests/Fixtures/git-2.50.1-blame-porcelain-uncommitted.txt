@@ -1,0 +1,67 @@
+91f55f2e2193817b1b8a34342f3c6dd3259d41f8 1 1 1
+author Main
+author-mail <a@example.invalid>
+author-time 1767571200
+author-tz +0000
+committer c
+committer-mail <c@example.invalid>
+committer-time 1767571200
+committer-tz +0000
+summary main change
+previous 2f9888f7fe90456f681e295d7ff4a1ad29eb72b0 src/new name é.txt
+filename src/new name é.txt
+	one main
+afe078f515f1c3ebe5cfd845fe3ab4702fbf636a 2 2 1
+author Tab	Author 日本
+author-mail <a@example.invalid>
+author-time 1767312000
+author-tz +0000
+committer c
+committer-mail <c@example.invalid>
+committer-time 1767312000
+committer-tz +0000
+summary summary	with tab ctl [31m esc 非ASCII
+previous ec8f58e2a71648122f6c6b0d78b953c2620fc529 src/old name ä.txt
+filename src/old name ä.txt
+	two changed
+ec8f58e2a71648122f6c6b0d78b953c2620fc529 3 3 2
+author Root Author
+author-mail <a@example.invalid>
+author-time 1767193200
+author-tz +0900
+committer c
+committer-mail <c@example.invalid>
+committer-time 1767193200
+committer-tz +0900
+summary root: 初回
+boundary
+filename src/old name ä.txt
+	three
+ec8f58e2a71648122f6c6b0d78b953c2620fc529 4 4
+	four
+066cbda57bcb458662f1124dd261c16ed25df049 5 5 1
+author CtlSide
+author-mail <a@example.invalid>
+author-time 1767484800
+author-tz +0000
+committer c
+committer-mail <c@example.invalid>
+committer-time 1767484800
+committer-tz +0000
+summary sidechangers
+previous 2f9888f7fe90456f681e295d7ff4a1ad29eb72b0 src/new name é.txt
+filename src/new name é.txt
+	five side
+0000000000000000000000000000000000000000 6 6 1
+author Not Committed Yet
+author-mail <not.committed.yet>
+author-time 1791509954
+author-tz +0900
+committer Not Committed Yet
+committer-mail <not.committed.yet>
+committer-time 1791509954
+committer-tz +0900
+summary Version of src/new name é.txt from src/new name é.txt
+previous e13aafb5162f2bde99de4f590a4672c6030314fc src/new name é.txt
+filename src/new name é.txt
+	uncommitted line

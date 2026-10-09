@@ -151,13 +151,12 @@ public enum DiffSnapshotChangeDetection {
 public struct DiffSnapshotHead: Sendable, Equatable {
   /// detached HEAD では `nil`。
   public let branch: String?
-  /// `git status --porcelain=v2 --branch` の `branch.oid`。commit が無い repository では
-  /// OID ではなく `(initial)` をそのまま持つ。
-  public let object: String
+  /// commit の無い branch に居る (unborn) ときは `nil`。
+  public let commit: String?
 
-  public init(branch: String?, object: String) {
+  public init(branch: String?, commit: String?) {
     self.branch = branch
-    self.object = object
+    self.commit = commit
   }
 }
 

@@ -723,7 +723,7 @@ Drawer内で比較元を指定してDiffを見る(§1.2)以上、いま何と何
 
 | 項目 | Base Diff | Branch Diff | Commit Diff |
 | --- | --- | --- | --- |
-| 対象 | worktreeの表示名(Task Tabと同じ名前。Project Rootは「Project Root」)、branch名(detached HEADなら「detached」)、HEADの短いOID | 同左 | 同左 |
+| 対象 | worktreeの表示名(Task Tabと同じ名前。Project Rootは「Project Root」)、branch名(detached HEADなら「detached」)、HEADの短いOID(commitの無いbranchなら「commit なし」) | 同左 | 同左 |
 | 比較元 | base branch名と、それを決めた経路(upstream／origin/HEAD／ユーザーの選択。§9.1.1) | 選んだbranch名 | commitの短いOIDとsubject |
 | 起点 | merge-baseの短いOIDと、merge-base起点であること(§9.1.2) | 同左 | 指定commitの親。親の無いcommitは空tree |
 | 範囲 | §9.1.3の5区分それぞれのファイル数(0件の区分も出す)と、ignoredを含まないこと | 同左 | そのcommitと親の差分であり、未commit変更を含まないこと |
@@ -731,6 +731,13 @@ Drawer内で比較元を指定してDiffを見る(§1.2)以上、いま何と何
 - HEADを観測できなかった場合は空欄にせず、観測できなかったと出す(§12.3と同じく丸めない)。
 - 共通祖先が無くmerge-baseを求められない場合はsnapshotを作らず、その理由を表示する。空treeやroot commitを
   起点に代えると§9.1.2と別の範囲になるため。
+- 「共通祖先が無い」と表示するのは、それを裏づけられる場合に限る。`git merge-base`は、共通祖先が無い場合と、
+  在っても辿れない場合とで同じ結果(出力なしの終了コード1)を返す(git 2.50.1／2.55.0で実測)。辿れない場合とは、
+  shallow cloneで共通祖先がshallowの境界より古い場合と、`git replace --graft`や`info/grafts`が親を切っている
+  場合である。そこで、shallowでない・`refs/replace/`と`info/grafts`が無い・stderrに何も出ていない、のすべてを
+  確かめられたときだけ「共通祖先が無い」とし、それ以外は「merge-baseを求められなかった(共通祖先が無いとは
+  限らない)」と理由を添えて表示する(§12.3と同じく、不明を既知の値に丸めない)。stderrを条件に含めるのは、
+  同名のtagとbranchがあるとgitはtagを選び、warningを出したうえで別のrefと比べるためである。
 - merge commitは比べる親が§9.1.2で定まっていないため、Commit Diffを作らない。commitの一覧ではmerge commitで
   あることを示す。
 

@@ -76,7 +76,8 @@ struct DiffRangeSummary: Equatable {
   private static func headLabel(_ head: DiffSnapshotHead?) -> String {
     guard let head else { return "HEAD を観測できませんでした" }
     let branch = head.branch.map { "branch \($0)" } ?? "detached"
-    return "\(branch) @ \(abbreviated(head.object))"
+    guard let commit = head.commit else { return "\(branch) (commit なし)" }
+    return "\(branch) @ \(abbreviated(commit))"
   }
 
   private static func mergeBaseLabel(_ mergeBase: String) -> String {

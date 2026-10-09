@@ -14,7 +14,7 @@ struct DiffRangeSummaryTests {
   func describesBaseDiff() {
     let snapshot = snapshot(
       subject: .base(branch: "origin/main", mergeBase: mergeBase),
-      head: DiffSnapshotHead(branch: "feat/x", object: head),
+      head: DiffSnapshotHead(branch: "feat/x", commit: head),
       counts: [.committed: 2, .staged: 1, .unstaged: 3, .untracked: 1])
     let summary = DiffRangeSummary(
       snapshot: snapshot,
@@ -48,7 +48,7 @@ struct DiffRangeSummaryTests {
     let summary = DiffRangeSummary(
       snapshot: snapshot(
         subject: .branch(name: "feat/other", mergeBase: mergeBase),
-        head: DiffSnapshotHead(branch: nil, object: head)),
+        head: DiffSnapshotHead(branch: nil, commit: head)),
       context: DiffSnapshotRangeContext(
         worktreeName: "Project Root", baseSource: nil, commit: nil))
 
@@ -65,11 +65,20 @@ struct DiffRangeSummaryTests {
     #expect(summary.target == "t — HEAD を観測できませんでした")
   }
 
+  @Test("commit の無い branch に居る HEAD は OID の代わりに commit 無しと示す")
+  func statesUnbornHead() {
+    let summary = DiffRangeSummary(
+      snapshot: snapshot(
+        subject: .commit(hash: head), head: DiffSnapshotHead(branch: "fresh", commit: nil)),
+      context: DiffSnapshotRangeContext(worktreeName: "t", baseSource: nil, commit: nil))
+    #expect(summary.target == "t — branch fresh (commit なし)")
+  }
+
   @Test("Commit Diff は親との差分で、未commit 変更を含まないと示す")
   func describesCommitDiff() {
     let summary = DiffRangeSummary(
       snapshot: snapshot(
-        subject: .commit(hash: head), head: DiffSnapshotHead(branch: "main", object: mergeBase),
+        subject: .commit(hash: head), head: DiffSnapshotHead(branch: "main", commit: mergeBase),
         counts: [.committed: 4]),
       context: DiffSnapshotRangeContext(
         worktreeName: "main", baseSource: nil,
@@ -109,6 +118,24 @@ struct DiffRangeSummaryTests {
       },
       observation: DiffSnapshotObservation(headObject: nil, files: []),
       head: head)
+  }
+}
+
+@Suite("§9.1.4 merge-base を求められないときの表示")
+struct DiffMergeBaseMessageTests {
+  @Test("共通祖先が無いと断定できないときは「無い」と言わず、理由を添える")
+  func doesNotAssertMissingMergeBase() {
+    let message = DiffViewerModel.message(
+      for: .mergeBaseUnresolved(branch: "origin/feature", reason: .shallowRepository))
+    #expect(!message.contains("共通祖先 (merge-base) が無いため"))
+    #expect(message.contains("共通祖先が無いとは限りません"))
+    #expect(message.contains("shallow clone"))
+  }
+
+  @Test("断定できるときだけ共通祖先が無いと言う")
+  func assertsMissingMergeBase() {
+    let message = DiffViewerModel.message(for: .noMergeBase(branch: "unrelated"))
+    #expect(message.contains("共通祖先 (merge-base) が無いため"))
   }
 }
 

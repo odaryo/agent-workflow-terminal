@@ -211,7 +211,8 @@ public struct GitFileHistoryReader: Sendable {
 extension GitReadCommand {
   /// 書式を決める option はユーザーの config に左右されないよう明示する (§17.3)。
   /// `--diff-merges=first-parent` が無いと `--follow` は merge commit を一切出さない
-  /// (`-m` では親ごとに同じ commit が2回出る。2.50.1 / 2.55.0 で実測)。
+  /// (`-m` では親ごとに同じ commit が2回出る。2.50.1 / 2.55.0 で実測)。`--follow` は diff の
+  /// 結果で commit を選ぶので、`--root` が無いと `log.showRoot=false` で root commit が消える。
   static func fileHistory(pathspec: GitPathspec, maxCount: Int) -> Self {
     Self(
       arguments: historyOptions + ["--follow", "--max-count=\(maxCount)", "HEAD", "--"]
@@ -225,7 +226,7 @@ extension GitReadCommand {
 
   private static let historyOptions = [
     "log", "-z", "--no-show-signature", "--encoding=UTF-8", "--find-renames",
-    "--diff-merges=first-parent", "--name-status", "--format=" + GitFileHistory.format,
+    "--diff-merges=first-parent", "--name-status", "--root", "--format=" + GitFileHistory.format,
   ]
 
   /// `--no-root` は `blame.showRoot=true` で root commit の `boundary` 行が消えるのを止める

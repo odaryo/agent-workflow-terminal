@@ -253,6 +253,53 @@ struct GitFileHistoryIntegrationTests {
 
   // MARK: -
 
+  /// `--follow` は diff の結果で commit を選ぶので、`log.showRoot=false` では root commit の
+  /// diff が作られず、root commit が一覧から落ちる (実測。`--no-walk` も name-status が空になる)。
+  /// 開発者の `~/.gitconfig` に左右されないよう、repository の local config で同じ条件を作る。
+  @Test("log.showRoot=false でも root commit が履歴と単独の読み出しに現れる", .timeLimit(.minutes(1)))
+  func showsRootCommitDespiteShowRootFalse() async throws {
+    try await withGitRepository { repository in
+      let root = repository.mainWorktree
+      try await repository.git(["checkout", "-q", "--orphan", "history"])
+      try write("only root\n", to: root, "untouched.txt")
+      let rootID = try await commit(repository, "root")
+      try write("other\n", to: root, "other.txt")
+      try await commit(repository, "unrelated")
+      try await repository.git(["config", "log.showRoot", "false"])
+      let reader = try makeReader(repository)
+
+      let page = try await reader.history(path: "untouched.txt")
+      let entry = try await reader.entry(commitID: rootID, paths: ["untouched.txt"])
+
+      #expect(page.records.count == page.entries.count)
+      #expect(page.entries.map(\.commitID) == [rootID])
+      #expect(page.entries.first?.changes.map(\.kind) == [.added])
+      #expect(entry?.changes.map(\.kind) == [.added])
+    }
+  }
+
+  /// git は `+2359` のような offset を受け付け、`%aI` はそれをそのまま出す。ISO 8601 の解析は
+  /// ±18:00 を超えると失敗するので、日時は UNIX 時刻で読む (実測)。
+  @Test("±18:00 を超える timezone の commit も日時を読める", .timeLimit(.minutes(1)))
+  func readsExtremeTimeZones() async throws {
+    try await withGitRepository { repository in
+      let root = repository.mainWorktree
+      try write("1\n", to: root, "tz.txt")
+      try await commit(repository, "plus", date: "1600086340 +2359")
+      try write("2\n", to: root, "tz.txt")
+      try await commit(repository, "minus", date: "1600000000 -2359")
+      let reader = try makeReader(repository)
+
+      let page = try await reader.history(path: "tz.txt")
+
+      #expect(page.records.count == page.entries.count)
+      #expect(
+        page.entries.map(\.authoredAt) == [
+          Date(timeIntervalSince1970: 1_600_000_000), Date(timeIntervalSince1970: 1_600_086_340),
+        ])
+    }
+  }
+
   private struct RenamedHistory {
     let root: String
     let beforeRename: String
@@ -283,10 +330,11 @@ struct GitFileHistoryIntegrationTests {
   @discardableResult
   private func commit(
     _ repository: GitTestRepository, _ message: String,
-    author: String = "awt <awt@example.invalid>"
+    author: String = "awt <awt@example.invalid>", date: String? = nil
   ) async throws -> String {
     try await repository.git(["add", "-A"])
-    try await repository.git(["commit", "-q", "--author", author, "-m", message])
+    try await repository.git(
+      ["commit", "-q", "--author", author, "-m", message] + (date.map { ["--date", $0] } ?? []))
     return try await headID(repository)
   }
 

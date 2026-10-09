@@ -5,8 +5,8 @@ import Testing
 // fixture は隔離 repository (`GIT_CONFIG_GLOBAL=/dev/null`) から 2.50.1 (ローカル) と
 // 2.55.0 (CI の runner。brew bottle を /private/tmp へ隔離展開) の両方で採取した。
 // `git --no-optional-locks -C <root> --no-pager log -z --no-show-signature --encoding=UTF-8
-// --follow --find-renames --diff-merges=first-parent --name-status --format=<GitFileHistory.format>
-// --max-count=201 HEAD -- ':(literal)src/new name é.txt'`
+// --find-renames --diff-merges=first-parent --name-status --root --format=<GitFileHistory.format>
+// --follow --max-count=201 HEAD -- ':(literal)src/new name é.txt'`
 // 履歴: root → 変更 → rename (`src/old name ä.txt` → `src/new name é.txt`) → 分岐して両側で変更 →
 // merge。author 名と summary にタブ・非 ASCII・制御文字 (US / RS を含む) を入れてある。
 @Suite("§7.3 ファイル単位の Git 履歴の解析")
@@ -42,6 +42,7 @@ struct GitFileHistoryTests {
     #expect(root.parentIDs.isEmpty)
     #expect(root.changes.map(\.kind) == [.added])
     #expect(root.summary == "root: 初回")
+    #expect(root.authoredAt == Date(timeIntervalSince1970: 1_767_193_200))
   }
 
   @Test("merge commit は第1親との差分として1件だけ現れる", arguments: versions)
@@ -92,7 +93,7 @@ struct GitFileHistoryTests {
   @Test("壊れたヘッダは部分失敗にし、後続のレコードを失わない")
   func reportsBrokenHeaderAndContinues() {
     let good =
-      "\(String(repeating: "a", count: 40))\0aaaaaaa\0\0n\02026-01-01T00:00:00Z\0s\0\nA\0p\0"
+      "\(String(repeating: "a", count: 40))\0aaaaaaa\0\0n\01767225600\0s\0\nA\0p\0"
     let broken = "\(String(repeating: "b", count: 40))\0bbbbbbb\0\0n\0not a date\0s\0\nM\0p\0"
     let result = GitFileHistory.parse(output: broken + good)
 
@@ -101,13 +102,27 @@ struct GitFileHistoryTests {
     #expect(result.failures.first?.error == .invalidAuthoredAt("not a date"))
   }
 
+  /// `%aI` は `+23:59` のような git が受け付ける offset をそのまま出し、ISO 8601 の解析は
+  /// ±18:00 を超えると失敗する (実測)。日時は offset を含まない UNIX 時刻で読む。
+  @Test("日時は UNIX 時刻で読み、ISO 8601 の文字列は受け付けない")
+  func readsAuthorDateAsUnixTime() {
+    let unix =
+      "\(String(repeating: "a", count: 40))\0aaaaaaa\0\0n\01600086340\0s\0\nM\0p\0"
+    let iso =
+      "\(String(repeating: "b", count: 40))\0bbbbbbb\0\0n\02020-09-15T12:24:40+23:59\0s\0\nM\0p\0"
+    let result = GitFileHistory.parse(output: unix + iso)
+
+    #expect(result.entries.map(\.authoredAt) == [Date(timeIntervalSince1970: 1_600_086_340)])
+    #expect(result.failures.first?.error == .invalidAuthoredAt("2020-09-15T12:24:40+23:59"))
+  }
+
   @Test("途中で切れた出力は、切れたレコードだけを失敗にする")
   func reportsTruncatedRecord() {
     let good =
-      "\(String(repeating: "a", count: 40))\0aaaaaaa\0\0n\02026-01-01T00:00:00Z\0s\0\nA\0p\0"
+      "\(String(repeating: "a", count: 40))\0aaaaaaa\0\0n\01767225600\0s\0\nA\0p\0"
     let truncated = "\(String(repeating: "c", count: 40))\0ccccccc\0\0n\0"
     let rename =
-      "\(String(repeating: "d", count: 40))\0ddddddd\0\0n\02026-01-01T00:00:00Z\0s\0\nR100\0old\0"
+      "\(String(repeating: "d", count: 40))\0ddddddd\0\0n\01767225600\0s\0\nR100\0old\0"
 
     let headerCut = GitFileHistory.parse(output: good + truncated)
     let pathCut = GitFileHistory.parse(output: good + rename)

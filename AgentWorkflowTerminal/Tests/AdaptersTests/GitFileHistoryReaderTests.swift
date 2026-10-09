@@ -13,7 +13,7 @@ struct GitFileHistoryReaderTests {
 
   @Test("履歴は上限より1件多く求め、超えた分で「さらに読む」を判定する")
   func requestsOneMoreThanLimit() async throws {
-    let record = "\(Self.commit)\0ccccccc\0\0a\02026-01-01T00:00:00Z\0s\0\nM\0a b.txt\0"
+    let record = "\(Self.commit)\0ccccccc\0\0a\01767225600\0s\0\nM\0a b.txt\0"
     let spy = ScriptedGitProcess(outputs: [String(repeating: record, count: 3)])
     let page = try await makeReader(spy).history(path: "a b.txt", limit: 2)
 
@@ -23,15 +23,16 @@ struct GitFileHistoryReaderTests {
     #expect(
       call.arguments.dropFirst(4) == [
         "log", "-z", "--no-show-signature", "--encoding=UTF-8", "--find-renames",
-        "--diff-merges=first-parent", "--name-status", "--format=" + GitFileHistory.format,
-        "--follow", "--max-count=3", "HEAD", "--", ":(literal)a b.txt",
+        "--diff-merges=first-parent", "--name-status", "--root",
+        "--format=" + GitFileHistory.format, "--follow", "--max-count=3", "HEAD", "--",
+        ":(literal)a b.txt",
       ])
     #expect(call.timeout == GitFileHistoryReader.historyTimeout)
   }
 
   @Test("上限ちょうどの件数なら「さらに読む」を出さない")
   func noMoreWhenWithinLimit() async throws {
-    let record = "\(Self.commit)\0ccccccc\0\0a\02026-01-01T00:00:00Z\0s\0\nM\0a\0"
+    let record = "\(Self.commit)\0ccccccc\0\0a\01767225600\0s\0\nM\0a\0"
     let spy = ScriptedGitProcess(outputs: [String(repeating: record, count: 2)])
     let page = try await makeReader(spy).history(path: "a", limit: 2)
 

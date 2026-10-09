@@ -24,7 +24,9 @@ public struct GitFileHistoryEntry: Sendable, Equatable, Identifiable {
   public let authoredAt: Date
   public let summary: String
   /// 空のことがある。`--no-walk` で pathspec に触れない commit を求めると、git 2.55.0 は
-  /// name-status の無いヘッダだけを出す (2.50.1 はヘッダも出さない。実測)。
+  /// name-status の無いヘッダだけを出す (2.50.1 はヘッダも出さない)。root commit も
+  /// `log.showRoot=false` では diff が作られず、両版ともヘッダだけになる。こちらは `--root` を
+  /// 明示して防いでいる (いずれも実測)。
   public let changes: [GitFileHistoryChange]
 
   public var id: String { commitID }
@@ -72,11 +74,14 @@ public struct GitFileHistoryParseResult: Sendable, Equatable {
 /// `%s` に残る)。NUL は commit message に入れられない (`git commit` が拒否する) ので、
 /// ヘッダを固定個数の NUL 区切りトークンにして位置で読む。
 ///
+/// 日時に `%aI` を使わないのは、git が受け付ける `+2359` のような offset をそのまま出し、
+/// ISO 8601 の解析が ±18:00 を超えると失敗するため (実測)。offset を含まない `%at` で読む。
+///
 /// `-z` の出力は `<ヘッダ 6 トークン>\0\n<status>\0<path>\0[<path>\0]` で、最初の status
 /// トークンの先頭に改行が付く (2.50.1 / 2.55.0 で実測)。status は英大文字で始まり、OID は
 /// 小文字の16進なので、次のトークンが status か次のヘッダかを取り違えない。
 public enum GitFileHistory {
-  public static let format = "%H%x00%h%x00%P%x00%an%x00%aI%x00%s"
+  public static let format = "%H%x00%h%x00%P%x00%an%x00%at%x00%s"
   private static let headerFieldCount = 6
 
   public static func parse(output: String) -> GitFileHistoryParseResult {
@@ -142,9 +147,10 @@ public enum GitFileHistory {
     let parents = header[2].isEmpty ? [] : header[2].split(separator: " ").map(String.init)
     guard parents.allSatisfy(GitObjectID.isValid) else { throw .invalidParentIDs(header[2]) }
     guard
-      let authoredAt = try? Date.ISO8601FormatStyle(includingFractionalSeconds: false)
-        .parse(header[4])
+      header[4].utf8.allSatisfy({ $0 >= UInt8(ascii: "0") && $0 <= UInt8(ascii: "9") }),
+      let seconds = Int64(header[4])
     else { throw .invalidAuthoredAt(header[4]) }
+    let authoredAt = Date(timeIntervalSince1970: TimeInterval(seconds))
     return GitFileHistoryEntry(
       commitID: header[0], abbreviatedCommitID: header[1], parentIDs: parents,
       authorName: header[3], authoredAt: authoredAt, summary: header[5], changes: changes)

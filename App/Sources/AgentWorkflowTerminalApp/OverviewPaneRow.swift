@@ -82,9 +82,7 @@ struct OverviewPaneRow: View {
   }
 
   private var name: String {
-    if pane.isMain { return "メイン" }
-    guard let location = pane.detail.location else { return pane.paneID.rawValue }
-    return "\(location.windowIndex).\(location.paneIndex)"
+    paneShortName(paneID: pane.paneID, isMain: pane.isMain, location: pane.detail.location)
   }
 
   private var shownPurpose: String {
@@ -117,4 +115,11 @@ struct OverviewPaneRow: View {
     case .tmux(let failure): "tmux への書き込みに失敗しました: \(failure)"
     }
   }
+}
+
+/// Overview の行と通知で同じ pane の呼び名を使う (§13)。
+func paneShortName(paneID: PaneID, isMain: Bool, location: PaneLocation?) -> String {
+  if isMain { return "メイン" }
+  guard let location else { return paneID.rawValue }
+  return "\(location.windowIndex).\(location.paneIndex)"
 }

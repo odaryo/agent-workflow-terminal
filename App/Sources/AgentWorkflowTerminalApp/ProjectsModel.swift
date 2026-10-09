@@ -26,6 +26,11 @@ final class ProjectsModel: ObservableObject {
   /// 端末を覆わずに伝える失敗 (保存できない、`--project` を解決できない、追加に失敗した等)。
   @Published private(set) var warning: String?
 
+  /// Overview の行と通知の deep link が共用する移動。
+  let navigator = AppNavigator()
+  /// `nil` は通知を出さない起動 (bundle の外)。
+  let notifier: PaneNotifier?
+
   private let dependencies: AppDependencies
   private let resolver = GitProjectResolver(processRunner: FoundationProcessRunner())
   private let store: ProjectRegistryStore?
@@ -41,6 +46,8 @@ final class ProjectsModel: ObservableObject {
       ProjectRegistryStore(
         fileURL: ProjectRegistryStore.defaultFileURL(applicationSupportDirectory: $0))
     }
+    notifier = PaneNotifier.make(navigator: navigator)
+    notifier?.attach(self)
   }
 
   var selectedModel: AppModel? {
@@ -153,6 +160,10 @@ final class ProjectsModel: ObservableObject {
     warning = nil
   }
 
+  func showWarning(_ text: String) {
+    warning = text
+  }
+
   private func isSelectable(_ commonDirectory: WorktreeIdentity) -> Bool {
     if case .available = slots[commonDirectory] { return true }
     return false
@@ -166,7 +177,7 @@ final class ProjectsModel: ObservableObject {
   }
 
   private func makeAvailableSlot(for project: RegisteredProject) -> ProjectSlot {
-    let model = AppModel(project: project, dependencies: dependencies)
+    let model = AppModel(project: project, dependencies: dependencies, notifier: notifier)
     model.run()
     return .available(model)
   }

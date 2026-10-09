@@ -145,7 +145,7 @@ struct WorktreePaneAgentStateFeedTests {
       adapters: [FeedAdapter(id: "matched", processNames: ["agent"], channel: channel)],
       fallback: FeedAdapter(id: "fallback", processNames: [], channel: channel),
       intervals: .init(signals: .seconds(1), liveness: .seconds(1)),
-      continuation: pair.continuation, signalSource: signals)
+      output: .states(pair.continuation), signalSource: signals)
     let paneID = PaneID(rawValue: "%1")
     var iterator = pair.stream.makeAsyncIterator()
 
@@ -175,7 +175,7 @@ struct WorktreePaneAgentStateFeedTests {
       adapters: [FeedAdapter(id: "matched", processNames: ["agent"], channel: channel)],
       fallback: FeedAdapter(id: "fallback", processNames: [], channel: channel),
       intervals: .init(signals: .seconds(1), liveness: .seconds(1)),
-      continuation: pair.continuation, signalSource: signals)
+      output: .states(pair.continuation), signalSource: signals)
 
     await coordinator.receive([pane("%1"), pane("%2")])
     await coordinator.cancel()
@@ -327,9 +327,9 @@ private struct TestContext {
   let clock: FeedTestClock
 }
 
-private enum TestError: Error { case failed }
+enum TestError: Error { case failed }
 
-private actor ScriptedPaneSource: WorktreePaneSource {
+actor ScriptedPaneSource: WorktreePaneSource {
   private let results: [Result<[PaneSnapshot], TestError>]
   private var callCount = 0
 
@@ -346,7 +346,7 @@ private actor ScriptedPaneSource: WorktreePaneSource {
   }
 }
 
-private actor FeedSignalSource: AgentSignalSource {
+actor FeedSignalSource: AgentSignalSource {
   private let aliveNames: Set<String>
   private let preferredProcessNames: [Int32: String]
   private(set) var forgotten: [PaneID] = []
@@ -375,7 +375,7 @@ private actor FeedSignalSource: AgentSignalSource {
   func forget(_ pane: PaneSnapshot) async { forgotten.append(pane.id) }
 }
 
-private struct FeedAdapter: AgentAdapter {
+struct FeedAdapter: AgentAdapter {
   let id: AgentAdapterID
   let processNames: Set<String>
   let channel: ObservationChannel
@@ -398,7 +398,7 @@ private struct FeedAdapter: AgentAdapter {
   }
 }
 
-private actor ObservationChannel {
+actor ObservationChannel {
   private struct Subscription {
     let id: UUID
     let adapterID: AgentAdapterID
@@ -484,7 +484,7 @@ private actor FeedOutputRecorder {
   }
 }
 
-private actor FeedTestClock: ContinuousTimeSource {
+actor FeedTestClock: ContinuousTimeSource {
   nonisolated let now = ContinuousClock().now
   private var sleepers: [CheckedContinuation<Void, any Error>] = []
 

@@ -161,7 +161,7 @@ final class AppModel: ObservableObject {
   /// 「体感で追随し、git への負荷が無視できる」程度でしかない。
   private static let rescanInterval = Duration.seconds(5)
 
-  init(project: RegisteredProject, dependencies: AppDependencies) {
+  init(project: RegisteredProject, dependencies: AppDependencies, notifier: PaneNotifier?) {
     self.project = project
     projectDirectory = URL(fileURLWithPath: project.directory)
     applicationSupportDirectory = dependencies.applicationSupportDirectory
@@ -172,7 +172,7 @@ final class AppModel: ObservableObject {
       } else {
         nil
       }
-    paneObservations = PaneObservationStore(dependencies: dependencies)
+    paneObservations = PaneObservationStore(dependencies: dependencies, notifier: notifier)
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
     closing = WorktreeClosing(tmuxRunner: dependencies.tmuxRunner)
     message = dependencies.tmuxError

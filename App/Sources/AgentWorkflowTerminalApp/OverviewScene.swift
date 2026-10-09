@@ -12,7 +12,7 @@ struct OverviewScene: Scene {
 
   var body: some Scene {
     Window("Overview", id: "overview") {
-      OverviewView(projects: projects)
+      OverviewView(projects: projects, navigator: projects.navigator)
         .frame(minWidth: 420, minHeight: 240)
 
     }
@@ -39,13 +39,13 @@ private struct OverviewMenuItem: View {
 
 private struct OverviewView: View {
   @ObservedObject var projects: ProjectsModel
+  @ObservedObject var navigator: AppNavigator
   @Environment(\.openWindow) private var openWindow
-  @State private var navigationError: String?
 
   var body: some View {
     VStack(spacing: 0) {
-      if let navigationError {
-        WarningBar(text: navigationError) { self.navigationError = nil }
+      if let notice = navigator.overviewNotice {
+        WarningBar(text: notice) { navigator.overviewNotice = nil }
         Divider()
       }
       if projects.availableModels.isEmpty {
@@ -64,23 +64,14 @@ private struct OverviewView: View {
         }
       }
     }
+    .onAppear { navigator.openWindow = openWindow }
   }
 
-  /// §13 の行の選択。Project → タブ → tmux の window と pane → メイン window の端末、の順に移す。
+  /// §13 の行の選択。
   private func reveal(_ model: AppModel, worktree: WorktreeIdentity, pane: PaneID?) async {
-    navigationError = nil
-    projects.select(model.project.commonDirectory)
-    if model.projectRoot?.identity == worktree {
-      model.selectProjectRoot()
-    } else if let task = model.worktrees.first(where: { $0.identity == worktree }) {
-      model.select(task)
-    }
-    if let pane, let error = await model.paneObservations.reveal(pane) {
-      navigationError = "pane \(pane.rawValue) へ移動できません: \(error)"
-    }
-    openWindow(id: "main")
-    NSApp.activate()
-    model.paneObservations.requestTerminalFocus()
+    navigator.overviewNotice = nil
+    navigator.overviewNotice = await navigator.reveal(
+      model, worktree: worktree, pane: pane, in: projects)
   }
 }
 
@@ -97,7 +88,7 @@ private struct OverviewProjectSection: View {
         worktreeRows(projectRoot, title: "Project Root")
       }
       ForEach(overview?.tasks ?? [], id: \.worktree) { task in
-        worktreeRows(task, title: title(of: task.worktree))
+        worktreeRows(task, title: model.worktreeTitle(of: task.worktree))
       }
     }
   }
@@ -135,20 +126,7 @@ private struct OverviewProjectSection: View {
     else { return nil }
     return OverviewWorktreeInput(
       worktree: identity, paneStates: observed.displayStates, details: observed.details,
-      mainPane: mainPane(of: identity, observed: observed))
-  }
-
-  private func mainPane(
-    of identity: WorktreeIdentity, observed: PaneObservationStore.Observed
-  ) -> PaneID? {
-    guard let registration = mainPanes.registry.registration(for: identity),
-      observed.processIDs[registration.pane] == registration.processID
-    else { return nil }
-    return registration.pane
-  }
-
-  private func title(of identity: WorktreeIdentity) -> String {
-    model.worktrees.first { $0.identity == identity }?.detected.tabName ?? identity.rawValue
+      mainPane: model.mainPane(of: identity))
   }
 }
 

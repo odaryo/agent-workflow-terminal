@@ -3,6 +3,23 @@ public protocol WorktreePaneSource: Sendable {
   func panes(of worktree: WorktreeIdentity) async throws -> [PaneSnapshot]
 }
 
+/// `states(of:)` の各配信に、それが揃った観測かどうかを添えたもの。
+public struct WorktreePaneAgentStates: Sendable, Hashable {
+  public let panes: [PaneAgentState]
+  /// pane 一覧の全 pane について、adapter の最初の結果 (観測か `.absent`) が届いている。
+  /// pane が無ければ真。後から pane が現れると、その結果が届くまで再び偽になる。
+  ///
+  /// - Important: 最初の配信は adapter の結果がまだ無いので、ほぼ必ず `[]` で偽になる。
+  ///   これを「Agent pane が無い」と読んで基準にすると、次の配信で判断待ちの pane が全部
+  ///   遷移に見える (#387)。
+  public let isComplete: Bool
+
+  public init(panes: [PaneAgentState], isComplete: Bool) {
+    self.panes = panes
+    self.isComplete = isComplete
+  }
+}
+
 public struct WorktreePaneAgentStateFeed: Sendable {
   private let adapters: [any AgentAdapter]
   private let fallback: any AgentAdapter
@@ -31,35 +48,63 @@ public struct WorktreePaneAgentStateFeed: Sendable {
     timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
   ) -> AsyncStream<[PaneAgentState]> {
     AsyncStream { continuation in
-      let coordinator = WorktreePaneFeedCoordinator(
-        adapters: adapters,
-        fallback: fallback,
-        intervals: intervals,
-        continuation: continuation,
-        signalSource: signalSource
-      )
-      let pollTask = Task {
-        while !Task.isCancelled {
-          do {
-            let panes = try await paneSource.panes(of: worktree)
-            guard !Task.isCancelled else { break }
-            await coordinator.receive(panes)
-          } catch {
-            guard !Task.isCancelled else { break }
-          }
+      let stop = run(
+        of: worktree, output: .states(continuation), panes: paneSource, signals: signalSource,
+        timeSource: timeSource)
+      continuation.onTermination = { _ in stop() }
+    }
+  }
 
-          do {
-            try await timeSource.sleep(until: timeSource.now.advanced(by: paneListInterval))
-          } catch {
-            break
-          }
+  /// `states(of:)` と同じ観測に `isComplete` を添える。`isComplete` だけが変わった回も配信する。
+  public func snapshots(
+    of worktree: WorktreeIdentity,
+    panes paneSource: any WorktreePaneSource,
+    signals signalSource: any AgentSignalSource,
+    timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
+  ) -> AsyncStream<WorktreePaneAgentStates> {
+    AsyncStream { continuation in
+      let stop = run(
+        of: worktree, output: .snapshots(continuation), panes: paneSource,
+        signals: signalSource, timeSource: timeSource)
+      continuation.onTermination = { _ in stop() }
+    }
+  }
+
+  private func run(
+    of worktree: WorktreeIdentity,
+    output: WorktreePaneFeedCoordinator.Output,
+    panes paneSource: any WorktreePaneSource,
+    signals signalSource: any AgentSignalSource,
+    timeSource: any ContinuousTimeSource
+  ) -> @Sendable () -> Void {
+    let coordinator = WorktreePaneFeedCoordinator(
+      adapters: adapters,
+      fallback: fallback,
+      intervals: intervals,
+      output: output,
+      signalSource: signalSource
+    )
+    let pollTask = Task {
+      while !Task.isCancelled {
+        do {
+          let panes = try await paneSource.panes(of: worktree)
+          guard !Task.isCancelled else { break }
+          await coordinator.receive(panes)
+        } catch {
+          guard !Task.isCancelled else { break }
+        }
+
+        do {
+          try await timeSource.sleep(until: timeSource.now.advanced(by: paneListInterval))
+        } catch {
+          break
         }
       }
-      Task { await coordinator.setPollTask(pollTask) }
-      continuation.onTermination = { _ in
-        pollTask.cancel()
-        Task { await coordinator.cancel() }
-      }
+    }
+    Task { await coordinator.setPollTask(pollTask) }
+    return {
+      pollTask.cancel()
+      Task { await coordinator.cancel() }
     }
   }
 }
@@ -75,11 +120,16 @@ actor WorktreePaneFeedCoordinator {
   private let adapters: [any AgentAdapter]
   private let fallback: any AgentAdapter
   private let intervals: AgentObservationIntervals
-  private let continuation: AsyncStream<[PaneAgentState]>.Continuation
+  enum Output: Sendable {
+    case states(AsyncStream<[PaneAgentState]>.Continuation)
+    case snapshots(AsyncStream<WorktreePaneAgentStates>.Continuation)
+  }
+
+  private let output: Output
   private let signalSource: any AgentSignalSource
   private var paneOrder: [PaneID] = []
   private var entries: [PaneID: PaneEntry] = [:]
-  private var lastYielded: [PaneAgentState]?
+  private var lastYielded: WorktreePaneAgentStates?
   private var pollTask: Task<Void, Never>?
   private var isCancelled = false
 
@@ -87,13 +137,13 @@ actor WorktreePaneFeedCoordinator {
     adapters: [any AgentAdapter],
     fallback: any AgentAdapter,
     intervals: AgentObservationIntervals,
-    continuation: AsyncStream<[PaneAgentState]>.Continuation,
+    output: Output,
     signalSource: any AgentSignalSource
   ) {
     self.adapters = adapters
     self.fallback = fallback
     self.intervals = intervals
-    self.continuation = continuation
+    self.output = output
     self.signalSource = signalSource
   }
 
@@ -166,7 +216,10 @@ actor WorktreePaneFeedCoordinator {
     }
     entries.removeAll()
     paneOrder.removeAll()
-    continuation.finish()
+    switch output {
+    case .states(let continuation): continuation.finish()
+    case .snapshots(let continuation): continuation.finish()
+    }
     for snapshot in released {
       await signalSource.forget(snapshot)
     }
@@ -206,8 +259,16 @@ actor WorktreePaneFeedCoordinator {
       guard case .observation(let observation) = entries[paneID]?.result else { return nil }
       return PaneAgentState(id: paneID, observation: observation)
     }
-    guard value != lastYielded else { return }
-    lastYielded = value
-    continuation.yield(value)
+    let isComplete = paneOrder.allSatisfy { entries[$0]?.result != nil }
+    let snapshot = WorktreePaneAgentStates(panes: value, isComplete: isComplete)
+    switch output {
+    case .states(let continuation):
+      guard value != lastYielded?.panes else { return }
+      continuation.yield(value)
+    case .snapshots(let continuation):
+      guard snapshot != lastYielded else { return }
+      continuation.yield(snapshot)
+    }
+    lastYielded = snapshot
   }
 }

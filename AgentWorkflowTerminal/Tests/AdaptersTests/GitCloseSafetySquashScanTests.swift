@@ -19,7 +19,7 @@ struct GitCloseSafetySquashScanTests {
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case let arguments where arguments.first == "diff":
         .success(.init(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n"))
@@ -46,7 +46,7 @@ struct GitCloseSafetySquashScanTests {
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case let arguments where arguments.first == "log":
         .success(.init(exitCode: 0, stdout: "not-a-commit-record\0", stderr: ""))
@@ -85,12 +85,15 @@ struct GitCloseSafetySquashScanTests {
 
 /// ancestor 判定が rc 1 を返した後に走る squash merge 走査 (§3.4) への応答。既定 branch 側に
 /// merge-base より後の commit が1つも無い形なので、突き合わせる相手がおらず `.unmerged` になる。
-/// 走査に関係しない command はここでは扱わず、呼び出し側の想定外として失敗させる。
+/// 走査と既定 branch の先端の解決に関係しない command はここでは扱わず、呼び出し側の想定外として
+/// 失敗させる。
 func squashScanWithoutCandidates(
   _ arguments: [String]
 ) -> Result<ProcessRunResult, ProcessRunnerError> {
   let oid = String(repeating: "a", count: 40)
   switch arguments.first {
+  case "rev-parse":
+    return defaultBranchTipOrUnexpected(arguments)
   case "merge-base" where arguments.dropFirst().first != "--is-ancestor":
     return .success(.init(exitCode: 0, stdout: oid + "\n", stderr: ""))
   case "diff":
@@ -100,5 +103,19 @@ func squashScanWithoutCandidates(
     return .success(.init(exitCode: 0, stdout: "", stderr: ""))
   default:
     return .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+  }
+}
+
+/// merge 判定は既定 branch の ref を1回だけ OID へ解決し、以降はその OID で問う (Issue #366)。
+/// その解決への応答。ほかの command は呼び出し側の想定外として失敗させる。
+func defaultBranchTipOrUnexpected(
+  _ arguments: [String]
+) -> Result<ProcessRunResult, ProcessRunnerError> {
+  switch arguments {
+  case ["rev-parse", "--verify", "--quiet", "refs/heads/main"],
+    ["rev-parse", "--verify", "--quiet", "refs/remotes/origin/main"]:
+    .success(tipOutput(fixtureDefaultTipHex))
+  default:
+    .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
   }
 }

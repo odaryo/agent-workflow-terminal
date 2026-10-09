@@ -69,6 +69,8 @@ let gitNotFound = ProcessRunResult(exitCode: 1, stdout: "", stderr: "")
 
 /// 検査がマージ判定に使ったことにする先端。`gitStub` の既定の `tip` もこれを返す。
 let fixtureTipHex = String(repeating: "a", count: 40)
+/// merge 判定で既定 branch の ref を解決した先端。branch 側 (`fixtureTipHex`) と取り違えないよう別の値にする。
+let fixtureDefaultTipHex = String(repeating: "b", count: 40)
 
 func inspectedTip() throws -> CommitObjectID {
   try #require(CommitObjectID(fixtureTipHex))

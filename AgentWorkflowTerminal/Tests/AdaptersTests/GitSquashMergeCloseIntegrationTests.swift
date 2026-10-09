@@ -155,6 +155,24 @@ struct GitSquashMergeCloseIntegrationTests {
     }
   }
 
+  @Test("判定を再利用していても、squash merge で既定 branch が進めば merged を返す (Issue #366)")
+  func judgesAgainAfterSquashMergeWithCache() async throws {
+    try await withGitRepository { repository in
+      let cache = GitBranchMergeCache()
+      try await repository.addBranchWorktree("topic", commits: [["a.txt": "a1"]])
+      try await repository.commitOnDefaultBranch(files: ["unrelated.txt": "u1"])
+      #expect(try await repository.branchMergeStatus("topic", mergeCache: cache) == .unmerged)
+      #expect(try await repository.branchMergeStatus("topic", mergeCache: cache) == .unmerged)
+
+      try await repository.squashMerge("topic")
+
+      let tip = try await repository.branchTip("topic")
+      #expect(
+        try await repository.branchMergeStatus("topic", mergeCache: cache)
+          == .merged(.squash, tip: tip))
+    }
+  }
+
   @Test("既定 branch 側の merge commit は第1親との差で突き合わせる")
   func comparesMergeCommitAgainstItsFirstParent() async throws {
     try await withGitRepository { repository in
@@ -215,12 +233,13 @@ extension GitTestRepository {
   }
 
   fileprivate func branchMergeStatus(
-    _ branch: String, scanLimit: Int = GitCloseSafetyInspector.defaultSquashScanCommitLimit
+    _ branch: String, scanLimit: Int = GitCloseSafetyInspector.defaultSquashScanCommitLimit,
+    mergeCache: GitBranchMergeCache? = nil
   ) async throws -> BranchMergeStatus {
     let target = try #require(try await detector().scan().detected.first { $0.branch == branch })
     let result = await GitCloseSafetyInspector(
       runner: try runner(globalConfig: "", in: branch), target: target,
-      squashScanCommitLimit: scanLimit
+      squashScanCommitLimit: scanLimit, mergeCache: mergeCache
     ).inspect(projectRootBranch: "main")
     #expect(result.failures.isEmpty)
     return result.report.inspection.branchMerge

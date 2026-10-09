@@ -1,0 +1,28 @@
+ec8f58e2a71648122f6c6b0d78b953c2620fc529 1 1 1
+author Root Author
+author-mail <a@example.invalid>
+author-time 1767193200
+author-tz +0900
+committer c
+committer-mail <c@example.invalid>
+committer-time 1767193200
+committer-tz +0900
+summary root: 初回
+boundary
+filename "src/q\"uote.txt"
+	crlf 1
+afe078f515f1c3ebe5cfd845fe3ab4702fbf636a 2 2 1
+author Tab	Author 日本
+author-mail <a@example.invalid>
+author-time 1767312000
+author-tz +0000
+committer c
+committer-mail <c@example.invalid>
+committer-time 1767312000
+committer-tz +0000
+summary summary	with tab ctl [31m esc 非ASCII
+previous ec8f58e2a71648122f6c6b0d78b953c2620fc529 "src/q\"uote.txt"
+filename "src/q\"uote.txt"
+	crlf 2 changed
+ec8f58e2a71648122f6c6b0d78b953c2620fc529 3 3 1
+	no newline

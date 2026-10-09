@@ -280,8 +280,8 @@ private struct WorktreeTab: View {
       tab.contextMenu {
         Button("Active にする") { setActivation(.active) }
           .disabled(worktree.activation == .active)
-        Button("Inactive にする") { setActivation(.inactive) }
-          .disabled(worktree.activation == .inactive)
+        // Inactive 化は Close の選択肢1からだけ行う。§3.4 の拒否 (detached HEAD・作業途中) は
+        // 選択肢1にも掛かり、直接 Inactive にする項目はその抜け道になる。
         Button("Close…", action: requestClose)
       }
     } else {

@@ -122,6 +122,8 @@ final class AppModel: ObservableObject {
   private let paneStates: WorktreePaneStatesFeed?
   let diffModels = DiffViewerModelStore()
   let mainPanes: MainPaneCoordinator
+  /// Close の確認と実行 (設計書 §3.4)。
+  let closing: WorktreeClosing
   let project: RegisteredProject
   private let projectDirectory: URL
   private let applicationSupportDirectory: URL?
@@ -156,6 +158,7 @@ final class AppModel: ObservableObject {
       }
     paneStates = dependencies.paneStates
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
+    closing = WorktreeClosing(tmuxRunner: dependencies.tmuxRunner)
     message = dependencies.tmuxError
   }
 

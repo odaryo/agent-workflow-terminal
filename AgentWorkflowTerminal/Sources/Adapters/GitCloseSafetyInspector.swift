@@ -40,11 +40,13 @@ public struct GitCloseSafetyInspector: Sendable {
   private let runner: GitRunner
   private let target: DetectedWorktree
   private let squashScanCommitLimit: Int
+  private let mergeCache: GitBranchMergeCache?
 
   public init(
     target: DetectedWorktree,
     processRunner: any ProcessRunning,
-    executableCandidates: [URL] = GitRunner.defaultExecutableCandidates
+    executableCandidates: [URL] = GitRunner.defaultExecutableCandidates,
+    mergeCache: GitBranchMergeCache? = nil
   ) throws(GitRunnerError) {
     self.runner = try GitRunner(
       repositoryDirectory: URL(fileURLWithPath: target.worktreePath),
@@ -52,15 +54,18 @@ public struct GitCloseSafetyInspector: Sendable {
       executableCandidates: executableCandidates)
     self.target = target
     self.squashScanCommitLimit = Self.defaultSquashScanCommitLimit
+    self.mergeCache = mergeCache
   }
 
   init(
     runner: GitRunner, target: DetectedWorktree,
-    squashScanCommitLimit: Int = Self.defaultSquashScanCommitLimit
+    squashScanCommitLimit: Int = Self.defaultSquashScanCommitLimit,
+    mergeCache: GitBranchMergeCache? = nil
   ) {
     self.runner = runner
     self.target = target
     self.squashScanCommitLimit = squashScanCommitLimit
+    self.mergeCache = mergeCache
   }
 
   /// `projectRootBranch` は `GitWorktreeDetector` と同じく `refs/heads/` を除いた短縮名だけを受け取る。
@@ -247,27 +252,54 @@ public struct GitCloseSafetyInspector: Sendable {
         [.init(check: .branchMerge, reason: .invalidRevision("refs/heads/\(targetBranch)"))]
       )
     }
-    guard let destination = GitRevision(defaultRevision) else {
+    guard let defaultReference = GitRevision(defaultRevision) else {
       return (
         .unknown, [.init(check: .branchMerge, reason: .invalidRevision(defaultRevision))]
       )
     }
     // 判定は ref 名ではなく、ここで1回読んだ先端の OID に対して行う。ref 名のまま問うと、
     // ancestor 判定と squash 走査がそれぞれ違う時点の先端を読み得るうえ、計画へ載せる先端
-    // (`BranchMergeStatus.merged` の `tip`) が判定に使った値だと言えなくなる。
+    // (`BranchMergeStatus.merged` の `tip`) が判定に使った値だと言えなくなる。既定 branch の
+    // 側も同じ理由で OID に固定する —— 加えて、再利用の鍵 (`GitBranchMergeCache`) が
+    // 判定に使った既定 branch そのものであることを保証するため (Issue #366)。
     let tip: CommitObjectID
+    let destinationTip: CommitObjectID
     do {
       let output = try await runner.run(.resolveCommit(reference)).stdout
       guard let resolved = localBranchTip(from: output) else {
         return (.unknown, [.init(check: .branchMerge, reason: .invalidRevision(output))])
       }
       tip = resolved
+      let destinationOutput = try await runner.run(.resolveCommit(defaultReference)).stdout
+      guard let resolvedDestination = localBranchTip(from: destinationOutput) else {
+        return (
+          .unknown, [.init(check: .branchMerge, reason: .invalidRevision(destinationOutput))]
+        )
+      }
+      destinationTip = resolvedDestination
     } catch {
       return (.unknown, [.init(check: .branchMerge, reason: .git(error))])
     }
-    guard let target = GitRevision(tip.rawValue) else {
+    guard let target = GitRevision(tip.rawValue),
+      let destination = GitRevision(destinationTip.rawValue)
+    else {
       return (.unknown, [.init(check: .branchMerge, reason: .invalidRevision(tip.rawValue))])
     }
+    let cacheKey = GitBranchMergeCache.Key(
+      tip: tip, destination: destinationTip, squashScanCommitLimit: squashScanCommitLimit)
+    if let cached = await mergeCache?.status(for: cacheKey) {
+      return (cached, [])
+    }
+    let result = await judgeMerge(tip: tip, target: target, destination: destination)
+    await mergeCache?.store(result.status, for: cacheKey)
+    return result
+  }
+
+  private func judgeMerge(
+    tip: CommitObjectID,
+    target: GitRevision,
+    destination: GitRevision
+  ) async -> (status: BranchMergeStatus, failures: [GitCloseSafetyInspectionFailure]) {
     do {
       _ = try await runner.run(.isAncestor(target, of: destination))
       return (.merged(.ancestor, tip: tip), [])

@@ -79,7 +79,8 @@ struct ProjectView: View {
                   selected: model.selectedIdentity == worktree.identity,
                   agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
                   select: { model.select(worktree) },
-                  setActivation: { model.setActivation($0, of: worktree.identity) }
+                  setActivation: { model.setActivation($0, of: worktree.identity) },
+                  requestClose: { model.requestClose(of: worktree.identity) }
                 )
               }
             }
@@ -95,6 +96,7 @@ struct ProjectView: View {
         }
         Divider()
       }
+      WorktreeClosePanelHost(closing: model.closing)
 
       if let message = model.message ?? model.emptyStateMessage {
         ContentUnavailableView(
@@ -119,26 +121,6 @@ struct ProjectView: View {
     .onChange(of: model.viewerDrawerLayout) { old, new in
       keyboardFocus.drawerLayoutChanged(from: old, to: new)
     }
-  }
-}
-
-struct WarningBar: View {
-  let text: String
-  let dismiss: () -> Void
-
-  var body: some View {
-    HStack(spacing: 6) {
-      Image(systemName: "exclamationmark.triangle")
-      Text(text).lineLimit(1).truncationMode(.middle)
-      Spacer(minLength: 8)
-      Button("閉じる", systemImage: "xmark", action: dismiss)
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-    }
-    .font(.callout)
-    .padding(.horizontal, 8)
-    .padding(.vertical, 4)
-    .background(Color.orange.opacity(0.15))
   }
 }
 
@@ -288,6 +270,7 @@ private struct WorktreeTab: View {
   let agentPaneStates: () -> AsyncStream<[PaneAgentState]>?
   let select: () -> Void
   let setActivation: (WorktreeActivation) -> Void
+  let requestClose: () -> Void
   @State private var representativeState: WorktreeRepresentativeState?
 
   var body: some View {
@@ -299,6 +282,7 @@ private struct WorktreeTab: View {
           .disabled(worktree.activation == .active)
         Button("Inactive にする") { setActivation(.inactive) }
           .disabled(worktree.activation == .inactive)
+        Button("Close…", action: requestClose)
       }
     } else {
       tab

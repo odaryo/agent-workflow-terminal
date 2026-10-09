@@ -54,7 +54,7 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/refs/foo"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
         squashScanWithoutCandidates(commandArguments(arguments))
@@ -82,7 +82,7 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/refs/heads/x"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
         squashScanWithoutCandidates(commandArguments(arguments))
@@ -111,10 +111,10 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/remotes/origin/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 0, stdout: "", stderr: ""))
       default:
-        .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+        defaultBranchTipOrUnexpected(commandArguments(arguments))
       }
     }
     let inspector = GitCloseSafetyInspector(
@@ -145,7 +145,7 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       default:
         squashScanWithoutCandidates(commandArguments(arguments))
@@ -233,10 +233,10 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/remotes/origin/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 0, stdout: "", stderr: ""))
       default:
-        .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+        defaultBranchTipOrUnexpected(commandArguments(arguments))
       }
     }
     let inspector = GitCloseSafetyInspector(
@@ -371,10 +371,10 @@ struct GitCloseSafetyInspectorTests {
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
         .success(tipOutput(fixtureTipHex))
-      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/remotes/origin/main"]:
+      case ["merge-base", "--is-ancestor", fixtureTipHex, fixtureDefaultTipHex]:
         .success(.init(exitCode: 0, stdout: "", stderr: ""))
       default:
-        .failure(.launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: ""))
+        defaultBranchTipOrUnexpected(commandArguments(arguments))
       }
     }
     let inspector = GitCloseSafetyInspector(

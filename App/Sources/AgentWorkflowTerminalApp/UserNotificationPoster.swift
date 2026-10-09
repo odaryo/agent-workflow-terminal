@@ -122,7 +122,7 @@ final class UserNotificationPoster {
   /// 初回の許可要求は、最初に通知を出す必要が生じた時点で行う。許可されなければ通知しない
   /// (エラーにしない)。
   private func isAuthorized() async -> Bool {
-    switch await center.notificationSettings().authorizationStatus {
+    switch await authorizationStatus() {
     case .authorized, .provisional: return true
     case .notDetermined: break
     case .denied, .ephemeral: return false
@@ -144,6 +144,18 @@ final class UserNotificationPoster {
     let granted = await request.value
     authorization = nil
     return granted
+  }
+
+  /// `notificationSettings()` の async 版は、macOS 15 SDK (CI) では `UNNotificationSettings` が
+  /// Sendable でないため main actor へ返せずコンパイルエラーになる。callback の中で enum だけを
+  /// 取り出して返す。
+  private func authorizationStatus() async -> UNAuthorizationStatus {
+    let center = center
+    return await withCheckedContinuation { continuation in
+      center.getNotificationSettings { settings in
+        continuation.resume(returning: settings.authorizationStatus)
+      }
+    }
   }
 
   private static func makeContent(_ content: PaneNotificationContent) -> UNNotificationContent {

@@ -146,6 +146,20 @@ public enum DiffSnapshotChangeDetection {
   }
 }
 
+/// snapshot を開いた時点の worktree の HEAD (§9.1 の範囲表示)。開いた後に HEAD が動いても
+/// 書き換えない — 動いたことは §9.3 の変更検知が伝える。
+public struct DiffSnapshotHead: Sendable, Equatable {
+  /// detached HEAD では `nil`。
+  public let branch: String?
+  /// commit の無い branch に居る (unborn) ときは `nil`。
+  public let commit: String?
+
+  public init(branch: String?, commit: String?) {
+    self.branch = branch
+    self.commit = commit
+  }
+}
+
 public enum DiffLineSide: Sendable, Equatable, Hashable {
   case old
   case new
@@ -158,6 +172,9 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
   /// 出所ごとの変更集合。同じファイルが複数の出所に現れうる (§9.1.3)。
   public let sections: [DiffOriginSection]
   public let observation: DiffSnapshotObservation
+  /// `nil` は HEAD を観測できなかったこと。Commit Diff では `observation.headObject` が
+  /// 選んだ commit を指すので、HEAD はこちらだけが持つ。
+  public let head: DiffSnapshotHead?
   public var reviewState: DiffReviewState
 
   public init(
@@ -166,6 +183,7 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
     createdAt: Date,
     sections: [DiffOriginSection],
     observation: DiffSnapshotObservation,
+    head: DiffSnapshotHead? = nil,
     reviewState: DiffReviewState = .reviewing
   ) {
     self.id = id
@@ -173,6 +191,7 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
     self.createdAt = createdAt
     self.sections = sections
     self.observation = observation
+    self.head = head
     self.reviewState = reviewState
   }
 

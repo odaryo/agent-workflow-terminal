@@ -111,9 +111,13 @@ final class UserNotificationPoster {
       identifier: UUID().uuidString, content: Self.makeContent(content), trigger: nil)
     Task {
       guard await isAuthorized() else { return }
-      do {
-        try await center.add(request)
-      } catch {
+      add(request)
+    }
+  }
+
+  private func add(_ request: UNNotificationRequest) {
+    center.add(request) { error in
+      if let error {
         NSLog("[app] 通知を出せませんでした: \(error)")
       }
     }
@@ -133,11 +137,13 @@ final class UserNotificationPoster {
     }
     let center = center
     let request = Task {
-      do {
-        return try await center.requestAuthorization(options: [.alert, .sound])
-      } catch {
-        NSLog("[app] 通知の許可を要求できませんでした: \(error)")
-        return false
+      await withCheckedContinuation { continuation in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+          if let error {
+            NSLog("[app] 通知の許可を要求できませんでした: \(error)")
+          }
+          continuation.resume(returning: granted)
+        }
       }
     }
     authorization = request
@@ -146,9 +152,10 @@ final class UserNotificationPoster {
     return granted
   }
 
-  /// `notificationSettings()` の async 版は、macOS 15 SDK (CI) では `UNNotificationSettings` が
-  /// Sendable でないため main actor へ返せずコンパイルエラーになる。callback の中で enum だけを
-  /// 取り出して返す。
+  /// `UNUserNotificationCenter` の async 版 (`notificationSettings()` / `add(_:)` /
+  /// `requestAuthorization(options:)`) は、Swift 6.1 (CI の Xcode 16.4) では non-Sendable な
+  /// center や結果を main actor との間で受け渡すとしてコンパイルエラーになる (手元の 6.3 では
+  /// 通る)。そのため callback 版を main actor から同期的に呼び、Sendable な値だけを返す。
   private func authorizationStatus() async -> UNAuthorizationStatus {
     let center = center
     return await withCheckedContinuation { continuation in

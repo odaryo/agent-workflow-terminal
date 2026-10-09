@@ -5,13 +5,21 @@ import TerminalCore
 
 struct CodeViewerContent: View {
   @ObservedObject var model: FileBrowserModel
+  @ObservedObject var history: CodeHistoryModel
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       if let selection = model.selection {
         header(name: selection.name)
         Divider()
-        body(for: selection)
+        switch history.mode {
+        case .current:
+          body(for: selection)
+        case .history:
+          CodeHistoryView(model: history, currentPath: selection.id)
+        case .blame:
+          CodeBlameView(model: history, isExpandable: isExpandable)
+        }
       } else {
         ContentUnavailableView("ファイルを選択してください", systemImage: "doc.text")
       }
@@ -19,20 +27,49 @@ struct CodeViewerContent: View {
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
 
+  /// blame は §7.2 で本文をそのまま展開するファイルに限る (確認を経て開いたものは含めない)。
+  private var isExpandable: Bool { model.content?.result.decision == .display }
+
+  private var modeBinding: Binding<CodeViewerMode> {
+    Binding(
+      get: { history.mode },
+      set: { mode in
+        switch mode {
+        case .current: history.showCurrent()
+        case .history: history.showHistory()
+        case .blame: history.showBlame(isExpandable: isExpandable)
+        }
+      })
+  }
+
   @ViewBuilder
   private func header(name: String) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 8) {
         Text(name).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
-        if let observation = model.content?.result.observation {
-          Text(summary(of: observation)).font(.caption).foregroundStyle(.secondary)
+        if history.mode == .current, let observation = model.content?.result.observation {
+          Text(FileViewText.summary(of: observation))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize()
         }
         Spacer(minLength: 0)
       }
-      ForEach(notices, id: \.self) { notice in
-        Label(notice, systemImage: "info.circle")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      // Drawer のペインは狭い (実測で本文側が約 240 pt)。ファイル名と同じ行に置くと名前が潰れる。
+      Picker("表示", selection: modeBinding) {
+        Text("本文").tag(CodeViewerMode.current)
+        Text("履歴").tag(CodeViewerMode.history)
+        Text("blame").tag(CodeViewerMode.blame)
+      }
+      .pickerStyle(.segmented)
+      .labelsHidden()
+      .fixedSize()
+      if history.mode == .current {
+        ForEach(notices, id: \.self) { notice in
+          Label(notice, systemImage: "info.circle")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
       }
     }
     .padding(8)
@@ -49,36 +86,15 @@ struct CodeViewerContent: View {
         CodeTextView(
           text: text.content, highlight: load.highlight, highlightedLine: model.highlightedLine)
       } else if let reasons = load.result.decision.confirmationReasons {
-        confirmation(reasons: reasons)
+        FileOpenConfirmationView(reasons: reasons) {
+          Task { await model.confirmOpen() }
+        }
       } else {
         ContentUnavailableView("本文がありません", systemImage: "doc")
       }
     } else {
       ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-  }
-
-  @ViewBuilder
-  private func confirmation(reasons: FileOpenConfirmationReasons) -> some View {
-    let isBinary = reasons.elements.contains { if case .binary = $0 { true } else { false } }
-    VStack(alignment: .leading, spacing: 8) {
-      ForEach(Array(reasons.elements.enumerated()), id: \.offset) { _, reason in
-        Label(message(for: reason), systemImage: "exclamationmark.triangle")
-      }
-      if isBinary {
-        // 確認を通してもバイナリの本文は返らないと型で決まっているため、ボタンを出すと
-        // 必ず空表示になる。v1 で hex ビューアは作らない (§7.2 / §7.3)。
-        Text("バイナリのため本文は表示しません。")
-          .foregroundStyle(.secondary)
-      } else {
-        Button("Open anyway") {
-          Task { await model.confirmOpen() }
-        }
-      }
-      Spacer(minLength: 0)
-    }
-    .padding(12)
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var notices: [String] {
@@ -93,46 +109,15 @@ struct CodeViewerContent: View {
       model.content?.result.text != nil
     {
       notices.append(
-        "確認のうえ表示しています: " + reasons.elements.map(message(for:)).joined(separator: " / "))
+        "確認のうえ表示しています: "
+          + reasons.elements.map(FileViewText.message(for:)).joined(separator: " / "))
     }
-    if let highlight = model.content?.highlight, let message = message(for: highlight) {
+    if let highlight = model.content?.highlight,
+      let message = FileViewText.message(for: highlight)
+    {
       notices.append(message)
     }
     return notices
-  }
-
-  private func summary(of observation: FileViewObservation) -> String {
-    switch observation {
-    case .binary(let byteCount):
-      "バイナリ / \(byteCount) バイト"
-    case .text(let byteCount, let lineCount):
-      // 行数を数えていない場合がある。0 行と書かない (§12.3)。
-      lineCount.map { "\(byteCount) バイト / \($0) 行" } ?? "\(byteCount) バイト"
-    }
-  }
-
-  private func message(for reason: FileOpenConfirmationReason) -> String {
-    switch reason {
-    case .binary(let byteCount):
-      "バイナリです (\(byteCount) バイト)"
-    case .byteCount(let actual, let maximum):
-      "サイズが閾値を超えています (\(actual) バイト > \(maximum) バイト)"
-    case .lineCount(let actual, let maximum):
-      "行数が閾値を超えています (\(actual) 行 > \(maximum) 行)"
-    }
-  }
-
-  private func message(for highlight: FileContentLoad.HighlightOutcome) -> String? {
-    switch highlight {
-    case .highlighted:
-      nil
-    case .unsupportedFileType:
-      "拡張子から言語を判定できないため、syntax highlight は行っていません。"
-    case .tooLarge(let byteCount, let maximum):
-      "サイズが大きいため syntax highlight は行っていません (\(byteCount) バイト > \(maximum) バイト)。"
-    case .unavailable:
-      "syntax highlight を適用できませんでした。"
-    }
   }
 
   private func message(for error: FileContentReaderError) -> String {
@@ -164,9 +149,72 @@ struct CodeViewerContent: View {
   }
 }
 
+/// 現在の版と過去版 (§7.3) で同じ文言を出すため、表示文言をここへ集める。
+enum FileViewText {
+  static func summary(of observation: FileViewObservation) -> String {
+    switch observation {
+    case .binary(let byteCount):
+      "バイナリ / \(byteCount) バイト"
+    case .text(let byteCount, let lineCount):
+      // 行数を数えていない場合がある。0 行と書かない (§12.3)。
+      lineCount.map { "\(byteCount) バイト / \($0) 行" } ?? "\(byteCount) バイト"
+    }
+  }
+
+  static func message(for reason: FileOpenConfirmationReason) -> String {
+    switch reason {
+    case .binary(let byteCount):
+      "バイナリです (\(byteCount) バイト)"
+    case .byteCount(let actual, let maximum):
+      "サイズが閾値を超えています (\(actual) バイト > \(maximum) バイト)"
+    case .lineCount(let actual, let maximum):
+      "行数が閾値を超えています (\(actual) 行 > \(maximum) 行)"
+    }
+  }
+
+  static func message(for highlight: FileContentLoad.HighlightOutcome) -> String? {
+    switch highlight {
+    case .highlighted:
+      nil
+    case .unsupportedFileType:
+      "拡張子から言語を判定できないため、syntax highlight は行っていません。"
+    case .tooLarge(let byteCount, let maximum):
+      "サイズが大きいため syntax highlight は行っていません (\(byteCount) バイト > \(maximum) バイト)。"
+    case .unavailable:
+      "syntax highlight を適用できませんでした。"
+    }
+  }
+}
+
+/// §7.2 の確認。バイナリには Open anyway を出さない。
+struct FileOpenConfirmationView: View {
+  let reasons: FileOpenConfirmationReasons
+  let onOpen: () -> Void
+
+  var body: some View {
+    let isBinary = reasons.elements.contains { if case .binary = $0 { true } else { false } }
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(Array(reasons.elements.enumerated()), id: \.offset) { _, reason in
+        Label(FileViewText.message(for: reason), systemImage: "exclamationmark.triangle")
+      }
+      if isBinary {
+        // 確認を通してもバイナリの本文は返らないと型で決まっているため、ボタンを出すと
+        // 必ず空表示になる。v1 で hex ビューアは作らない (§7.2 / §7.3)。
+        Text("バイナリのため本文は表示しません。")
+          .foregroundStyle(.secondary)
+      } else {
+        Button("Open anyway", action: onOpen)
+      }
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+}
+
 /// SwiftUI の `Text` は本文全体を1つのレイアウトに載せるため、数 MiB の本文で実用にならない。
 /// read-only の `NSTextView` を使い、`NSScrollView` に行単位のレイアウトを任せる。
-private struct CodeTextView: NSViewRepresentable {
+struct CodeTextView: NSViewRepresentable {
   private static let highlightedLineColor = NSColor.systemYellow.withAlphaComponent(0.28)
 
   let text: String

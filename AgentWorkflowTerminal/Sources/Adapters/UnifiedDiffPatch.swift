@@ -389,7 +389,7 @@ private struct FileParser {
   // この形で出るため、UTF-8 バイト列へ戻してから復号する。
   // escape 表現ごとの分岐が仕様そのもので、分割しても読みやすくならない。
   // swiftlint:disable:next cyclomatic_complexity
-  private static func unquote(_ value: String) -> String? {
+  static func unquote(_ value: String) -> String? {
     guard value.hasPrefix("\""), value.hasSuffix("\""), value.count >= 2 else { return nil }
     var bytes: [UInt8] = []
     var iterator = Array(value.dropFirst().dropLast().utf8).makeIterator()
@@ -414,6 +414,11 @@ private struct FileParser {
     }
     return String(decoding: bytes, as: UTF8.self)
   }
+}
+
+extension UnifiedDiffPatch {
+  /// blame の porcelain (`filename` / `previous`) も同じ C style quoting で path を出す。
+  static func unquote(_ value: String) -> String? { FileParser.unquote(value) }
 }
 
 private struct HunkHeader {

@@ -9,40 +9,51 @@ import TerminalCore
 struct CodeViewerPane: View {
   @StateObject private var model: FileBrowserModel
   @StateObject private var searchModel: WorktreeSearchModel
+  @StateObject private var history: CodeHistoryModel
   @Environment(\.colorScheme) private var colorScheme
 
   init(worktreeRoot: URL) {
     _model = StateObject(wrappedValue: FileBrowserModel(worktreeRoot: worktreeRoot))
     _searchModel = StateObject(wrappedValue: WorktreeSearchModel(worktreeRoot: worktreeRoot))
+    _history = StateObject(wrappedValue: CodeHistoryModel(worktreeRoot: worktreeRoot))
   }
 
   var body: some View {
     HSplitView {
       FileBrowserList(model: model, searchModel: searchModel)
         .frame(minWidth: 180, idealWidth: 240)
-      CodeViewerContent(model: model)
+      CodeViewerContent(model: model, history: history)
         .frame(minWidth: 240, maxWidth: .infinity)
     }
     .task {
       model.prefersDarkTheme = colorScheme == .dark
+      history.prefersDarkTheme = colorScheme == .dark
       // タブの活性化 = このペインが階層に現れた時。ここで列挙と Git 状態を取り直す。
       model.loadRoot()
     }
     .task(id: model.selection) {
+      // git へ渡すパスは列挙・検索で得た worktree root からの相対パス (`id`)。
+      history.reset(relativePath: model.selection?.id)
       model.resetSelectionState()
       await model.loadContent()
       await watchSelectedFile()
     }
     .onChange(of: colorScheme) { _, scheme in
       model.prefersDarkTheme = scheme == .dark
+      history.appearanceDidChange(isDark: scheme == .dark)
       Task { await model.loadContent() }
     }
     .task {
       await watchGitIndex()
     }
+    .onDisappear {
+      // タブを切り替えるとペインが階層から外れる。走っている git をそこで止める。
+      history.cancelAll()
+    }
   }
 
   /// Drawer を閉じるとこのビューが階層から外れ、`task` ごと監視が止まる。
+  /// 読み直すのは現在の版だけで、表示中の過去版 (`CodeHistoryModel`) には触れない。
   private func watchSelectedFile() async {
     guard let selection = model.selection else { return }
     let watcher = FileChangeWatcher(path: selection.url)
@@ -50,6 +61,7 @@ struct CodeViewerPane: View {
       switch event {
       case .modified:
         await model.loadContent()
+        history.fileDidChange(isExpandable: isExpandable)
       case .deleted:
         model.markSelectionDeleted()
       }
@@ -61,8 +73,11 @@ struct CodeViewerPane: View {
     guard let indexURL = model.gitIndexURL else { return }
     for await _ in FileChangeWatcher(path: indexURL).events() {
       model.refreshGitState()
+      history.gitIndexDidChange(isExpandable: isExpandable)
     }
   }
+
+  private var isExpandable: Bool { model.content?.result.decision == .display }
 }
 
 private struct FileBrowserList: View {

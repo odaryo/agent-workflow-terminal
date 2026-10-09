@@ -15,6 +15,10 @@ tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch, Skill
 
 spec の **完了条件** に挙がった GREEN コマンドは自分で実行し、その結果を報告に含める。実行していないコマンドを「通るはず」と report してはならない。
 
+## UI の動作確認はしない
+
+`scripts/verify-app-ui.sh` の実行と、スクリーンショットの撮影・読み込みは行わない。`ui-verifier` の担当である (CLAUDE.md「実装役への渡し方」)。
+
 ## コミットしない
 
 git commit / push は行わない。変更の検証とコミットは Director の担当であり、書き込み系スクリプト (`scripts/wf-*.sh`) の実行も禁止。作業ツリーは変更したまま (dirty のまま) 返すこと。

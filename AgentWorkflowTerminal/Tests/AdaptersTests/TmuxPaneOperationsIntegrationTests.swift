@@ -80,6 +80,37 @@ struct TmuxPaneOperationsIntegrationTests {
     }
   }
 
+  @Test("window ごとの選択は current window と active pane を対象へ移し、select-pane だけでは移らない")
+  func selectWindowAndPaneMovesCurrentWindow() async throws {
+    let socketName = uniqueSocketName("select-window")
+    try await IsolatedTmuxServer.withServer(socketName: socketName) { runner in
+      let operations = TmuxPaneOperations(runner: runner)
+      let first = try #require(await IsolatedTmuxServer.paneIDs(runner).first)
+      let sibling = try await operations.splitLeftRight(pane: first)
+      try await operations.select(pane: sibling)
+      let created = try await runner.run(
+        arguments: ["new-window", "-t", "awt-operations", "-P", "-F", "#{pane_id}"])
+      let otherWindow = PaneID(
+        rawValue: created.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
+
+      try await operations.select(pane: first)
+      #expect(try await current(runner) == otherWindow.rawValue)
+
+      try await operations.selectWindowAndPane(pane: first)
+      #expect(try await current(runner) == first.rawValue)
+
+      await #expect(throws: TmuxPaneOperationError.paneNotFound(PaneID(rawValue: "%999"))) {
+        try await operations.selectWindowAndPane(pane: PaneID(rawValue: "%999"))
+      }
+      #expect(try await current(runner) == first.rawValue)
+    }
+  }
+
+  private func current(_ runner: TmuxRunner) async throws -> String {
+    try await runner.run(arguments: ["display-message", "-p", "-t", "awt-operations", "#{pane_id}"])
+      .stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   @Test("方向指定は隣接 pane を選び、その方向に pane が無ければ選択が変わらない")
   func selectNeighborMovesToAdjacentPane() async throws {
     try await IsolatedTmuxServer.withServer(socketName: uniqueSocketName("neighbor")) { runner in

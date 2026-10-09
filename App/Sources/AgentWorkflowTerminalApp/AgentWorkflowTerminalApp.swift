@@ -39,6 +39,7 @@ struct AgentWorkflowTerminalApp: App {
           .keyboardShortcut("w")
       }
     }
+    OverviewScene(projects: projects)
   }
 }
 
@@ -114,6 +115,9 @@ struct ProjectView: View {
           TerminalTabs(model: model, keyboardFocus: keyboardFocus)
         }
       }
+    }
+    .onReceive(model.paneObservations.$terminalFocusRequest.dropFirst()) { _ in
+      keyboardFocus.requestFocus()
     }
     .onChange(of: model.selectedIdentity) { _, _ in
       keyboardFocus.tabSelectionChanged(drawerLayout: model.viewerDrawerLayout)
@@ -292,12 +296,9 @@ private struct WorktreeTab: View {
   private var tab: some View {
     Button(action: select) {
       HStack(spacing: 6) {
-        Circle().fill(stateColor).frame(width: 8, height: 8)
-        Text(
-          worktree.detected.branch
-            ?? URL(fileURLWithPath: worktree.detected.worktreePath).lastPathComponent
-        )
-        .foregroundStyle(worktree.activation == .active ? Color.primary : Color.secondary)
+        AgentStateIcon(presentation: statePresentation)
+        Text(worktree.detected.tabName)
+          .foregroundStyle(worktree.activation == .active ? Color.primary : Color.secondary)
         Text(stateLabel).foregroundStyle(.secondary)
       }
       .padding(.horizontal, 8)
@@ -311,11 +312,14 @@ private struct WorktreeTab: View {
       }
     }
     .buttonStyle(.plain)
+    // 記号の label (状態名、§5.3) を合成に任せず明示する。Overview の行では合成されなかった。
+    .accessibilityLabel("\(worktree.detected.tabName) \(statePresentation.label)")
     // 到達不能な worktree は一覧から消さずに残す (設計書 §3.2)。消すと安定 ID が消失に見え、
     // 復帰したときにユーザーが意図した Active/Inactive が失われる。
     .disabled(!worktree.detected.isReachable)
     .opacity(worktree.detected.isReachable ? 1 : 0.4)
-    .task(id: worktree.identity) {
+    // 観測が止まると購読は終わるので、到達できるようになったら購読し直す。
+    .task(id: [worktree.identity.rawValue, "\(worktree.detected.isReachable)"]) {
       guard let paneStates = agentPaneStates() else { return }
       let states = WorktreeRepresentativeStateFeed().states(from: paneStates)
       for await state in states {
@@ -338,17 +342,10 @@ private struct WorktreeTab: View {
     return representativeState.state.displayLabel
   }
 
-  private var stateColor: Color {
-    // 観測できていないことを `Unknown` と同じ色で示す (設計書 §12.3)。
-    if worktree.detected.observation == .observationFailed { return .orange }
-    guard let representativeState else { return .secondary }
-    return switch representativeState.category {
-    case .needsAttention: .red
-    case .readyForReview: .green
-    case .working: .blue
-    case .unknown: .orange
-    case .idle: .secondary
-    }
+  private var statePresentation: AgentStatePresentation {
+    guard worktree.detected.isReachable else { return .unobserved(stateLabel) }
+    return AgentStatePresentation(
+      state: representativeState?.state ?? .idle, category: representativeState?.category ?? .idle)
   }
 }
 

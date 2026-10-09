@@ -515,7 +515,30 @@ Task Tabには次を圧縮表示する。
 **状態表示の原則 — 確定(2026-10-08)。** Task TabとOverview(§13)の状態表示は、SF Symbolsの固定
 セットを使い、状態ごとに形を変える。色は補助であり、色だけで状態を区別させない。accessibility labelは
 状態名をそのまま使う。`Unknown`には専用の形を与え、他の状態の形を流用しない(§12.3)。paneの応答終了と
-タスク完了(§12.7)も別の形にする。状態と記号・色の具体的な対応表は、Overviewの実装時(Issue #189)に決める。
+タスク完了(§12.7)も別の形にする。
+
+**状態と記号・色の対応表 — 確定(2026-10-08、Issue #189)。** Task Tabの代表状態とOverviewの各paneに
+同じ表を使う。
+
+| 表示 | SF Symbol | 色 | accessibility label |
+|---|---|---|---|
+| `Working` | `ellipsis.circle.fill` | 青(accent) | Working |
+| `Question` | `questionmark.bubble.fill` | 橙 | Question |
+| `Permission` | `hand.raised.fill` | 橙 | Permission |
+| `Error` | `exclamationmark.octagon.fill` | 赤 | Error |
+| 応答終了(`Completed`) | `checkmark.circle` | 緑 | 応答終了 |
+| 要対応(種別不明) | `exclamationmark.bubble.fill` | 橙 | 要対応 (種別不明) |
+| `Idle` | `pause.circle` | 灰 | Idle |
+| `Unknown` | `circle.dashed` | 灰 | Unknown |
+| タスク完了(状態とは別の列) | `checkmark.seal.fill` | 緑 | タスク完了 |
+
+- 要対応(種別不明)は、`Unknown`のうち大分類がNeeds Attentionのもの(§12.4.3。adapterが「人間の対応が
+  要る」とだけ判定でき、`Question`／`Permission`／`Error`のどれかは決められない状態)。注意の要らない
+  `Unknown`と同じ形にすると見落とされるため、別の形にする。
+- 同じ色の状態どうしも形は必ず変える。色だけで区別させない原則による。
+- `Completed`の表示名は「応答終了」とする。paneの応答が終わったことであって、タスク完了(§12.7)では
+  ないため。
+- 到達不能・観測失敗のTask Tabは、状態の記号を流用せず`exclamationmark.triangle`と文言で示す(§12.3)。
 
 ### 5.4 キーボードショートカットの原則 — 確定(2026-10-08)
 
@@ -1169,6 +1192,21 @@ accessibility labelで意味を伝える(原則は§5.3)。paneの応答終了�
 2. それ以外を最終操作順
 
 `Question`、`Permission`、`Error`間に固定優先順位は付けず、最終更新順とする。
+
+**並び順の詳細と開く操作 — 確定(2026-10-08、Issue #189)。**
+
+- Projectは登録順(§16.1)で固定し、状態で並べ替えない。Projectの並びまで動くと、見ている場所そのものが
+  状態の変化で移り、一覧の中で自分の位置を見失うため。Project RootはTaskと混ぜず、Projectの先頭の別枠に
+  置く。
+- Taskは、Needs Attention(大分類で判定し、要対応(種別不明)を含む。§5.3)のpaneを含むものを先に、それぞれ
+  paneの最終更新の最大値が新しい順に並べる。同じなら Task Tabの順。Agent paneの無いTaskはその後ろに
+  Task Tabの順で置き、「Agent pane なし」の行1つで示す。
+- Task内のpaneは、Needs Attentionを先に、それぞれ最終更新の新しい順。同じなら tmux上の順。
+- アイコンと並べ替えには、paneごとに§12.2と同じ安定化(`Idle`／`Unknown`へ入る遷移を9秒保持)を掛けた
+  状態を使い、「最終更新」はその安定化後の状態が変わった時刻とする。生の観測で並べると`Working`と
+  `Unknown`の振動のたびに行が入れ替わり、クリックの直前に別のpaneの行が来て誤ったpaneへ移る。
+  タスク完了表示の解除(§12.7)は生の状態で判定し、保持で遅らせない。
+- Overviewを開く操作は⌘⇧O(メニュー「Overview を表示」)とする(§5.4)。
 
 ## 14. Evidence
 
@@ -1839,7 +1877,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### UI
 
 - Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定。メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替えることは確定(2026-10-08))
-- 状態と記号・色の対応表(原則は§5.3で確定。Overviewの実装時に決める)
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
 - keyboard shortcutの一覧(⌘修飾をアプリが使い端末への打鍵に触れない原則は§5.4で確定)
@@ -2203,7 +2240,9 @@ PR_READY
 - [x] Overviewは通常のウィンドウ1枚で位置とサイズを記憶し、常に最前面には置かない
 - [x] メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替える
 - [x] Overviewと通知は登録済みの全Projectを対象にする(選択中のProjectに限らない)
-- [x] 状態表示はSF Symbolsの固定セットで状態ごとに形を変え、色は補助、accessibility labelは状態名。`Unknown`に専用の形(対応表は#189で決める)
+- [x] 状態表示はSF Symbolsの固定セットで状態ごとに形を変え、色は補助、accessibility labelは状態名。`Unknown`に専用の形
+- [x] 状態と記号・色の対応表(§5.3)。要対応(種別不明)に専用の形、`Completed`の表示名は「応答終了」
+- [x] OverviewはProjectを登録順で固定し、Task／paneはNeeds Attentionを先に安定化後の最終更新順で並べる。開く操作は⌘⇧O
 - [x] ⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵には割り当てない
 - [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する
 - [x] Agent開発フローはReview独立sessionを含む4phase構成

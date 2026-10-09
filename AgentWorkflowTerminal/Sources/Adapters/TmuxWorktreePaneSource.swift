@@ -70,9 +70,10 @@ actor TmuxAllSessionPaneListCache {
     runner: TmuxRunner
   ) async -> Result<[TmuxPane], TmuxWorktreePaneSourceError> {
     do {
+      // 連携変数 (§12.7) も同じ1回で読む。pane 一覧と別に起動すると外部プロセスが増える。
       let result = try await runner.run(
-        arguments: ["list-panes", "-a", "-F", TmuxListPanes.format])
-      return .success(TmuxListPanes.parse(output: result.stdout).panes)
+        arguments: ["list-panes", "-a", "-F", TmuxListPanes.formatWithSummary])
+      return .success(TmuxListPanes.parseWithSummary(output: result.stdout).panes)
     } catch {
       // server ごと居ない場合は「pane が無い」であって障害ではない。`-t` を渡していた頃に
       // 必要だった `can't find window:` の分岐は、`-a` が session を指さないので要らなくなった
@@ -106,6 +107,20 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
     return try await paneList.panes()
       .filter { $0.sessionName == session.rawValue }
       .map(\.snapshot)
+  }
+
+  /// `panes(of:)` と同じ共有キャッシュから読むので、両方を呼んでも `list-panes` は増えない。
+  public func summaryReadings(
+    of worktree: WorktreeIdentity
+  ) async throws(TmuxWorktreePaneSourceError) -> [PaneSummaryReadingsSnapshot] {
+    let session = TmuxSessionName(identity: worktree)
+    return try await paneList.panes()
+      .filter { $0.sessionName == session.rawValue }
+      .compactMap { pane in
+        pane.summaryReadings.map {
+          PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0)
+        }
+      }
   }
 
   /// tmux server の同一性 (`#{pid}`)。`nil` は server が居ない、または値を読めなかったことを

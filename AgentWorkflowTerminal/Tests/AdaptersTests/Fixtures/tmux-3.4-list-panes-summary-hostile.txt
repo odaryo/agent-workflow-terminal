@@ -1,0 +1,6 @@
+%0\037summary-fixture\0370\037@0\0370\03765202\0371\037sleep\0370\037\037\037/dev/ttys008\037/private/tmp\037fixture-title\037v4242 設計｜相談中\037v4242 1700000000\037vログイン不具合を修正する
+%4\037summary-fixture\0370\037@0\0371\03765215\0370\037sleep\0370\037\037\037/dev/ttys031\037/private/tmp\037fixture-title\037v4242 a\\b|c\$d\\037e\\\037v\037L
+%3\037summary-fixture\0370\037@0\0372\03765211\0370\037sleep\0370\037\037\037/dev/ttys030\037/private/tmp\037fixture-title\037L\037L\037U
+%2\037summary-fixture\0370\037@0\0373\03765208\0370\037sleep\0370\037\037\037/dev/ttys024\037/private/tmp\037fixture-title\037X\037v4242 \033[31mred\037v
+%1\037summary-fixture\0370\037@0\0374\03765205\0370\037sleep\0370\037\037\037/dev/ttys022\037/private/tmp\037fixture-title\037v\037v\037v
+%5\037summary-fixture\0371\037@1\0370\03765250\0371\037sleep\0370\037\037\037/dev/ttys032\037/private/tmp\037fixture-title\037L\037v\037L

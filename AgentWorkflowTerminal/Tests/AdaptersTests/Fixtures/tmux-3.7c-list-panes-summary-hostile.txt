@@ -1,0 +1,6 @@
+%0summary-fixture0@00652691sleep0/dev/ttys008/private/tmpfixture-titlev4242 設計｜相談中v4242 1700000000vログイン不具合を修正する
+%4summary-fixture0@01652880sleep0/dev/ttys031/private/tmpfixture-titlev4242 a\\b|c$d\\037e\\vL
+%3summary-fixture0@02652830sleep0/dev/ttys030/private/tmpfixture-titleLLU
+%2summary-fixture0@03652770sleep0/dev/ttys024/private/tmpfixture-titleXv4242 [31mredv
+%1summary-fixture0@04652710sleep0/dev/ttys022/private/tmpfixture-titlevvv
+%5summary-fixture1@10653351sleep0/dev/ttys032/private/tmpfixture-titleLvL

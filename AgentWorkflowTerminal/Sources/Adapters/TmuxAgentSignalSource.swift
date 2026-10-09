@@ -125,6 +125,24 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     return liveness
   }
 
+  /// §12.7 の「現在の Agent プロセス」。`liveness` と同じ共有 `ps` スナップショットを使うので、
+  /// 呼んでも `ps` の起動は増えない。`matchingProcessNames` には fallback adapter と同じ
+  /// Agent 名の集合を渡す。
+  public func agentProcess(
+    for pane: PaneSnapshot, matchingProcessNames: Set<String>
+  ) async -> PaneAgentProcess {
+    // dead pane の `pane_pid` は終了済みで、再利用されて無関係な木を指し得る。
+    guard !pane.isDead else { return .notRunning }
+    guard let snapshot = await processTable.snapshot() else { return .unobservable }
+    let candidates = snapshot.nearestProcessIDs(
+      named: matchingProcessNames, inTreeOf: pane.processID)
+    switch candidates.count {
+    case 0: return .notRunning
+    case 1: return .identified(processID: candidates[0])
+    default: return .ambiguous(processIDs: candidates)
+    }
+  }
+
   public func forget(_ pane: PaneSnapshot) async {
     forgetScreen(of: pane.id)
     await screenBatcher.forget(pane.id)

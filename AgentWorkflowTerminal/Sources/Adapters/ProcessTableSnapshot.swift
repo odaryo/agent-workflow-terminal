@@ -33,6 +33,23 @@ struct ProcessTableSnapshot: Sendable {
     return names
   }
 
+  /// §12.7 の「現在の Agent プロセス」の候補。`root` 自身を深さ 0 として幅優先で辿り、
+  /// 名前が一致するプロセスが最初に現れた深さの PID を昇順で返す。空なら木の中に居ない。
+  /// 2件以上は「特定できない」であり、呼び出し側で1つを選ばない。
+  func nearestProcessIDs(named names: Set<String>, inTreeOf root: Int32) -> [Int32] {
+    var level = rowsByPID[root].map { [$0] } ?? []
+    var visited: Set<Int32> = []
+    while !level.isEmpty {
+      let matches = level.filter { names.contains($0.name) }.map(\.pid)
+      if !matches.isEmpty { return matches.sorted() }
+      visited.formUnion(level.map(\.pid))
+      // ps の行に循環は無いはずだが、壊れた出力で無限に回らないよう訪問済みを除く。
+      level = level.flatMap { childrenByParentPID[$0.pid] ?? [] }
+        .filter { !visited.contains($0.pid) }
+    }
+    return []
+  }
+
   static func parse(_ output: String) -> Self {
     Self(
       rows: output.split(separator: "\n").compactMap { line in

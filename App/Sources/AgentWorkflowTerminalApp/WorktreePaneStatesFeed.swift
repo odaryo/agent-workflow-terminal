@@ -10,7 +10,8 @@ import TerminalCore
 ///   要求すると Project Root タブで送信が恒久的に不可になる)。§2.3 が禁じているのは Project
 ///   Root に Active/Inactive を持たせることで、pane を観測することではない。`TaskWorktree` の
 ///   precondition はそのまま残す。
-typealias WorktreePaneStatesFeed = @Sendable (DetectedWorktree) -> AsyncStream<[PaneAgentState]>
+typealias WorktreePaneStatesFeed =
+  @Sendable (DetectedWorktree) -> AsyncStream<WorktreePaneAgentStates>
 
 /// fallback adapter が Agent とみなすプロセス名。§12.7 の「現在の Agent プロセス」も同じ集合で
 /// 判定する — 別の集合にすると、状態は Agent と出るのに連携変数が「現役でない」と捨てられる。
@@ -34,6 +35,6 @@ func makeWorktreePaneStatesFeed(
     paneListInterval: .seconds(2)
   )
   return { worktree in
-    feed.states(of: worktree.identity, panes: paneSource, signals: signalSource)
+    feed.snapshots(of: worktree.identity, panes: paneSource, signals: signalSource)
   }
 }

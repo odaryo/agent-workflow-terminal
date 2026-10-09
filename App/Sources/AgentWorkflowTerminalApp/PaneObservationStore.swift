@@ -35,6 +35,8 @@ final class PaneObservationStore: ObservableObject {
   private let signalSource: TmuxAgentSignalSource?
   private let purposeWriter: TmuxPanePurposeWriter?
   private let paneOperations: TmuxPaneOperations?
+  /// `nil` は通知を出さない起動 (bundle の外、設計書 §11.2)。
+  private let notifier: PaneNotifier?
 
   private var observations: [WorktreeIdentity: Observation] = [:]
   private var subscribers: [WorktreeIdentity: [UUID: AsyncStream<[PaneAgentState]>.Continuation]] =
@@ -61,7 +63,8 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
-  init(dependencies: AppDependencies) {
+  init(dependencies: AppDependencies, notifier: PaneNotifier?) {
+    self.notifier = notifier
     feed = dependencies.paneStates
     paneSource = dependencies.paneSource
     signalSource = dependencies.signalSource
@@ -152,9 +155,9 @@ final class PaneObservationStore: ObservableObject {
     guard let feed else { return }
     let identity = worktree.identity
     let states = Task { [weak self] in
-      for await panes in feed(worktree) {
+      for await snapshot in feed(worktree) {
         guard !Task.isCancelled else { return }
-        self?.receive(panes, for: identity)
+        self?.receive(snapshot, for: identity)
       }
     }
     let summaries = Task { [weak self] in
@@ -165,10 +168,12 @@ final class PaneObservationStore: ObservableObject {
     }
     observations[identity] = Observation(states: states, summaries: summaries)
     observed[identity] = Observed()
+    notifier?.observationStarted(identity)
   }
 
   private func stop(_ identity: WorktreeIdentity) {
     observations.removeValue(forKey: identity)?.cancel()
+    notifier?.observationStopped(identity)
     for continuation in subscribers.removeValue(forKey: identity)?.values ?? [:].values {
       continuation.finish()
     }
@@ -181,7 +186,8 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
-  private func receive(_ panes: [PaneAgentState], for identity: WorktreeIdentity) {
+  private func receive(_ snapshot: WorktreePaneAgentStates, for identity: WorktreeIdentity) {
+    let panes = snapshot.panes
     guard var current = observed[identity] else { return }
     current.paneStates = panes
     for pane in panes {
@@ -196,6 +202,7 @@ final class PaneObservationStore: ObservableObject {
     for continuation in subscribers[identity]?.values ?? [:].values {
       continuation.yield(panes)
     }
+    notifier?.statesObserved(snapshot, in: identity)
   }
 
   private func stabilize(_ identity: WorktreeIdentity, at instant: ContinuousClock.Instant) {
@@ -231,6 +238,7 @@ final class PaneObservationStore: ObservableObject {
     var details: [PaneID: OverviewPaneDetail] = [:]
     var processIDs: [PaneID: Int32] = [:]
     var entries: [PaneID: PaneSummaryEntry<AgentStampedValue>] = [:]
+    var displays: [PaneID: PaneTaskCompletionDisplay] = [:]
     var summaries: [PaneSummary] = []
     for item in located {
       let snapshot = item.readings
@@ -258,6 +266,7 @@ final class PaneObservationStore: ObservableObject {
         paneID: summary.paneID, completion: summary.completion,
         agentState: rawStates[summary.paneID])
       entries[summary.paneID] = summary.completion
+      displays[summary.paneID] = display
       details[summary.paneID]?.isTaskCompleted = display.isCompleted
     }
     for paneID in current.details.keys where details[paneID] == nil {
@@ -270,6 +279,7 @@ final class PaneObservationStore: ObservableObject {
     if observed[identity] != current {
       observed[identity] = current
     }
+    notifier?.completionsObserved(displays, in: identity)
   }
 
   private static func hasValue(_ reading: PaneUserOptionReading) -> Bool {

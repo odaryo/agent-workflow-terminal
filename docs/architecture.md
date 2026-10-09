@@ -930,6 +930,32 @@ APNsの鍵もdevice tokenの受け渡しも持たない。利用者が増えて�
 - 長時間継続する`Unknown`の通知は既定でOFFとする。`Unknown`は判定できないことを表すだけで、人間の
   対応が必要とは限らないためである。ONにした場合の既定の継続時間は10分とする。
 
+**Macのローカル通知の起動直後・前面時・bundle外 — 現在の推奨(2026-10-09、Issue #190)。**
+
+- 起動直後と、Projectの追加・worktreeのActive化で観測が始まった直後は、worktreeごとの最初の観測を
+  基準とし、遷移とみなさない。基準は「そのworktreeの全paneについてAdapterの最初の結果が揃った観測」
+  とする。観測の最初の配信はAdapterの結果がまだ無く空になるので、それを基準にすると次の観測で
+  判断待ちのpaneが全部個別に鳴る(Issue #387)。
+- 基準の時点で判断待ちのpaneがあれば、個別には通知せず、上の再接続時と同じ「判断待ちがN件あります」の
+  1件にまとめ、開くとOverviewへ移る。起動直後はProjectとworktreeごとに基準を取る時刻がずれるので、
+  まとめ通知はProjectの一覧と各Projectの初回のworktree検出が終わり、観測を始めた全worktreeが基準を
+  取り終えた時点で出す。基準を取れないworktreeが残っても、最初の候補から30秒で出す。それまでに
+  判断待ちを抜けたpaneは数えない。
+- タスク完了は、そのworktreeで最初に読んだ完了表示を基準とし、その時点で既に有効なtokenは通知しない。
+  再起動のたびに古い完了が鳴るのを防ぐためである。**残存挙動**として、アプリの停止中に書かれた完了は
+  再起動後に通知されない(Overviewとタブの完了表示には出る)。
+- アプリが前面で、対象paneのworktreeのタブがメインwindowで選択されている間は、判断待ちの通知を出さない。
+  ユーザーがその画面を見ているためである。抑止した遷移は後から出し直さない。タスク完了は前面でも出す。
+- 要対応(種別不明)(§12.4.3)は判断待ちとして通知する(実測: Codex 0.159.2 の `request_user_input` の
+  質問画面はこの状態として観測された)。種類の分かる判断待ちとの行き来は同じ判断待ちの続きとして
+  再通知しない。ON/OFFは他の判断待ちと別に持ち、既定はONとする。
+- bundle identifierの無いプロセス(`swift run`など)では、`UNUserNotificationCenter`が例外で落ちる
+  (実測)。この場合は通知を無効にして起動する。
+- 通知に載せるのはProject名・タスク名・paneの短い識別(§13と同じ。メインpaneなら「メイン」)・種類だけで、
+  タスク完了にはハーネスが書いた現在地(§12.7)を1行添える。コードやTerminal出力は載せない(上の最小
+  payloadの原則をローカル通知にも適用する)。Questionの質問overlay(§11.1)は未実装なので、Questionの
+  通知も該当paneまで移る。
+
 ## 12. Agent Adapterと状態モデル
 
 ### 12.1 Adapter境界
@@ -1890,6 +1916,10 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - rename、binary Diff、submodule、LFS
 - 競合(unmerged)ファイルの差分本文(combined diff)の表示方法
 
+### 通知
+
+- Macのローカル通知の起動直後の基準とまとめ通知・前面時の判断待ちの抑止・要対応(種別不明)の通知・bundle外での無効化(§11.2で現在の推奨。重複・再接続・消失した対象の扱いは§11.2で確定)
+
 ### Mobile／remote
 
 - モバイル側Terminal rendererの選定(`libghostty-vt` + 自前描画／SwiftTerm等の既存renderer／外部SSHアプリ連携)
@@ -2259,6 +2289,7 @@ PR_READY
 - [ ] hostctl over SSHを正式採用 — protocol PoC待ち
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
 - [ ] 選択中Projectの復元と、登録解除でディスクとtmux sessionに触れないこと — ユーザー確認待ち(§16.1)
+- [ ] Macのローカル通知の起動直後の基準とまとめ通知・前面時の判断待ちの抑止・要対応(種別不明)の通知・bundle外での無効化 — ユーザー確認待ち(§11.2)
 
 # 付録C. 参照先
 

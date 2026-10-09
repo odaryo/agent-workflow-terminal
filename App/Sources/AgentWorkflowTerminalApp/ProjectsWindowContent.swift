@@ -6,6 +6,7 @@ import TerminalCore
 /// だけを表示し、ツールバーのメニューで切り替える (Issue #372)。
 struct ProjectsWindowContent: View {
   @ObservedObject var projects: ProjectsModel
+  @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     VStack(spacing: 0) {
@@ -21,6 +22,7 @@ struct ProjectsWindowContent: View {
       }
     }
     .task { projects.start() }
+    .onAppear { projects.navigator.openWindow = openWindow }
   }
 
   @ViewBuilder private var content: some View {

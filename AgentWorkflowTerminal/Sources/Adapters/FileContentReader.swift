@@ -215,7 +215,7 @@ public struct FileContentReader: Sendable {
 
   /// 絶対上限は文字境界を無視して切るため、末尾に不完全な UTF-8 列が残り得る。これを不正 UTF-8 =
   /// バイナリと見なすと、打ち切りだけを理由に本文を失う。UTF-8 の1文字は最長 4 バイト。
-  private static func decodeUTF8(
+  static func decodeUTF8(
     _ data: Data, droppingIncompleteTail: Bool
   ) -> (text: String, byteCount: Int)? {
     if let text = String(data: data, encoding: .utf8) { return (text, data.count) }
@@ -227,7 +227,7 @@ public struct FileContentReader: Sendable {
     return nil
   }
 
-  private static func lineCount(of data: Data) -> Int {
+  static func lineCount(of data: Data) -> Int {
     data.reduce(into: 0) { count, byte in
       if byte == 0x0A { count += 1 }
     } + (data.isEmpty || data.last == 0x0A ? 0 : 1)

@@ -22,6 +22,10 @@ struct DiffViewerPane: View {
     VStack(spacing: 0) {
       controls
       Divider()
+      if let snapshot = model.currentSnapshot, let context = model.rangeContexts[snapshot.id] {
+        DiffRangeHeader(summary: DiffRangeSummary(snapshot: snapshot, context: context))
+        Divider()
+      }
       banners
       // HSplitView は VStack の中では余った縦を自分から取りに行かない (実測: 上下に空きが出る)。
       // 明示的に優先度を上げて、残りの高さをこのペインへ渡す。
@@ -167,7 +171,17 @@ struct DiffViewerPane: View {
           .lineLimit(1)
         Menu("選ぶ") {
           ForEach(model.commits, id: \.hash) { commit in
-            Button("\(commit.abbreviatedHash) \(commit.subject)") { model.selectCommit(commit) }
+            // merge commit は Diff を作らない (§9.1.2 は比べる親を定めていない)。
+            let merge = commit.isMerge ? " (merge: 未対応)" : ""
+            Button("\(commit.abbreviatedHash) \(commit.subject)\(merge)") {
+              model.selectCommit(commit)
+            }
+          }
+          if model.canLoadMoreCommits {
+            Divider()
+            Button("さらに読む (\(DiffViewerModel.commitListLimit) 件)") {
+              Task { await model.loadMoreCommits() }
+            }
           }
         }
         .menuStyle(.borderlessButton)
@@ -178,13 +192,12 @@ struct DiffViewerPane: View {
   }
 
   private func branchMenu(title: String, action: @escaping (String) -> Void) -> some View {
-    Menu(title) {
-      ForEach(model.refNames?.all ?? [], id: \.self) { name in
-        Button(name) { action(name) }
-      }
-    }
-    .menuStyle(.borderlessButton)
-    .fixedSize()
+    DiffRefPicker(
+      title: title,
+      tasks: { [model] in model.worktreeContext().otherTasks },
+      refNames: model.refNames,
+      keyboardFocus: keyboardFocus,
+      choose: action)
   }
 
   private var snapshotHistoryMenu: some View {

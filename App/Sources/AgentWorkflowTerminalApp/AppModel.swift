@@ -176,6 +176,11 @@ final class AppModel: ObservableObject {
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
     closing = WorktreeClosing(tmuxRunner: dependencies.tmuxRunner)
     message = dependencies.tmuxError
+    // Diff の範囲表示と比較先の候補 (§9.1) が、この Project の一覧を読むための口。
+    diffModels.worktreeContext = { [weak self] root in
+      DiffWorktreeContext(
+        worktreeRoot: root, projectRoot: self?.projectRoot, worktrees: self?.worktrees ?? [])
+    }
   }
 
   var inventory: WorktreeInventory {

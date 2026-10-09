@@ -15,6 +15,26 @@ public enum DiffSnapshotBuilderError: Error, Sendable, Equatable {
   case invalidRevision(String)
   /// merge commit の比較対象は設計書が定めていない (§9.1.2)。
   case unsupportedMergeCommit(parents: [String])
+  /// `branch` と HEAD に共通祖先が無く、merge-base 起点の range (§9.1.2) を作れない。
+  /// 空 tree や root commit を起点に代えない — それは §9.1.2 と別の範囲になる。
+  case noMergeBase(branch: String)
+  /// merge-base を求められなかったが、共通祖先が無いとは言い切れない (§9.1.4)。
+  case mergeBaseUnresolved(branch: String, reason: DiffMergeBaseUnresolvedReason)
+}
+
+/// `git merge-base` が共通祖先を返さなかったのに、それを「無い」と断定できない理由。
+/// どれも、共通祖先が無いときと同じ出力なしの終了コード 1 で終わる (git 2.50.1 / 2.55.0 で実測)。
+public enum DiffMergeBaseUnresolvedReason: Sendable, Equatable {
+  /// 共通祖先が shallow の境界より古いと、在っても辿れない。
+  case shallowRepository
+  /// `refs/replace/` か `info/grafts` が親子関係を書き換えていて、置き換え前の履歴には
+  /// 共通祖先がありうる。
+  case rewrittenHistory
+  /// 終了コード 1 と一緒に stderr へ何か出た。例: 同名の tag と branch があると git は
+  /// tag を選んで warning を出すので、利用者が意図した branch とは別の ref と比べている。
+  case gitReported(stderr: String)
+  /// 上を見分けるための git の実行が失敗したか、その出力を読めなかった。
+  case historyCheckFailed(detail: String)
 }
 
 public struct DiffSnapshotBuildResult: Sendable {
@@ -78,13 +98,20 @@ public struct DiffSnapshotBuilder: Sendable {
     now: Date
   ) async throws(DiffSnapshotBuilderError) -> DiffSnapshotBuildResult {
     let collected = try await collect(request)
+    var head = collected.head
+    if case .commit = request {
+      // Commit Diff の範囲表示 (§9.1) のためだけに読む。`observe` (変更検知のポーリング) では
+      // 読まないよう `collect` の外に置き、読めなくても Diff 自体は作れるので失敗にしない。
+      head = (try? await status(untrackedFiles: .normal)).flatMap { Self.head(of: $0.status) }
+    }
     return DiffSnapshotBuildResult(
       snapshot: DiffSnapshot(
         id: id,
         subject: collected.subject,
         createdAt: now,
         sections: collected.sections,
-        observation: collected.observation),
+        observation: collected.observation,
+        head: head),
       patchFailures: collected.patchFailures,
       statusFailures: collected.statusFailures,
       unreadableUntrackedPaths: collected.unreadableUntrackedPaths)
@@ -103,6 +130,7 @@ public struct DiffSnapshotBuilder: Sendable {
     let subject: DiffSubject
     let sections: [DiffOriginSection]
     let observation: DiffSnapshotObservation
+    let head: DiffSnapshotHead?
     let patchFailures: [UnifiedDiffParseFailure]
     let statusFailures: [GitStatusParseFailure]
     let unreadableUntrackedPaths: [String]
@@ -148,6 +176,7 @@ public struct DiffSnapshotBuilder: Sendable {
       sections: sections,
       observation: DiffSnapshotObservation(
         headObject: hash, files: observations(of: sections)),
+      head: nil,
       patchFailures: parsed.failures,
       statusFailures: [],
       unreadableUntrackedPaths: [])
@@ -160,7 +189,7 @@ public struct DiffSnapshotBuilder: Sendable {
     subject: (String) -> DiffSubject
   ) async throws(DiffSnapshotBuilderError) -> Collected {
     let base = try revision(branch)
-    let mergeBase = try await run(.mergeBase(base, .head)).trimmed
+    let mergeBase = try await mergeBase(of: base, branch: branch)
     let mergeBaseRevision = try revision(mergeBase)
 
     var sections: [DiffOriginSection] = []
@@ -192,9 +221,35 @@ public struct DiffSnapshotBuilder: Sendable {
       sections: sections,
       observation: DiffSnapshotObservation(
         headObject: statusResult.status.branch?.oid, files: observations(of: sections)),
+      head: Self.head(of: statusResult.status),
       patchFailures: failures,
       statusFailures: statusResult.failures,
       unreadableUntrackedPaths: untracked.unreadablePaths)
+  }
+
+  /// 共通祖先が無いときの `git merge-base` は、出力なしの終了コード 1 で終わる。ref が解決
+  /// できないときは 128 なので (git 2.50.1 で実測)、終了コードと空出力の両方で区別する。
+  private func mergeBase(
+    of base: GitRevision, branch: String
+  ) async throws(DiffSnapshotBuilderError) -> String {
+    do {
+      return try await runner.run(.mergeBase(base, .head)).stdout.trimmed
+    } catch {
+      if case .commandFailed(1, let stdout, let stderr) = error, stdout.trimmed.isEmpty {
+        if let reason = await unresolvedMergeBaseReason(stderr: stderr) {
+          throw .mergeBaseUnresolved(branch: branch, reason: reason)
+        }
+        throw .noMergeBase(branch: branch)
+      }
+      throw .git(error)
+    }
+  }
+
+  private static func head(of status: GitStatus) -> DiffSnapshotHead? {
+    guard let branch = status.branch else { return nil }
+    return DiffSnapshotHead(
+      branch: branch.isDetached ? nil : branch.head,
+      commit: branch.oid == GitStatusBranch.unbornObject ? nil : branch.oid)
   }
 
   /// 競合中のパスは `git diff` / `git diff --cached` のどちらにも patch 形式では現れないため、
@@ -305,4 +360,67 @@ public struct DiffSnapshotBuilder: Sendable {
 
 extension String {
   fileprivate var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
+extension DiffSnapshotBuilder {
+  /// `nil` は「共通祖先が無い」と断定してよいこと。断定に要る条件 (shallow でない・履歴の
+  /// 書き換えが無い・git が何も言っていない) を1つでも確かめられなければ理由を返す (§12.3)。
+  fileprivate func unresolvedMergeBaseReason(
+    stderr: String
+  ) async -> DiffMergeBaseUnresolvedReason? {
+    let shape: (isShallow: Bool, graftFile: String)
+    let replaceRefs: String
+    do {
+      let output = try await runner.run(.historyShape()).stdout
+      guard let parsed = Self.parseHistoryShape(output) else {
+        return .historyCheckFailed(detail: "rev-parse の出力を読めません: \(output)")
+      }
+      shape = parsed
+      replaceRefs = try await runner.run(.replaceRefs()).stdout
+    } catch {
+      return .historyCheckFailed(detail: "\(error)")
+    }
+    if shape.isShallow { return .shallowRepository }
+    // grafts の hint は `advice.graftFileDeprecated=false` で stderr から消えるので、
+    // stderr ではなくファイルの有無で見る。
+    if !replaceRefs.trimmed.isEmpty || FileManager.default.fileExists(atPath: shape.graftFile) {
+      return .rewrittenHistory
+    }
+    if !stderr.trimmed.isEmpty { return .gitReported(stderr: stderr) }
+    return nil
+  }
+
+  /// `historyShape()` の出力は `true` / `false` の1行と、grafts ファイルの絶対パスの1行。
+  private static func parseHistoryShape(_ output: String) -> (isShallow: Bool, graftFile: String)? {
+    var lines = output.split(separator: "\n", omittingEmptySubsequences: false)
+    if lines.last?.isEmpty == true { lines.removeLast() }
+    guard lines.count == 2, lines[1].hasPrefix("/") else { return nil }
+    switch lines[0] {
+    case "true": return (true, String(lines[1]))
+    case "false": return (false, String(lines[1]))
+    default: return nil
+    }
+  }
+}
+
+extension GitStatusBranch {
+  /// `# branch.oid` は commit の無い branch では OID の代わりにこの値を出す (porcelain v2)。
+  fileprivate static let unbornObject = "(initial)"
+}
+
+extension GitReadCommand {
+  /// 1行目が shallow か (`true` / `false`)、2行目が grafts ファイルの絶対パス。linked worktree
+  /// でも共通ディレクトリの `info/grafts` を返す (git 2.50.1 / 2.55.0 で実測)。
+  fileprivate static func historyShape() -> Self {
+    Self(arguments: [
+      "rev-parse", "--path-format=absolute", "--is-shallow-repository", "--git-path",
+      "info/grafts",
+    ])
+  }
+
+  /// 1件でもあれば足りるので `--count=1`。`GitRunner` は `GIT_REPLACE_REF_BASE` を子へ渡さない
+  /// ので、置き場所は既定の `refs/replace/` に限られる。
+  fileprivate static func replaceRefs() -> Self {
+    Self(arguments: ["for-each-ref", "--count=1", "--format=%(refname)", "refs/replace/"])
+  }
 }

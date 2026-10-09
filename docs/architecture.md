@@ -624,6 +624,29 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 
 軽量なsyntax highlightingは必要だが、v1でEditor engineやLSPを作ることはしない。
 
+**履歴・過去commit・blameの実装上の決定 — 現在の推奨(Issue #183)。**
+
+- 履歴はHEADから辿り、renameを追う(`git log --follow`)。1回に200件を読み、続きは「さらに読む」で
+  件数を200件ずつ広げて先頭から読み直す。`--skip`で続きを取らないのは、`--follow`がrenameを
+  そのcommitを出力するときに検出するため、renameのcommitを読み飛ばすとそれより前の履歴が
+  1件も出ないからである(git 2.50.1／2.55.0で実測)。
+- `--follow`は1本のパスを線形に追い、renameのcommitを辿った時点で追うパスを旧名へ切り替える。
+  そのため、renameより前に分岐したside branchで旧名のファイルを変えたcommitは、renameのcommitより
+  先に辿られる(日時が新しい)と一覧に出ず、mergeの第1親との差分としてだけ現れる。renameより先に
+  辿られなければ一覧に出る(git 2.50.1／2.55.0で実測)。
+- merge commitは履歴に1回だけ出し、そのDiffは第1親との差分とする。表示で第1親との差分である
+  ことと親の数を示す。root commitは空のtreeとの差分とする。Commit Diff(§9.1.2)がmerge commitを
+  拒否するのとは扱いが異なる。
+- 過去commit時点のコードには§7.2と同じ判定(警告閾値・`Open anyway`・バイナリ)を適用する。
+  ただし絶対上限(16 MiB)を超える過去版は本文を取得せず、先頭だけの表示もしない。また不正な
+  UTF-8を含む過去版は、サイズ超過の確認より前にバイナリとして扱う。いずれもgitの出力を
+  受け取る実行層が出力上限で打ち切らずに失敗し、受け取ったバイト列を文字列としてしか返さない
+  ことによる、現在のファイルとの差である。
+- blameはworking treeの内容に対して取り、未commitの行を「未commit」と区別して示す。§7.2で本文を
+  そのまま展開しないファイル(バイナリ、警告閾値を超えるもの。`Open anyway`で開いたものを含む)
+  にはblameを出さない。blameは非同期に実行し、取り消せる。
+- 失敗時はgitのstderrをそのまま表示する。
+
 ## 8. 検索
 
 ### 8.1 確定仕様
@@ -714,6 +737,37 @@ snapshot内では出所を区別して表示する。区別はcommit済み／sta
 ためである。§9.2のcomment anchorが持つ6要素の構造自体は変更しない。
 
 **競合(unmerged)の情報源と本文 — 確定(2026-09-09)。** 競合ファイルの一覧は`git status --porcelain=v2`の`u`レコードから作る。`git diff`が出すcombined diff(`diff --cc`)と`git diff --cached`が出す`* Unmerged path`はどちらも通常のpatch形式と別物で、パーサは既知のレコードとして読み飛ばすだけにする — 「このパスは競合中」という一次情報はstatusが持っており、そちらだけを使う方が版数差に強い(git 2.50.1で実測: 競合中のパスは`git diff`／`git diff --cached`のどちらにも`diff --git`形式では現れず、unstaged側は`diff --cc`と`* Unmerged path`の両方を出す)。P2では**差分本文(combined diff)を表示せず**、一覧に競合中として出したうえで、開いたときに本文を表示しない理由を明示する。黙って空にしないことが要求であり、本文の表示方法は未確定として§25に残す。競合中でも`u`レコードのXY(例: `UU`／`AA`／`DU`)とstage 1/2/3のOIDは保持し、状態を「変更」へ丸めない(§12.3)。
+
+#### 9.1.4 範囲の表示 — 現在の推奨
+
+Drawer内で比較元を指定してDiffを見る(§1.2)以上、いま何と何を比べているかが画面から分からなければ
+指定した意味が無い。Diff paneの上部に次の4項目を出す。値はsnapshotを開いた時点のもので、
+開いた後にHEADが動いても書き換えない(動いたことは§9.3の変更通知が伝える)。
+
+| 項目 | Base Diff | Branch Diff | Commit Diff |
+| --- | --- | --- | --- |
+| 対象 | worktreeの表示名(Task Tabと同じ名前。Project Rootは「Project Root」)、branch名(detached HEADなら「detached」)、HEADの短いOID(commitの無いbranchなら「commit なし」) | 同左 | 同左 |
+| 比較元 | base branch名と、それを決めた経路(upstream／origin/HEAD／ユーザーの選択。§9.1.1) | 選んだbranch名 | commitの短いOIDとsubject |
+| 起点 | merge-baseの短いOIDと、merge-base起点であること(§9.1.2) | 同左 | 指定commitの親。親の無いcommitは空tree |
+| 範囲 | §9.1.3の5区分それぞれのファイル数(0件の区分も出す)と、ignoredを含まないこと | 同左 | そのcommitと親の差分であり、未commit変更を含まないこと |
+
+- HEADを観測できなかった場合は空欄にせず、観測できなかったと出す(§12.3と同じく丸めない)。
+- 共通祖先が無くmerge-baseを求められない場合はsnapshotを作らず、その理由を表示する。空treeやroot commitを
+  起点に代えると§9.1.2と別の範囲になるため。
+- 「共通祖先が無い」と表示するのは、それを裏づけられる場合に限る。`git merge-base`は、共通祖先が無い場合と、
+  在っても辿れない場合とで同じ結果(出力なしの終了コード1)を返す(git 2.50.1／2.55.0で実測)。辿れない場合とは、
+  shallow cloneで共通祖先がshallowの境界より古い場合と、`git replace --graft`や`info/grafts`が親を切っている
+  場合である。そこで、shallowでない・`refs/replace/`と`info/grafts`が無い・stderrに何も出ていない、のすべてを
+  確かめられたときだけ「共通祖先が無い」とし、それ以外は「merge-baseを求められなかった(共通祖先が無いとは
+  限らない)」と理由を添えて表示する(§12.3と同じく、不明を既知の値に丸めない)。stderrを条件に含めるのは、
+  同名のtagとbranchがあるとgitはtagを選び、warningを出したうえで別のrefと比べるためである。
+- merge commitは比べる親が§9.1.2で定まっていないため、Commit Diffを作らない。commitの一覧ではmerge commitで
+  あることを示す。
+
+比較先(Branch Diffの比較先とBase Diffのbaseの選び直し)は、**同じProjectの他のActiveなタスクのbranch**、
+local branch、remote branchの順に区画を分けて並べ、文字列で絞り込めるようにする。並行タスクの成果と
+比べることが主な用途で、ref名を平たく並べるだけでは探せないため。Commit Diffのcommit一覧は一定件数ずつ
+追加で読み込めるようにする。
 
 ### 9.2 コメント
 

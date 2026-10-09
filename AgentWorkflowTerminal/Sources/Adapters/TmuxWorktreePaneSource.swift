@@ -123,6 +123,23 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
       }
   }
 
+  /// `summaryReadings(of:)` に pane の位置 (`#{window_index}` / `#{pane_index}`) を添えたもの。
+  /// 同じ1回の `list-panes` から取るので、概要と位置が別の時点の pane を指すことは無い。
+  public func locatedSummaryReadings(
+    of worktree: WorktreeIdentity
+  ) async throws(TmuxWorktreePaneSourceError) -> [LocatedPaneSummaryReadings] {
+    let session = TmuxSessionName(identity: worktree)
+    return try await paneList.panes()
+      .filter { $0.sessionName == session.rawValue }
+      .compactMap { pane in
+        pane.summaryReadings.map {
+          LocatedPaneSummaryReadings(
+            readings: PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0),
+            location: PaneLocation(windowIndex: pane.windowIndex, paneIndex: pane.paneIndex))
+        }
+      }
+  }
+
   /// tmux server の同一性 (`#{pid}`)。`nil` は server が居ない、または値を読めなかったことを
   /// 表し、呼び出し側はこれを「一致した」側へ倒さない (`MainPaneRegistry.resolve`)。
   ///
@@ -146,4 +163,9 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
       throw .tmux(error)
     }
   }
+}
+
+public struct LocatedPaneSummaryReadings: Sendable, Hashable {
+  public let readings: PaneSummaryReadingsSnapshot
+  public let location: PaneLocation
 }

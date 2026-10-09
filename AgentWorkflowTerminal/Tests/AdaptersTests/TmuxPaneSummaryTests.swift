@@ -265,6 +265,38 @@ struct TmuxWorktreePaneSourceSummaryTests {
     #expect(summaries.first?.readings.status == .value("4242 設計｜相談中"))
     #expect(summaries.map(\.readings.purpose)[1] == .unreadable(.containsLineBreakOrUnitSeparator))
   }
+
+  @Test("pane の window と pane の index を、連携変数と同じ1回の list-panes から添える")
+  func locatesSummaryReadingsFromTheSameListPanes() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/summary"))
+    let session = TmuxSessionName(identity: worktree).rawValue
+    let output = try String(
+      contentsOf: try #require(
+        Bundle.module.url(
+          forResource: "tmux-3.4-list-panes-summary-hostile.txt", withExtension: nil,
+          subdirectory: "Fixtures")),
+      encoding: .utf8
+    ).replacingOccurrences(of: "summary-fixture", with: session)
+    let spy = ObservationProcessSpy(listPanesOutput: output)
+    let clock = ManualTimeSource()
+    let runner = try makeTmuxRunner(socketName: "summary-test", processRunner: spy)
+    let source = TmuxWorktreePaneSource(
+      runner: runner,
+      paneList: TmuxAllSessionPaneListCache(
+        runner: runner, timeToLive: .seconds(1), timeSource: clock))
+
+    let summaries = try await source.summaryReadings(of: worktree)
+    let located = try await source.locatedSummaryReadings(of: worktree)
+
+    #expect(await spy.count(of: .listPanes) == 1)
+    #expect(located.map(\.readings) == summaries)
+    #expect(
+      located.map(\.location) == [
+        PaneLocation(windowIndex: 0, paneIndex: 0), PaneLocation(windowIndex: 0, paneIndex: 1),
+        PaneLocation(windowIndex: 0, paneIndex: 2), PaneLocation(windowIndex: 0, paneIndex: 3),
+        PaneLocation(windowIndex: 0, paneIndex: 4), PaneLocation(windowIndex: 1, paneIndex: 0),
+      ])
+  }
 }
 
 @Suite("目的の書き込み (設計書 §12.7 / §13)")

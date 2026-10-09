@@ -14,6 +14,11 @@ struct AppDependencies: Sendable {
   /// メインpaneの候補列挙とテキスト注入 (設計書 §9.2 / §12.7) が使う。tmux を起動できない
   /// 起動では `nil` で、その間は送信操作そのものが成立しない。
   let tmuxRunner: TmuxRunner?
+  /// pane 一覧と連携変数 (§12.7) の読み取り。`paneStates` の feed と共有する (同じ `list-panes`
+  /// キャッシュ)。
+  let paneSource: TmuxWorktreePaneSource?
+  /// `ps` のスナップショットを pane 状態の観測と共有する (§12.7 の現在の Agent プロセス)。
+  let signalSource: TmuxAgentSignalSource?
   /// `~/Library/Application Support` に当たるディレクトリ。引けなかった場合は `nil` で、
   /// その起動では Active/Inactive を保存できない。
   let applicationSupportDirectory: URL?
@@ -36,6 +41,8 @@ struct AppDependencies: Sendable {
         tmuxError: "tmux 実行ファイルが見つかりません。tmux をインストールしてください。",
         paneStates: nil,
         tmuxRunner: nil,
+        paneSource: nil,
+        signalSource: nil,
         applicationSupportDirectory: applicationSupport
       )
     }
@@ -50,12 +57,15 @@ struct AppDependencies: Sendable {
         tmuxRunner: runner,
         processRunner: FoundationProcessRunner()
       )
+      let paneSource = TmuxWorktreePaneSource(runner: runner)
       return Self(
         launchProject: launchProject,
         tmuxExecutable: executable,
         tmuxError: nil,
-        paneStates: makeWorktreePaneStatesFeed(runner: runner, signalSource: signalSource),
+        paneStates: makeWorktreePaneStatesFeed(paneSource: paneSource, signalSource: signalSource),
         tmuxRunner: runner,
+        paneSource: paneSource,
+        signalSource: signalSource,
         applicationSupportDirectory: applicationSupport
       )
     } catch {
@@ -65,6 +75,8 @@ struct AppDependencies: Sendable {
         tmuxError: "tmux を利用できません: \(error)",
         paneStates: nil,
         tmuxRunner: nil,
+        paneSource: nil,
+        signalSource: nil,
         applicationSupportDirectory: applicationSupport
       )
     }
@@ -98,8 +110,12 @@ enum LaunchProjectArgument: Sendable {
 
 @MainActor
 final class AppModel: ObservableObject {
-  @Published private(set) var projectRoot: DetectedWorktree?
-  @Published private(set) var worktrees: [TaskWorktree] = []
+  @Published private(set) var projectRoot: DetectedWorktree? {
+    didSet { paneObservations.observe(inventory) }
+  }
+  @Published private(set) var worktrees: [TaskWorktree] = [] {
+    didSet { paneObservations.observe(inventory) }
+  }
   @Published var selectedIdentity: WorktreeIdentity?
   @Published var openedIdentities: Set<WorktreeIdentity> = []
   @Published var viewerDrawerLayout = ViewerDrawerLayout.closed
@@ -117,9 +133,9 @@ final class AppModel: ObservableObject {
   let tmuxExecutable: URL?
   /// `nil` は tmux を使えない起動。`tmuxExecutable` が `nil` の起動と同じ集合になる。
   let sessions: TmuxSessionProvisioner?
-  /// 公開しない。表示層から直に呼べると `agentPaneStates(of:)` の gate を迂回して Inactive の
-  /// pane を観測できてしまい、Issue #237 の状態がそのまま戻る。
-  private let paneStates: WorktreePaneStatesFeed?
+  /// pane 観測はここで worktree ごとに1本だけ回す (Issue #189)。タブ・Drawer・Overview はどれも
+  /// これを読み、自分で観測を起こさない。
+  let paneObservations: PaneObservationStore
   let diffModels = DiffViewerModelStore()
   let mainPanes: MainPaneCoordinator
   let project: RegisteredProject
@@ -154,7 +170,7 @@ final class AppModel: ObservableObject {
       } else {
         nil
       }
-    paneStates = dependencies.paneStates
+    paneObservations = PaneObservationStore(dependencies: dependencies)
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
     message = dependencies.tmuxError
   }
@@ -201,6 +217,7 @@ final class AppModel: ObservableObject {
   /// Project へ git を撃ち続け、その保存ファイルを書き続ける。
   func stop() {
     rescan.cancel()
+    paneObservations.stopAll()
   }
 
   private func scanAndObserve(projectDirectory: URL) async {
@@ -462,15 +479,10 @@ final class AppModel: ObservableObject {
   /// - Important: 可否の判定は `WorktreeInventory.observesPaneStates(of:)` に任せ、ここでは
   ///   書き直さない。タブ側とドロワー側がそれぞれ条件を持つと、片方だけが Inactive を外して
   ///   観測が走り続ける (Issue #237)。
+  ///
+  /// 返すのは `paneObservations` の購読で、呼ぶたびに観測を起こすことはない (Issue #189)。
   func agentPaneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
-    guard let paneStates, inventory.observesPaneStates(of: identity),
-      let detected = detectedWorktree(of: identity)
-    else { return nil }
-    return paneStates(detected)
-  }
-
-  private func detectedWorktree(of identity: WorktreeIdentity) -> DetectedWorktree? {
-    if let projectRoot, projectRoot.identity == identity { return projectRoot }
-    return worktrees.first { $0.identity == identity }?.detected
+    guard inventory.observesPaneStates(of: identity) else { return nil }
+    return paneObservations.paneStates(of: identity)
   }
 }

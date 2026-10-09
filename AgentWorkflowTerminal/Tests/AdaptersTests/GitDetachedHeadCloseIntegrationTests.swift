@@ -47,10 +47,11 @@ struct GitDetachedHeadCloseIntegrationTests {
 
       let confirmation = WorktreeRemovalConfirmation(
         report: result.report, continuation: .forcingAcknowledgedWarnings)
+      let progress = try await repository.progressReport(for: target)
       for choice in Self.everyChoice {
         #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
           try planWorktreeClose(
-            worktree: target, choice: choice, confirmation: confirmation)
+            worktree: target, progress: progress, choice: choice, confirmation: confirmation)
         }
       }
 
@@ -89,10 +90,11 @@ struct GitDetachedHeadCloseIntegrationTests {
 
       let confirmation = WorktreeRemovalConfirmation(
         report: result.report, continuation: .forcingAcknowledgedWarnings)
+      let progress = try await repository.progressReport(for: target)
       for choice in Self.everyChoice {
         #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
           try planWorktreeClose(
-            worktree: target, choice: choice, confirmation: confirmation)
+            worktree: target, progress: progress, choice: choice, confirmation: confirmation)
         }
       }
 

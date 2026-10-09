@@ -263,18 +263,29 @@ Agentの実装完了やPR作成完了だけではworktreeをInactiveにしない
 下記の検査(警告して続行可)より強い扱いとして、確認では済ませない。
 
 **拒否の対象は、detached HEADに加えて作業が途中のworktree全般とする — 確定(2026-10-08)。**
-merge／cherry-pick／revert／rebase／bisectの途中状態が残っているworktreeは拒否する。merge・cherry-pickの
+merge／cherry-pick／revert／rebase／bisect／`git am`の途中状態と、連続cherry-pick・revertの衝突を
+解決した後に残る未完了のsequencerを持つworktreeは拒否する。merge・cherry-pickの
 衝突中はHEADがbranchを指したままで(`worktree list --porcelain`が`branch`行を出す。git 2.50.1で実測)、
 detached HEADの条件では捕まらず、未commit変更の警告を承諾すれば`--force`付きで削除されてしまうため
-である。途中の操作を完了または中止するよう促す。途中状態の観測手段(管理ディレクトリの`MERGE_HEAD`等を
-見るか、`git status`を読むか)は実装時に計測で決める(Issue #355)。
+である。途中の操作を完了または中止するよう促す。途中状態は対象worktreeの管理ディレクトリ
+(`<common>/worktrees/<名前>`)で観測する。`MERGE_HEAD`／`CHERRY_PICK_HEAD`／`REVERT_HEAD`は
+`rev-parse --verify`でgitに問い(reftable形式のrepositoryでは後2者がファイルとして現れないため)、
+`rebase-merge`／`rebase-apply`／`BISECT_LOG`／`sequencer`はファイルの有無で見る。`git status`は使わない
+(porcelain出力ではmerge・cherry-pick・revertの衝突が区別できず、bisectは何も出さない。git 2.50.1で
+実測、Issue #355)。観測できなかった場合は作業途中として扱い、拒否する。
 
 **この拒否は計画時と実行直前の2回判定する — 確定(2026-10-08)。** 実行層はsessionを終了する前に
 対象worktreeのHEADと途中状態を読み直し、detached、計画時と別のbranch、作業途中のいずれかであれば
 何も実行せずに中止する。計画から実行までの間にAgentがrebaseを始めた場合や、保存から復元した陳腐化
 したbranchで計画を作った場合に、detached HEADのworktreeが削除されるためである。detachedには
 `git worktree remove`が`--force`なしでも成功し、そこに積んだcommitはgc後に失われる(git 2.50.1で実測、
-Issue #354)。読み直しから削除までの窓は残存リスクとして受け入れる。
+Issue #354)。branch削除を含む計画では、マージ判定に使ったbranch先端のcommitを計画に載せ、実行直前に
+先端がそれと一致することも確かめる。`-D`は未マージのcommitも消すので、判定の後にbranchへ積まれた
+commitをマージ済みという古い判定のまま削除しないためである(Issue #359)。sessionを終了するまでは
+Agentが動いておりこの照合の後にもcommitを積めるので、worktree削除の後、`-D`の直前に先端をもう一度
+読み、一致しなければ`-D`を実行せずbranch削除の失敗として返す(branchは残る)。残存リスクとして受け入れる
+のは、先端については2段目の照合で読んでから`-D`を実行するまでの窓、HEADと途中状態については読み直し
+からworktree削除までの窓である。
 
 **3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
 
@@ -1143,6 +1154,9 @@ accessibility labelで意味を伝える(原則は§5.3)。paneの応答終了�
 - Overviewは通常のウィンドウ1枚とし、位置とサイズを記憶する。常に最前面には置かない。開く操作は⌘修飾の
   ショートカット1つを割り当てる(§5.4)。
 
+**対象とするProject — 確定(2026-10-08)。** Overviewと通知(§11.2)は、選択中のProjectに限らず
+登録済みの全Project(§16.1)を対象にする(Issue #372)。
+
 並び順は次のとおり。
 
 1. 人間の対応が必要な状態
@@ -1269,6 +1283,15 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 4. cloneされたrepository rootをProject Rootとして登録
 
 親ディレクトリ監視によるProject自動登録／discoveryは行わない。これはworktree自動検出とは別である。
+
+**登録の永続化 — 確定(2026-10-08)。** 登録済みProjectの一覧はApplication Support(§22.1)に保存し、
+再起動を跨いで復元する(Issue #372)。
+
+**選択中Projectの復元と登録解除 — 現在の推奨。** 選択中のProjectも同じ場所に保存して復元する。
+登録解除は一覧から外すだけで、repositoryのディスク上の内容とtmux sessionには触れない。
+
+**Clone Repositoryの経路 — 未確定。** 上の2経路の限定は変えず、先に既存Local Repositoryの経路だけを
+実装する(2026-10-08)。Clone経路の実装時期と詳細は決まっていない。
 
 ### 16.2 Git認証
 
@@ -1805,10 +1828,11 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - プロダクト名
 - Mac専用から他PC hostへ広げるか
 - v1、v2の正式な機能境界
+- Clone RepositoryによるProject登録の経路(§16.1。既存Local Repositoryの経路を先に実装した)
 
 ### UI
 
-- Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定)
+- Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定。メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替えることは確定(2026-10-08))
 - 状態と記号・色の対応表(原則は§5.3で確定。Overviewの実装時に決める)
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
@@ -2076,8 +2100,8 @@ PR_READY
 - [x] Close削除系の検査にignoredファイルの存在を含める。upstream設定はあるが追跡refが無い状態は未push／push済みと別の状態として扱う
 - [x] 「マージ済み」の判定はancestor判定に加え、patch相当の同一性(squash merge)も検出する
 - [x] HEADがbranchを指していない(detached HEAD)worktreeはCloseそのものを拒否する(既存の警告して続行可な検査より強い扱い)
-- [x] Closeの拒否対象はmerge／cherry-pick／revert／rebase／bisectの途中状態を含む「作業途中」全般
-- [x] Closeの拒否条件は計画時と実行直前(session終了の前)の2回判定し、実行直前にHEADが変わっていれば何も実行しない
+- [x] Closeの拒否対象はmerge／cherry-pick／revert／rebase／bisect／`git am`の途中状態と未完了のsequencerを含む「作業途中」全般。観測できなければ拒否する
+- [x] Closeの拒否条件は計画時と実行直前(session終了の前)の2回判定し、実行直前にHEADが変わっていれば何も実行しない。branch削除を含む計画では、マージ判定に使ったbranch先端との一致も確かめる
 - [x] 選択肢4のbranch削除は`git branch -D`で、アプリが「マージ済み」と判定したbranchに限る。squash mergeと判定したときは確認で強制削除を明示する
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
@@ -2139,6 +2163,7 @@ PR_READY
 - [x] libghostty(完全版)の採用対象はmacOS版のみ、モバイルrendererはmacOSと共通であることを要求せず実現可能なものを採用
 - [x] surfaceのプロセス終了後に作り直すかは上位レイヤが決める(rendererは状態と`restart`を公開するだけ、生成失敗のリトライはrenderer内部の責務)
 - [x] Project登録はlocal選択またはclone
+- [x] 登録済みProjectの一覧はApplication Supportに保存して再起動を跨いで復元する
 - [x] Git認証は既存環境へ完全委譲
 - [x] Git GUIは閲覧中心
 - [x] UI状態はdeviceごとに独立復元
@@ -2170,6 +2195,8 @@ PR_READY
 - [x] `Ask Agent`で使うAgent CLIは起動のたびに選ぶ
 - [x] 概要の「目的」の手入力はOverviewの行で直接編集し、入力箇所はそこ1つに限る
 - [x] Overviewは通常のウィンドウ1枚で位置とサイズを記憶し、常に最前面には置かない
+- [x] メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替える
+- [x] Overviewと通知は登録済みの全Projectを対象にする(選択中のProjectに限らない)
 - [x] 状態表示はSF Symbolsの固定セットで状態ごとに形を変え、色は補助、accessibility labelは状態名。`Unknown`に専用の形(対応表は#189で決める)
 - [x] ⌘修飾のショートカットはアプリが使い、tmuxのprefixと端末への打鍵には割り当てない
 - [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する
@@ -2186,6 +2213,7 @@ PR_READY
 - [ ] ripgrep CLIを正式採用 — bundle／host依存方針待ち
 - [ ] hostctl over SSHを正式採用 — protocol PoC待ち
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
+- [ ] 選択中Projectの復元と、登録解除でディスクとtmux sessionに触れないこと — ユーザー確認待ち(§16.1)
 
 # 付録C. 参照先
 

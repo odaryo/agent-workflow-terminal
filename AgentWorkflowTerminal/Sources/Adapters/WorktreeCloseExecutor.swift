@@ -9,7 +9,7 @@ import TerminalCore
 /// 1. `GitReadCommand` に書き込み case を足さない。あちらの internal initializer が
 ///    「モジュール外から書き込み command を作れない」保証そのものなので、そこへ混ぜると
 ///    保証している対象が変わってしまう。
-/// 2. 作れるのは `worktree remove` と `branch -d` の2つだけ。private initializer により、
+/// 2. 作れるのは `worktree remove` と `branch -D` の2つだけ。private initializer により、
 ///    任意の subcommand を組み立てる経路は無い。
 /// 3. `Adapters` の外へ出さない。公開している実行の入口は `WorktreeCloseExecutor.execute(_:)`
 ///    だけで、そこへ渡せる `WorktreeClosePlan` は `planWorktreeClose` しか作れない。
@@ -32,18 +32,29 @@ struct GitCloseWriteCommand: Sendable, Equatable {
     return Self(arguments: ["worktree", "remove"] + (force ? ["--force"] : []) + ["--", path])
   }
 
-  /// **`-D` は持たない。** §3.4 は選択肢4をマージ済み branch に限る。`-d` の拒否
-  /// (git 2.50.1 実測: rc=1 / `error: the branch 'topic' is not fully merged`) は、こちらの
-  /// 未merge検査と git の判断が食い違ったという信号であって、押し通す対象ではない。
+  /// **`-d` ではなく `-D` (`--delete --force`) で消す** (§3.4 確定 2026-10-08、Issue #359)。
+  /// `-d` は squash merge をマージ済みと認めず、upstream が削除されて `fetch --prune` された後
+  /// —— PR のマージ後に Close する最も普通の状況 —— は削除を拒否する (git 2.50.1 実測: rc=1 /
+  /// `error: the branch 'topic' is not fully merged`、同じ branch に `-D` は rc=0)。判定と実行で
+  /// 「マージ済み」の定義が食い違ったままでは選択肢4が squash merge 運用で必ず失敗するので、
+  /// アプリ自身の ancestor／patch 同一性の判定 (`BranchMergeStatus.merged`) を根拠にする。
   ///
-  /// - Parameter name: 短縮 local branch 名。`refs/` 始まりを弾くのは、`branch -d` が完全修飾した
+  /// その代わり **git 側に未merge を拒否する防波堤は無い**。`-D` を撃てるのは
+  /// `planWorktreeClose` が「マージ済み」と判定して `.deleteBranch` を載せた計画だけで、その経路を
+  /// 型で閉じているのは3つ —— この型の private initializer、`WorktreeClosePlan` の internal
+  /// initializer、`WorktreeCloseExecutor.execute` が計画しか受け取らないこと —— である。判定の後に
+  /// branch へ積まれた commit を巻き込まないよう、実行層は先端が判定時
+  /// (`WorktreeCloseStep.deleteBranch` の `tip`) のままかを2回確かめる —— session を終了する前と、
+  /// これを撃つ直前である。
+  ///
+  /// - Parameter name: 短縮 local branch 名。`refs/` 始まりを弾くのは、`branch -D` が完全修飾した
   ///   形も `refs/` 始まりの値も rc=1 の `not found` にするためで (git 2.50.1 実測)、argv の形の
   ///   検証である。同じ前置を見る Issue #142 の暫定 guard (`isBranchDeletionAvailable`) とは
   ///   目的が別で、そちらは選択肢4を提供するかどうかを決める。
   /// - Returns: 短縮 local branch 名でなければ `nil`。
   static func deleteMergedBranch(name: String) -> Self? {
     guard !name.isEmpty, !name.hasPrefix("refs/") else { return nil }
-    return Self(arguments: ["branch", "--delete", "--", name])
+    return Self(arguments: ["branch", "--delete", "--force", "--", name])
   }
 }
 
@@ -106,73 +117,6 @@ struct GitCloseWriteRunner: Sendable {
   }
 }
 
-/// `worktree remove` が失敗した後、登録が残っているかを読み直した結果 (設計書 §3.4)。
-///
-/// **`worktree remove` は step として atomic ではない。** git 2.50.1 実測では、clean な worktree の
-/// サブディレクトリを `chmod 500` にすると `worktree remove` は
-/// `error: failed to delete '<path>': Permission denied` と **rc=255** で終わるが、
-/// `worktree list --porcelain` からその worktree は消え、管理ディレクトリ (`.git/worktrees/<名前>`)
-/// ごと削除されていた。作業ツリーのディレクトリは中途半端に消えた状態で残る (`--force` を付けても
-/// 同じ)。一方、未commit変更があって git が実行を拒否した場合は rc=128 で登録は残る。
-/// **exit code だけでは区別できない**ので、この層が読み取りを1回撃って確かめる。
-///
-/// - Important: **「登録が残っている」と「アプリから見える」は別物である。** git 2.50.1 実測では、
-///   同じ `chmod 500` でも対象が管理ディレクトリ (`.git/worktrees/<名前>`) 側だと結果が変わる。
-///   `worktree remove` は同じ rc=255 /
-///   `error: failed to delete '.git/worktrees/p6': Permission denied` で終わり、作業ツリーは
-///   **完全に消える**のに、`worktree list --porcelain` には
-///   `prunable gitdir file points to non-existent location` を伴う record が残る。
-///   `GitWorktreeDetector` は `prunable` の付いた entry をスキャン対象から落とすので、
-///   「record がある」を「やり直せる」と答えると、ユーザーのファイルが全部消えた worktree を
-///   無傷だと伝えることになる。だから record の有無だけでなく、その record が
-///   スキャン対象になり得るかまで見る。
-public enum WorktreeRegistrationAfterFailedRemoval: Sendable, Equatable {
-  /// record があり、`GitWorktreeDetector` が一覧段で落とす条件 (`prunable` / bare) にも当たらない。
-  ///
-  /// **呼び出し側にできること**: 次のスキャンでもこの worktree は現れるので、UI から同じ Close を
-  /// もう一度選べる。git が実行を拒否した場合 (未commit変更など) がここへ来る。
-  ///
-  /// - Important: 「`scan()` が必ず返す」までは約束しない。`GitWorktreeDetector.describe` は
-  ///   一覧段を通った entry も、作業ツリーへ到達できない・common dir がこの Project のもので
-  ///   ないという理由で落とす。ここで見ているのは `worktree list` の record だけである。
-  case retained
-  /// record はあるが `prunable` (または bare) が付いており、`GitWorktreeDetector` が一覧段で落とす。
-  ///
-  /// **呼び出し側にできること**: `scan()` には現れないので、**UI からもう一度 Close を選ぶ経路は
-  /// 無い**。やり直せるのは、いま手元にある `WorktreeCloseExecutor` から同じ計画を撃ち直す場合
-  /// だけである。git 2.50.1 実測では、`prunable` の原因を取り除いた後の `worktree remove` は
-  /// rc=0 で record ごと消えるが、原因が残っている間は同じ rc=255 を繰り返す
-  /// (`worktree prune` も同じ `Permission denied` を出し、record を残したまま rc=0 で終わる)。
-  /// 原因を取り除く操作はアプリの書き込み範囲の外にあり、§17.2 のとおり Agent か通常 shell へ委ねる。
-  case retainedButNotScannable
-  /// 消したい作業ツリーのパスが `worktree list` に**見えなくなった**。
-  ///
-  /// 本当に登録が消えている形は実在する (上の「サブディレクトリを `chmod 500`」がそれで、
-  /// `.git/worktrees/<名前>` ごと消えたうえに作業ツリーは中途半端に残る)。ただしこの判定は
-  /// 「`DetectedWorktree.worktreePath` と `worktree list` の `worktree` 行が同じバイト列か」しか
-  /// 見ておらず、**両者が同じスキャンから来ている保証は型に無い**。git 2.50.1 実測では、
-  /// 登録が無傷のまま `.dropped` に見える形が少なくとも3つある。
-  ///
-  /// 1. `git worktree move` の後。安定 ID は不変なので `scan()` はこの worktree を返し続けるが、
-  ///    `worktree` 行は新しいパスになる (実測: `p7` → `p7-moved` で安定 ID は
-  ///    `.../worktrees/p7` のまま、旧パスは list から消える)。手元の `DetectedWorktree` が
-  ///    移動前のものなら一致しない。呼び出し側のバグは要らない。
-  /// 2. `repositoryDirectory` が別 repository を指していた場合。その repository の list に対象の
-  ///    パスは無い (実測) 一方、対象の登録は無傷である。
-  /// 3. `worktree remove` が受け付けるパス表記は list が吐く表記より広い。実測では末尾スラッシュ・
-  ///    `..` を含む形・symlink 経由 (`/tmp` → `/private/tmp`) がいずれも rc=0 で同じ worktree を
-  ///    消すが、list は解決後の1表記しか吐かない。`WorktreeCloseExecutor.init` の検証は
-  ///    `hasPrefix("/")` だけなのでこれらは argv に入り、入った時点で文字列比較は外れる。
-  ///
-  /// **呼び出し側にできること**: この値だけで「消えた」と断定しない。次のスキャン結果と安定 ID で
-  /// 突き合わせ直すのが唯一の確かめ方である。挙動を安全側 (`.retained` へ丸めない) に寄せている
-  /// のは、上の3つがどれも**登録が残っている**方向の誤りだからである。
-  case dropped
-  /// 読み直し自体が失敗し、どれか決められなかった。`retained` へ丸めない —— 消えた登録を
-  /// 「何も起きていない」と読ませることが、この読み直しが防ごうとしている事故そのものである。
-  case unknown(GitRunnerError)
-}
-
 public struct WorktreeCloseStepFailure: Error, Sendable, Equatable {
   public enum Reason: Sendable, Equatable {
     case tmux(TmuxSessionOperationError)
@@ -181,6 +125,13 @@ public struct WorktreeCloseStepFailure: Error, Sendable, Equatable {
     /// `worktree remove` の失敗。**「失敗した」だけでは何が起きたか決まらない**ので、
     /// 登録を読み直した結果を必ず添える (`WorktreeRegistrationAfterFailedRemoval`)。
     case worktreeRemoval(GitRunnerError, registration: WorktreeRegistrationAfterFailedRemoval)
+    /// `branch -D` の直前 (worktree 削除の後) に読み直した先端が、マージ判定のときと違った。
+    /// `-D` は撃っておらず、branch は残っている。判定の後に積まれた commit はマージ済みと
+    /// 確かめられていない (§3.4、Issue #359)。
+    case branchTipMoved(planned: CommitObjectID, current: CommitObjectID)
+    /// `branch -D` の直前に先端を読めなかった。動いていないと確かめられないので `-D` は撃って
+    /// おらず、branch は残っている。
+    case branchTipUnverified(GitWorktreeProgressReadError)
     /// step の値から git の argv を組み立てられなかった。作業ツリーのパスは
     /// `WorktreeCloseExecutor.init` が弾くので、ここへ来るのは `DetectedWorktree` から来た
     /// branch 名が `GitCloseWriteCommand.deleteMergedBranch` の受け付ける形でなかったときだけ
@@ -209,6 +160,13 @@ public enum WorktreeCloseExecutorError: Error, Sendable, Equatable {
 public struct WorktreeClosePlanMismatch: Error, Sendable, Equatable {
   public let plan: WorktreeIdentity
   public let executor: WorktreeIdentity
+}
+
+/// `execute` の結果。中止 (1 step も撃っていない) と、step を撃ち始めた後の失敗を型で分ける。
+public enum WorktreeCloseExecution: Sendable, Equatable {
+  /// 実行直前の読み直しで中止した。tmux にも git にも書き込んでいない。
+  case abandoned(WorktreeClosePreflightRefusal)
+  case executed(WorktreeCloseOutcome)
 }
 
 /// どこまで進んだか。Close の後始末は**巻き戻せない**ので、「全部成功か例外か」の2値にしない
@@ -246,6 +204,10 @@ public struct WorktreeCloseExecutor: Sendable {
   /// 撃てない」保証そのもの —— であり、読み取り用の command を通せないためである。同じ規則を
   /// 書き写すのではなく `GitRunner` をそのまま使う (Issue #143)。
   private let readRunner: GitRunner
+  /// 実行直前の読み直し用。`readRunner` (`repositoryDirectory` で動く) とは別に、対象の管理
+  /// ディレクトリで動く。`repositoryDirectory` で `symbolic-ref HEAD` を撃つと、答えるのは
+  /// 対象ではなく Project Root の HEAD である。
+  private let progressReader: GitWorktreeProgressReader
   /// `force` は計画ごとに変わるが、`removeWorktree(path:force:)` が `nil` を返すかどうかはパスの
   /// 形だけで決まる。両方を init で組み立てておくと、**実行時に `nil` を扱う分岐が残らない** ——
   /// 「撃っていない step を成功として報告する」経路を、テストで到達できないまま置かずに済む。
@@ -280,7 +242,8 @@ public struct WorktreeCloseExecutor: Sendable {
       sessionOperations: sessionOperations, processRunner: processRunner,
       executableCandidates: executableCandidates,
       parentEnvironment: ProcessInfo.processInfo.environment,
-      isExecutableFile: { FileManager.default.isExecutableFile(atPath: $0.path) })
+      isExecutableFile: { FileManager.default.isExecutableFile(atPath: $0.path) },
+      fileExists: { FileManager.default.fileExists(atPath: $0) })
   }
 
   init(
@@ -290,7 +253,8 @@ public struct WorktreeCloseExecutor: Sendable {
     processRunner: any ProcessRunning,
     executableCandidates: [URL],
     parentEnvironment: [String: String],
-    isExecutableFile: @Sendable (URL) -> Bool
+    isExecutableFile: @Sendable (URL) -> Bool,
+    fileExists: @escaping @Sendable (String) -> Bool
   ) throws(WorktreeCloseExecutorError) {
     // `DetectedWorktree.worktreePath` は壊れた `worktree list` の出力で一覧全体を落とさないよう
     // 意図的に無検証で通されている (あちらの doc コメント)。検証はここで行う。条件を
@@ -324,18 +288,42 @@ public struct WorktreeCloseExecutor: Sendable {
         repositoryDirectory: repositoryDirectory, processRunner: processRunner,
         executableCandidates: executableCandidates, parentEnvironment: parentEnvironment,
         isExecutableFile: isExecutableFile)
+      self.progressReader = GitWorktreeProgressReader(
+        runner: try GitRunner(
+          repositoryDirectory: URL(fileURLWithPath: worktree.identity.rawValue),
+          processRunner: processRunner, executableCandidates: executableCandidates,
+          parentEnvironment: parentEnvironment, isExecutableFile: isExecutableFile),
+        identity: worktree.identity, fileExists: fileExists)
     } catch {
       throw .git(error)
     }
   }
 
+  /// 最初の step を撃つ前に、対象の HEAD と途中状態を読み直す (§3.4、Issue #354)。branch 削除を
+  /// 含む計画では branch の先端も読み直す (Issue #359)。detached、計画時と別の branch、作業途中、
+  /// 先端の移動のいずれか —— または読み直せなかった —— なら何も撃たずに `.abandoned` を返す。
+  ///
+  /// - Note: 空の計画 (選択肢1) では読み直さない。撃つものが無く、中止しても止める操作が無い。
+  ///   §3.4 の拒否は計画段階 (`planWorktreeClose`) で選択肢1にも掛かっている。
   /// - Throws: 計画が別の worktree のものだったとき。実行前に弾く —— 1 step でも撃ってからでは
   ///   巻き戻せない。
   public func execute(
     _ plan: WorktreeClosePlan
-  ) async throws(WorktreeClosePlanMismatch) -> WorktreeCloseOutcome {
+  ) async throws(WorktreeClosePlanMismatch) -> WorktreeCloseExecution {
     guard plan.worktree == identity else {
       throw WorktreeClosePlanMismatch(plan: plan.worktree, executor: identity)
+    }
+    guard !plan.steps.isEmpty else {
+      return .executed(WorktreeCloseOutcome(completed: [], failure: nil, skipped: []))
+    }
+    let plannedTip = plan.steps.lazy.compactMap { step -> CommitObjectID? in
+      guard case .deleteBranch(_, let tip) = step else { return nil }
+      return tip
+    }.first
+    if let refusal = await progressReader.preflightRefusal(
+      plannedBranch: plan.branch, plannedTip: plannedTip)
+    {
+      return .abandoned(refusal)
     }
     var completed: [WorktreeCloseStep] = []
     for (index, step) in plan.steps.enumerated() {
@@ -343,11 +331,12 @@ public struct WorktreeCloseExecutor: Sendable {
         completed.append(step)
         continue
       }
-      return WorktreeCloseOutcome(
-        completed: completed, failure: failure,
-        skipped: Array(plan.steps[plan.steps.index(after: index)...]))
+      return .executed(
+        WorktreeCloseOutcome(
+          completed: completed, failure: failure,
+          skipped: Array(plan.steps[plan.steps.index(after: index)...])))
     }
-    return WorktreeCloseOutcome(completed: completed, failure: nil, skipped: [])
+    return .executed(WorktreeCloseOutcome(completed: completed, failure: nil, skipped: []))
   }
 
   private func perform(_ step: WorktreeCloseStep) async -> WorktreeCloseStepFailure? {
@@ -356,9 +345,32 @@ public struct WorktreeCloseExecutor: Sendable {
       await terminateSession(step)
     case .removeWorktree(let force):
       await removeWorktree(force: force, for: step)
-    case .deleteBranch(let name):
-      await write(GitCloseWriteCommand.deleteMergedBranch(name: name), for: step)
+    case .deleteBranch(let name, let tip):
+      await deleteBranch(name: name, plannedTip: tip, for: step)
     }
+  }
+
+  /// 先端の照合は `execute` の冒頭 (session 終了の前) でも行うが、session を終了するまで Agent は
+  /// 動いており、その間に積まれた commit は冒頭の照合をすり抜ける (レビューの実測: 計画時の先端の
+  /// 後に commit → `worktree remove` rc=0 → `branch --delete --force` がその commit ごと消した)。
+  /// だから `-D` の直前にもう一度読む。worktree はもう無いので `repositoryDirectory` で読む。
+  /// 残る窓は、ここで読んでから `-D` を撃つまでである。
+  private func deleteBranch(
+    name: String, plannedTip: CommitObjectID, for step: WorktreeCloseStep
+  ) async -> WorktreeCloseStepFailure? {
+    guard let command = GitCloseWriteCommand.deleteMergedBranch(name: name) else {
+      return WorktreeCloseStepFailure(step: step, reason: .invalidArguments)
+    }
+    do {
+      let current = try await readLocalBranchTip(name, with: readRunner)
+      guard current == plannedTip else {
+        return WorktreeCloseStepFailure(
+          step: step, reason: .branchTipMoved(planned: plannedTip, current: current))
+      }
+    } catch {
+      return WorktreeCloseStepFailure(step: step, reason: .branchTipUnverified(error))
+    }
+    return await write(command, for: step)
   }
 
   /// 失敗したときだけ `worktree list` を1回読み直す。書き込みの失敗後に読み取りを撃つのは
@@ -428,11 +440,8 @@ public struct WorktreeCloseExecutor: Sendable {
   }
 
   private func write(
-    _ command: GitCloseWriteCommand?, for step: WorktreeCloseStep
+    _ command: GitCloseWriteCommand, for step: WorktreeCloseStep
   ) async -> WorktreeCloseStepFailure? {
-    guard let command else {
-      return WorktreeCloseStepFailure(step: step, reason: .invalidArguments)
-    }
     do {
       _ = try await runner.run(command)
       return nil

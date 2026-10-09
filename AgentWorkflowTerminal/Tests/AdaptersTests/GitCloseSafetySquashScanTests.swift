@@ -17,7 +17,9 @@ struct GitCloseSafetySquashScanTests {
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/heads/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case let arguments where arguments.first == "diff":
         .success(.init(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n"))
@@ -42,7 +44,9 @@ struct GitCloseSafetySquashScanTests {
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
-      case ["merge-base", "--is-ancestor", "refs/heads/topic", "refs/heads/main"]:
+      case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
+        .success(tipOutput(fixtureTipHex))
+      case ["merge-base", "--is-ancestor", fixtureTipHex, "refs/heads/main"]:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case let arguments where arguments.first == "log":
         .success(.init(exitCode: 0, stdout: "not-a-commit-record\0", stderr: ""))

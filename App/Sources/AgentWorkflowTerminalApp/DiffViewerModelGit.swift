@@ -37,6 +37,28 @@ extension DiffViewerModel {
     }
   }
 
+  nonisolated static func readCommits(
+    worktreeRoot: URL, maxCount: Int
+  ) async -> Result<[GitCommit], DiffViewerFailure> {
+    do {
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: worktreeRoot, processRunner: FoundationProcessRunner())
+      return .success(try await builder.recentCommits(maxCount: maxCount))
+    } catch {
+      return .failure(DiffViewerFailure(message: "commit 一覧を取得できません: \(error)"))
+    }
+  }
+
+  /// 開く操作の時点の選択を写し取る (§9.1 の範囲表示)。
+  func rangeContext() -> DiffSnapshotRangeContext {
+    var baseSource: DiffBaseBranchSource?
+    if kind == .base, case .resolved(_, let source) = baseBranch { baseSource = source }
+    return DiffSnapshotRangeContext(
+      worktreeName: worktreeContext().displayName,
+      baseSource: baseSource,
+      commit: kind == .commit ? selectedCommit.map(DiffCommitLabel.init) : nil)
+  }
+
   nonisolated static func build(
     worktreeRoot: URL, request: DiffRequest
   ) async -> Result<DiffSnapshotBuildResult, DiffViewerFailure> {
@@ -72,6 +94,9 @@ extension DiffViewerModel {
     case .unsupportedMergeCommit(let parents):
       // どの親と比べるかは設計書が定めていない (§9.1.2)。第一親を推測で選ばない。
       "merge commit の Diff は未対応です (親 \(parents.count) 件)"
+    case .noMergeBase(let branch):
+      // 空 tree や root commit を起点に代えない (§9.1.2)。
+      "\(branch) と HEAD に共通祖先 (merge-base) が無いため、merge-base 起点の Diff を作れません"
     case .invalidRevision(let value):
       "revision を解決できません: \(value)"
     case .git(let error):

@@ -34,6 +34,9 @@ final class DiffViewerModel: ObservableObject {
   static let commitListLimit = 50
 
   let worktreeRoot: URL
+  /// 呼ぶたびに `AppModel` の現在の一覧から作り直す。表示名は snapshot を開いた時点の値を
+  /// `rangeContexts` へ写すので、後から変わっても開いた snapshot の表示は動かない。
+  let worktreeContext: @MainActor () -> DiffWorktreeContext
 
   @Published var kind: Kind = .base
   @Published private(set) var baseBranch: DiffBaseBranch = .undetermined
@@ -41,6 +44,9 @@ final class DiffViewerModel: ObservableObject {
   @Published private(set) var selectedCommit: GitCommit?
   @Published private(set) var refNames: GitRefNames?
   @Published private(set) var commits: [GitCommit] = []
+  @Published private(set) var canLoadMoreCommits = false
+  /// snapshot ごとの、開いた時点の範囲 (§9.1)。`history` と同じく消さない。
+  @Published private(set) var rangeContexts: [DiffSnapshotID: DiffSnapshotRangeContext] = [:]
   /// 保持の不変条件は `DiffSnapshotHistory` が持つ (§9.3)。
   @Published private(set) var history = DiffSnapshotHistory()
   @Published var currentSnapshotID: DiffSnapshotID?
@@ -81,9 +87,14 @@ final class DiffViewerModel: ObservableObject {
   /// 動かすため。既定は本番と同じ単調増加クロック。
   init(
     worktreeRoot: URL,
+    worktreeContext: (@MainActor () -> DiffWorktreeContext)? = nil,
     timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
   ) {
     self.worktreeRoot = worktreeRoot
+    self.worktreeContext =
+      worktreeContext ?? {
+        DiffWorktreeContext(displayName: worktreeRoot.lastPathComponent, otherTasks: [])
+      }
     self.sendCoalescer = DiffCommentSendCoalescer(timeSource: timeSource)
   }
 
@@ -99,7 +110,7 @@ final class DiffViewerModel: ObservableObject {
 
   var baseBranchDescription: String {
     switch baseBranch {
-    case .resolved(let branch, let source): "\(branch) (\(source.label))"
+    case .resolved(let branch, let source): "\(branch) (\(source.decisionLabel))"
     case .undetermined: "未決定"
     }
   }
@@ -378,6 +389,7 @@ final class DiffViewerModel: ObservableObject {
       baseBranch = context.baseBranch
       refNames = context.refNames
       commits = context.commits
+      canLoadMoreCommits = context.commits.count >= Self.commitListLimit
       if selectedCommit == nil { selectedCommit = context.commits.first }
       if selectedBranch == nil { selectedBranch = context.baseBranch.branch }
       errorMessage = nil
@@ -400,15 +412,30 @@ final class DiffViewerModel: ObservableObject {
     selectedCommit = commit
   }
 
+  /// 続きを `--skip` で取らずに件数を増やして読み直すのは、読み込みの間に HEAD が動くと
+  /// skip の位置がずれて、commit が欠けるか重なるため。
+  func loadMoreCommits() async {
+    let limit = commits.count + Self.commitListLimit
+    switch await Self.readCommits(worktreeRoot: worktreeRoot, maxCount: limit) {
+    case .success(let loaded):
+      commits = loaded
+      canLoadMoreCommits = loaded.count >= limit
+    case .failure(let failure):
+      errorMessage = failure.message
+    }
+  }
+
   /// Diff を開く / Refresh する。どちらも新しい snapshot を作り、古いものは残す (§9.3)。
   func openSnapshot() async {
     guard let request = currentRequest() else { return }
+    let context = rangeContext()
     isLoading = true
     defer { isLoading = false }
     let outcome = await Self.build(worktreeRoot: worktreeRoot, request: request)
     switch outcome {
     case .success(let result):
       history.append(result.snapshot)
+      rangeContexts[result.snapshot.id] = context
       currentSnapshotID = result.snapshot.id
       changeSinceOpened = nil
       selection = firstSelection(in: result.snapshot)
@@ -468,27 +495,4 @@ final class DiffViewerModel: ObservableObject {
 
 struct DiffViewerFailure: Error {
   let message: String
-}
-
-/// worktree ごとの `DiffViewerModel` を Drawer の開閉より長く持たせるための入れ物。
-@MainActor
-final class DiffViewerModelStore: ObservableObject {
-  private var models: [URL: DiffViewerModel] = [:]
-
-  func model(for worktreeRoot: URL) -> DiffViewerModel {
-    if let existing = models[worktreeRoot] { return existing }
-    let model = DiffViewerModel(worktreeRoot: worktreeRoot)
-    models[worktreeRoot] = model
-    return model
-  }
-}
-
-extension DiffBaseBranchSource {
-  fileprivate var label: String {
-    switch self {
-    case .userSelection: "選択"
-    case .upstream: "upstream"
-    case .originHead: "origin/HEAD"
-    }
-  }
 }

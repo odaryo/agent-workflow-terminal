@@ -15,6 +15,9 @@ public enum DiffSnapshotBuilderError: Error, Sendable, Equatable {
   case invalidRevision(String)
   /// merge commit の比較対象は設計書が定めていない (§9.1.2)。
   case unsupportedMergeCommit(parents: [String])
+  /// `branch` と HEAD に共通祖先が無く、merge-base 起点の range (§9.1.2) を作れない。
+  /// 空 tree や root commit を起点に代えない — それは §9.1.2 と別の範囲になる。
+  case noMergeBase(branch: String)
 }
 
 public struct DiffSnapshotBuildResult: Sendable {
@@ -78,13 +81,20 @@ public struct DiffSnapshotBuilder: Sendable {
     now: Date
   ) async throws(DiffSnapshotBuilderError) -> DiffSnapshotBuildResult {
     let collected = try await collect(request)
+    var head = collected.head
+    if case .commit = request {
+      // Commit Diff の範囲表示 (§9.1) のためだけに読む。`observe` (変更検知のポーリング) では
+      // 読まないよう `collect` の外に置き、読めなくても Diff 自体は作れるので失敗にしない。
+      head = (try? await status(untrackedFiles: .normal)).flatMap { Self.head(of: $0.status) }
+    }
     return DiffSnapshotBuildResult(
       snapshot: DiffSnapshot(
         id: id,
         subject: collected.subject,
         createdAt: now,
         sections: collected.sections,
-        observation: collected.observation),
+        observation: collected.observation,
+        head: head),
       patchFailures: collected.patchFailures,
       statusFailures: collected.statusFailures,
       unreadableUntrackedPaths: collected.unreadableUntrackedPaths)
@@ -103,6 +113,7 @@ public struct DiffSnapshotBuilder: Sendable {
     let subject: DiffSubject
     let sections: [DiffOriginSection]
     let observation: DiffSnapshotObservation
+    let head: DiffSnapshotHead?
     let patchFailures: [UnifiedDiffParseFailure]
     let statusFailures: [GitStatusParseFailure]
     let unreadableUntrackedPaths: [String]
@@ -148,6 +159,7 @@ public struct DiffSnapshotBuilder: Sendable {
       sections: sections,
       observation: DiffSnapshotObservation(
         headObject: hash, files: observations(of: sections)),
+      head: nil,
       patchFailures: parsed.failures,
       statusFailures: [],
       unreadableUntrackedPaths: [])
@@ -160,7 +172,7 @@ public struct DiffSnapshotBuilder: Sendable {
     subject: (String) -> DiffSubject
   ) async throws(DiffSnapshotBuilderError) -> Collected {
     let base = try revision(branch)
-    let mergeBase = try await run(.mergeBase(base, .head)).trimmed
+    let mergeBase = try await mergeBase(of: base, branch: branch)
     let mergeBaseRevision = try revision(mergeBase)
 
     var sections: [DiffOriginSection] = []
@@ -192,9 +204,30 @@ public struct DiffSnapshotBuilder: Sendable {
       sections: sections,
       observation: DiffSnapshotObservation(
         headObject: statusResult.status.branch?.oid, files: observations(of: sections)),
+      head: Self.head(of: statusResult.status),
       patchFailures: failures,
       statusFailures: statusResult.failures,
       unreadableUntrackedPaths: untracked.unreadablePaths)
+  }
+
+  /// 共通祖先が無いときの `git merge-base` は、出力なしの終了コード 1 で終わる。ref が解決
+  /// できないときは 128 なので (git 2.50.1 で実測)、終了コードと空出力の両方で区別する。
+  private func mergeBase(
+    of base: GitRevision, branch: String
+  ) async throws(DiffSnapshotBuilderError) -> String {
+    do {
+      return try await runner.run(.mergeBase(base, .head)).stdout.trimmed
+    } catch {
+      if case .commandFailed(1, let stdout, _) = error, stdout.trimmed.isEmpty {
+        throw .noMergeBase(branch: branch)
+      }
+      throw .git(error)
+    }
+  }
+
+  private static func head(of status: GitStatus) -> DiffSnapshotHead? {
+    guard let branch = status.branch else { return nil }
+    return DiffSnapshotHead(branch: branch.isDetached ? nil : branch.head, object: branch.oid)
   }
 
   /// 競合中のパスは `git diff` / `git diff --cached` のどちらにも patch 形式では現れないため、

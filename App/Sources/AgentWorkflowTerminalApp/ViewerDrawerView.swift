@@ -84,38 +84,19 @@ struct ViewerDrawerView<Terminal: View>: View {
 
   @ViewBuilder
   private var drawer: some View {
-    if let primary = layout.primary {
-      if let secondary = layout.secondary {
-        switch layout.splitAxis {
-        case .horizontal:
-          HSplitView {
-            pane(primary, isPrimary: true)
-            pane(secondary, isPrimary: false)
-          }
-        case .vertical:
-          VSplitView {
-            pane(primary, isPrimary: true)
-            pane(secondary, isPrimary: false)
-          }
-        }
-      } else {
-        pane(primary, isPrimary: true)
-      }
+    if let content = layout.content {
+      pane(content)
     }
   }
 
-  private func pane(_ content: ViewerContent, isPrimary: Bool) -> some View {
+  private func pane(_ content: ViewerContent) -> some View {
     VStack(spacing: 0) {
       HStack {
         Label(content.title, systemImage: content.systemImage)
           .fontWeight(.medium)
         Spacer()
         Button("閉じる", systemImage: "xmark") {
-          if isPrimary {
-            layout.closePrimary()
-          } else {
-            layout.closeSecondary()
-          }
+          layout.close()
         }
         .labelStyle(.iconOnly)
         .buttonStyle(.borderless)

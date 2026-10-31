@@ -567,9 +567,9 @@ Code、Diff、Evidenceは常設せず、必要時にViewer Drawerとして開く
 - ViewerだけをFullscreen表示できる。
 - Drawerを閉じた時点がOverlayなら次回もOverlayで開き、InlineまたはFullscreenなら次回はInlineで開く。
 - iPhoneでは基本的にFullscreen sheetとして表示する。
-- Drawer内部は最大2分割とする。
-- 2分割は左右または上下を選び、Code／Diff／Evidenceを任意に組み合わせる。
-- Viewer側に自由な多分割レイアウトは持たせない。
+- Drawerは常に1ペインとし、Drawer内部を分割しない(2026-10-31 決定。それまでの「最大2分割」を廃止)。
+- Code／Diff／Evidenceのうち別の内容を開くと、開いているペインを置き換える。
+- Viewer側に多分割レイアウトは持たせない。
 
 ### 6.2 Terminal出力からの遷移
 
@@ -1502,7 +1502,6 @@ Terminalはユーザーの`~/.gitconfig`に依存しない決定的な出力を�
 - 選択pane
 - Viewer Drawerの開閉
 - Drawerの幅
-- Viewerの左右／上下分割
 - 開いていたCode／Diff／Evidence
 - Diff review途中のsnapshot
 
@@ -2245,7 +2244,7 @@ PR_READY
 - [x] 選択肢4のbranch削除は`git branch -D`で、アプリが「マージ済み」と判定したbranchに限る。squash mergeと判定したときは確認で強制削除を明示する
 - [x] worktree内はpane分割中心、tmux window追加を基本にしない
 - [x] Agent Terminal中心
-- [x] Viewer Drawerは最大2分割
+- [x] Viewer Drawerは常に1ペインで、別の内容を開くと置き換える(2026-10-31、最大2分割を廃止)
 - [x] Code／Diff／Evidenceを必要時だけ表示
 - [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
 - [x] File Browserはignoredを含む全ファイル、lazy load

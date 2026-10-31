@@ -1417,8 +1417,15 @@ Project別上限と全体上限のどちらを必須にするか、保存期間�
 **登録の永続化 — 確定(2026-10-08)。** 登録済みProjectの一覧はApplication Support(§22.1)に保存し、
 再起動を跨いで復元する(Issue #372)。
 
-**選択中Projectの復元と登録解除 — 現在の推奨。** 選択中のProjectも同じ場所に保存して復元する。
-登録解除は一覧から外すだけで、repositoryのディスク上の内容とtmux sessionには触れない。
+**選択中Projectの復元 — 現在の推奨。** 選択中のProjectも同じ場所に保存して復元する。
+
+**登録解除 — 確定(2026-10-31、Issue #406)。** 登録解除の前に確認を出し、「キャンセル」「登録だけ解除」
+「sessionとデータも削除して解除」の3つから選ばせる。「登録だけ解除」は一覧から外すだけで、tmux sessionと
+アプリ内データ(§3.2.1の`projects/<project-id>/`)を残す。「削除して解除」は、そのProjectのtmux session
+(Project Rootと、アプリが把握しているTask worktreeのsessionのうち実在するもの)とアプリ内データを
+削除してから一覧から外す。確認には削除するsession名を示し、session内のAgentやコマンドも終了することを
+明記する。どちらの場合もrepositoryとworktreeのディスク上の内容には触れない(Gitはwrite-free)。
+登録解除を放置すると、一覧から辿れないsessionとデータが残り続けるためである。
 
 **Clone Repositoryの経路 — 未確定。** 上の2経路の限定は変えず、先に既存Local Repositoryの経路だけを
 実装する(2026-10-08)。Clone経路の実装時期と詳細は決まっていない。
@@ -2297,6 +2304,7 @@ PR_READY
 - [x] surfaceのプロセス終了後に作り直すかは上位レイヤが決める(rendererは状態と`restart`を公開するだけ、生成失敗のリトライはrenderer内部の責務)
 - [x] Project登録はlocal選択またはclone
 - [x] 登録済みProjectの一覧はApplication Supportに保存して再起動を跨いで復元する
+- [x] 登録解除は確認のうえ「登録だけ解除」か「tmux sessionとアプリ内データも削除して解除」を選ぶ。repositoryとworktreeには触れない
 - [x] Git認証は既存環境へ完全委譲
 - [x] Git GUIは閲覧中心
 - [x] UI状態はdeviceごとに独立復元
@@ -2348,7 +2356,7 @@ PR_READY
 - [ ] ripgrep CLIを正式採用 — bundle／host依存方針待ち
 - [ ] hostctl over SSHを正式採用 — protocol PoC待ち
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
-- [ ] 選択中Projectの復元と、登録解除でディスクとtmux sessionに触れないこと — ユーザー確認待ち(§16.1)
+- [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)
 - [ ] Macのローカル通知の起動直後の基準とまとめ通知・前面時の判断待ちの抑止・要対応(種別不明)の通知・bundle外での無効化 — ユーザー確認待ち(§11.2)
 
 # 付録C. 参照先

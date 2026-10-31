@@ -10,108 +10,38 @@ public enum ViewerDrawerPresentation: Sendable, Hashable, CaseIterable {
   case fullscreen
 }
 
-public enum ViewerDrawerSplitAxis: Sendable, Hashable {
-  case horizontal
-  case vertical
-}
-
 public struct ViewerDrawerLayout: Sendable, Hashable {
-  private struct OpenLayout: Sendable, Hashable {
-    var primary: ViewerContent
-    var secondary: ViewerContent?
-    var presentation: ViewerDrawerPresentation
-  }
-
-  private var openLayout: OpenLayout?
+  public private(set) var content: ViewerContent?
+  public private(set) var presentation: ViewerDrawerPresentation?
   private var opensInOverlay: Bool
-  public private(set) var splitAxis: ViewerDrawerSplitAxis
 
   public static let closed = Self()
 
-  public var primary: ViewerContent? { openLayout?.primary }
-  public var secondary: ViewerContent? { openLayout?.secondary }
-  public var presentation: ViewerDrawerPresentation? { openLayout?.presentation }
-  public var isOpen: Bool { openLayout != nil }
+  public var isOpen: Bool { content != nil }
 
-  public init(splitAxis: ViewerDrawerSplitAxis = .horizontal) {
-    openLayout = nil
+  public init() {
+    content = nil
+    presentation = nil
     opensInOverlay = false
-    self.splitAxis = splitAxis
   }
 
-  public mutating func openPrimary(_ content: ViewerContent) {
-    guard var current = openLayout else {
-      let presentation: ViewerDrawerPresentation = opensInOverlay ? .overlay : .inline
+  public mutating func open(_ content: ViewerContent) {
+    if !isOpen {
+      presentation = opensInOverlay ? .overlay : .inline
       opensInOverlay = false
-      openLayout = OpenLayout(
-        primary: content,
-        secondary: nil,
-        presentation: presentation
-      )
-      return
     }
-    if current.secondary == content {
-      current.secondary = current.primary
-    }
-    current.primary = content
-    openLayout = current
+    self.content = content
   }
 
-  public mutating func openSecondary(_ content: ViewerContent) {
-    guard var current = openLayout else {
-      let presentation: ViewerDrawerPresentation = opensInOverlay ? .overlay : .inline
-      opensInOverlay = false
-      openLayout = OpenLayout(
-        primary: content,
-        secondary: nil,
-        presentation: presentation
-      )
-      return
-    }
-    if current.primary == content {
-      guard let secondary = current.secondary else { return }
-      current.primary = secondary
-    }
-    current.secondary = content
-    openLayout = current
-  }
-
-  public mutating func closePrimary() {
-    guard let current = openLayout else { return }
-    guard let secondary = current.secondary else {
-      opensInOverlay = current.presentation == .overlay
-      openLayout = nil
-      return
-    }
-    openLayout = OpenLayout(
-      primary: secondary,
-      secondary: nil,
-      presentation: current.presentation
-    )
-  }
-
-  public mutating func closeSecondary() {
-    openLayout?.secondary = nil
-  }
-
-  public mutating func closeAll() {
-    guard let current = openLayout else { return }
-    opensInOverlay = current.presentation == .overlay
-    openLayout = nil
+  public mutating func close() {
+    guard isOpen else { return }
+    opensInOverlay = presentation == .overlay
+    content = nil
+    presentation = nil
   }
 
   public mutating func setPresentation(_ presentation: ViewerDrawerPresentation) {
-    openLayout?.presentation = presentation
-  }
-
-  public mutating func toggleSplitAxis() {
-    splitAxis = splitAxis == .horizontal ? .vertical : .horizontal
-  }
-
-  public mutating func swapPanes() {
-    guard var current = openLayout, let secondary = current.secondary else { return }
-    current.secondary = current.primary
-    current.primary = secondary
-    openLayout = current
+    guard isOpen else { return }
+    self.presentation = presentation
   }
 }

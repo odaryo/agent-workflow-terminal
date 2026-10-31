@@ -27,8 +27,6 @@ struct DiffViewerPane: View {
         Divider()
       }
       banners
-      // HSplitView は VStack の中では余った縦を自分から取りに行かない (実測: 上下に空きが出る)。
-      // 明示的に優先度を上げて、残りの高さをこのペインへ渡す。
       content
         .layoutPriority(1)
     }
@@ -68,7 +66,7 @@ struct DiffViewerPane: View {
   @ViewBuilder
   private var controls: some View {
     VStack(alignment: .leading, spacing: 6) {
-      HStack {
+      VStack(alignment: .leading, spacing: 6) {
         Picker("種別", selection: $model.kind) {
           Text("Commit").tag(DiffViewerModel.Kind.commit)
           Text("Base").tag(DiffViewerModel.Kind.base)
@@ -83,7 +81,7 @@ struct DiffViewerPane: View {
       }
       subjectSelector
       if let snapshot = model.currentSnapshot {
-        HStack {
+        VStack(alignment: .leading, spacing: 6) {
           Picker("レビュー状態", selection: reviewStateBinding(snapshot)) {
             Text("Reviewing").tag(DiffReviewState.reviewing)
             Text("Reviewed").tag(DiffReviewState.reviewed)
@@ -94,7 +92,6 @@ struct DiffViewerPane: View {
           if model.history.count > 1 {
             snapshotHistoryMenu
           }
-          Spacer()
         }
         sendControls
       }
@@ -105,19 +102,24 @@ struct DiffViewerPane: View {
   /// 登録済みの送信先を見せ、いつでも選び直せるようにする (§12.7)。
   @ViewBuilder
   private var sendControls: some View {
-    HStack(spacing: 8) {
-      Text(destinationLabel)
-        .font(.caption)
-        .foregroundStyle(.secondary)
-      Button("送信先を選ぶ") {
-        Task {
-          await model.requestMainPaneSelection(
-            worktree: worktree, mainPane: mainPane, agentPaneStates: observedPaneStates)
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(spacing: 8) {
+        Text(destinationLabel)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+        Button("送信先を選ぶ") {
+          Task {
+            await model.requestMainPaneSelection(
+              worktree: worktree, mainPane: mainPane, agentPaneStates: observedPaneStates)
+          }
         }
+        .buttonStyle(.link)
+        .fixedSize()
+        .disabled(model.isSending)
       }
-      .buttonStyle(.link)
-      .disabled(model.isSending)
-      Spacer()
       Button("Review batch を送信 (\(model.currentSnapshotComments.count))") {
         Task {
           await model.requestSend(
@@ -154,21 +156,27 @@ struct DiffViewerPane: View {
       HStack {
         Text("base: \(model.baseBranchDescription)")
           .font(.caption)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         branchMenu(title: "選び直す") { model.selectBaseBranch($0) }
-        Spacer()
       }
     case .branch:
       HStack {
         Text("比較先: \(model.selectedBranch ?? "未選択")")
           .font(.caption)
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         branchMenu(title: "選ぶ") { model.selectBranch($0) }
-        Spacer()
       }
     case .commit:
       HStack {
         Text(model.selectedCommit.map { "\($0.abbreviatedHash) \($0.subject)" } ?? "未選択")
           .font(.caption)
           .lineLimit(1)
+          .truncationMode(.tail)
+          .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         Menu("選ぶ") {
           ForEach(model.commits, id: \.hash) { commit in
             // merge commit は Diff を作らない (§9.1.2 は比べる親を定めていない)。
@@ -186,7 +194,6 @@ struct DiffViewerPane: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        Spacer()
       }
     }
   }
@@ -273,24 +280,18 @@ struct DiffViewerPane: View {
   @ViewBuilder
   private var content: some View {
     if let snapshot = model.currentSnapshot {
-      // Why not HSplitView: VStack の中に置くと縦に伸びず、ペイン下部に空きが出る (実測)。
-      // 幅の調整より、Drawer いっぱいに差分が出ることを優先する。
-      HStack(spacing: 0) {
+      DiffContentLayout {
         DiffFileList(model: model, snapshot: snapshot)
-          .frame(width: 240)
-        Divider()
+      } diff: {
         DiffHunkView(model: model, file: selectedFile(in: snapshot))
-          .frame(minWidth: 200, maxWidth: .infinity)
-        Divider()
+      } comments: {
         DiffCommentPanel(
           model: model, mainPane: mainPane, worktree: worktree,
           keyboardFocus: keyboardFocus
         ) {
           observedPaneStates
         }
-        .frame(width: 260)
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if model.isLoading {
       ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {

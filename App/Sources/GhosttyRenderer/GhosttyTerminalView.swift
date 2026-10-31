@@ -531,6 +531,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   init() {
     super.init(frame: .zero)
     focusRingType = .none
+    registerForDraggedTypes([.fileURL])
   }
 
   // Why not deinit: @MainActor class の deinit から isolated な surface へ安全に触れられない。

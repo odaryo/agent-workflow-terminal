@@ -18,6 +18,7 @@ struct OverviewScene: Scene {
     }
     .defaultSize(width: 640, height: 480)
     .commands {
+      TabCyclingCommands(projects: projects)
       CommandGroup(after: .toolbar) {
         OverviewMenuItem()
       }

@@ -22,15 +22,14 @@ struct ViewerDrawerView<Terminal: View>: View {
   let keyboardFocus: TerminalKeyboardFocus
   @ViewBuilder let terminal: () -> Terminal
 
-  @State private var requestedInlineDrawerWidth = ViewerDrawerMetrics.defaultDrawerWidth
-  @State private var inlineDragBaseWidth: CGFloat?
+  @State private var requestedDrawerWidth = ViewerDrawerMetrics.defaultDrawerWidth
 
   var body: some View {
     GeometryReader { proxy in
       let metrics = ViewerDrawerMetrics(
         presentation: layout.presentation,
         totalWidth: proxy.size.width,
-        requestedInlineWidth: requestedInlineDrawerWidth
+        requestedWidth: requestedDrawerWidth
       )
       ZStack(alignment: .topLeading) {
         terminal()
@@ -45,40 +44,27 @@ struct ViewerDrawerView<Terminal: View>: View {
             .frame(width: metrics.drawerWidth)
             .background(metrics.drawerBackground)
             .shadow(radius: metrics.isDrawerOverlaid ? 8 : 0)
-            .overlay(alignment: .leading) { inlineResizeHandle(metrics: metrics) }
         }
         .opacity(metrics.isDrawerVisible ? 1 : 0)
         .allowsHitTesting(metrics.isDrawerVisible)
+        if metrics.isDrawerInline || metrics.isDrawerOverlaid {
+          DrawerResizeHandle(
+            width: metrics.drawerWidth,
+            onWidthChange: { requestedDrawerWidth = $0 },
+            onDragEnd: { requestedWidth in
+              requestedDrawerWidth =
+                ViewerDrawerMetrics(
+                  presentation: layout.presentation,
+                  totalWidth: proxy.size.width,
+                  requestedWidth: requestedWidth
+                ).drawerWidth
+            }
+          )
+          .frame(width: 8, height: proxy.size.height)
+          .offset(x: metrics.drawerOffsetX - 4)
+        }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-  }
-
-  @ViewBuilder
-  private func inlineResizeHandle(metrics: ViewerDrawerMetrics) -> some View {
-    if metrics.isDrawerInline {
-      Divider()
-        .padding(.horizontal, 3)
-        .contentShape(.rect)
-        .onHover { inside in
-          if inside {
-            NSCursor.resizeLeftRight.set()
-          } else {
-            NSCursor.arrow.set()
-          }
-        }
-        .gesture(
-          DragGesture(minimumDistance: 1)
-            .onChanged { value in
-              let base = inlineDragBaseWidth ?? metrics.drawerWidth
-              inlineDragBaseWidth = base
-              requestedInlineDrawerWidth = base - value.translation.width
-            }
-            .onEnded { _ in
-              inlineDragBaseWidth = nil
-              requestedInlineDrawerWidth = metrics.drawerWidth
-            }
-        )
     }
   }
 
@@ -151,7 +137,7 @@ struct ViewerDrawerView<Terminal: View>: View {
 
 /// Drawer を階層から出し入れせずに 3 種類の見た目を作るための寸法。
 /// 閉じている間も drawer は階層に残り、幅と可視性だけが変わる。
-private struct ViewerDrawerMetrics {
+struct ViewerDrawerMetrics {
   static let defaultDrawerWidth: CGFloat = 420
   private static let minimumDrawerWidth: CGFloat = 240
   private static let minimumTerminalWidth: CGFloat = 320
@@ -172,7 +158,7 @@ private struct ViewerDrawerMetrics {
   init(
     presentation: ViewerDrawerPresentation?,
     totalWidth: CGFloat,
-    requestedInlineWidth: CGFloat
+    requestedWidth: CGFloat
   ) {
     let total = max(totalWidth, 0)
     isDrawerVisible = presentation != nil
@@ -187,10 +173,15 @@ private struct ViewerDrawerMetrics {
       drawerOffsetX = 0
     case .inline:
       let upperBound = max(Self.minimumDrawerWidth, total - Self.minimumTerminalWidth)
-      drawerWidth = min(max(requestedInlineWidth, Self.minimumDrawerWidth), upperBound)
+      drawerWidth = min(max(requestedWidth, Self.minimumDrawerWidth), upperBound)
       terminalWidth = max(total - drawerWidth, 0)
       drawerOffsetX = terminalWidth
-    case .overlay, nil:
+    case .overlay:
+      let upperBound = max(Self.minimumDrawerWidth, total - Self.minimumTerminalWidth)
+      drawerWidth = min(min(max(requestedWidth, Self.minimumDrawerWidth), upperBound), total)
+      terminalWidth = total
+      drawerOffsetX = total - drawerWidth
+    case nil:
       drawerWidth = min(Self.defaultDrawerWidth, total)
       terminalWidth = total
       drawerOffsetX = total - drawerWidth

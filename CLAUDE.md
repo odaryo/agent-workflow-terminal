@@ -64,6 +64,7 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Create a PR | `scripts/wf-pr-create.sh` |
 | Edit a PR body or title | `scripts/wf-pr-edit.sh` |
 | Merge a PR | `scripts/wf-pr-merge.sh` |
+| Re-run the failed CI jobs of a PR (unrelated flakes only) | `scripts/wf-ci-rerun.sh` |
 | Close a PR without merging | `scripts/wf-pr-close.sh` |
 | Read / reply to PR comments | `scripts/wf-pr-comments.sh` / `scripts/wf-pr-reply.sh` |
 | Clean up merged branches | `scripts/wf-cleanup-branches.sh` |

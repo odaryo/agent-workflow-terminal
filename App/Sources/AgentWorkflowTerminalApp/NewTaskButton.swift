@@ -6,9 +6,17 @@ struct NewTaskButton: View {
   let action: () -> Void
 
   var body: some View {
-    NewTaskMenuItem(isDisabled: isDisabled, action: action)
-      .labelStyle(.iconOnly)
-      .buttonStyle(.borderless)
+    // Why not `NewTaskMenuItem` + `.labelStyle(.iconOnly)`: 実測で AX の title / description が
+    // 空になり (#407 の UI 確認)、当たり判定もアイコンの 10x10pt しか無かった。
+    Button(action: action) {
+      Image(systemName: "plus")
+        .frame(width: 22, height: 22)
+        .contentShape(.rect)
+    }
+    .buttonStyle(.borderless)
+    .accessibilityLabel(NewTaskMenuItem.title)
+    .disabled(isDisabled)
+    .help(NewTaskMenuItem.help(isDisabled: isDisabled))
   }
 }
 
@@ -17,14 +25,18 @@ struct NewTaskMenuItem: View {
   let isDisabled: Bool
   let action: () -> Void
 
+  static let title = "新しいタスク…"
+
+  static func help(isDisabled: Bool) -> String {
+    isDisabled
+      ? "bare repository には Project Root の端末が無いため使えません。"
+      : "Project Root の端末へ移ります。そこで Agent を起動して worktree を作らせると、新しいタブとして現れます。"
+  }
+
   var body: some View {
-    Button("新しいタスク…", systemImage: "plus", action: action)
+    Button(Self.title, systemImage: "plus", action: action)
       .disabled(isDisabled)
-      .help(
-        isDisabled
-          ? "bare repository には Project Root の端末が無いため使えません。"
-          : "Project Root の端末へ移ります。そこで Agent を起動して worktree を作らせると、新しいタブとして現れます。"
-      )
+      .help(Self.help(isDisabled: isDisabled))
   }
 }
 

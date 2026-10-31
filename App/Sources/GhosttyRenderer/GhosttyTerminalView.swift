@@ -514,6 +514,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   /// false の間は自分から first responder を取らない。surface の (再) 生成の経路も
   /// `applyFocusRequest` の経路も、この同じ述語だけを読む (Issue #278)。
   private var wantsKeyboardFocus = false
+  var acceptsFileDrops = false
   private var appliedFocusRequest: Int?
   /// フォーカス移譲だけに使われたクリックの mouseUp を握り潰すための印。
   var suppressesNextLeftMouseUp = false
@@ -630,6 +631,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     _ request: TerminalFocusRequest?,
     participation: TerminalKeyboardParticipation
   ) {
+    updateFileDropRegistration(request, participation: participation)
     wantsKeyboardFocus = request?.isTerminalAllowed == true && participation == .normal
     // 表示中のタブ (`request != nil`) が受け取れないときは、キーボードを端末から外す。
     // Why not `isTerminalAllowed` も条件にする: それは「テキスト入力が主張しているなら

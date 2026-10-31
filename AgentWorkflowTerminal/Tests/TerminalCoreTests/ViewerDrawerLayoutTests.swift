@@ -86,6 +86,7 @@ struct ViewerDrawerLayoutTests {
     #expect(!layout.isOpen)
     #expect(layout.content == nil)
     #expect(layout.presentation == nil)
+    #expect(layout != .closed)
     layout.open(.diff)
 
     #expect(layout.content == .diff)

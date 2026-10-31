@@ -11,37 +11,41 @@ public enum ViewerDrawerPresentation: Sendable, Hashable, CaseIterable {
 }
 
 public struct ViewerDrawerLayout: Sendable, Hashable {
-  public private(set) var content: ViewerContent?
-  public private(set) var presentation: ViewerDrawerPresentation?
+  private struct OpenLayout: Sendable, Hashable {
+    var content: ViewerContent
+    var presentation: ViewerDrawerPresentation
+  }
+
+  private var openLayout: OpenLayout?
   private var opensInOverlay: Bool
 
   public static let closed = Self()
 
-  public var isOpen: Bool { content != nil }
+  public var content: ViewerContent? { openLayout?.content }
+  public var presentation: ViewerDrawerPresentation? { openLayout?.presentation }
+  public var isOpen: Bool { openLayout != nil }
 
   public init() {
-    content = nil
-    presentation = nil
+    openLayout = nil
     opensInOverlay = false
   }
 
   public mutating func open(_ content: ViewerContent) {
-    if !isOpen {
-      presentation = opensInOverlay ? .overlay : .inline
+    guard openLayout != nil else {
+      openLayout = OpenLayout(content: content, presentation: opensInOverlay ? .overlay : .inline)
       opensInOverlay = false
+      return
     }
-    self.content = content
+    openLayout?.content = content
   }
 
   public mutating func close() {
-    guard isOpen else { return }
-    opensInOverlay = presentation == .overlay
-    content = nil
-    presentation = nil
+    guard let current = openLayout else { return }
+    opensInOverlay = current.presentation == .overlay
+    openLayout = nil
   }
 
   public mutating func setPresentation(_ presentation: ViewerDrawerPresentation) {
-    guard isOpen else { return }
-    self.presentation = presentation
+    openLayout?.presentation = presentation
   }
 }

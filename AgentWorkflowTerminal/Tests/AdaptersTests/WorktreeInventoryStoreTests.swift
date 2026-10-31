@@ -4,12 +4,11 @@ import Foundation
 import TerminalCore
 import Testing
 
-@Suite("worktree Active/Inactiveの保存 (設計書 §22.1 / Issue #136)")
-struct WorktreeInventoryStoreTests {
+/// 保存のテストと削除のテスト (`WorktreeInventoryStoreRemovalTests`) が共有する。
+protocol WorktreeInventoryStoreTestHelpers {}
 
-  // MARK: - Helpers
-
-  private func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
+extension WorktreeInventoryStoreTestHelpers {
+  func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
     let directory = URL(fileURLWithPath: NSTemporaryDirectory())
       .appendingPathComponent("awt-inventory-store-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -17,7 +16,7 @@ struct WorktreeInventoryStoreTests {
     try await body(directory)
   }
 
-  private func inventory(active: Bool) throws -> PersistedWorktreeInventory {
+  func inventory(active: Bool) throws -> PersistedWorktreeInventory {
     let root = DetectedWorktree(
       identity: try #require(WorktreeIdentity(rawValue: "/repo/.git")),
       worktreePath: "/repo",
@@ -38,7 +37,7 @@ struct WorktreeInventoryStoreTests {
     )
   }
 
-  private func capturedError(
+  func capturedError(
     _ body: () async throws -> Void
   ) async -> (any Error)? {
     do {
@@ -48,6 +47,10 @@ struct WorktreeInventoryStoreTests {
       return error
     }
   }
+}
+
+@Suite("worktree Active/Inactiveの保存 (設計書 §22.1 / Issue #136)")
+struct WorktreeInventoryStoreTests: WorktreeInventoryStoreTestHelpers {
 
   // MARK: - ラウンドトリップ
 
@@ -285,176 +288,6 @@ struct WorktreeInventoryStoreTests {
         Issue.record("readFailed を期待したが \(String(describing: error))")
         return
       }
-    }
-  }
-
-  // MARK: - 削除 (Issue #406)
-
-  private func projectFileURL(in directory: URL) -> URL {
-    directory
-      .appendingPathComponent("projects", isDirectory: true)
-      .appendingPathComponent("deadbeef", isDirectory: true)
-      .appendingPathComponent("worktree-inventory.json")
-  }
-
-  /// `FileManager.fileExists` は symlink を辿るので、壊れた symlink が残っていても `false` になる。
-  private func nothingExists(at url: URL) -> Bool {
-    var status = stat()
-    return lstat(url.path, &status) != 0 && errno == ENOENT
-  }
-
-  @Test("保存したファイルとProjectのディレクトリを消し、projects/は残す")
-  func removeDeletesFileAndProjectDirectory() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-      try await store.save(try inventory(active: true))
-      try #require(!nothingExists(at: fileURL))
-
-      try await store.remove()
-
-      #expect(nothingExists(at: fileURL))
-      #expect(nothingExists(at: fileURL.deletingLastPathComponent()))
-      let projects = fileURL.deletingLastPathComponent().deletingLastPathComponent()
-      #expect(!nothingExists(at: projects))
-      #expect(try await store.load() == nil)
-    }
-  }
-
-  @Test("何も無い状態での削除は成功する")
-  func removeSucceedsWhenNothingExists() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-
-      try await store.remove()
-
-      #expect(nothingExists(at: fileURL.deletingLastPathComponent()))
-    }
-  }
-
-  @Test("ファイルが無くても空のProjectディレクトリは消す")
-  func removeDeletesEmptyDirectoryWhenFileIsAbsent() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      try FileManager.default.createDirectory(
-        at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-
-      try await store.remove()
-
-      #expect(nothingExists(at: fileURL.deletingLastPathComponent()))
-    }
-  }
-
-  @Test("Projectディレクトリに別のファイルがあれば、ファイルだけ消してディレクトリは残す")
-  func removeKeepsNonEmptyDirectory() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-      try await store.save(try inventory(active: true))
-      let other = fileURL.deletingLastPathComponent().appendingPathComponent("other.txt")
-      try Data("keep".utf8).write(to: other)
-
-      try await store.remove()
-
-      #expect(nothingExists(at: fileURL))
-      let remaining = try FileManager.default.contentsOfDirectory(
-        atPath: fileURL.deletingLastPathComponent().path)
-      #expect(remaining == ["other.txt"])
-    }
-  }
-
-  @Test("リンク先の無いsymlinkも消す")
-  func removeDeletesBrokenSymbolicLink() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      try FileManager.default.createDirectory(
-        at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-      let target = directory.appendingPathComponent("nowhere.json")
-      try FileManager.default.createSymbolicLink(
-        atPath: fileURL.path, withDestinationPath: target.path)
-      try #require(!nothingExists(at: fileURL))
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-
-      try await store.remove()
-
-      #expect(nothingExists(at: fileURL))
-      #expect(nothingExists(at: fileURL.deletingLastPathComponent()))
-      #expect(nothingExists(at: target))
-    }
-  }
-
-  @Test("symlinkはリンク自体だけを消し、リンク先は残す")
-  func removeDoesNotFollowSymbolicLink() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      try FileManager.default.createDirectory(
-        at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-      let target = directory.appendingPathComponent("elsewhere.json")
-      try Data("keep".utf8).write(to: target)
-      try FileManager.default.createSymbolicLink(
-        atPath: fileURL.path, withDestinationPath: target.path)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-
-      try await store.remove()
-
-      #expect(nothingExists(at: fileURL))
-      #expect(try Data(contentsOf: target) == Data("keep".utf8))
-    }
-  }
-
-  @Test("保存先がディレクトリにすり替わっていたら、中身ごと消さずremoveFailedをthrowする")
-  func removeDoesNotRecurseIntoDirectory() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: true)
-      let inner = fileURL.appendingPathComponent("inner.txt")
-      try Data("keep".utf8).write(to: inner)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-
-      let error = await capturedError { try await store.remove() }
-
-      guard case .removeFailed(let path, _) = try #require(error as? WorktreeInventoryStoreError)
-      else {
-        Issue.record("removeFailed を期待したが \(String(describing: error))")
-        return
-      }
-      #expect(path == fileURL.path)
-      #expect(try Data(contentsOf: inner) == Data("keep".utf8))
-    }
-  }
-
-  @Test("消せなかったらremoveFailedをthrowし、ファイルを残す")
-  func removeThrowsWhenFileCannotBeDeleted() async throws {
-    try await withTemporaryDirectory { directory in
-      let fileURL = projectFileURL(in: directory)
-      let store = WorktreeInventoryStore(fileURL: fileURL)
-      try await store.save(try inventory(active: true))
-      let projectDirectory = fileURL.deletingLastPathComponent()
-
-      // 書き込み権の無いディレクトリからは中のファイルを unlink できない。root ではパーミッションが
-      // 効かないので前提を明示する。
-      try FileManager.default.setAttributes(
-        [.posixPermissions: 0o500], ofItemAtPath: projectDirectory.path)
-      defer {
-        try? FileManager.default.setAttributes(
-          [.posixPermissions: 0o755], ofItemAtPath: projectDirectory.path)
-      }
-      try #require(!FileManager.default.isWritableFile(atPath: projectDirectory.path))
-
-      let error = await capturedError { try await store.remove() }
-
-      guard
-        case .removeFailed(let path, let code) = try #require(
-          error as? WorktreeInventoryStoreError)
-      else {
-        Issue.record("removeFailed を期待したが \(String(describing: error))")
-        return
-      }
-      #expect(path == fileURL.path)
-      #expect(code == Int(EACCES))
-      #expect(!nothingExists(at: fileURL))
     }
   }
 

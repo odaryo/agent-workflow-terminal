@@ -10,8 +10,29 @@ public enum WorktreeInventoryStoreError: Error, Sendable, Equatable {
   case unsupportedSchemaVersion(path: String, found: Int, supported: Int)
   case writeFailed(path: String, code: Int)
   /// `code` は `errno`。他の case の `code` (NSError の code) と領域が違う — 削除は `unlink` /
-  /// `rmdir` を直接呼ぶため。
+  /// `rmdir` / `opendir` を直接呼ぶため。
   case removeFailed(path: String, code: Int)
+}
+
+/// 登録解除で消しきれなかったものを、App がユーザーへ伝えるための値 (Issue #406)。
+public struct WorktreeInventoryRemoval: Sendable, Equatable {
+  public struct KeptDirectory: Sendable, Equatable {
+    public let path: String
+    /// 名前順。ディレクトリの列挙順は安定しないため。
+    public let entries: [String]
+
+    public init(path: String, entries: [String]) {
+      self.path = path
+      self.entries = entries
+    }
+  }
+
+  /// `nil` はディレクトリまで消えた (元から無かった場合を含む) こと。
+  public let keptDirectory: KeptDirectory?
+
+  public init(keptDirectory: KeptDirectory?) {
+    self.keptDirectory = keptDirectory
+  }
 }
 
 /// worktree の Active/Inactive を JSON ファイルとして保存する**暫定**実装 (Issue #136 の決定 1)。
@@ -95,22 +116,74 @@ public actor WorktreeInventoryStore {
     }
   }
 
-  /// 既に無いことは失敗にしない。親ディレクトリ (`projects/<project-id>/`) は空のときだけ消し、
-  /// 他のファイルが残っていれば黙って残す — このアプリ以外が置いたものかもしれないため。
+  /// 既に無いことは失敗にしない。親ディレクトリ (`projects/<project-id>/`) は、`save()` が残した
+  /// 自分の一時ファイルを消したうえで、空のときだけ消す。他のファイル (`.DS_Store` 等) は
+  /// このアプリ以外が置いたものかもしれないので消さず、残ったことを戻り値で返す — 黙って残すと
+  /// ユーザーには「削除した」と見えるため。
   ///
   /// `FileManager.removeItem` を使わないのは、保存先がディレクトリにすり替わっていた場合に
-  /// 中身ごと再帰的に消すため。`unlink` はディレクトリを消さず、symlink はリンク自体だけを消す。
-  public func remove() throws(WorktreeInventoryStoreError) {
-    if !isAbsent(path: fileURL.path), unlink(fileURL.path) != 0 {
-      throw .removeFailed(path: fileURL.path, code: Int(errno))
-    }
+  /// 中身ごと再帰的に消すため。`unlink` / `rmdir` が辿らないのはパスの**最後の要素だけ**で、
+  /// 途中の要素 (`projects/<project-id>` 自体が symlink の場合など) は辿る。途中の要素は検査しない。
+  public func remove() throws(WorktreeInventoryStoreError) -> WorktreeInventoryRemoval {
+    try Self.unlinkIfPresent(fileURL.path)
 
     let directory = fileURL.deletingLastPathComponent().path
-    guard rmdir(directory) != 0 else { return }
+    // 列挙に失敗しても止めない。空なら下の `rmdir` が消し、空でなければそこで列挙し直して失敗を返す。
+    // 一時ファイルの `unlink` の失敗は本体と同じく throw する — 残せば `rmdir` が `ENOTEMPTY` になり、
+    // 自分のごみを「他人のファイル」として報告することになる。
+    for name in (try? Self.entries(of: directory)) ?? [] where isOwnTemporaryFile(name) {
+      try Self.unlinkIfPresent(directory + "/" + name)
+    }
+
+    guard rmdir(directory) != 0 else { return WorktreeInventoryRemoval(keptDirectory: nil) }
     let code = errno
+    if code == ENOENT { return WorktreeInventoryRemoval(keptDirectory: nil) }
     // 空でないディレクトリへの `rmdir` は POSIX 上 `ENOTEMPTY` と `EEXIST` のどちらも許される。
-    guard code == ENOENT || code == ENOTEMPTY || code == EEXIST else {
+    guard code == ENOTEMPTY || code == EEXIST else {
       throw .removeFailed(path: directory, code: Int(code))
+    }
+    return WorktreeInventoryRemoval(
+      keptDirectory: .init(path: directory, entries: try Self.entries(of: directory).sorted()))
+  }
+
+  /// `ENOENT` を成功にするのは、別の store が先に消していても「無い」という結果は同じだから。
+  private static func unlinkIfPresent(_ path: String) throws(WorktreeInventoryStoreError) {
+    guard unlink(path) != 0 else { return }
+    let code = errno
+    guard code == ENOENT else { throw .removeFailed(path: path, code: Int(code)) }
+  }
+
+  /// `save()` の一時ファイル名 (`.<保存先の名前>.<UUID>.tmp`) と同じ形のものだけを自分のものとみなす。
+  private func isOwnTemporaryFile(_ name: String) -> Bool {
+    let prefix = ".\(fileURL.lastPathComponent)."
+    let suffix = ".tmp"
+    guard name.hasPrefix(prefix), name.hasSuffix(suffix),
+      name.count > prefix.count + suffix.count
+    else { return false }
+    return UUID(uuidString: String(name.dropFirst(prefix.count).dropLast(suffix.count))) != nil
+  }
+
+  /// `FileManager.contentsOfDirectory` を使わないのは、失敗が NSError の code で返り、
+  /// `removeFailed` の `code` を `errno` に揃えられないため。
+  private static func entries(of directory: String) throws(WorktreeInventoryStoreError) -> [String]
+  {
+    guard let stream = opendir(directory) else {
+      throw .removeFailed(path: directory, code: Int(errno))
+    }
+    defer { closedir(stream) }
+
+    var names: [String] = []
+    while true {
+      // `readdir` は終端でも失敗でも `nil` を返すので、`errno` を先に 0 にして区別する。
+      errno = 0
+      guard let entry = readdir(stream) else {
+        guard errno == 0 else { throw .removeFailed(path: directory, code: Int(errno)) }
+        return names
+      }
+      let name = withUnsafeBytes(of: entry.pointee.d_name) { bytes in
+        String(decoding: bytes.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
+      }
+      if name != "." && name != ".." { names.append(name) }
     }
   }
 

@@ -42,25 +42,76 @@ struct ProjectSessionCleanupTests {
 
   // MARK: - 順序と重複
 
-  @Test("Project Root → 保存のProject Root → 保存のtask (保存順) → 観測 (渡された順) の順に並ぶ")
+  @Test("Project Root → 保存のtask (保存順) → 観測 (渡された順) の順に並ぶ")
   func candidatesFollowSourceOrder() throws {
-    let savedRoot = "/elsewhere/.git"
+    let delta = "/repo/.git/worktrees/delta"
     let names = [
       try sessionName(Self.commonDirectory),
-      try sessionName(savedRoot),
       try sessionName(Self.beta),
       try sessionName(Self.alpha),
+      try sessionName(delta),
       try sessionName(Self.gamma),
     ]
 
     let result = ProjectSessionCleanup.sessions(
       projectCommonDirectory: try identity(Self.commonDirectory),
-      saved: try saved(projectRoot: savedRoot, tasks: [Self.beta, Self.alpha]),
-      observed: [try identity(Self.gamma)],
+      saved: try saved(projectRoot: Self.commonDirectory, tasks: [Self.beta, Self.alpha]),
+      observed: [try identity(delta), try identity(Self.gamma)],
       existingSessionNames: names.reversed().map(\.rawValue)
     )
 
     #expect(result == names)
+  }
+
+  // MARK: - この Project のものだけ
+
+  /// 保存ファイルや観測に別 Project の安定 ID が紛れても、その Project の session を消さない。
+  /// `<common>/worktrees/` の接頭辞は文字列ではなく UTF-8 バイト列で照合するので、正準等価な
+  /// NFD 表記の Project も別物として扱う。
+  @Test(
+    "別Projectの安定IDは、そのsessionが実在しても返さない",
+    arguments: [
+      "/elsewhere/.git",
+      "/elsewhere/.git/worktrees/alpha",
+      "/repo/.gitx/worktrees/alpha",
+      "/repo/.gitworktrees/alpha",
+      "/repo/.git/worktreesalpha",
+      "/repo/.git/modules/sub",
+      "/repo",
+      "/repo/.git/worktrees",
+    ]
+  )
+  func identitiesOfOtherProjectsAreExcluded(foreign: String) throws {
+    let foreignName = try sessionName(foreign)
+    let root = try sessionName(Self.commonDirectory)
+    try #require(foreignName != root)
+
+    let result = ProjectSessionCleanup.sessions(
+      projectCommonDirectory: try identity(Self.commonDirectory),
+      saved: try saved(projectRoot: foreign, tasks: [foreign]),
+      observed: [try identity(foreign)],
+      existingSessionNames: [root.rawValue, foreignName.rawValue]
+    )
+
+    #expect(result == [root])
+  }
+
+  @Test("正準等価でもバイト列が違うcommon dir配下のworktreeは返さない")
+  func canonicallyEquivalentButByteDifferentIsExcluded() throws {
+    let nfcCommon = "/caf\u{00E9}/.git"
+    let nfdTask = "/cafe\u{0301}/.git/worktrees/alpha"
+    let nfcTask = "/caf\u{00E9}/.git/worktrees/beta"
+    try #require(nfdTask.hasPrefix(nfcCommon + "/worktrees/"))
+    let names = try [nfcCommon, nfdTask, nfcTask].map(sessionName)
+
+    let result = ProjectSessionCleanup.sessions(
+      projectCommonDirectory: try identity(nfcCommon),
+      saved: try saved(projectRoot: nil, tasks: [nfdTask, nfcTask]),
+      observed: [],
+      existingSessionNames: names.map(\.rawValue)
+    )
+
+    #expect(result == [try sessionName(nfcCommon), try sessionName(nfcTask)])
   }
 
   @Test("同じ名前になる候補は最初の1件だけを残す")

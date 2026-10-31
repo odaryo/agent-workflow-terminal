@@ -7,7 +7,7 @@ struct DiffRangeHeader: View {
   let summary: DiffRangeSummary
 
   var body: some View {
-    Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 2) {
+    VStack(alignment: .leading, spacing: 2) {
       row("対象", summary.target)
       row("比較元", summary.comparison)
       row("起点", summary.origin)
@@ -20,10 +20,14 @@ struct DiffRangeHeader: View {
   }
 
   private func row(_ title: String, _ value: String) -> some View {
-    GridRow {
-      Text(title).foregroundStyle(.secondary)
+    HStack(alignment: .top, spacing: 8) {
+      Text(title)
+        .foregroundStyle(.secondary)
+        .frame(width: 40, alignment: .leading)
       Text(value)
         .lineLimit(2)
+        .truncationMode(.tail)
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         .textSelection(.enabled)
     }
   }

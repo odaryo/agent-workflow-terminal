@@ -2,7 +2,7 @@ import Foundation
 
 enum TerminalDropText {
   static func text(for urls: [URL]) -> String? {
-    let metacharacters = Set(" \\'\"`$!#&;|*?()[]{}<>~=%".unicodeScalars)
+    let metacharacters = Set(" \\'\"`$!#&;|*?()[]{}<>~=%^".unicodeScalars)
     let paths = urls.filter(\.isFileURL).compactMap { url -> String? in
       let path = url.path
       guard !path.unicodeScalars.contains(where: { $0.value <= 31 || $0.value == 127 }) else {

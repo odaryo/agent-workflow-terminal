@@ -13,11 +13,26 @@ struct TerminalDropTextTests {
     #expect(TerminalDropText.text(for: [URL(fileURLWithPath: path)]) == expected)
   }
 
-  @Test(arguments: Array(" \\'\"`$!#&;|*?()[]{}<>~=%"))
-  func escapesEachMetacharacter(character: Character) {
-    let path = "/tmp/a\(character)b.png"
-    #expect(
-      TerminalDropText.text(for: [URL(fileURLWithPath: path)]) == "/tmp/a\\\(character)b.png")
+  @Test(arguments: [
+    (#"/tmp/a$(x).png"#, #"/tmp/a\$\(x\).png"#),
+    (#"/tmp/^a.png"#, #"/tmp/\^a.png"#),
+    (#"/tmp/~a b.png"#, #"/tmp/\~a\ b.png"#),
+    (#"/tmp/a'b"c.png"#, #"/tmp/a\'b\"c.png"#),
+    (#"/tmp/a\b`c.png"#, #"/tmp/a\\b\`c.png"#),
+    (##"/tmp/a!#&;|b.png"##, ##"/tmp/a\!\#\&\;\|b.png"##),
+    (#"/tmp/a*?[x]{y}.png"#, #"/tmp/a\*\?\[x\]\{y\}.png"#),
+    (#"/tmp/a<>=%b.png"#, #"/tmp/a\<\>\=\%b.png"#),
+  ])
+  func escapesShellSyntax(path: String, expected: String) {
+    #expect(TerminalDropText.text(for: [URL(fileURLWithPath: path)]) == expected)
+  }
+
+  @Test(arguments: [
+    "/tmp/a\u{0085}b.png",
+    "/tmp/a\u{2028}b.png",
+  ])
+  func preservesUnicodeSeparators(path: String) {
+    #expect(TerminalDropText.text(for: [URL(fileURLWithPath: path)]) == path)
   }
 
   @Test func joinsFilesWithoutTrailingWhitespace() {

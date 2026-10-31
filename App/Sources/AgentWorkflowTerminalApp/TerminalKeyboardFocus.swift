@@ -58,8 +58,8 @@ final class TerminalKeyboardFocus: ObservableObject {
     requestFocus()
   }
 
-  /// Drawer の遷移のうち、キーボードの行き先が消えるものだけを拾う。開く・ペインを足す・
-  /// 分割方向を変えるといった遷移でも取り返すと、Drawer 内で入力中のフォーカスを奪う。
+  /// Drawer の遷移のうち、キーボードの行き先が消えるものだけを拾う。開く・内容を置き換える・
+  /// 表示方法を変えるといった遷移で常に取り返すと、Drawer 内で入力中のフォーカスを奪う。
   func drawerLayoutChanged(from old: ViewerDrawerLayout, to new: ViewerDrawerLayout) {
     let closed = old.isOpen && !new.isOpen
     let terminalReappeared = old.presentation == .fullscreen && new.presentation != .fullscreen

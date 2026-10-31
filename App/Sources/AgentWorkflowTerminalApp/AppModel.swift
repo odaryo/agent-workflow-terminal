@@ -145,13 +145,13 @@ final class AppModel: ObservableObject {
   private let applicationSupportDirectory: URL?
   private var store: WorktreeInventoryStore?
   /// 保存されたファイルを読めなかった起動では `false`。読めなかったファイルを上書きすると、
-  /// ユーザーが手で復旧できる可能性まで消える。
+  /// ユーザーが手で復旧できる可能性まで消える。`stop()` の後も `false` (登録解除後に書かない)。
   private var canSave = false
   private let rescan = DetachedOnceTask()
   /// `rescan` と分ける。あちらは `run()` の二重起動を防ぐ側で、スキャンが**終わった**ことは
   /// 表さない。空の一覧を「worktree が無い」と読んでよいのは、この印が立った後だけである。
   @Published private(set) var didCompleteInitialScan = false
-  private var pendingSave: Task<Void, Never>?
+  private(set) var pendingSave: Task<Void, Never>?
   /// 直近のスキャンで観測に失敗した entry の要約。**毎回バナーへ代入しない**ための状態で、
   /// これが変わらない限り再表示しない。5 秒ごとの再スキャンで代入すると、ユーザーが閉じた
   /// バナーが閉じた直後に復活し、端末の上に貼り付いたままになる。
@@ -225,6 +225,7 @@ final class AppModel: ObservableObject {
   /// Project へ git を撃ち続け、その保存ファイルを書き続ける。
   func stop() {
     rescan.cancel()
+    canSave = false
     paneObservations.stopAll()
   }
 
@@ -282,7 +283,7 @@ final class AppModel: ObservableObject {
     self.store = store
     do {
       let saved = try await store.load()
-      canSave = true
+      canSave = !Task.isCancelled
       return saved
     } catch {
       // 「保存が無い」(`nil`) と同じ扱いにしない。読めなかったことをユーザーへ伝え、

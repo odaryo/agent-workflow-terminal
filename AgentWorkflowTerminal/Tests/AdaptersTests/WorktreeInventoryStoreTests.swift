@@ -4,12 +4,11 @@ import Foundation
 import TerminalCore
 import Testing
 
-@Suite("worktree Active/Inactiveの保存 (設計書 §22.1 / Issue #136)")
-struct WorktreeInventoryStoreTests {
+/// 保存のテストと削除のテスト (`WorktreeInventoryStoreRemovalTests`) が共有する。
+protocol WorktreeInventoryStoreTestHelpers {}
 
-  // MARK: - Helpers
-
-  private func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
+extension WorktreeInventoryStoreTestHelpers {
+  func withTemporaryDirectory(_ body: (URL) async throws -> Void) async throws {
     let directory = URL(fileURLWithPath: NSTemporaryDirectory())
       .appendingPathComponent("awt-inventory-store-\(UUID().uuidString)", isDirectory: true)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -17,7 +16,7 @@ struct WorktreeInventoryStoreTests {
     try await body(directory)
   }
 
-  private func inventory(active: Bool) throws -> PersistedWorktreeInventory {
+  func inventory(active: Bool) throws -> PersistedWorktreeInventory {
     let root = DetectedWorktree(
       identity: try #require(WorktreeIdentity(rawValue: "/repo/.git")),
       worktreePath: "/repo",
@@ -38,7 +37,7 @@ struct WorktreeInventoryStoreTests {
     )
   }
 
-  private func capturedError(
+  func capturedError(
     _ body: () async throws -> Void
   ) async -> (any Error)? {
     do {
@@ -48,6 +47,10 @@ struct WorktreeInventoryStoreTests {
       return error
     }
   }
+}
+
+@Suite("worktree Active/Inactiveの保存 (設計書 §22.1 / Issue #136)")
+struct WorktreeInventoryStoreTests: WorktreeInventoryStoreTestHelpers {
 
   // MARK: - ラウンドトリップ
 

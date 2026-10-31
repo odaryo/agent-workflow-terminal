@@ -21,6 +21,22 @@ struct ProjectsWindowContent: View {
         ProjectMenu(projects: projects)
       }
     }
+    .confirmationDialog(
+      projects.pendingUnregister?.title ?? "",
+      isPresented: Binding(
+        get: { projects.pendingUnregister != nil },
+        set: { if !$0 { projects.dismissUnregister() } }),
+      titleVisibility: .visible,
+      presenting: projects.pendingUnregister
+    ) { review in
+      Button("キャンセル", role: .cancel) {}
+      Button("登録だけ解除") { projects.unregister(review.project.commonDirectory) }
+      Button("session とデータも削除して解除", role: .destructive) {
+        Task { await projects.unregisterAndDelete(review) }
+      }
+    } message: { review in
+      Text(review.message)
+    }
     .task { projects.start() }
     .onAppear { projects.navigator.openWindow = openWindow }
   }
@@ -66,7 +82,7 @@ private struct ProjectMenu: View {
       Button("Project を追加…") { chooseProjectDirectory(projects) }
       if let selected = projects.selectedProject {
         Button("「\(selected.displayName)」の登録を解除") {
-          projects.unregister(selected.commonDirectory)
+          Task { await projects.requestUnregister(selected.commonDirectory) }
         }
       }
     } label: {
@@ -92,7 +108,7 @@ private struct ProjectMenu: View {
       // 到達不能な Project は選択できないので、選択中の Project 向けの「登録を解除」からは外せない。
       // 項目ごとのサブメニューに解除を置く (全 Project が到達不能で選択が無いときもここから外せる)。
       Menu("\(project.displayName) (到達不能: \(reason))") {
-        Button("登録を解除") { projects.unregister(project.commonDirectory) }
+        Button("登録を解除") { Task { await projects.requestUnregister(project.commonDirectory) } }
       }
     case nil:
       Button(project.displayName) {}

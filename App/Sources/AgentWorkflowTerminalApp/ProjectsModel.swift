@@ -38,6 +38,8 @@ final class ProjectsModel: ObservableObject {
   /// ユーザーが手で復旧できる可能性まで消える (`AppModel.canSave` と同じ理由)。
   private var canSave = false
   private var pendingSave: Task<Void, Never>?
+  /// 確認ダイアログの内容。非 `nil` の間だけダイアログを出す。
+  @Published private(set) var pendingUnregister: ProjectUnregisterReview?
   private let startup = DetachedOnceTask()
 
   init(dependencies: AppDependencies) {
@@ -144,8 +146,8 @@ final class ProjectsModel: ObservableObject {
     save()
   }
 
-  /// 一覧から外すだけで、repository と tmux session には触れない (設計書 §16.1)。その Project の
-  /// 端末は view ごと破棄され、tmux client が detach する。
+  /// 一覧から外すだけで、repository・tmux session・アプリ内データには触れない (設計書 §16.1)。
+  /// その Project の端末は view ごと破棄され、tmux client が detach する。
   func unregister(_ commonDirectory: WorktreeIdentity) {
     if case .available(let model) = slots[commonDirectory] {
       model.stop()
@@ -156,12 +158,129 @@ final class ProjectsModel: ObservableObject {
     save()
   }
 
+  /// 確認に出す session と保存データを済ませてからダイアログを出す。結果が揃う前に出すと、
+  /// 本文に載せる session 一覧が確認後に変わる。
+  func requestUnregister(_ commonDirectory: WorktreeIdentity) async {
+    guard let project = registry.project(commonDirectory) else { return }
+    let review = await makeUnregisterReview(for: project)
+    guard registry.project(commonDirectory) != nil else { return }
+    pendingUnregister = review
+  }
+
+  func dismissUnregister() {
+    pendingUnregister = nil
+  }
+
+  /// 順序には理由がある。`AppModel` の保存を待たないと、遅れて着いた保存が消したはずの
+  /// `projects/<hash>/` を作り直す。session を kill する前に一覧から外すのは、表示中の端末が
+  /// 終了表示になったり再 attach を試みたりしないため。
+  func unregisterAndDelete(_ review: ProjectUnregisterReview) async {
+    let commonDirectory = review.project.commonDirectory
+    if case .available(let model) = slots[commonDirectory] {
+      // stop() 後は保存が積まれない (`canSave`) ので、待つのは既に積まれた分だけで足りる。
+      model.stop()
+      await model.pendingSave?.value
+    }
+    unregister(commonDirectory)
+
+    var problems = await kill(review.sessions)
+    if review.inventoryLoadFailure != nil {
+      problems.append("保存データを読めなかったため、アプリ内データは残しています。")
+    } else if let store = review.store {
+      problems.append(contentsOf: await remove(store))
+    }
+
+    if !problems.isEmpty {
+      warning =
+        "「\(review.project.displayName)」の登録は解除しましたが、削除しきれていません。"
+        + problems.joined(separator: " ")
+    }
+  }
+
+  /// 失敗の説明を返す。`sessionNotFound` と `serverNotRunning` は既に消えているので成功と同じ。
+  private func kill(_ sessions: [TmuxSessionName]) async -> [String] {
+    guard let runner = dependencies.tmuxRunner else { return [] }
+    let operations = TmuxSessionOperations(runner: runner)
+    var problems: [String] = []
+    for session in sessions {
+      do {
+        try await operations.kill(session: session)
+      } catch {
+        switch error {
+        case .sessionNotFound, .serverNotRunning: break
+        default: problems.append("tmux session「\(session.rawValue)」を終了できませんでした: \(error)")
+        }
+      }
+    }
+    return problems
+  }
+
+  private func remove(_ store: WorktreeInventoryStore) async -> [String] {
+    do {
+      guard let kept = try await store.remove().keptDirectory else { return [] }
+      let entries = kept.entries.joined(separator: ", ")
+      return ["保存データのディレクトリに他のファイルが残っています: \(kept.path) (\(entries))"]
+    } catch {
+      return ["保存データを削除できませんでした: \(error)"]
+    }
+  }
+
   func dismissWarning() {
     warning = nil
   }
 
   func showWarning(_ text: String) {
     warning = text
+  }
+
+  private func makeUnregisterReview(
+    for project: RegisteredProject
+  ) async
+    -> ProjectUnregisterReview
+  {
+    var existing: [String] = []
+    var listingFailure: String?
+    if let runner = dependencies.tmuxRunner {
+      do {
+        existing = try await TmuxSessionOperations(runner: runner).list()
+      } catch {
+        listingFailure = "\(error)"
+      }
+    } else {
+      listingFailure = "tmux を使えない起動です"
+    }
+
+    let store = dependencies.applicationSupportDirectory.map {
+      WorktreeInventoryStore(
+        fileURL: WorktreeInventoryStore.defaultFileURL(
+          applicationSupportDirectory: $0, projectRootIdentity: project.commonDirectory))
+    }
+    var saved: PersistedWorktreeInventory?
+    var loadFailure: String?
+    if let store {
+      do {
+        saved = try await store.load()
+      } catch {
+        loadFailure = "\(error)"
+      }
+    }
+
+    var observed: [WorktreeIdentity] = []
+    if case .available(let model) = slots[project.commonDirectory] {
+      observed =
+        (model.inventory.projectRoot.map { [$0.identity] } ?? [])
+        + model.inventory.taskWorktrees.map(\.identity)
+    }
+
+    let sessions =
+      listingFailure == nil
+      ? ProjectSessionCleanup.sessions(
+        projectCommonDirectory: project.commonDirectory, saved: saved, observed: observed,
+        existingSessionNames: existing)
+      : []
+    return ProjectUnregisterReview(
+      project: project, sessions: sessions, sessionListingFailure: listingFailure,
+      inventoryLoadFailure: loadFailure, store: store)
   }
 
   private func isSelectable(_ commonDirectory: WorktreeIdentity) -> Bool {

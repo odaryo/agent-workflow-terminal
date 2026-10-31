@@ -9,6 +9,9 @@ public enum WorktreeInventoryStoreError: Error, Sendable, Equatable {
   case malformed(path: String, description: String)
   case unsupportedSchemaVersion(path: String, found: Int, supported: Int)
   case writeFailed(path: String, code: Int)
+  /// `code` は `errno`。他の case の `code` (NSError の code) と領域が違う — 削除は `unlink` /
+  /// `rmdir` を直接呼ぶため。
+  case removeFailed(path: String, code: Int)
 }
 
 /// worktree の Active/Inactive を JSON ファイルとして保存する**暫定**実装 (Issue #136 の決定 1)。
@@ -89,6 +92,25 @@ public actor WorktreeInventoryStore {
     } catch {
       try? FileManager.default.removeItem(at: temporaryURL)
       throw .writeFailed(path: fileURL.path, code: (error as NSError).code)
+    }
+  }
+
+  /// 既に無いことは失敗にしない。親ディレクトリ (`projects/<project-id>/`) は空のときだけ消し、
+  /// 他のファイルが残っていれば黙って残す — このアプリ以外が置いたものかもしれないため。
+  ///
+  /// `FileManager.removeItem` を使わないのは、保存先がディレクトリにすり替わっていた場合に
+  /// 中身ごと再帰的に消すため。`unlink` はディレクトリを消さず、symlink はリンク自体だけを消す。
+  public func remove() throws(WorktreeInventoryStoreError) {
+    if !isAbsent(path: fileURL.path), unlink(fileURL.path) != 0 {
+      throw .removeFailed(path: fileURL.path, code: Int(errno))
+    }
+
+    let directory = fileURL.deletingLastPathComponent().path
+    guard rmdir(directory) != 0 else { return }
+    let code = errno
+    // 空でないディレクトリへの `rmdir` は POSIX 上 `ENOTEMPTY` と `EEXIST` のどちらも許される。
+    guard code == ENOENT || code == ENOTEMPTY || code == EEXIST else {
+      throw .removeFailed(path: directory, code: Int(code))
     }
   }
 

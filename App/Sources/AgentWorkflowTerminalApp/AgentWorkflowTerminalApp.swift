@@ -138,31 +138,20 @@ private struct ViewerDrawerToolbar: View {
     HStack(spacing: 4) {
       Menu("Viewer", systemImage: "sidebar.right") {
         ForEach(ViewerContent.allCases, id: \.self) { content in
-          Button(content.toolbarTitle) { layout.openPrimary(content) }
+          Button(content.toolbarTitle) { layout.open(content) }
         }
       }
       .menuStyle(.borderlessButton)
 
       if layout.isOpen {
-        Menu("ペインを追加", systemImage: "rectangle.split.2x1") {
-          ForEach(ViewerContent.allCases, id: \.self) { content in
-            Button(content.toolbarTitle) { layout.openSecondary(content) }
-          }
-        }
-        .menuStyle(.borderlessButton)
-
         Menu("表示方法", systemImage: "rectangle.on.rectangle") {
           Button("並べて表示") { layout.setPresentation(.inline) }
           Button("オーバーレイ") { layout.setPresentation(.overlay) }
           Button("フルスクリーン") { layout.setPresentation(.fullscreen) }
-          Divider()
-          Button("分割方向を切り替え") { layout.toggleSplitAxis() }
-          Button("主と副を入れ替え") { layout.swapPanes() }
-            .disabled(layout.secondary == nil)
         }
         .menuStyle(.borderlessButton)
 
-        Button("Viewer を閉じる", systemImage: "xmark") { layout.closeAll() }
+        Button("Viewer を閉じる", systemImage: "xmark") { layout.close() }
           .labelStyle(.iconOnly)
           .buttonStyle(.borderless)
       }

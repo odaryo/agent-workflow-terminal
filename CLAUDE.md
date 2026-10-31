@@ -257,13 +257,15 @@ compact された。費用の 67% はこのコンテキストを毎回読み直�
   構文エラーで exit 1 を返し (実測)、exit 2 以外は block しないので**ガードごと無効になる**
   — bash 実装では exit 2 になり全 Bash 呼び出しが拒否される逆向きの事故だったので、
   移行で向きが変わっている。CI の `shell-guard` が `py_compile` を別段で回すのはこのため。
-- **ローカルの tmux は 3.4、CI の tmux は 3.7c。片方での計測はもう片方の証拠にならない。** #239 は
-  3 ラウンドのレビューを Critical 無しで抜けた後、マージ直前の CI で落ちた — 監督の GREEN 再実行も
-  レビューアの実 tmux 計測も**全部 3.4 だけ**だったためである。原因は 3.7c が `#{pane_title}` を
-  展開する時点で backslash を二重化すること (3.4 はしない) で、**この変更とは無関係に main に
-  存在する欠陥**だった (#334)。tmux の挙動を観測に使う変更では、`brew` の bottle を
-  `/private/tmp` へ隔離展開して**両版で回すこと** (`brew upgrade tmux` はユーザーの環境を
-  変えるので使わない)。
+- **ローカルと CI の tmux は同じ版とは限らない。片方での計測はもう片方の証拠にならない。** CI は
+  `brew install tmux` で最新の bottle を入れるため、brew の更新で版が黙って変わる。2026-10-31 の
+  実測ではローカルも CI も 3.8 だった。CI 側の版は、ジョブログの `Show external CLI versions` で
+  確かめる。#239 (当時はローカルが 3.4、CI が 3.7c) は、3 ラウンドのレビューを Critical 無しで
+  抜けた後、マージ直前の CI で落ちた — 監督の GREEN 再実行もレビューアの実 tmux 計測も**全部 3.4
+  だけ**だったためである。原因は 3.7c が `#{pane_title}` を展開する時点で backslash を二重化する
+  こと (3.4 はしない) で、**この変更とは無関係に main に存在する欠陥**だった (#334)。tmux の挙動を
+  観測に使う変更では、`brew` の bottle を `/private/tmp` へ隔離展開して**ローカルと CI の両方の版で
+  回すこと** (`brew upgrade tmux` はユーザーの環境を変えるので使わない)。
 - **版数 fixture が通ることは、その版で正しいことの証拠ではない。** 上の欠陥は 3.7c の fixture が
   実機と**バイト一致していた**のに見つからなかった。fixture の title に backslash が入って
   いなかっただけである。「その版のテストが緑」は「fixture に入れた文字については緑」でしかない。
@@ -354,3 +356,8 @@ The app itself is MIT (decided; matches `LICENSE`). Dependencies: permissive onl
 The document deliberately separates four statuses: **確定** / **現在の推奨** / **未確定** / **対象外・不採用**. Preserve that distinction — do not promote a 現在の推奨 or 未確定 item to 確定 without the user saying so, and keep §25 (terminal open questions) and §31 (Agent Skills open questions) in sync when something is decided. Appendix A (decided checklist) and Appendix B (candidate checklist) also need updating when status changes.
 
 Part I (terminal app) and Part II (Agent Skills / dev workflow) are intentionally kept separate; do not merge concerns across them.
+
+## 指示書の確認
+
+ドキュメントと既存のコードが食い違うときはコードの書き方に従い、見つけた食い違いを最
+後の返答で全て挙げること

@@ -14,3 +14,8 @@ Codex など Claude Code 以外のエージェント向けのプロジェクト�
 - 完了条件: `swift build` / `swift test` / `swift format lint --strict --recursive Sources Tests`（`AgentWorkflowTerminal/` 内で実行）がすべて GREEN。
 - コミットは Conventional Commits、本文に Why を書く。**タイトル・本文とも日本語**（履歴が日本語で統一されており、squash マージでそのまま main のログになる）。
 - ドキュメントは日本語。`docs/architecture.md` の 確定/現在の推奨/未確定/対象外 の4状態区分を勝手に変えない。
+
+## 指示書の確認
+
+ドキュメントと既存のコードが食い違うときはコードの書き方に従い、見つけた食い違いを最
+後の返答で全て挙げること

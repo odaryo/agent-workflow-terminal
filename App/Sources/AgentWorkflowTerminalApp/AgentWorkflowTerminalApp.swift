@@ -48,7 +48,7 @@ struct AgentWorkflowTerminalApp: App {
 
 struct ProjectView: View {
   @ObservedObject var model: AppModel
-  @StateObject private var keyboardFocus = TerminalKeyboardFocus()
+  @StateObject var keyboardFocus = TerminalKeyboardFocus()
 
   var body: some View {
     VStack(spacing: 0) {
@@ -62,7 +62,7 @@ struct ProjectView: View {
         WarningBar(text: scanFailureWarning) { model.dismissScanFailureWarning() }
         Divider()
       }
-      if model.projectRoot != nil || !model.worktrees.isEmpty {
+      if model.didCompleteInitialScan || model.projectRoot != nil || !model.worktrees.isEmpty {
         HStack(spacing: 0) {
           ScrollView(.horizontal) {
             // `LazyHStack` にしない。Active タブの代表状態は画面外でも観測し続ける必要があり
@@ -73,6 +73,7 @@ struct ProjectView: View {
                 ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
                   model.selectProjectRoot()
                 }
+                .contextMenu { NewTaskMenuItem(isDisabled: false, action: startNewTask) }
                 if !model.tabbedWorktrees.isEmpty {
                   Divider().frame(height: 22).padding(.horizontal, 2)
                 }
@@ -84,13 +85,16 @@ struct ProjectView: View {
                   agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
                   select: { model.select(worktree) },
                   setActivation: { model.setActivation($0, of: worktree.identity) },
-                  requestClose: { model.requestClose(of: worktree.identity) }
+                  requestClose: { model.requestClose(of: worktree.identity) },
+                  startNewTask: startNewTask,
+                  isNewTaskDisabled: model.projectRoot == nil
                 )
               }
             }
             .padding(6)
           }
           .scrollIndicators(.hidden)
+          NewTaskButton(isDisabled: model.projectRoot == nil, action: startNewTask)
           InactiveWorktreeMenu(
             worktrees: model.inactiveWorktrees,
             activate: { model.setActivation(.active, of: $0) }
@@ -267,6 +271,8 @@ private struct WorktreeTab: View {
   let select: () -> Void
   let setActivation: (WorktreeActivation) -> Void
   let requestClose: () -> Void
+  let startNewTask: () -> Void
+  let isNewTaskDisabled: Bool
   @State private var representativeState: WorktreeRepresentativeState?
 
   var body: some View {
@@ -274,6 +280,8 @@ private struct WorktreeTab: View {
     // 認めていない対象で、空のメニューを開かせないため。
     if worktree.detected.isReachable {
       tab.contextMenu {
+        NewTaskMenuItem(isDisabled: isNewTaskDisabled, action: startNewTask)
+        Divider()
         Button("Active にする") { setActivation(.active) }
           .disabled(worktree.activation == .active)
         // Inactive 化は Close の選択肢1からだけ行う。§3.4 の拒否 (detached HEAD・作業途中) は

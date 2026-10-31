@@ -155,7 +155,7 @@ worktree作成は原則としてAgent側が担当する。
 ```text
 User selects + New Task
         ↓
-Mac host starts a normal interactive Agent
+User starts a normal interactive Agent in the Project Root terminal
         ↓
 User and Agent clarify the task
         ↓
@@ -167,6 +167,8 @@ Worktree is registered/activated
         ↓
 Dedicated tmux session and Task Tab become available
 ```
+
+**Macアプリの`+ New Task`はProject Rootタブへ移り、その端末にキーボードフォーカスを渡すだけとする — 確定(2026-10-31、Issue #407)。** アプリはAgentを起動せず、起動コマンドも持たない。Agentの起動はユーザーがProject Rootの端末で行い、Agent(または`git worktree add`)が作ったworktreeは§3.2の自動Active化でタブになる。入口はタブ列右端の`＋`ボタンと、タブ(Project Rootタブを含む)の右クリックメニューの「新しいタスク…」の2つ。Drawerがフルスクリーンのときは端末が見えないので、並べて表示に戻してから移る。Project Rootタブを持たないbare repositoryのProject(§2.3)では、どちらの入口も無効にして理由をツールチップで示す。
 
 モバイルからも`+ New Task`を開始できる。ただし、モバイルアプリ自身がGit worktreeを作るのではなく、Mac上のAgentを起動して同じフローへ入る。
 
@@ -2229,6 +2231,7 @@ PR_READY
 - [x] worktreeごとに独立tmux session
 - [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は安定IDだけから導出する`awt-<slug>-<安定IDのSHA-256先頭8桁>`
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
+- [x] Macアプリの`+ New Task`(タブ列の`＋`とタブの右クリック)はProject Rootタブへ移り端末にフォーカスを渡すだけで、Agentは起動しない。bare repositoryのProjectでは無効
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
 - [x] Active/Inactiveは再起動を跨いで復元する。停止中に現れたworktreeはInactiveから始め、停止中に消えたworktreeは落とさず到達不能として保持する
 - [x] GRDB正式採用までの再起動を跨ぐ状態はApplication Support配下のJSONへ暫定保存する(schema／migrationの決定とはしない)

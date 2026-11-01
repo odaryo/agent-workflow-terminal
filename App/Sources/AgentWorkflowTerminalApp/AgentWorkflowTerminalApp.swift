@@ -30,6 +30,7 @@ struct AgentWorkflowTerminalApp: App {
         }
     }
     .defaultSize(width: 900, height: 560)
+    .fixedToolbarLabels()
     .commands {
       // `Window` だけで File メニューごと消えることは計測済みで、この行は多重防御。
       CommandGroup(replacing: .newItem) {}
@@ -48,6 +49,18 @@ struct AgentWorkflowTerminalApp: App {
     OverviewScene(projects: projects)
     Settings {
       NotificationSettingsView()
+    }
+  }
+}
+
+private extension Scene {
+  @SceneBuilder
+  func fixedToolbarLabels() -> some Scene {
+    if #available(macOS 15, *) {
+      // Icon Only ではタブ名が消え、右クリックは表示形式メニューに取られた (#431 の計測)。
+      windowToolbarLabelStyle(fixed: .titleAndIcon)
+    } else {
+      self
     }
   }
 }
@@ -105,7 +118,11 @@ struct ProjectView: View {
         } else {
           taskTabsToolbar
         }
-        ToolbarItem(placement: .primaryAction) {
+        if #available(macOS 26, *) {
+          ToolbarSpacer(.flexible)
+        }
+        // primaryAction は macOS では leading 側に配置される。
+        ToolbarItem(placement: .automatic) {
           ViewerDrawerToolbar(layout: $model.viewerDrawerLayout)
         }
       }
@@ -214,6 +231,7 @@ private struct ProjectRootTab: View {
   var body: some View {
     Button(action: action) {
       Label("Project Root", systemImage: "shippingbox")
+        .labelStyle(.titleAndIcon)
         .fontWeight(.medium)
         .padding(.horizontal, 8)
         .padding(.vertical, 5)

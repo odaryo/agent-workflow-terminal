@@ -33,46 +33,6 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
   case gitRunnerUnavailable(worktreePath: String, GitRunnerError)
 }
 
-/// entry 1件の失敗。`scan()` はこれを検出できた worktree と一緒に返す。
-///
-/// - Important: 呼び出し側が原因を再現できるよう、git の生の出力を丸めずに持つ。
-///   失敗した worktree を UI でどう扱うかは Issue #137 の担当で、ここでは決めない。
-public struct GitWorktreeEntryFailure: Sendable, Equatable {
-  /// `worktree list` が返した作業ツリーのパス。呼び出し側が失敗を既存の worktree と突き合わせる
-  /// 手掛かりはこれだけである。
-  ///
-  /// - Note: `invalidCommonDirectoryPath` に限っては `rev-parse` の1行目から `WorktreeIdentity` を
-  ///   作れているが、ここには載せない。その ID は「この Project のものか」を確かめる2行目が壊れた
-  ///   ままの未照合の値であり、照合を省くと別 repository へ置き換わった worktree の ID が
-  ///   この Project の ID として通って Project Root が2件になる (`describe`)。載せると呼び出し側は
-  ///   照合済みの ID と混ぜて使うか、同じ照合をもう一度書くかのどちらかになる。どちらが要るかは
-  ///   照合の要否を決められる呼び出し側 (Issue #137) と一緒に決める。
-  public let worktreePath: String
-  public let reason: Reason
-
-  public enum Reason: Sendable, Equatable {
-    /// 安定 ID の `rev-parse` が失敗し、作業ツリーの不在として除外できなかった。壊れているのが
-    /// git ディレクトリ側とは限らない。分類は作業ツリーへ**到達できたかどうか**だけで決めており、
-    /// git のメッセージは見ていない (`describe`)。git が exit code を返さなかった失敗
-    /// (timeout 等) も、不在の証拠にならないのでここへ来る。git 2.50.1 実測では、
-    /// 管理ディレクトリの `commondir` 欠落が
-    /// `not a git repository: <管理ディレクトリ>`、`.git` ファイルの破損が `invalid gitfile format`、
-    /// `.git` ファイルの消失が `not a git repository (or any of the parent directories): .git` で、
-    /// いずれも exit 128。`worktree list` はこのどれにも `prunable` を付けない (網羅ではない)。
-    case gitDirectory(GitRunnerError)
-    /// `rev-parse` の出力が2行でなかった。パス自体に改行が含まれる場合もここへ来る。
-    case unexpectedGitDirectoryOutput(output: String)
-    /// 安定 ID にする1行目が絶対パスでなかった。
-    case invalidGitDirectoryPath(gitDirectory: String)
-    /// この Project のものかを判定する2行目が絶対パスでなかった。`invalidGitDirectoryPath` と
-    /// 分けているのは、壊れているのが ID なのか判定基準なのかで呼び出し側の打ち手が変わるためである。
-    case invalidCommonDirectoryPath(commonDirectory: String)
-    /// 到達不能な作業ツリーと対応する admin ディレクトリを Project Root 側で特定できなかった。
-    /// 作業ツリーのパスを代替 ID にすると復帰時に同一性を保証できないため、検出結果へは載せない。
-    case administrativeDirectoryNotFound
-  }
-}
-
 /// - Important: `failures` を捨てて `detected` だけを `reconcileDetectedWorktrees` へ渡すと、
 ///   失敗した worktree は消失扱いになる (`GitWorktreeDetector` の契約を参照)。
 public struct GitWorktreeScanResult: Sendable, Equatable {
@@ -107,11 +67,17 @@ public struct GitWorktreeScanResult: Sendable, Equatable {
 public struct GitWorktreeDetector: Sendable {
   /// `--path-format=absolute` は**それ以降のオプションにだけ効く**ため、位置に意味がある
   /// (git 2.31 以降。サポート下限は 2.39 なので使える)。1回の実行で管理ディレクトリと
-  /// common dir の2行が得られ、2行が等しいかどうかが main worktree か否かの判定になる
-  /// (git 2.50.1 実測)。`worktree list` の並び順に依存せずに済む。
+  /// common dir の2行が得られ、main worktree では2行が等しくなる (git 2.50.1 実測)。ただし
+  /// `.git` を失った linked worktree からは祖先へ遡って等しくなり得るので、等しいことだけでは
+  /// main worktree と判定しない (`describe`、Issue #502)。
   private static let gitDirectoryArguments = [
     "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
   ]
+
+  /// main worktree でない entry にだけ使う。main に足さない理由は
+  /// `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository`。
+  private static let linkedWorktreeArguments =
+    gitDirectoryArguments + ["--is-bare-repository", "--show-prefix"]
 
   /// linked worktree から引いても main worktree から引いても同じ値が返る (git 2.50.1 実測) ため、
   /// Project ディレクトリがどの worktree にあっても同じ基準になる。
@@ -233,8 +199,12 @@ public struct GitWorktreeDetector: Sendable {
 
     var detected: [DetectedWorktree] = []
     var failures: [GitWorktreeEntryFailure] = []
-    for entry in parsed.entries where isScannable(entry) {
-      switch try await describe(entry, projectCommonDirectory: commonDirectory) {
+    // main worktree は `worktree list` の最初の entry (git-worktree(1))。bare の entry も
+    // main として最初に現れるので、scannable で絞る前の順序で決める。
+    for (index, entry) in parsed.entries.enumerated() where isScannable(entry) {
+      switch try await describe(
+        entry, isMainWorktree: index == 0, projectCommonDirectory: commonDirectory)
+      {
       case .detected(let worktree): detected.append(worktree)
       case .absent: continue
       case .failed(let failure): failures.append(failure)
@@ -289,8 +259,17 @@ public struct GitWorktreeDetector: Sendable {
   ///     **その別 repository の** git ディレクトリを返す (git 2.50.1 実測)。そのまま通すと
   ///     Project Root が2件になり、安定 ID が別 Project の `.git` を指して tmux session 名まで
   ///     衝突し得る。この Project の worktree ではないので、失敗ではなく不在として扱う。
+  ///   - main worktree でない entry が entry 自身でない git ディレクトリへ解決した: lock された
+  ///     worktree の `.git` が消えても入れるディレクトリなら、`rev-parse` は祖先へ遡って exit 0 で
+  ///     祖先の repository を返す (Issue #502)。そのまま通すと偽の Project Root や ID の重複になり、
+  ///     祖先が別 repository なら上の `.absent` に当たって黙って消えるため、common dir の照合より
+  ///     **先に**、同じ `rev-parse` に足した `--is-bare-repository` と `--show-prefix` で確かめ、
+  ///     `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository` で返す (判定の順はそちら)。
+  ///     パスは比べない。main worktree かどうかを2行の一致では決められないので、`worktree list`
+  ///     の順序で渡す。
   private func describe(
     _ entry: GitWorktreeEntry,
+    isMainWorktree: Bool,
     projectCommonDirectory: WorktreeIdentity
   ) async throws(GitWorktreeScanError) -> EntryOutcome {
     if entry.prunableReason != nil {
@@ -309,7 +288,9 @@ public struct GitWorktreeDetector: Sendable {
       // initializer が internal なのは、書き込み subcommand をモジュール外から
       // 注入させないためである (§17.2)。
       stdout = try await runner.run(
-        GitReadCommand(arguments: Self.gitDirectoryArguments), timeout: entryTimeout
+        GitReadCommand(
+          arguments: isMainWorktree ? Self.gitDirectoryArguments : Self.linkedWorktreeArguments),
+        timeout: entryTimeout
       ).stdout
     } catch {
       if case .commandFailed = error, !isWorktreeReachable(entry.path) {
@@ -318,8 +299,8 @@ public struct GitWorktreeDetector: Sendable {
       return .failed(entry.path, .gitDirectory(error))
     }
 
-    let paths = stdout.split(separator: "\n")
-    guard paths.count == 2 else {
+    let paths = Self.outputLines(stdout, isMainWorktree: isMainWorktree)
+    guard paths.count == (isMainWorktree ? 2 : 4) else {
       return .failed(entry.path, .unexpectedGitDirectoryOutput(output: stdout))
     }
     guard let identity = WorktreeIdentity(rawValue: String(paths[0])) else {
@@ -329,6 +310,13 @@ public struct GitWorktreeDetector: Sendable {
     // `WorktreeIdentity` に委ねることで、正準等価な別表記を別 ID とする規則がここへ二重化しない。
     guard let commonDirectory = WorktreeIdentity(rawValue: String(paths[1])) else {
       return .failed(entry.path, .invalidCommonDirectoryPath(commonDirectory: String(paths[1])))
+    }
+    if !isMainWorktree,
+      let failure = Self.ancestorResolution(
+        paths, output: stdout, identity: identity, commonDirectory: commonDirectory,
+        projectCommonDirectory: projectCommonDirectory)
+    {
+      return .failed(entry.path, failure)
     }
     guard commonDirectory == projectCommonDirectory else { return .absent }
 
@@ -340,6 +328,33 @@ public struct GitWorktreeDetector: Sendable {
         isProjectRoot: identity == commonDirectory,
         isReachable: true
       ))
+  }
+
+  /// main の2行は `split` で分ける (空の行を捨てる)。main でない entry の4行目 (`--show-prefix`)
+  /// は作業ツリーの根で空行になるので (git 2.50.1 実測: 3行目以降が `false\n\n`)、空の要素を保ち、
+  /// 末尾の改行1つだけを落として分ける。末尾が改行でない出力は行数の検査で弾く。
+  private static func outputLines(_ stdout: String, isMainWorktree: Bool) -> [Substring] {
+    if isMainWorktree { return stdout.split(separator: "\n") }
+    guard stdout.hasSuffix("\n") else { return [] }
+    return stdout.dropLast().split(separator: "\n", omittingEmptySubsequences: false)
+  }
+
+  /// 判定の順と計測は `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository`。
+  private static func ancestorResolution(
+    _ lines: [Substring],
+    output: String,
+    identity: WorktreeIdentity,
+    commonDirectory: WorktreeIdentity,
+    projectCommonDirectory: WorktreeIdentity
+  ) -> GitWorktreeEntryFailure.Reason? {
+    if identity == commonDirectory && commonDirectory == projectCommonDirectory {
+      return .resolvedToAncestorRepository
+    }
+    switch lines[2] {
+    case "true": return .resolvedToAncestorRepository
+    case "false": return lines[3].isEmpty ? nil : .resolvedToAncestorRepository
+    default: return .unexpectedGitDirectoryOutput(output: output)
+    }
   }
 
   private func describeUnreachable(

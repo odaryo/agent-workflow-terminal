@@ -22,9 +22,12 @@ jobs:
           echo "b ran: a.outcome=${{ steps.a.outcome }} a.conclusion=${{ steps.a.conclusion }} job.status=${{ job.status }}"
       - name: c (failure)
         if: ${{ failure() }}
-        run: echo "c ran: failure() was true"
+        run: |
+          echo "c ran: failure() was true"
       - name: d (default condition)
-        run: echo "d ran: default success() was true"
+        run: |
+          echo "d ran: default success() was true"
       - name: e (always)
         if: ${{ always() }}
-        run: echo "e ran: always()"
+        run: |
+          echo "e ran: always()"

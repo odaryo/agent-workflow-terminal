@@ -23,6 +23,7 @@ struct AgentWorkflowTerminalApp: App {
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
         .modifier(HiddenWindowTitle())
+        .background { ToolbarDisplayModeLock() }
         // 内側の frame は window に効かず (#430)、ここでも下限は 480 のまま (#477、未解決)。
         .frame(minWidth: minimumWindowWidth, minHeight: 320)
         .onPreferenceChange(ProjectMinimumWindowWidthKey.self) { [width = $minimumWindowWidth] in
@@ -30,7 +31,6 @@ struct AgentWorkflowTerminalApp: App {
         }
     }
     .defaultSize(width: 900, height: 560)
-    .fixedToolbarLabels()
     .commands {
       // `Window` だけで File メニューごと消えることは計測済みで、この行は多重防御。
       CommandGroup(replacing: .newItem) {}
@@ -49,18 +49,6 @@ struct AgentWorkflowTerminalApp: App {
     OverviewScene(projects: projects)
     Settings {
       NotificationSettingsView()
-    }
-  }
-}
-
-private extension Scene {
-  @SceneBuilder
-  func fixedToolbarLabels() -> some Scene {
-    if #available(macOS 15, *) {
-      // Icon Only ではタブ名が消え、右クリックは表示形式メニューに取られた (#431 の計測)。
-      windowToolbarLabelStyle(fixed: .titleAndIcon)
-    } else {
-      self
     }
   }
 }

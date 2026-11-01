@@ -16,6 +16,13 @@ struct ProjectsWindowContent: View {
       }
       content
     }
+    .background {
+      if let model = projects.selectedModel {
+        ProjectWindowMinimumSize(model: model)
+      } else {
+        WindowMinimumSize(size: NSSize(width: 480, height: 320))
+      }
+    }
     .toolbar {
       ToolbarItem(placement: .navigation) {
         ProjectMenu(projects: projects)

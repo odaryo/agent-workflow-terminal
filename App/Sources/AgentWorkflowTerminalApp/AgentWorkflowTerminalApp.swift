@@ -21,7 +21,6 @@ struct AgentWorkflowTerminalApp: App {
     // 複製できる形にして壊れた状態で開けるようにはしない (Issue #238 / #372)。
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
-        .frame(minWidth: 480, minHeight: 320)
     }
     .defaultSize(width: 900, height: 560)
     .commands {
@@ -123,7 +122,6 @@ struct ProjectView: View {
         }
       }
     }
-    .frame(minWidth: ViewerDrawerMetrics.minimumWindowWidth(for: model.viewerDrawerLayout))
     .onAppear {
       var restored = ViewerArrangementPreferences.restoredLayout()
       if let content = model.viewerDrawerLayout.content { restored.open(content) }

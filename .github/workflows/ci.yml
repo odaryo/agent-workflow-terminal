@@ -55,8 +55,13 @@ jobs:
           xcodebuild -version
           swift --version
 
+      # 段の上限は #475 の計測による: 時間切れの段は cancelled ではなく failure になり、後に続く
+      # `!cancelled()` の段は走る (run 41343741887)。job の上限だけでは、ハングした段で job ごと
+      # cancel され、後の段の結果が同じ run に残らない。実測は Build 96s / brew 17s (run 41342303849)。
+      # run-swift-test.sh を挟む段は、自前の --timeout とスタックの書き出しに任せて上限を付けない。
       - name: Build
         id: build
+        timeout-minutes: 15
         run: swift build --build-tests
 
       # 経過時間とプロセス全体の CPU を測る AdaptersSerialTimingTests は、同一プロセス内で
@@ -90,6 +95,7 @@ jobs:
       - name: Install tmux and ripgrep
         id: install-clis
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 10
         run: brew install tmux ripgrep
 
       # 版数は固定せず runner の既定を使い、ログに残す。サポート下限版数が未決 (Issue #16) の
@@ -194,6 +200,10 @@ jobs:
   # 互いに独立した短い検査をまとめたジョブ。各段は `!cancelled()` で走らせ、1つが落ちても
   # 残りの段の結果を得る (ジョブを分けていた頃と同じく、全部の結果を1回の run で見るため)。
   # どれかの段が落ちればジョブは失敗する。
+  #
+  # 1つの段がハングしても残りの段の結果を得るため、段ごとに上限を付ける。時間切れの段は failure
+  # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 0〜40 秒
+  # (run 41342303849) で、brew で導入しうる段は 10 分、それ以外は 5 分、iOS のビルドは 15 分とする。
   checks:
     name: Static checks & iOS build
     runs-on: macos-15
@@ -215,6 +225,7 @@ jobs:
       # (docs/coding-guidelines.md §7)。
       - name: swift-format
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: |
           swift format lint \
             --configuration .swift-format \
@@ -230,6 +241,7 @@ jobs:
       # 同梱が外れた場合だけ brew で導入する (数分かかる)。
       - name: SwiftLint
         if: ${{ !cancelled() }}
+        timeout-minutes: 10
         run: |
           if ! command -v swiftlint >/dev/null 2>&1; then
             brew install swiftlint
@@ -247,6 +259,7 @@ jobs:
       # (SwiftLint の段と同じ方針)。
       - name: Install shellcheck if missing
         if: ${{ !cancelled() }}
+        timeout-minutes: 10
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
             brew install shellcheck
@@ -257,24 +270,28 @@ jobs:
       # 静的解析からは追跡できないパスを指す (各スクリプト先頭の注釈のとおり)。
       - name: ShellCheck
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: shellcheck -e SC1091 scripts/*.sh
 
       # 判定本体に構文エラーがあると python3 自身が exit 1 を返し、フックは block しない
       # (= 素通り) 側へ落ちる。コンパイルだけは必ず通っていることを別段で確かめる。
       - name: Shell guard - compile
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: |
           python3 -m py_compile scripts/guard_bash_tmux.py
           python3 -m py_compile scripts/tests/tmux-kill-guard/make-perf-command.py
 
       - name: Shell guard - fixtures
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: scripts/check-tmux-kill-guard.sh
 
       # wf-pr-merge.sh は、この判定器が「CI は起動しない」と返した PR の待ちを省く。誤って
       # そう返すと CI 未検証のままマージされるため、判定の向きを fixture と変異で固定する。
       - name: CI paths-ignore detector - fixtures
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: |
           python3 -m py_compile scripts/ci_paths_ignored.py
           scripts/check-ci-paths-ignored.sh
@@ -288,14 +305,17 @@ jobs:
       # 「両者がずれた」ことだけを示す段にしたいため。TerminalCore しかビルドしない。
       - name: Session name parity - naming rule (bash vs Swift)
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: scripts/check-session-name-parity.sh
 
       - name: Session name parity - stable ID (worktree admin dir)
         if: ${{ !cancelled() }}
+        timeout-minutes: 5
         run: scripts/check-worktree-admin-dir.sh
 
       - name: Build (iOS Simulator)
         if: ${{ !cancelled() }}
+        timeout-minutes: 15
         working-directory: AgentWorkflowTerminal
         run: |
           swift build \

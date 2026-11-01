@@ -6,8 +6,10 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
   case process(ProcessRunnerError)
   case commandFailed(exitCode: Int32, stdout: String, stderr: String)
 
-  /// server 不在へ畳む失敗の判定を集める。socket 欠落は server 不在の証拠にはならないが、
-  /// 現在は同じ扱いを維持している (Issue #500 で扱う)。
+  /// socket 欠落は server 不在の証拠にはならないが、観測経路では不在へ畳む
+  /// (Issue #500、Director 決定4、2026-11-02)。attach 済みの client は fd で繋がったままで、
+  /// 端末は動き続ける。誤った書き込みは bootstrap と Close で止め、観測のたびに lsof を
+  /// 起動するコストを避ける。
   ///
   /// stderr の形は2つある (tmux 3.4 実測、`<path>` は socket の絶対パス):
   ///
@@ -18,7 +20,7 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
   ///
   /// ENOENT は未起動だけでなく、生存中の server の socket が消えた場合にも出る
   /// (tmux 3.8、Issue #492 で計測)。片方だけを見る述語を各所に置くと判定が食い違うため、
-  /// ここに集めているが、この畳み込みの見直しは Issue #500 の担当。
+  /// ここに集めている。
   ///
   /// - Note: 3つ目に `error connecting to <path> (Socket operation on non-socket)` があるが、
   ///   これは「server が居ない」ではなく**その path が socket ではない**という設定の誤りなので

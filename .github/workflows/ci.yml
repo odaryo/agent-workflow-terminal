@@ -119,7 +119,7 @@ jobs:
 
       # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
       # これらの suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
-      # filter は 12 suite / 99 テスト分を1回で走らせるためのもの。skip を静かに見逃さないよう、
+      # filter は 14 suite / 110 テスト分を1回で走らせるためのもの。skip を静かに見逃さないよう、
       # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       - name: Test (integration suites only)
         id: integration-only
@@ -129,7 +129,7 @@ jobs:
           AWT_GIT_INTEGRATION: "1"
           AWT_RIPGREP_INTEGRATION: "1"
           AWT_INTEGRATION_FILTER: >-
-            TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests
+            TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitWorktreeDetectorPrunableIntegrationTests|TmuxOrphanedServerProbeIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
@@ -141,8 +141,8 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --min-tests 99 \
-            --suites 12
+            --min-tests 110 \
+            --suites 14
 
       # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では
       # ないのは、concurrency の cancel-in-progress で途中で殺された回にも走ってしまい、

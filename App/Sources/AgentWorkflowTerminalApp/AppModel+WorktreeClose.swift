@@ -28,13 +28,20 @@ extension AppModel {
       select(neighbor)
     }
     setActivation(.inactive, of: identity)
+    removeTabs(in: identity)
   }
 
   /// 右隣、無ければ左隣の選べるタブ。どちらも無ければ `nil` で、`setActivation` が Project Root を選ぶ。
-  private func neighborTab(of identity: WorktreeIdentity) -> TaskWorktree? {
-    let tabs = tabbedWorktrees
-    guard let index = tabs.firstIndex(where: { $0.identity == identity }) else { return nil }
-    return tabs[tabs.index(after: index)...].first { $0.detected.isReachable }
-      ?? tabs[..<index].last { $0.detected.isReachable }
+  private func neighborTab(of identity: WorktreeIdentity) -> TerminalSessionKey? {
+    let tabs = tabKeys
+    guard let first = tabs.firstIndex(where: { $0.identity == identity }),
+      let last = tabs.lastIndex(where: { $0.identity == identity })
+    else { return nil }
+    let selectable = Set(inventory.selectableTaskWorktrees.map(\.identity))
+    let canSelect: (TerminalSessionKey) -> Bool = {
+      $0.identity == self.projectRoot?.identity || selectable.contains($0.identity)
+    }
+    return tabs[tabs.index(after: last)...].first(where: canSelect)
+      ?? tabs[..<first].last(where: canSelect)
   }
 }

@@ -33,10 +33,10 @@ struct TmuxSessionProvisioner: Sendable {
 
   /// - Returns: 成功時は surface へ渡す attach の argv。
   func attachCommand(
-    for identity: WorktreeIdentity,
+    for key: TerminalSessionKey,
     workingDirectory: String
   ) async -> Result<[String], TmuxSessionOperationError> {
-    let session = TmuxSessionName(identity: identity)
+    let session = TmuxSessionName(key: key)
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
     } catch .sessionAlreadyExists {

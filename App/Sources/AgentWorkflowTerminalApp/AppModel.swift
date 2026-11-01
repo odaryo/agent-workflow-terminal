@@ -116,8 +116,10 @@ final class AppModel: ObservableObject {
   @Published private(set) var worktrees: [TaskWorktree] = [] {
     didSet { paneObservations.observe(inventory) }
   }
-  @Published var selectedIdentity: WorktreeIdentity?
-  @Published var openedIdentities: Set<WorktreeIdentity> = []
+  @Published var selectedTab: TerminalSessionKey?
+  @Published var openedTabs: Set<TerminalSessionKey> = []
+  @Published private(set) var tabLayout = TerminalTabLayout()
+
   @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
     didSet { saveViewerArrangements(replacing: oldValue) }
   }
@@ -189,6 +191,16 @@ final class AppModel: ObservableObject {
     WorktreeInventory(projectRoot: projectRoot, taskWorktrees: worktrees)
   }
 
+  var selectedIdentity: WorktreeIdentity? { selectedTab?.identity }
+
+  var tabKeys: [TerminalSessionKey] {
+    tabLayout.tabs(
+      directories: [projectRoot?.identity].compactMap { $0 } + tabbedWorktrees.map(\.identity))
+  }
+
+  func removeTabs(in identity: WorktreeIdentity) {
+    for key in tabLayout.tabs(in: identity) { tabLayout.removeTab(key) }
+  }
   /// 通常の Task Tab に並べる worktree (設計書 §3.2)。
   var tabbedWorktrees: [TaskWorktree] { inventory.tabbedTaskWorktrees }
 
@@ -341,11 +353,11 @@ final class AppModel: ObservableObject {
     worktrees = result.inventory.taskWorktrees
     didCompleteInitialScan = true
     if let projectRoot {
-      selectedIdentity = projectRoot.identity
-      openedIdentities.insert(projectRoot.identity)
+      selectedTab = .primary(projectRoot.identity)
+      openedTabs.insert(.primary(projectRoot.identity))
     } else if let first = firstSelectableWorktree {
-      selectedIdentity = first.identity
-      openedIdentities.insert(first.identity)
+      selectedTab = .primary(first.identity)
+      openedTabs.insert(.primary(first.identity))
     }
     // 選べる worktree が無いことは `message` へ書かない。書くと Inactive を Active 化しても
     // 消えないままになる (`emptyStateMessage`)。
@@ -379,9 +391,9 @@ final class AppModel: ObservableObject {
   /// responder を持ち続け、打鍵が別 worktree の生きた session へ入る窓が開く (Issue #234)。
   /// tmux session 自体は残す (設計書 §3.4)。
   private func close(_ identity: WorktreeIdentity) {
-    openedIdentities.remove(identity)
+    openedTabs = openedTabs.filter { $0.identity != identity }
     guard selectedIdentity == identity else { return }
-    // 到達不能な Project Root へは移さない。`selectProjectRoot()` は `select(_:)` と違って
+    // 到達不能な Project Root へは移さない。`selectProjectRoot()` は worktree の選択と違って
     // 到達可能性を見ないので、自動で呼ぶこの経路が「開けない Project Root を勝手に開く」
     // 入口になる (`select(_:)` の doc コメントにある `$HOME` へ落ちる `new-session`)。
     if projectRoot?.isReachable == true {
@@ -389,7 +401,7 @@ final class AppModel: ObservableObject {
     } else if let next = firstSelectableWorktree {
       select(next)
     } else {
-      selectedIdentity = nil
+      selectedTab = nil
     }
   }
 
@@ -453,33 +465,6 @@ final class AppModel: ObservableObject {
         warning = "Active/Inactive を保存できませんでした: \(error)"
       }
     }
-  }
-
-  /// 到達不能な worktree を開かないのは、`tmux new-session -c <存在しないディレクトリ>` が
-  /// エラーにならず `$HOME` へ黙って落ちるためである (tmux 3.4 実測: client の cwd が
-  /// `/private/tmp` でも exit 0 で session ができ、`pane_current_path` は `$HOME` になる)。そこで agent を走らせると、
-  /// worktree の名前を持つタブが実際には別のディレクトリで作業することになる。しかも
-  /// `new-session -A` なので、その誤った session に以後ずっと再 attach され続ける。
-  ///
-  /// Inactive を開かないのは、タブが無い worktree の端末を作らないためである (設計書 §3.2)。
-  /// Active 化そのものは open/attach を伴わず、session の用意はタブを選んだ時点に留める
-  /// (§3.3: session が無いときに Terminal が黙って作らない)。
-  func select(_ worktree: TaskWorktree) {
-    guard worktree.activation == .active, worktree.detected.isReachable else { return }
-    selectedIdentity = worktree.identity
-    openedIdentities.insert(worktree.identity)
-  }
-
-  func selectProjectRoot() {
-    guard let projectRoot else { return }
-    selectedIdentity = projectRoot.identity
-    openedIdentities.insert(projectRoot.identity)
-  }
-
-  var selectedWorktree: DetectedWorktree? {
-    guard let selectedIdentity else { return nil }
-    if let projectRoot, projectRoot.identity == selectedIdentity { return projectRoot }
-    return worktrees.first { $0.identity == selectedIdentity }?.detected
   }
 
   /// pane の Agent 状態の観測経路。候補一覧の印 (§12.7) と送信可否 (§9.2.2) の両方がこれを見る。

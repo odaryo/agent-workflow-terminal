@@ -44,7 +44,7 @@ extension ProjectView {
   func startNewTask() {
     guard model.projectRoot != nil else { return }
     model.startNewTask()
-    // 同じタブを選び直す場合は selectedIdentity の onChange が発火しない。
+    // 同じタブを選び直す場合は selectedTab の onChange が発火しない。
     keyboardFocus.requestFocus()
   }
 }

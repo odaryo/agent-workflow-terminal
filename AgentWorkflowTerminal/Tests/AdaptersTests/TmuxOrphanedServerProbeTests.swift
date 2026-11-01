@@ -1,4 +1,5 @@
 import Adapters
+import Darwin
 import Foundation
 import Testing
 
@@ -34,7 +35,8 @@ struct TmuxOrphanedServerProbeTests {
   func findsOrphanedServer() async throws {
     let runner = OrphanedServerRunnerStub(result: stubSuccess(stdout: try measuredLsofOutput()))
     #expect(
-      await TmuxOrphanedServerProbe(runner: runner).probe(socketPath: measuredOrphanedSocketPath)
+      await TmuxOrphanedServerProbe(runner: runner, socketExists: socketIsMissing).probe(
+        socketPath: measuredOrphanedSocketPath)
         == .orphaned(processIDs: [15199]))
   }
 
@@ -106,7 +108,8 @@ struct TmuxOrphanedServerProbeTests {
       result: stubSuccess(
         stdout: "p20378\nf6\nn/private/tmp/tmux-501/default\np54148\nf6\nn\(socketPath)\n"))
     #expect(
-      await TmuxOrphanedServerProbe(runner: runner).probe(socketPath: socketPath)
+      await TmuxOrphanedServerProbe(runner: runner, socketExists: socketIsMissing).probe(
+        socketPath: socketPath)
         == .orphaned(processIDs: [54148]))
   }
 
@@ -124,6 +127,43 @@ struct TmuxOrphanedServerProbeTests {
       result: stubSuccess(
         stdout: "p20378\nf6\nn/private/tmp/tmux-501/default\np123\nf6\nn->0x57eff5ebf5b56053\n"))
     #expect(await TmuxOrphanedServerProbe(runner: runner).probe(socketPath: socketPath) == .absent)
+  }
+
+  // MARK: - socket が今あるか (lstat)
+
+  /// socket があれば tmux は既存の server に繋ぐので、lsof に一致があっても取り残されてはいない。
+  @Test("lsof に一致があっても、そのパスに socket が在れば absent")
+  func reportsAbsenceWhenSocketExists() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+    let socket = try BoundUnixSocket(path: directory.path("s"))
+    defer { socket.close() }
+
+    #expect(await probeWithListeningLine(on: socket.path) == .absent)
+  }
+
+  @Test("lsof に一致があり、そのパスに何も無ければ orphaned")
+  func reportsOrphanedWhenPathIsMissing() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+
+    #expect(
+      await probeWithListeningLine(on: directory.path("s")) == .orphaned(processIDs: [4242]))
+  }
+
+  @Test("lsof に一致があり、そのパスが socket でない通常ファイルなら orphaned")
+  func reportsOrphanedWhenPathIsRegularFile() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+    let path = directory.path("s")
+    try #require(FileManager.default.createFile(atPath: path, contents: Data()))
+
+    #expect(await probeWithListeningLine(on: path) == .orphaned(processIDs: [4242]))
+  }
+
+  private func probeWithListeningLine(on path: String) async -> TmuxOrphanedServerProbeResult {
+    let runner = OrphanedServerRunnerStub(result: stubSuccess(stdout: "p4242\nf6\nn\(path)\n"))
+    return await TmuxOrphanedServerProbe(runner: runner).probe(socketPath: path)
   }
 
   private func expectUndetermined(
@@ -200,3 +240,65 @@ let lsofEscapedPathCases = [
   LsofEscapedPathCase(
     label: "DEL (0x7F)", socketPath: "/private/tmp/tmux-501/awt-a\u{7F}b", lsofName: nil),
 ]
+
+/// probe はパスに socket が在るかも見る。socket の欠落を前提にした検証が、実機に在るパス
+/// (`/private/tmp/tmux-501/default` や fixture の計測時の socket) で結果を変えないよう固定する。
+let socketIsMissing: @Sendable (String) -> Bool = { _ in false }
+
+/// `sockaddr_un.sun_path` は 104 バイトなので、短い名前で一時ディレクトリに作る。
+struct SocketTestDirectory {
+  let url: URL
+
+  init() throws {
+    url = FileManager.default.temporaryDirectory
+      .appending(path: "awtp\(UInt32.random(in: 0..<UInt32.max))")
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: false)
+  }
+
+  func path(_ name: String) -> String { url.appending(path: name).path }
+
+  func remove() { try? FileManager.default.removeItem(at: url) }
+}
+
+struct BoundUnixSocketError: Error {
+  let operation: String
+  let errno: Int32
+}
+
+/// bind しただけの AF_UNIX socket。lstat が `S_IFSOCK` を返すファイルを、tmux を使わずに作る。
+struct BoundUnixSocket {
+  let path: String
+  private let descriptor: Int32
+
+  init(path: String) throws {
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    let bytes = Array(path.utf8)
+    let capacity = MemoryLayout.size(ofValue: address.sun_path)
+    guard bytes.count < capacity else {
+      throw BoundUnixSocketError(operation: "path too long", errno: ENAMETOOLONG)
+    }
+    withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+      for (index, byte) in bytes.enumerated() { buffer[index] = byte }
+    }
+    let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw BoundUnixSocketError(operation: "socket", errno: errno) }
+    let bound = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
+      }
+    }
+    guard bound == 0 else {
+      let error = errno
+      Darwin.close(descriptor)
+      throw BoundUnixSocketError(operation: "bind", errno: error)
+    }
+    self.path = path
+    self.descriptor = descriptor
+  }
+
+  func close() {
+    Darwin.close(descriptor)
+    Darwin.unlink(path)
+  }
+}

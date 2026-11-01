@@ -79,6 +79,32 @@ struct TmuxOrphanedServerProbeIntegrationTests {
     }
   }
 
+  /// 一覧の失敗から probe までの間に server が起きた場合と同じ形。socket が在れば tmux は
+  /// その server に繋ぐので、2つ目の server はできない (Issue #500 のレビューの計測)。
+  @Test("socket が在る生きた server は、lsof に一致があっても absent")
+  func reportsLiveServerWithSocketAsAbsent() async throws {
+    let socketName = uniqueSocketName("orphaned-live")
+    try await IsolatedTmuxServer.withServer(socketName: socketName) { runner in
+      let pidOutput = try await runner.run(arguments: ["display-message", "-p", "#{pid}"])
+      let serverPID = try #require(
+        Int32(pidOutput.stdout.trimmingCharacters(in: .whitespacesAndNewlines)))
+      let pathOutput = try await runner.run(arguments: ["display-message", "-p", "#{socket_path}"])
+      let socketPath = pathOutput.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      try #require(FileManager.default.fileExists(atPath: socketPath))
+
+      // 陽性対照: socket を見なければ、lsof はこの server を一致として出す。
+      let withoutSocketCheck = await TmuxOrphanedServerProbe(
+        runner: FoundationProcessRunner(), socketExists: socketIsMissing
+      ).probe(socketPath: socketPath)
+      guard case .orphaned(let processIDs) = withoutSocketCheck else {
+        Issue.record("lsof が生きた server を一致として出すことを前提にしたが、\(withoutSocketCheck) が返った")
+        return
+      }
+      #expect(processIDs.contains(serverPID))
+      #expect(await TmuxOrphanedServerProbe().probe(socketPath: socketPath) == .absent)
+    }
+  }
+
   @Test("一度も起動していない socket の server は absent")
   func reportsNeverStartedSocketAsAbsent() async throws {
     let runner = try TmuxRunner(

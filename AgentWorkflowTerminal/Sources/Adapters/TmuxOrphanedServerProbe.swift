@@ -12,15 +12,19 @@ public struct TmuxOrphanedServerProbe: Sendable {
   private let runner: any ProcessRunning
   private let executable: URL
   private let timeout: Duration
+  private let socketExists: @Sendable (String) -> Bool
 
+  /// `socketExists` の既定は、`lstat` が成功し `S_IFSOCK` であること。
   public init(
     runner: any ProcessRunning,
     executable: URL = URL(fileURLWithPath: "/usr/sbin/lsof"),
-    timeout: Duration = .seconds(3)
+    timeout: Duration = .seconds(3),
+    socketExists: (@Sendable (String) -> Bool)? = nil
   ) {
     self.runner = runner
     self.executable = executable
     self.timeout = timeout
+    self.socketExists = socketExists ?? Self.isSocket
   }
 
   #if os(macOS)
@@ -39,7 +43,12 @@ public struct TmuxOrphanedServerProbe: Sendable {
         environment: ["LC_ALL": "C"], timeout: timeout)
       if result.exitCode == 0 {
         let processIDs = LsofUnixSocketList.processIDs(listening: socketPath, in: result.stdout)
-        if !processIDs.isEmpty { return .orphaned(processIDs: processIDs) }
+        if !processIDs.isEmpty {
+          // socket が在れば tmux は既存の server に繋ぐので、2つ目の server はできない。一覧の失敗
+          // から probe までの間に起きた健全な server も lsof には一致として出るため、これを
+          // 取り残されたと誤らない (Issue #500 のレビューの計測)。
+          return socketExists(socketPath) ? .absent : .orphaned(processIDs: processIDs)
+        }
         return absenceUnlessEscaped(socketPath)
       }
       // lsof はどのエラーでも exit 1 を返すので、stderr のある exit 1 は「一致が無い」と区別できない。
@@ -52,6 +61,13 @@ public struct TmuxOrphanedServerProbe: Sendable {
     } catch {
       return .undetermined("lsof: \(error)")
     }
+  }
+
+  /// symlink を辿らない `lstat` で見る (Issue #500 の決定)。
+  private static func isSocket(_ path: String) -> Bool {
+    var status = stat()
+    guard lstat(path, &status) == 0 else { return false }
+    return status.st_mode & S_IFMT == S_IFSOCK
   }
 
   /// lsof (revision 4.91) の `n` 行は socket のパスをバイトのまま出すとは限らない (Issue #500 の

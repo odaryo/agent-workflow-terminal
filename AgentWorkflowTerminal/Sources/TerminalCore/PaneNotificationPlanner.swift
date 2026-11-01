@@ -116,10 +116,10 @@ public enum PaneNotification: Sendable, Hashable {
 ///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
 ///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
 ///   飲み込むため。
-/// - Important: 他の session や猶予中に既知の状態の記憶がある pane は、基準で `lastKnown` を上書き
-///   しない (#494)。完了表示の記憶だけでは状態を知ったことにならないため、状態の記憶がない pane の
-///   判断待ちは基準で個別に鳴らさず、「判断待ちが N 件」1件にまとめる。猶予から戻った pane は状態を
-///   観測するまで数えず、判断待ちの続きか plain `Unknown` でなければまとめ通知から外す (#508)。
+/// - Important: 他の session に同時に見えている pane は、基準で `lastKnown` を上書きしない (#494)。
+///   完了表示の記憶だけでは状態を知ったことにならないため、状態の記憶がない pane の判断待ちは基準で
+///   個別に鳴らさず、「判断待ちが N 件」1件にまとめる。猶予から戻った pane は状態を観測するまで数えず、
+///   戻って最初の観測は基準でも遷移として扱い、判断待ちの続きか plain `Unknown` なら数える (#508)。
 ///   起動直後は Project ごと・session (タブ) ごとに基準を取る時刻がずれるので、まとめ通知は
 ///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 session が基準を取り終えた時点で
 ///   出す。基準を取れない session が残っても、最初の候補から `summaryMaximumDelay` で出す。
@@ -259,20 +259,15 @@ public struct PaneNotificationPlanner: Sendable {
     expireMissingPanes(at: instant)
     guard var memory = sessions[session] else { return [] }
     memory.observedPanes = Set(snapshot.panes.map(\.id))
-    if !memory.hasStatesBaseline {
+    let isBaseline = !memory.hasStatesBaseline
+    if isBaseline {
       guard snapshot.isComplete else { return [] }
       memory.hasStatesBaseline = true
-      sessions[session] = memory
-      for pane in snapshot.panes {
-        takeBaseline(pane, in: session, at: instant)
-      }
-      updateMissingPanes(at: instant)
-      return due(at: instant)
     }
     sessions[session] = memory
 
     var notifications: [PaneNotification] = []
-    for (paneID, pane) in panes where pane.session == session {
+    for (paneID, pane) in panes where !isBaseline && pane.session == session {
       if !memory.observedPanes.contains(paneID) {
         // 観測なし。直前の既知の状態は保ち、Unknown の継続だけ切る。
         panes[paneID]?.unknownSince = nil
@@ -280,7 +275,10 @@ public struct PaneNotificationPlanner: Sendable {
       }
     }
     for pane in snapshot.panes {
-      if let kind = transition(pane, in: session, at: instant) {
+      let kind =
+        isBaseline
+        ? takeBaseline(pane, in: session, at: instant) : transition(pane, in: session, at: instant)
+      if let kind {
         notifications.append(.pane(event(pane.id, in: session, kind: kind)))
       }
     }
@@ -342,25 +340,26 @@ public struct PaneNotificationPlanner: Sendable {
 
   // MARK: - 内部
 
+  /// 猶予から戻った pane は、猶予の間どの session にも居なかった (2つの session に同時に見える pane は
+  /// 猶予に入らない)。遷移として扱っても、#494 が基準で防いだ二重の通知は起きない (#508 の W1 / W2)。
   private mutating func takeBaseline(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
-  ) {
+  ) -> PaneNotificationKind? {
+    if let memory = panes[pane.id], memory.lastKnown != nil, memory.awaitsStateAfterHandoff {
+      return transition(pane, in: session, at: instant)
+    }
     attach(pane.id, to: session)
     var memory = panes[pane.id] ?? PaneMemory(session: session)
     defer { panes[pane.id] = memory }
     memory.trackUnknown(isPlain: Self.isPlainUnknown(pane), at: instant)
-    if memory.lastKnown != nil {
-      if memory.awaitsStateAfterHandoff { resumeSummary(&memory, observing: pane, at: instant) }
-      return
-    }
+    if memory.lastKnown != nil { return nil }
     memory.awaitsStateAfterHandoff = false
     memory.lastKnown = Self.known(pane)
     let kind = memory.lastKnown?.attentionKind
     memory.isSummaryMember = kind != nil
     memory.isAttentionAnnounced = kind.map(settings.enabledKinds.contains) ?? false
-    if memory.isSummaryMember, summaryStartedAt == nil {
-      summaryStartedAt = instant
-    }
+    if memory.isSummaryMember, summaryStartedAt == nil { summaryStartedAt = instant }
+    return nil
   }
 
   /// 通知すべき遷移なら、その種類を返す。無効な種類でも記憶は進める。
@@ -390,7 +389,7 @@ public struct PaneNotificationPlanner: Sendable {
     return memory.isAttentionAnnounced ? kind : nil
   }
 
-  /// 基準は `lastKnown` を上書きしない (#494) ので、外した pane の別の判断待ちは次の遷移で鳴る。
+  /// 印を外した pane は、続く遷移の判定で通知する (別の種類の判断待ちはそこで個別に鳴る)。
   private mutating func resumeSummary(
     _ memory: inout PaneMemory, observing pane: PaneAgentState,
     at instant: ContinuousClock.Instant

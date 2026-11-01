@@ -30,7 +30,7 @@ struct PaneNotificationPlannerResumeTests: PaneNotificationPlannerTesting {
     all += planner.setSummaryGate(isOpen: true, at: returned)
     all += states(&planner, [pane("%1", .working)], in: sessionB, at: returned)
     all += planner.setSummaryGate(isOpen: true, at: returned)
-    all += followUps(&planner, .working, in: sessionB, from: returned)
+    all += completionsOnly(&planner, in: sessionB, from: returned)
     #expect(all.isEmpty)
   }
 
@@ -45,7 +45,7 @@ struct PaneNotificationPlannerResumeTests: PaneNotificationPlannerTesting {
     all += planner.setSummaryGate(isOpen: true, at: returned)
     all += states(&planner, [pane("%1", .permission)], in: sessionB, at: returned)
     all += planner.setSummaryGate(isOpen: true, at: returned)
-    all += followUps(&planner, .permission, in: sessionB, from: returned)
+    all += completionsOnly(&planner, in: sessionB, from: returned)
     #expect(all == [notification(in: sessionB, kind: .permission)])
   }
 
@@ -63,43 +63,30 @@ struct PaneNotificationPlannerResumeTests: PaneNotificationPlannerTesting {
       states(&planner, [pane("%1", state)], in: sessionB, at: returned)
         == [.attentionSummary(count: 1)])
     #expect(planner.setSummaryGate(isOpen: true, at: returned).isEmpty)
-    #expect(followUps(&planner, state, in: sessionB, from: returned).isEmpty)
+    #expect(completionsOnly(&planner, in: sessionB, from: returned).isEmpty)
   }
 
   @Test(
-    "H2: まとめ通知の後に新しいタブ C の基準へ移った pane は、観測した状態で数える", arguments: [AgentState.working, .question])
-  func newSessionBaselineCountsObservedState(state: AgentState) {
+    "H2 / W1: 新しいタブ C の基準に戻った pane は、その観測を遷移として扱う",
+    arguments: [AgentState.question, .working, .permission])
+  func newSessionBaselineIsTransition(baseline: AgentState) {
     let start = Self.clock.now
     var planner = summarySentWithMissingPane(at: start)
-    let all = joinNewSession(&planner, state: state, at: start.advanced(by: .seconds(2)))
-    let expected: [PaneNotification] = state == .question ? [.attentionSummary(count: 1)] : []
-    #expect(all == expected)
-  }
-
-  @Test("H2: 新しいタブ C の基準で別の判断待ちなら、まとめ通知を出さず次の観測で個別に1回だけ通知する")
-  func newSessionBaselineWithOtherAttentionDoesNotSummarize() {
-    let start = Self.clock.now
-    var planner = summarySentWithMissingPane(at: start)
-    let all = joinNewSession(&planner, state: .permission, at: start.advanced(by: .seconds(2)))
-    #expect(all == [notification(in: sessionC, kind: .permission)])
+    let returned = start.advanced(by: .seconds(2))
+    var all = joinNewSession(&planner, state: baseline, at: returned)
+    all += change(&planner, after: baseline, in: sessionC, from: returned)
+    #expect(all == expected(after: baseline, in: sessionC))
   }
 
   @Test(
-    "H6: gate が開く前に停止して再開した session の基準は、観測した状態で数える", arguments: [AgentState.working, .question])
-  func restartedSessionBaselineCountsObservedState(state: AgentState) {
+    "H6 / W2: gate が開く前に停止して再開した session の基準は、その観測を遷移として扱う",
+    arguments: [AgentState.question, .working, .permission])
+  func restartedSessionBaselineIsTransition(baseline: AgentState) {
     let start = Self.clock.now
     var planner = PaneNotificationPlanner()
-    let all = restartBeforeGate(&planner, state: state, at: start)
-    let expected: [PaneNotification] = state == .question ? [.attentionSummary(count: 1)] : []
-    #expect(all == expected)
-  }
-
-  @Test("H6: 再開後の基準で別の判断待ちなら、まとめ通知を出さず次の観測で個別に1回だけ通知する")
-  func restartedSessionBaselineWithOtherAttentionDoesNotSummarize() {
-    let start = Self.clock.now
-    var planner = PaneNotificationPlanner()
-    let all = restartBeforeGate(&planner, state: .permission, at: start)
-    #expect(all == [notification(in: sessionA, kind: .permission)])
+    var all = restartBeforeGate(&planner, state: baseline, at: start)
+    all += change(&planner, after: baseline, in: sessionA, from: start.advanced(by: .seconds(1)))
+    #expect(all == expected(after: baseline, in: sessionA))
   }
 
   @Test("A2: まとめ通知が進んでいる間に戻った pane は、まとめ通知の開始時刻を後ろへずらさない")
@@ -186,7 +173,7 @@ struct PaneNotificationPlannerResumeTests: PaneNotificationPlannerTesting {
     all += planner.setSummaryGate(isOpen: true, at: instant)
     all += displays(&planner, ["%1": .none], in: sessionC, at: instant)
     all += planner.setSummaryGate(isOpen: true, at: instant)
-    all += followUps(&planner, state, in: sessionC, from: instant)
+    all += completionsOnly(&planner, in: sessionC, from: instant)
     return all
   }
 
@@ -213,26 +200,56 @@ struct PaneNotificationPlannerResumeTests: PaneNotificationPlannerTesting {
     all += states(&planner, [pane("%1", state)], in: sessionA, at: resumed)
     all += planner.setSummaryGate(isOpen: false, at: resumed)
     all += planner.setSummaryGate(isOpen: true, at: resumed)
-    all += followUps(&planner, state, in: sessionA, from: resumed)
+    all += completionsOnly(&planner, in: sessionA, from: resumed)
     return all
   }
 
-  /// 戻った後の遷移の観測を20秒続け、まとめ通知の上限を過ぎるまで進める。
-  private func followUps(
-    _ planner: inout PaneNotificationPlanner, _ state: AgentState,
-    in session: TerminalSessionKey, from instant: ContinuousClock.Instant
+  /// アプリは状態が変わらない限り同じ観測を配信しない (`AgentAdapter.observations` と
+  /// `WorktreePaneAgentStateFeed.yieldIfChanged`)。戻った後は完了表示だけが2秒ごとに届く。
+  private func completionsOnly(
+    _ planner: inout PaneNotificationPlanner, in session: TerminalSessionKey,
+    from instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
     var all: [PaneNotification] = []
-    for seconds in 1...20 {
-      let observed = instant.advanced(by: .seconds(seconds))
-      all += states(&planner, [pane("%1", state)], in: session, at: observed)
+    for step in 1...30 {
+      let observed = instant.advanced(by: .seconds(2 * step))
       all += displays(&planner, ["%1": .none], in: session, at: observed)
+      all += planner.advance(to: observed)
       all += planner.setSummaryGate(isOpen: true, at: observed)
     }
-    let later = instant.advanced(by: .seconds(60))
-    all += planner.advance(to: later)
-    all += states(&planner, [pane("%1", state)], in: session, at: later)
     return all
+  }
+
+  /// 完了表示だけの期間の後に状態を変える。Working は直接 Question へ (W1 / W2)、Permission は
+  /// Working を経て Question へ移す。
+  private func change(
+    _ planner: inout PaneNotificationPlanner, after baseline: AgentState,
+    in session: TerminalSessionKey, from instant: ContinuousClock.Instant
+  ) -> [PaneNotification] {
+    let next: [AgentState] =
+      switch baseline {
+      case .working: [.question]
+      case .permission: [.working, .question]
+      default: []
+      }
+    var all: [PaneNotification] = []
+    for (offset, state) in next.enumerated() {
+      let observed = instant.advanced(by: .seconds(61 + 2 * offset))
+      all += states(&planner, [pane("%1", state)], in: session, at: observed)
+      all += planner.setSummaryGate(isOpen: true, at: observed)
+    }
+    return all + planner.advance(to: instant.advanced(by: .seconds(120)))
+  }
+
+  private func expected(
+    after baseline: AgentState, in session: TerminalSessionKey
+  ) -> [PaneNotification] {
+    switch baseline {
+    case .working: [notification(in: session, kind: .question)]
+    case .permission:
+      [notification(in: session, kind: .permission), notification(in: session, kind: .question)]
+    default: [.attentionSummary(count: 1)]
+    }
   }
 
   private func states(

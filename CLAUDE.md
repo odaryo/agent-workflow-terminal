@@ -89,7 +89,7 @@ A macOS terminal app that runs multiple AI agents in parallel, one per Git workt
 
 These are recorded as **確定** (decided) in `docs/architecture.md` and should be treated as fixed unless the user changes them:
 
-- **1 development task = 1 Git worktree = 1 task tab = 1 dedicated tmux session.** The Project Root gets its own separate permanent tmux session, outside the task-tab model.
+- **1 development task = 1 Git worktree = 1 task tab = 1 dedicated tmux session.** The Project Root gets its own separate permanent tmux session, outside the task-tab model. `+ New Task` adds a tmux window to that Project Root session and shows it as a new tab, where the user starts the Agent — the app never launches one — and mobile opens the same window of the same session (§3.1, decided 2026-11-01). What happens to that tab once the Agent has created the worktree is still 未確定 (§25).
 - **The Agent Terminal is always the primary interaction UI.** All Agent panes' summaries and states can also stay visible in an independent Overview window (§13). Code, Diff, and Evidence open only in the Viewer Drawer (always a single pane; opening another content replaces it — decided 2026-10-31, replacing the earlier max-2-panes rule) — no separate windows; choosing the Diff base happens inside the Drawer (§1.2, decided 2026-10-08).
 - **Do not reimplement tmux.** Pane splitting, key bindings, and session management stay in tmux; the app exposes only a minimal operation set (split, close, select, zoom) and reads pane/process/agent state.
 - **tmux and git are driven as external CLI processes**, not as embedded libraries (no libgit2). Rationale: the app must observe the same entities the user sees in their own terminal, and version differences get absorbed at an adapter boundary.
@@ -117,16 +117,17 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **Roles**
 - **Director** (the main Claude session): research, decisions, task decomposition, spec writing, progress judgment, reporting. Does not implement. Delegates read-only exploration and codebase lookups to the `explorer` subagent (`.claude/agents/explorer.md`, haiku).
-- **Implementer** (the Opus subagent defined in `.claude/agents/implementer.md`): receives the Director's spec and edits files. **It only edits — it never commits or pushes**, so the Director independently verifies the changes and commits them. Follow-ups go back to the same agent via `SendMessage` so it keeps its measurements and context; a fresh agent re-derives what the last one already established. **Codex is no longer used** (user decision, 2026-09-07) — do not call `codex exec` for implementation, and do not treat a Codex fallback as available. `AGENTS.md` stays a thin pointer to this file and `docs/coding-guidelines.md`, never a second copy of the rules.
-- **App implementer** (`.claude/agents/implementer-app.md`, Sonnet): `App/` だけを触る実装役。規則は Implementer と同じで、違いは担当範囲と UI の動作確認をしないことだけ (下記「実装役への渡し方」)。
+- **Implementer = Codex** (user decision 2026-11-01, reversing the 2026-09-07 decision to stop using it). Run it as `codex exec -C <worktree> -s workspace-write -o <result.md> - < <prompt.md>` in the background; the prompt is the spec plus "read `docs/coding-guidelines.md` first, never commit / push / open a PR, never use tmux kill commands". **It only edits — it never commits or pushes**, so the Director verifies the changes and commits them. **Codex's sandbox cannot run `swift build` / `swift test`** (実測 2026-10-31: the nested `sandbox_apply` is denied, even with `--add-dir`), so the spec tells it not to build and to run only `swift format lint` and `swiftlint lint --no-cache`; build and test go to the `gate-runner`. Each `codex exec` starts with no memory of the previous one, so a follow-up is a new `codex exec` whose spec restates the measurements it relies on. `AGENTS.md` stays a thin pointer to this file and `docs/coding-guidelines.md`, never a second copy of the rules.
+- **Fallback implementers** (`.claude/agents/implementer.md` Opus / `.claude/agents/implementer-app.md` Sonnet): used only when Codex cannot be (CLI missing, auth or quota failure). Same rules — edits only, no commit or push; follow-ups go back to the same agent via `SendMessage`. `implementer-app` touches `App/` only and does not run UI checks (下記「実装役への渡し方」).
+- **Gate runner** (`.claude/agents/gate-runner.md`, Sonnet): runs the exact GREEN commands the Director lists, in the worktree the Director names, and reports each command's exit code and the raw tail of its output. It does not edit, commit, or diagnose. The Director judges GREEN from that raw output and does not re-run the commands itself.
 - **UI verifier** (`.claude/agents/ui-verifier.md`, Sonnet): Director が書いた UI 確認項目を最終バンドル上で `scripts/verify-app-ui.sh` により実行し、項目ごとの成否を生出力とスクリーンショットのパス付きで報告する。編集はしない。
 - **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. A measurement that needs a process with a specific name (agent detection is name-based) can use a **symlink** to a signed system binary: on macOS a renamed *copy* of `/bin/sleep` is SIGKILLed (exit 137) before it runs, but a symlink under the wanted name runs (the signature is verified against the target) and `ps -o comm=` reports the symlink's own path, so name-based detection matches. A hardlink fails when `/bin` and the temp directory are on different filesystems. This needs no compiler and no CI dependency (実測 2026-09-09、#239). Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
 
 **The loop**
 1. Director writes an Issue-style spec: 背景 / 要求 / スコープ (files allowed to change) / 完了条件 (the exact GREEN commands) / "on ambiguity or contradiction, stop and ask". Treat a reported workaround as a spec defect and widen the scope explicitly in the next round rather than blaming the implementer. The spec must forbid committing and pushing, because the implementer does neither.
-2. Implementer delivers; Director independently re-runs the GREEN commands (cheap; trust but verify).
+2. Implementer delivers; the `gate-runner` runs the GREEN commands and the Director judges from its raw output (trust but verify — the implementer's own "lint passed" is not the gate).
 3. Reviewer reviews adversarially, classifying Critical / Major / Minor and separating code defects from **spec defects** (the pilot found both).
-4. Critical findings go back to the implementer via `SendMessage` to the same agent as a fix spec. **Review findings are hypotheses**: any claim in a fix spec about external behavior must be re-verified by the implementer with a measurement before coding — the pilot's only regression came from implementing a reviewer's unverified premise. Continue looping while each round is backed by fresh measurement; escalate to the user when a round fails without new evidence or a design question emerges. **An agent's own "I measured it" is a claim, not evidence** — Issue #23 had an implementer's measured claim refuted by the reviewer, and two reviewers reach opposite conclusions from reading the same source. Ask for the method and the raw output, not the conclusion; when two rounds disagree, adopt neither and send it back to measurement.
+4. Critical findings go back to the implementer as a fix spec (Codex: a new `codex exec` with the measurements restated; fallback agents: `SendMessage` to the same agent). **Review findings are hypotheses**: any claim in a fix spec about external behavior must be re-verified by the implementer with a measurement before coding — the pilot's only regression came from implementing a reviewer's unverified premise. Continue looping while each round is backed by fresh measurement; escalate to the user when a round fails without new evidence or a design question emerges. **An agent's own "I measured it" is a claim, not evidence** — Issue #23 had an implementer's measured claim refuted by the reviewer, and two reviewers reach opposite conclusions from reading the same source. Ask for the method and the raw output, not the conclusion; when two rounds disagree, adopt neither and send it back to measurement.
 5. Completion is reported only with GREEN + no Critical remaining — and at that point the Director merges (see **Merge authority**).
 
 **実装役への渡し方** (実測 2026-10-09、#398)。implementer はこのプロジェクトの消費の 62% を占めた。1回あたり
@@ -141,12 +142,15 @@ compact された。費用の 67% はこのコンテキストを毎回読み直�
   **新しいエージェントとして** `implementer-app` (Sonnet) へ渡し、spec には Core 側で確定した型と関数名を書く。
   `App/` だけを触る Issue は最初から `implementer-app` へ渡す。片側だけでもなお大きいとき (要求が独立した
   機能を複数含むとき) は、渡す前に Issue を分割して起票し直す (`scripts/wf-issue-create.sh`)。
+- **Codex でも同じ分け方をする。** 上の計測は Claude の implementer についてのものだが、1 Issue = 1 実装役、
+  Core 側と App 側を別々の `codex exec` にすること (App 側の prompt には Core 側で確定した型と関数名を書く)、
+  UI 確認を実装役にさせないことは Codex にもそのまま当てはめる。
 - **UI の動作確認は `ui-verifier` (Sonnet) へ渡す。** 実装役は `verify-app-ui.sh` を回さず、スクリーンショットも
   読まない。実測ではこれが implementer の費用の約 25% を占め、しかもコンテキストが最も大きい終盤に行われて
   いた (スクリーンショット1枚 ≈ 3.6k トークンが、以後のすべてのリクエストに乗る)。Director は spec と同時に
-  UI 確認項目 (操作と期待する表示) を書き、App 側の GREEN を再実行で確かめてから `ui-verifier` に渡す。
-  失敗は ui-verifier の報告 (コマンド・生出力・スクリーンショットのパス) を添えて、同じ `implementer-app` へ
-  `SendMessage` で返す。
+  UI 確認項目 (操作と期待する表示) を書き、App 側の GREEN を `gate-runner` の生出力で確かめてから `ui-verifier` に
+  渡す。失敗は ui-verifier の報告 (コマンド・生出力・スクリーンショットのパス) を添えて実装役へ返す (Codex なら
+  新しい `codex exec`、予備の `implementer-app` なら `SendMessage`)。
 - 追い修正を同じエージェントへ返す規則 (Roles) は、各側の中で引き続き適用する。ただし実装役は 265k 付近で
   compact されて要約から再開するので、**同じエージェントだから計測結果を覚えているとは限らない**。追い修正の
   spec には、前提にした計測結果を書き直して添えること。
@@ -154,6 +158,15 @@ compact された。費用の 67% はこのコンテキストを毎回読み直�
 **Merge authority.** GREEN + no Critical remaining **is** the merge condition, and the Director acts on it — `scripts/wf-pr-merge.sh <PR>` **without waiting for the user's judgment**. The script mechanically verifies the rest (OPEN / non-draft / base=main / not CONFLICTING / checks complete and green), so the Director's own judgment reduces to one question: did an adversarial review run, and did it leave no Critical? For changes that skip the pipeline (below), GREEN alone is the condition. Escalate instead of merging when a Critical is unresolved, when no review was run on a change that needed one, when a design decision is still open, or when the user has said to hold that specific PR.
 
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop. **UI wiring in `App/` is reviewed by running it, not by the reviewer**: the layer is not unit-testable and measurement-based adversarial review has little to measure there, so the `ui-verifier` runs a manual-run check, the Director attaches its result (screenshot in the PR), and only the `TerminalCore` / `Adapters` side of the change goes to the reviewer. **Drive that run with `scripts/verify-app-ui.sh`** (`build` / `launch` / `find` / `click-text` / `expect`, and `selftest` to check the harness itself) — it launches the bundle `scripts/build-app.sh` produced, locates elements through Accessibility instead of guessed coordinates, and closes the two traps that made Issue #230 a false alarm: a click on a non-active window is eaten by activation, and System Events clicks never fire SwiftUI's `onTapGesture` even though they do actuate Buttons.
+
+**macOS 27 (Darwin 27.0) ではハーネスの要素探索が動かない (#414、未解決)。** `selftest` は自前のプローブで
+失敗し、`texts` は空、`find` / `expect` は exit 1 になる。直るまでは、ハーネスからは `build` / `launch` /
+`click <x> <y>` / `type` / `quit` だけを使い、要素の探索と読み取りは osascript (System Events) で AX を直接
+当てる。座標は AX から読んだ位置を使う。**SwiftUI の `accessibilityLabel` は `AXAttributedDescription` にしか
+出ない** — System Events の `title of` は `missing value`、`description of` は役割名 (`button`) を返すので、
+ラベルの有無は `AXUIElementCopyAttributeValue` で属性を直接読んで判定する (#407 の確認、2026-10-31)。
+sheet の button の文言は `description` に入っている。タブの選択状態は、タブを切り取ったスクリーンショットの
+塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
 
 **UI 層を計測するときの作法** (#278 の実測による)。
 
@@ -284,27 +297,26 @@ compact された。費用の 67% はこのコンテキストを毎回読み直�
 
 **Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
 
-**Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k) because autocompact effectively never fires on a 1M window.
+**Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k, later 447k) because on a 1M window autocompact defaults to about 967k.
 
-- **One Issue, one Director session.** The Director ends every Issue's final report with an explicit one-line request to run `/clear`, before the next worktree is created. This cannot be automated and the rule exists because the manual step was being forgotten: nothing in Claude Code lets the model invoke `/clear` or `/compact` itself, hooks (`PreCompact` / `PostCompact` included) can observe compaction but not trigger it, and autocompact (`autoCompactEnabled` / `autoCompactWindow`, default on) only fires as the context nears its limit — which the measurements above show a 1M window never reaches. Never `/clear` mid-Issue: the reviewer round-trip needs the Director's memory of what was already measured and rejected.
-- **このルールは書いてあっても守られていない。** 2026-10-09 の再計測 (#398) では、1つの Director セッションが
-  Issue 8件を続けて担当し、別のセッションのピークは 447k だった (上の「peak 313k」を超える)。そこで
-  **Director は新しい Issue の worktree を作る前に、このセッションで既に別の Issue を完了していないかを
-  確かめる。** 完了していれば worktree を作らず、ユーザーに `/clear` を依頼して止まる。ユーザーが同じ
-  セッションで次の Issue を指示した場合も、着手する前に一度 `/clear` を勧めること。
-- **並列レーン運用では、監督が worktree を作る前にユーザーへ `/clear` を依頼する。** 監督 (main session) が
-  worktree を作って隣の pane のセッションへ Issue を割り当てる運用では、上のルールの順序が壊れる —
-  レーンが最終報告で `/clear` を要請した時点で、監督はもう次の worktree を作って次の Issue を渡している。
-  レーンは規約に従って停止し (実測: 3回要請して停止したまま)、あるいは待つのをやめて規約を外れる。
-  **順序は「レーンの完了報告 → 監督がユーザーへ `/clear` を依頼 → 打たれたのを確認 → 次の worktree を
-  作って割り当て」**。`/clear` 後のレーンは文脈を失うので、割り当てメッセージは Issue 番号・worktree の
-  パス・spec の在り処を含む自己完結した形にすること (spec が Issue コメントに載っていれば足りる)。
+- **Issue をマージしたら、そのまま次の Issue へ進む (ユーザー決定 2026-11-01)。** Director は `/clear` も
+  `/compact` も依頼せず、止まらない。モデルは `/clear` / `/compact` を自分で発動できず (Skill tool からも
+  呼べない)、hook も compact を観測・阻止できるだけで起こせない。コンテキストの上限は、**ユーザーが設定する
+  自動 compact のしきい値** (`autoCompactWindow` / `CLAUDE_CODE_AUTO_COMPACT_WINDOW` / `/autocompact`) に任せる。
+  Director はこの設定を変えない。以前の「1 Issue = 1 Director セッションで、Issue ごとに `/clear` を依頼する」
+  規則は廃止した。
+- **compact は Issue の途中でも起こる。** 要約で失われて困るもの — 実装役へ渡した spec、前提にした計測結果、
+  棄却したレビュー仮説 — は、下の表のとおり、生じたその場で Issue コメントと PR 本文へ書き出す。compact の
+  後に Issue を続けるときは、記憶ではなくそれらを読み直して再開する。
+- **並列レーン運用でも同じ。** レーンは完了報告の後に `/clear` を求めて止まらない。割り当てメッセージは
+  compact の後でも辿れるよう、Issue 番号・worktree のパス・spec の在り処を含む自己完結した形にする
+  (spec が Issue コメントに載っていれば足りる)。
 - **Do not `--resume` a large session left idle for over an hour.** The 1-hour prompt cache has expired and the first request rewrites the entire history: measured $2.06–$2.51 for a 200–233k resume, against $0.43–$0.65 to prime a fresh one. Start a new session and re-read what you need.
-- **Never pass a `model:` override when calling a subagent on your own initiative.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `implementer-app` / `ui-verifier` = sonnet, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`. `settings.json` の `CLAUDE_CODE_SUBAGENT_MODEL` は frontmatter に `model:` を持つエージェントには効かない (実測 2026-10-09、#398: env が `sonnet` のまま、`model:` 指定の無い Agent 呼び出しで implementer 8回すべてが opus で動いた) — モデルを変えるなら定義を分ける。
+- **Never pass a `model:` override when calling a subagent on your own initiative.** The frontmatter is the decision (`reviewer` / `implementer` = opus, `implementer-app` / `ui-verifier` / `gate-runner` = sonnet, `explorer` = haiku); an override silently replaces it, and an accidental opus/fable exploration agent costs an order of magnitude more than `explorer`. `settings.json` の `CLAUDE_CODE_SUBAGENT_MODEL` は frontmatter に `model:` を持つエージェントには効かない (実測 2026-10-09、#398: env が `sonnet` のまま、`model:` 指定の無い Agent 呼び出しで implementer 8回すべてが opus で動いた) — モデルを変えるなら定義を分ける。
 - **Read-only exploration goes to `explorer`, not `general-purpose`** — restating the Director's role above, because in practice this is the rule that gets skipped.
 - **Never pass a `model:` override when calling a subagent unless the user names the model.** The frontmatter is otherwise the decision; a user asking for a specific model overrides it, and the report says which model ran.
 
-**What survives a `/clear`.** Nothing is destroyed — the transcript persists and `/resume` still reaches it. What is lost is only what was loaded in context, and it has four kinds with four different homes. Getting this wrong produces a second, stale source of truth that contradicts the Issues.
+**What survives a `/clear` or a compaction.** Nothing is destroyed — the transcript persists and `/resume` still reaches it. What is lost is only what was loaded in context, and it has four kinds with four different homes. Getting this wrong produces a second, stale source of truth that contradicts the Issues.
 
 | 種類 | 例 | 行き先 |
 | --- | --- | --- |

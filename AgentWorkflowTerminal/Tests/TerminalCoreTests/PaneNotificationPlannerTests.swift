@@ -313,7 +313,7 @@ struct PaneNotificationPlannerTests: PaneNotificationPlannerTesting {
   @Test("観測を止めた worktree の記憶を捨て、再開したら新しい基準を取る")
   func stopForgetsWorktree() {
     let start = Self.clock.now
-    var planner = baselined([pane("%1", .question)])
+    var planner = baselined([pane("%1", .question)], at: start)
     _ = planner.setSummaryGate(isOpen: true, at: start)
 
     planner.stopObserving(worktree)
@@ -321,21 +321,29 @@ struct PaneNotificationPlannerTests: PaneNotificationPlannerTesting {
       planner.observeStates(complete([pane("%1", .permission)]), in: worktree, at: start)
         .isEmpty)
 
-    planner.startObserving(worktree, at: start)
+    let resumed = start.advanced(by: PaneNotificationPlanner.paneHandoffGrace + .seconds(1))
+    #expect(planner.advance(to: resumed).isEmpty)
+    planner.startObserving(worktree, at: resumed)
     #expect(
-      planner.observeStates(complete([pane("%1", .permission)]), in: worktree, at: start)
+      planner.observeStates(complete([pane("%1", .permission)]), in: worktree, at: resumed)
         == [.attentionSummary(count: 1)])
   }
 
   @Test("pane 一覧からも状態からも消えた pane の記憶を捨てる")
   func vanishedPaneIsForgotten() {
-    var planner = baselined([pane("%1", .question)])
-    _ = completions(&planner, ["%1": .completed(Self.first)])
+    let start = Self.clock.now
+    var planner = baselined([pane("%1", .question)], at: start)
+    _ = planner.observeCompletions(
+      Self.keyed(["%1": .completed(Self.first)]), undetermined: [], in: worktree, at: start)
 
-    _ = observe(&planner, [])
-    _ = completions(&planner, [:])
+    _ = planner.observeStates(complete([]), in: worktree, at: start)
+    _ = planner.observeCompletions([:], undetermined: [], in: worktree, at: start)
 
-    #expect(observe(&planner, [pane("%1", .question)]) == [event("%1", .question)])
+    let returned = start.advanced(by: PaneNotificationPlanner.paneHandoffGrace + .seconds(1))
+    #expect(planner.advance(to: returned).isEmpty)
+    #expect(
+      planner.observeStates(complete([pane("%1", .question)]), in: worktree, at: returned)
+        == [event("%1", .question)])
   }
 
   @Test("概要の読み取りに無くても、状態の観測に残っている pane の記憶は保つ")

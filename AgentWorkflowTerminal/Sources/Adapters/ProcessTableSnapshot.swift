@@ -77,7 +77,8 @@ struct ProcessTableSnapshot: Sendable {
         let fields = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
         guard fields.count == 3, let pid = Int32(fields[0]), let parentPID = Int32(fields[1])
         else { return nil }
-        let command = String(fields[2])
+        // `ucomm` は最後の列でも 16 桁まで空白で埋められる (macOS の ps で実測、#457)。
+        let command = String(fields[2].reversed().drop(while: \.isWhitespace).reversed())
         return ProcessTableRow(
           pid: pid, parentPID: parentPID,
           name: command.split(separator: "/").last.map(String.init) ?? command

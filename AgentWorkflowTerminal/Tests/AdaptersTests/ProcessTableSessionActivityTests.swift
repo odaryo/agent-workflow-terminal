@@ -12,6 +12,14 @@ struct ProcessTableSessionActivityTests {
     #expect(snapshot.sessionActivity(of: testCase.panes) == testCase.expected)
   }
 
+  @Test("ucomm の末尾の空白埋めを名前に含めない")
+  func trimsPaddedUcomm() {
+    // `ps -Ao pid=,ppid=,ucomm=` は最後の列でも 16 桁まで空白で埋める (macOS で実測)。
+    let snapshot = ProcessTableSnapshot.parse("100     1 bash            \n")
+
+    #expect(snapshot.sessionActivity(of: [(pid: 100, isDead: false)]) == .shellOnly)
+  }
+
   @Test(
     "既存の shell 集合と login shell は子が無ければ shellOnly",
     arguments: ["sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu"])

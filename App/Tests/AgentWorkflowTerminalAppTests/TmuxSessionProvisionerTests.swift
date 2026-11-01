@@ -169,6 +169,48 @@ struct TmuxSessionProvisionerTests {
     #expect(text.contains("kill -USR1 77"))
   }
 
+  @Test("Resume では create が session の重複を返したあと detach-on-destroy を入れ直す")
+  func resumeReappliesDetachOnDestroy() async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let process = TerminationProcessRunner(results: [
+      .init(exitCode: 1, stdout: "", stderr: "can't find session: \(name)\n"),
+      .init(exitCode: 1, stdout: "", stderr: "duplicate session: \(name)\n"),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+    ])
+
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+
+    #expect(
+      await process.calls == [
+        ["-u", "has-session", "-t", "=\(name)"],
+        [
+          "-u", "new-session", "-d", "-s", name, "-c", "/", "-P", "-F", "#{session_id}",
+        ],
+        ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+      ])
+    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+  }
+
+  @Test("Resume で detach-on-destroy の設定に失敗しても attach の argv を返す")
+  func resumeIgnoresDetachOnDestroyFailure() async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let process = TerminationProcessRunner(results: [
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 1, stdout: "", stderr: "no such session: =\(name):\n"),
+    ])
+
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+
+    #expect(
+      await process.calls == [
+        ["-u", "has-session", "-t", "=\(name)"],
+        ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+      ])
+    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+  }
+
   private static let socketPath = "/tmp/awt-test/default"
   private static let socketMissing = ProcessRunResult(
     exitCode: 1, stdout: "",
@@ -198,11 +240,16 @@ struct TmuxSessionProvisionerTests {
 }
 
 private actor TerminationProcessRunner: ProcessRunning {
-  let result: ProcessRunResult
+  /// 呼ばれた順に返す。尽きたら最後の結果を返し続ける。
+  let results: [ProcessRunResult]
   private(set) var calls: [[String]] = []
 
   init(result: ProcessRunResult) {
-    self.result = result
+    self.results = [result]
+  }
+
+  init(results: [ProcessRunResult]) {
+    self.results = results
   }
 
   func run(
@@ -210,6 +257,6 @@ private actor TerminationProcessRunner: ProcessRunning {
     outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     calls.append(arguments)
-    return result
+    return results[min(calls.count - 1, results.count - 1)]
   }
 }

@@ -83,15 +83,7 @@ struct TmuxSessionProvisioner: Sendable {
     } catch .sessionAlreadyExists {
       // 設計書 §3.3 の Resume。`exists` で先に分けないのは、`exists` と `create` の間に
       // 他のクライアントが同じ名前を作る窓があり、そこで返るこの値も Resume だからである。
-      // 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す (#491)。
-      do {
-        try await operations.ensureDetachOnDestroy(session: session)
-      } catch {
-        // session 消滅は attach 側で失敗が表示される。それ以外の設定失敗でもタブを開けなく
-        // する方が害が大きいため、ここでは attach を止めない。
-        NSLog(
-          "[app] session \(session.rawValue) の detach-on-destroy 設定に失敗: \(error)")
-      }
+      await reapplyDetachOnDestroy(session)
     } catch .serverNotRunning {
       return await attachCommandBootstrappingServer(
         session: session, workingDirectory: workingDirectory)
@@ -109,6 +101,17 @@ struct TmuxSessionProvisioner: Sendable {
       return .failure(.operation(error))
     }
     return .success(attachCommand(for: session))
+  }
+
+  /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す (#491)。
+  /// 失敗しても attach を止めない: session 消滅は attach 側で失敗が表示され、それ以外の設定失敗で
+  /// タブを開けなくする方が害が大きい。
+  private func reapplyDetachOnDestroy(_ session: TmuxSessionName) async {
+    do {
+      try await operations.ensureDetachOnDestroy(session: session)
+    } catch {
+      NSLog("[app] session \(session.rawValue) の detach-on-destroy 設定に失敗: \(error)")
+    }
   }
 
   /// `-A` を持たない `attach-session` にする。session が消えていた場合に、§4.2 / §4.4 の
@@ -141,6 +144,7 @@ struct TmuxSessionProvisioner: Sendable {
       try await operations.create(session: session, workingDirectory: workingDirectory)
       result = .success(attachCommand(for: session))
     } catch .sessionAlreadyExists {
+      await reapplyDetachOnDestroy(session)
       result = .success(attachCommand(for: session))
     } catch {
       result = .failure(.operation(error))

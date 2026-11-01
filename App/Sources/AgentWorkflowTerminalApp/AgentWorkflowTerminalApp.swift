@@ -232,7 +232,8 @@ private struct InactiveWorktreeMenu: View {
 
   var body: some View {
     if !worktrees.isEmpty {
-      Menu("Inactive", systemImage: "tray") {
+      // Viewer のメニューと同じ理由で、文字を出して AX の名前を「Inactive」にする。
+      Menu {
         ForEach(worktrees, id: \.identity) { worktree in
           Button(title(of: worktree)) { activate(worktree.identity) }
             // 到達不能・観測失敗の Active 化は設計書 §3.2 が認めていない (attach 先を
@@ -240,6 +241,8 @@ private struct InactiveWorktreeMenu: View {
             // しない。
             .disabled(!worktree.detected.isReachable)
         }
+      } label: {
+        Label("Inactive", systemImage: "tray").labelStyle(.titleAndIcon)
       }
       .menuStyle(.borderlessButton)
       .fixedSize()

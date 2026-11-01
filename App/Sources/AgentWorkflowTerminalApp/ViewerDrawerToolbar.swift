@@ -6,10 +6,14 @@ struct ViewerDrawerToolbar: View {
 
   var body: some View {
     HStack(spacing: 4) {
-      Menu("Viewer", systemImage: "sidebar.right") {
+      // toolbar の中では既定でアイコンだけになり、AX の名前が SF Symbol 名 (「Split View
+      // Horizontally Right」) になった。accessibilityLabel では変わらなかった (#431 の UI 確認)。
+      Menu {
         ForEach(ViewerContent.allCases, id: \.self) { content in
           Button(content.toolbarTitle) { layout.open(content) }
         }
+      } label: {
+        Label("Viewer", systemImage: "sidebar.right").labelStyle(.titleAndIcon)
       }
       .menuStyle(.borderlessButton)
 

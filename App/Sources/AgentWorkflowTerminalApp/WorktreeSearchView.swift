@@ -30,31 +30,58 @@ struct WorktreeSearchBar: View {
             .buttonStyle(.borderless)
         }
       }
-      HStack(spacing: 8) {
-        Picker("", selection: $model.target) {
-          Text("全文").tag(WorktreeSearchTarget.fullText)
-          Text("ファイル名").tag(WorktreeSearchTarget.fileName)
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 8) {
+          targetPicker
+          scopePicker
+          regularExpressionToggle
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .fixedSize()
-        Picker("", selection: $model.scope) {
-          Text("gitignore を尊重").tag(WorktreeSearchScope.respectingGitignore)
-          Text("全ファイル").tag(WorktreeSearchScope.allFiles)
+        VStack(alignment: .leading, spacing: 4) {
+          HStack(spacing: 8) {
+            targetPicker
+            regularExpressionToggle
+          }
+          scopePicker
         }
-        .labelsHidden()
-        .fixedSize()
-        Toggle("正規表現", isOn: $model.usesRegularExpression)
-          .toggleStyle(.checkbox)
-          // ファイル名検索は部分一致固定 (§8.2 既定)。
-          .disabled(model.target == .fileName)
-        Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 4) {
+          targetPicker
+          regularExpressionToggle
+          scopePicker
+        }
       }
+      .frame(maxWidth: .infinity, alignment: .leading)
       .font(.caption)
       .controlSize(.small)
     }
     .padding(.horizontal, 8)
     .padding(.vertical, 6)
+  }
+
+  private var targetPicker: some View {
+    Picker("", selection: $model.target) {
+      Text("全文").tag(WorktreeSearchTarget.fullText)
+      Text("ファイル名").tag(WorktreeSearchTarget.fileName)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+    .fixedSize()
+  }
+
+  private var scopePicker: some View {
+    Picker("", selection: $model.scope) {
+      Text("gitignore を尊重").tag(WorktreeSearchScope.respectingGitignore)
+      Text("全ファイル").tag(WorktreeSearchScope.allFiles)
+    }
+    .labelsHidden()
+    .fixedSize()
+  }
+
+  private var regularExpressionToggle: some View {
+    Toggle("正規表現", isOn: $model.usesRegularExpression)
+      .toggleStyle(.checkbox)
+      .fixedSize()
+      // ファイル名検索は部分一致固定 (§8.2 既定)。
+      .disabled(model.target == .fileName)
   }
 }
 

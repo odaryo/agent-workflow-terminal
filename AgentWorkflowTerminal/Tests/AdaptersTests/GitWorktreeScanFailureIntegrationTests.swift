@@ -74,7 +74,7 @@ extension GitWorktreeDetectorIntegrationTests {
   /// timeout の経路。`rev-parse` が exit code を返さないので `describe` は到達可能性を確かめず
   /// (`isReachableWorkingTree` の doc)、`.failed(.gitDirectory(.process(.timedOut)))` になる。
   /// 実プロセスで起こすため、対象の作業ツリーの `rev-parse` だけ `/bin/sleep` に化ける git の
-  /// 代役と、短い `entryTimeout` を使う (計測: 200 ミリ秒の指定で 0.21 秒で `.timedOut`)。
+  /// 代役を使う。閾値と sleep の比は `GitTestRepository.stalledEntryTimeout` のコメントを参照。
   @Test("git が応答しないスキャンでも、Active 指定が保存表現から消えない")
   func timedOutEntryDoesNotDropTheActivationFromThePersistedInventory() async throws {
     try await withGitRepository { repository in
@@ -95,7 +95,7 @@ extension GitWorktreeDetectorIntegrationTests {
       let shim = try repository.sleepingGitShim(revParseIn: active.path)
       let stalled =
         try await repository
-        .detector(executable: shim, entryTimeout: .milliseconds(200))
+        .detector(executable: shim, entryTimeout: GitTestRepository.stalledEntryTimeout)
         .scan()
 
       #expect(stalled.failures.map(\.worktreePath) == [active.path])

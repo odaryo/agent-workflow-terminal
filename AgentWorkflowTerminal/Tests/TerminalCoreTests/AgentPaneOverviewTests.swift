@@ -165,6 +165,108 @@ struct AgentPaneOverviewTests {
     #expect(panes.map(\.isMain) == [false, true])
   }
 
+  @Test("worktree から作った入力は番号 1 の session を指す")
+  func worktreeInputIsPrimarySession() throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/a/.git/worktrees/t"))
+
+    let input = OverviewWorktreeInput(worktree: worktree, paneStates: [])
+
+    #expect(input.session == .primary(worktree))
+    #expect(input.worktree == worktree)
+  }
+
+  @Test("session から作った入力の worktree はその session の worktree")
+  func sessionInputHasSessionWorktree() throws {
+    let key = try session("/a/.git/worktrees/t", 2)
+
+    let input = OverviewWorktreeInput(session: key, paneStates: [])
+
+    #expect(input.session == key)
+    #expect(input.worktree == key.identity)
+  }
+
+  @Test("Project Root の session は入力 (番号) の順に並べ、Needs Attention があっても動かさない (設計書 §12.2)")
+  func projectRootSessionsKeepInputOrder() throws {
+    let first = try sessionInput(session("/a", 1), [pane("%1", .idle, 1)])
+    let second = try sessionInput(session("/a", 2), [pane("%2", .question, 9)])
+    let input = OverviewProjectInput(
+      project: try #require(WorktreeIdentity(rawValue: "/a/.git")),
+      projectRootSessions: [first, second], tasks: [])
+
+    let overview = try #require(makeAgentPaneOverview([input]).first)
+
+    #expect(overview.projectRootSessions.map(\.session) == [first.session, second.session])
+    #expect(overview.projectRoot?.session == first.session)
+    #expect(overview.projectRoot == overview.projectRootSessions.first)
+  }
+
+  @Test("Project Root の session が無ければ projectRoot は nil")
+  func noProjectRootSessionsHasNoProjectRoot() throws {
+    let input = OverviewProjectInput(
+      project: try #require(WorktreeIdentity(rawValue: "/a/.git")), projectRootSessions: [],
+      tasks: [])
+
+    let overview = try #require(makeAgentPaneOverview([input]).first)
+
+    #expect(overview.projectRootSessions.isEmpty)
+    #expect(overview.projectRoot == nil)
+  }
+
+  @Test("projectRoot から作った入力は、その1つだけを Project Root の session に持つ")
+  func projectRootInputIsSingleSession() throws {
+    let root = try task("/a", [pane("%9", .idle, 1)])
+
+    let withRoot = try project("/a/.git", root: root, tasks: [])
+    let withoutRoot = try project("/a/.git", tasks: [])
+
+    #expect(withRoot.projectRootSessions.map(\.session) == [root.session])
+    #expect(withoutRoot.projectRootSessions.isEmpty)
+    let overview = try #require(makeAgentPaneOverview([withRoot]).first)
+    #expect(overview.projectRootSessions.map(\.session) == [.primary(root.worktree)])
+    #expect(overview.projectRoot?.session == .primary(root.worktree))
+  }
+
+  @Test("同じ worktree の2つの session は束ねず、Task の並び順で別々に並べる (設計書 §12.2 / §13)")
+  func sessionsOfOneWorktreeAreSeparateTasks() throws {
+    let first = try sessionInput(session("/a/.git/worktrees/t", 1), [pane("%1", .working, 3)])
+    let other = try sessionInput(session("/a/.git/worktrees/u", 1), [pane("%2", .working, 5)])
+    let second = try sessionInput(session("/a/.git/worktrees/t", 2), [pane("%3", .question, 1)])
+
+    let overview = try #require(
+      makeAgentPaneOverview([try project("/a/.git", tasks: [first, other, second])]).first)
+
+    #expect(overview.tasks.map(\.session) == [second, other, first].map(\.session))
+    #expect(overview.tasks.map(\.worktree) == [second, other, first].map(\.worktree))
+    #expect(overview.tasks.map(paneIDs) == [["%3"], ["%2"], ["%1"]])
+  }
+
+  @Test("出力の session は入力の session と一致する")
+  func outputCarriesInputSession() throws {
+    let root = try sessionInput(session("/a", 3), [])
+    let task = try sessionInput(session("/a/.git/worktrees/t", 2), [pane("%1", .idle, 1)])
+    let input = OverviewProjectInput(
+      project: try #require(WorktreeIdentity(rawValue: "/a/.git")),
+      projectRootSessions: [root], tasks: [task])
+
+    let overview = try #require(makeAgentPaneOverview([input]).first)
+
+    #expect(overview.projectRootSessions.map(\.session) == [root.session])
+    #expect(overview.projectRootSessions.map(\.worktree) == [root.worktree])
+    #expect(overview.tasks.map(\.session) == [task.session])
+    #expect(overview.tasks.map(\.worktree) == [task.worktree])
+  }
+
+  private func session(_ path: String, _ index: Int) throws -> TerminalSessionKey {
+    let identity = try #require(WorktreeIdentity(rawValue: path))
+    return try #require(TerminalSessionKey(identity: identity, index: index))
+  }
+
+  private func sessionInput(
+    _ key: TerminalSessionKey, _ panes: [PaneDisplayState]
+  ) -> OverviewWorktreeInput {
+    OverviewWorktreeInput(session: key, paneStates: panes)
+  }
+
   private func at(_ seconds: Int) -> ContinuousClock.Instant {
     base.advanced(by: .seconds(seconds))
   }

@@ -13,7 +13,7 @@ import Testing
 ///
 /// `.serialized` は速度ではなく負荷のため。12 件が並列に走ると実 git のプロセスが同時に
 /// 十数本立ち、同じ job の中で wall-clock の閾値を持つテスト
-/// (`GitWorktreeScanFailureIntegrationTests` の entryTimeout 200 ミリ秒) を CI で押し出した
+/// (`GitWorktreeScanFailureIntegrationTests` の当時の entryTimeout 200 ミリ秒。#342 で 5 秒にした) を CI で押し出した
 /// (実測: main は直近 12 回すべて緑、本 suite を足すと 2/2 赤)。
 @Suite("§3.4 実 git の squash merge を Close の merge 判定が拾う", .serialized)
 struct GitSquashMergeCloseIntegrationTests {

@@ -4,48 +4,46 @@ public enum ViewerContent: Sendable, Hashable, CaseIterable {
   case evidence
 }
 
-public enum ViewerDrawerPresentation: Sendable, Hashable, CaseIterable {
-  case inline
-  case overlay
-  case fullscreen
-}
-
 public struct ViewerDrawerLayout: Sendable, Hashable {
-  private struct OpenLayout: Sendable, Hashable {
-    var content: ViewerContent
-    var presentation: ViewerDrawerPresentation
-  }
-
-  private var openLayout: OpenLayout?
-  private var opensInOverlay: Bool
+  public private(set) var content: ViewerContent?
+  public private(set) var arrangements: ViewerContentArrangements
 
   public static let closed = Self()
 
-  public var content: ViewerContent? { openLayout?.content }
-  public var presentation: ViewerDrawerPresentation? { openLayout?.presentation }
-  public var isOpen: Bool { openLayout != nil }
+  public var isOpen: Bool { content != nil }
 
   public init() {
-    openLayout = nil
-    opensInOverlay = false
+    self.init(arrangements: .defaults)
+  }
+
+  public init(arrangements: ViewerContentArrangements) {
+    content = nil
+    self.arrangements = arrangements
   }
 
   public mutating func open(_ content: ViewerContent) {
-    guard openLayout != nil else {
-      openLayout = OpenLayout(content: content, presentation: opensInOverlay ? .overlay : .inline)
-      opensInOverlay = false
-      return
-    }
-    openLayout?.content = content
+    self.content = content
   }
 
   public mutating func close() {
-    guard let current = openLayout else { return }
-    opensInOverlay = current.presentation == .overlay
-    openLayout = nil
+    content = nil
   }
 
-  public mutating func setPresentation(_ presentation: ViewerDrawerPresentation) {
-    openLayout?.presentation = presentation
+  public func arrangement(for content: ViewerContent) -> ViewerContentArrangement? {
+    switch content {
+    case .code: arrangements.code
+    case .diff: arrangements.diff
+    case .evidence: nil
+    }
+  }
+
+  public mutating func setArrangement(
+    _ arrangement: ViewerContentArrangement, for content: ViewerContent
+  ) {
+    switch content {
+    case .code: arrangements.code = arrangement
+    case .diff: arrangements.diff = arrangement
+    case .evidence: break
+    }
   }
 }

@@ -38,7 +38,7 @@ swift format format --configuration .swift-format --recursive --in-place \
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 
-`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, compiles `App/`, and runs format/lint over both packages. The app job downloads a prebuilt `GhosttyKit.xcframework` from a Release asset, so CI does not require the toolchain that builds the xcframework (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, compiles `App/`, and runs format/lint over both packages. The app job downloads a prebuilt `GhosttyKit.xcframework` from a Release asset, so CI does not require the toolchain that builds the xcframework (the `checks` job installs SwiftLint via brew if the runner image lacks it). CI keeps its macOS jobs to three because the account-wide limit of five concurrent macOS runners is shared by every PR and `main` push in flight; add a new check as a step in an existing job, not as a new job.
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 
@@ -91,7 +91,7 @@ A macOS terminal app that runs multiple AI agents in parallel, one per Git workt
 These are recorded as **確定** (decided) in `docs/architecture.md` and should be treated as fixed unless the user changes them:
 
 - **1 development task = 1 Git worktree; each tab = 1 dedicated tmux session.** A worktree — and the Project Root, which has its own permanent session outside the task model — can have several tabs, each with its own independent session in the same directory (§3.1, decided 2026-11-01, replacing that morning's add-a-window rule; no grouped sessions). Right-clicking a tab and choosing 新規タブ opens a new session in that tab's directory; `+ New Task` opens one in the Project Root. A new session starts a plain shell — the app never launches an Agent; the user starts it there — and mobile does the same. Closing any tab but the last ends its session; closing a worktree's last tab is the §3.4 Close; the Project Root keeps at least one tab. What happens to a `+ New Task` tab once the Agent has created the worktree is still 未確定 (§25).
-- **The Agent Terminal is always the primary interaction UI.** All Agent panes' summaries and states can also stay visible in an independent Overview window (§13). Code, Diff, and Evidence open only in the Viewer Drawer (always a single pane; opening another content replaces it — decided 2026-10-31, replacing the earlier max-2-panes rule) — no separate windows; choosing the Diff base happens inside the Drawer (§1.2, decided 2026-10-08). Handing a `.html` / `.md` file open in the Code Viewer to the OS default app (Mac only) does not break that rule; in-app rendering or preview windows still do (§7.3, decided 2026-11-01).
+- **The Agent Terminal is always the primary interaction UI.** All Agent panes' summaries and states can also stay visible in an independent Overview window (§13). Code, Diff, and Evidence open only in the Viewer Drawer (always a single pane; opening another content replaces it — decided 2026-10-31, replacing the earlier max-2-panes rule) — no separate windows; choosing the Diff base happens inside the Drawer (§1.2, decided 2026-10-08). Handing a `.html` / `.md` file shown in the Code Viewer or the Diff to the OS default app (Mac only; the working-tree file, never a past or base-side version) does not break that rule; in-app rendering or preview windows still do (§7.3, decided 2026-11-01).
 - **Do not reimplement tmux.** Pane splitting, key bindings, and session management stay in tmux; the app exposes only a minimal operation set (split, close, select, zoom) and reads pane/process/agent state.
 - **tmux and git are driven as external CLI processes**, not as embedded libraries (no libgit2). Rationale: the app must observe the same entities the user sees in their own terminal, and version differences get absorbed at an adapter boundary.
 - **Git is read-heavy, write-free.** Viewing (file browser, code viewer, diff, history/blame) is rich; commit/merge/rebase/worktree-creation is delegated to the agent or a plain shell. Worktree creation belongs to the agent because naming/placement rules are project-specific.
@@ -164,14 +164,17 @@ compact された。費用の 67% はこのコンテキストを毎回読み直�
 
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop. **UI wiring in `App/` is reviewed by running it, not by the reviewer**: the layer is not unit-testable and measurement-based adversarial review has little to measure there, so the `ui-verifier` runs a manual-run check, the Director attaches its result (screenshot in the PR), and only the `TerminalCore` / `Adapters` side of the change goes to the reviewer. **Drive that run with `scripts/verify-app-ui.sh`** (`build` / `launch` / `find` / `click-text` / `expect`, and `selftest` to check the harness itself) — it launches the bundle `scripts/build-app.sh` produced, locates elements through Accessibility instead of guessed coordinates, and closes the two traps that made Issue #230 a false alarm: a click on a non-active window is eaten by activation, and System Events clicks never fire SwiftUI's `onTapGesture` even though they do actuate Buttons.
 
-**macOS 27 (Darwin 27.0) ではハーネスの要素探索が動かない (#414、未解決)。** `selftest` は自前のプローブで
-失敗し、`texts` は空、`find` / `expect` は exit 1 になる。直るまでは、ハーネスからは `build` / `launch` /
-`click <x> <y>` / `type` / `quit` だけを使い、要素の探索と読み取りは osascript (System Events) で AX を直接
-当てる。座標は AX から読んだ位置を使う。**SwiftUI の `accessibilityLabel` は `AXAttributedDescription` にしか
-出ない** — System Events の `title of` は `missing value`、`description of` は役割名 (`button`) を返すので、
-ラベルの有無は `AXUIElementCopyAttributeValue` で属性を直接読んで判定する (#407 の確認、2026-10-31)。
-sheet の button の文言は `description` に入っている。タブの選択状態は、タブを切り取ったスクリーンショットの
-塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
+**ハーネスの探索は AX の4種の文言を見る (#414、2026-11-01)。** `find` / `click-text` / `expect` / `texts` は
+`scripts/ui-ax.swift` で AX の木を辿り、AXTitle / AXValue / AXDescription / AXAttributedDescription のどれかに一致する
+要素を探す (`--exact` / `--role` で絞れる。AXPress は `swift scripts/ui-ax.swift AgentWorkflowTerminalApp press ...`)。
+**SwiftUI の `accessibilityLabel` は `AXAttributedDescription` にしか出ない** — System Events の `title of` は
+`missing value`、`description of` は役割名 (`button`) を返すので、osascript では読めない (#407)。以前この段にあった
+「macOS 27 ではハーネスの要素探索が動かない」は誤りだった。原因は、UI の変更で selftest が**順番で**押していた
+button がずれ、「開く」のつもりで「閉じる」を押していたことである (計測は #414)。要素は順番ではなく文言と role で指す。
+**実 HID のクリックは、`AXFrontmost` が true でも、画面上でアプリを覆っている別のアプリ (ユーザーの端末) へ届きうる**
+(#414 の確認で起きかけた)。`ui-click.swift` はクリックの直前にその座標の要素の pid を確かめ、違えばクリックしない。
+UI 確認は、アプリのウィンドウが画面上で見えていて、ユーザーの PC 操作とぶつからない時間に回す。
+タブの選択状態は、タブを切り取ったスクリーンショットの塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
 
 **UI 層を計測するときの作法** (#278 の実測による)。
 
@@ -264,7 +267,7 @@ sheet の button の文言は `description` に入っている。タブの選択
   — マージ直後の監督セッション (main で起動、途中でマージ) で canary が拒否されることを実測した
   (公式ドキュメントの「Direct edits to hooks in settings files are normally picked up automatically
   by the file watcher」と一致。一度「再起動が要る」と書いて撤回した経緯がある)。判定を変えたときは
-  `scripts/check-tmux-kill-guard.sh` の fixture で確かめる (CI の `shell-guard`)。
+  `scripts/check-tmux-kill-guard.sh` の fixture で確かめる (CI の `checks` ジョブの `Shell guard - fixtures`)。
 - **フックの fail-closed には閉じられない穴が4つある。** 判定スクリプトが**無い** / **実行権が
   無い** / **timeout を超えた** / **`python3` が無くて起動できない** ときは、いずれもツール
   呼び出しが**そのまま実行される** (実測 2026-09-09: 存在しないパス・`chmod -x` した exit 2 の
@@ -275,7 +278,7 @@ sheet の button の文言は `description` に入っている。タブの選択
   はガードが働いた証拠にならない。**判定本体の構文エラーもこの穴に落ちる**: python3 は
   構文エラーで exit 1 を返し (実測)、exit 2 以外は block しないので**ガードごと無効になる**
   — bash 実装では exit 2 になり全 Bash 呼び出しが拒否される逆向きの事故だったので、
-  移行で向きが変わっている。CI の `shell-guard` が `py_compile` を別段で回すのはこのため。
+  移行で向きが変わっている。CI の `checks` ジョブが `py_compile` を別段 (`Shell guard - compile`) で回すのはこのため。
 - **ローカルと CI の tmux は同じ版とは限らない。片方での計測はもう片方の証拠にならない。** CI は
   `brew install tmux` で最新の bottle を入れるため、brew の更新で版が黙って変わる。2026-10-31 の
   実測ではローカルも CI も 3.8 だった。CI 側の版は、ジョブログの `Show external CLI versions` で

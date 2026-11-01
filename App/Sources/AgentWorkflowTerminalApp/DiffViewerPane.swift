@@ -11,6 +11,7 @@ struct DiffViewerPane: View {
   /// ように観測経路が無ければ `nil` で、その場合は印の無い候補一覧になる。
   let agentPaneStates: () -> AsyncStream<[PaneAgentState]>?
   let keyboardFocus: TerminalKeyboardFocus
+  let arrangement: ViewerContentArrangement
 
   /// 候補一覧の Agent 印 (§12.7) と、送信可否の判定 (§9.2.2) の両方に使う最後の観測。
   @State private var paneStates: [PaneAgentState] = []
@@ -297,7 +298,7 @@ struct DiffViewerPane: View {
   @ViewBuilder
   private var content: some View {
     if let snapshot = model.currentSnapshot {
-      DiffContentLayout {
+      DiffContentLayout(arrangement: arrangement) {
         DiffFileList(model: model, snapshot: snapshot)
       } diff: {
         DiffHunkView(model: model, file: selectedFile(in: snapshot))

@@ -98,46 +98,63 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
   }
 
   public func panes(
+    of session: TerminalSessionKey
+  ) async throws(TmuxWorktreePaneSourceError) -> [PaneSnapshot] {
+    try await panes(in: session).map(\.snapshot)
+  }
+
+  public func panes(
     of worktree: WorktreeIdentity
   ) async throws(TmuxWorktreePaneSourceError) -> [PaneSnapshot] {
-    let session = TmuxSessionName(identity: worktree)
-    // `-a` は対象 server の全 session を返すので、ユーザー自身の session の pane が混ざる。
-    // 振り分けは String の完全一致だけで行う。前方一致・部分一致・正規化を挟むと、
-    // `TmuxSessionName` の生成名と重なる他の session を取り込む。
-    return try await paneList.panes()
-      .filter { $0.sessionName == session.rawValue }
-      .map(\.snapshot)
+    try await panes(of: .primary(worktree))
   }
 
   /// `panes(of:)` と同じ共有キャッシュから読むので、両方を呼んでも `list-panes` は増えない。
   public func summaryReadings(
+    of session: TerminalSessionKey
+  ) async throws(TmuxWorktreePaneSourceError) -> [PaneSummaryReadingsSnapshot] {
+    try await panes(in: session).compactMap { pane in
+      pane.summaryReadings.map {
+        PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0)
+      }
+    }
+  }
+
+  public func summaryReadings(
     of worktree: WorktreeIdentity
   ) async throws(TmuxWorktreePaneSourceError) -> [PaneSummaryReadingsSnapshot] {
-    let session = TmuxSessionName(identity: worktree)
-    return try await paneList.panes()
-      .filter { $0.sessionName == session.rawValue }
-      .compactMap { pane in
-        pane.summaryReadings.map {
-          PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0)
-        }
-      }
+    try await summaryReadings(of: .primary(worktree))
   }
 
   /// `summaryReadings(of:)` に pane の位置 (`#{window_index}` / `#{pane_index}`) を添えたもの。
   /// 同じ1回の `list-panes` から取るので、概要と位置が別の時点の pane を指すことは無い。
   public func locatedSummaryReadings(
+    of session: TerminalSessionKey
+  ) async throws(TmuxWorktreePaneSourceError) -> [LocatedPaneSummaryReadings] {
+    try await panes(in: session).compactMap { pane in
+      pane.summaryReadings.map {
+        LocatedPaneSummaryReadings(
+          readings: PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0),
+          location: PaneLocation(windowIndex: pane.windowIndex, paneIndex: pane.paneIndex))
+      }
+    }
+  }
+
+  public func locatedSummaryReadings(
     of worktree: WorktreeIdentity
   ) async throws(TmuxWorktreePaneSourceError) -> [LocatedPaneSummaryReadings] {
-    let session = TmuxSessionName(identity: worktree)
-    return try await paneList.panes()
-      .filter { $0.sessionName == session.rawValue }
-      .compactMap { pane in
-        pane.summaryReadings.map {
-          LocatedPaneSummaryReadings(
-            readings: PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0),
-            location: PaneLocation(windowIndex: pane.windowIndex, paneIndex: pane.paneIndex))
-        }
-      }
+    try await locatedSummaryReadings(of: .primary(worktree))
+  }
+
+  private func panes(
+    in session: TerminalSessionKey
+  ) async throws(TmuxWorktreePaneSourceError) -> [TmuxPane] {
+    let name = TmuxSessionName(key: session)
+    // `-a` は対象 server の全 session を返すので、ユーザー自身の session の pane が混ざる。
+    // 振り分けは String の完全一致だけで行う。前方一致・部分一致・正規化を挟むと、
+    // `TmuxSessionName` の生成名と重なる他の session (同じ worktree の `-<n>` 付きを含む)
+    // を取り込む。
+    return try await paneList.panes().filter { $0.sessionName == name.rawValue }
   }
 
   /// tmux server の同一性 (`#{pid}`)。`nil` は server が居ない、または値を読めなかったことを

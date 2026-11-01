@@ -11,13 +11,14 @@ usage() {
 
 前提条件 (OPEN かつ non-draft / base=main / mergeable が CONFLICTING でない /
 checks が完了かつ成功) を検証したうえで squash マージする。
-checks がゼロ件の場合は check run 未登録ウィンドウを考慮して最大60秒待ってから受理する
-(このフラグの有無によらない)。
+checks がゼロ件の場合は check run 未登録ウィンドウを考慮して最大60秒待ってから受理する。
+全変更パス (rename の旧パスも含む) が CI の paths-ignore に一致すると判定できた場合は、
+ゼロ件の猶予とマージ後の main CI 探索を省略する。判定不能なら従来どおり待機する。
   --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ
   --delete-local     マージ後、ローカルの head ブランチを削除する
                      (作業ツリーが checkout 中の場合は警告を出してスキップする)
   --no-wait-main-ci  マージ後の main CI 完了待ちを省略する
-  --dry-run          実行せず、実行するはずの内容を表示する
+  --dry-run          CI 起動判定と checks 検証を行い、マージせず実行予定を表示する
   -h, --help         このヘルプを表示
 EOF
 }
@@ -77,6 +78,43 @@ IFS=$'\t' read -r pr_state pr_is_draft pr_base pr_mergeable pr_title pr_head pr_
 # wf-pr-create.sh を通らず作られた PR もここで捕捉する (Issue #43)。
 require_conventional_title "$pr_title" "PR #$pr_number のタイトル (scripts/wf-pr-edit.sh $pr_number -t で修正可)"
 
+ci_paths_ignored=0
+checks_grace_skipped=0
+ci_paths_reason=""
+if changed_paths=$(gh api --paginate "repos/$(nwo)/pulls/$pr_number/files" --jq '.[] | .filename, (.previous_filename // empty)'); then
+  if paths_head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid) \
+    && [[ -n "$paths_head_oid" && "$paths_head_oid" == "$pr_head_oid" ]]; then
+    if command -v python3 >/dev/null 2>&1; then
+      ci_paths_rc=0
+      ci_paths_reason=$(
+        ci_workflow=$(mktemp) || exit 2
+        trap 'rm -f -- "$ci_workflow"' EXIT
+        if ! gh api "repos/$(nwo)/contents/.github/workflows/ci.yml?ref=$paths_head_oid" \
+          -H 'Accept: application/vnd.github.raw' >"$ci_workflow"; then
+          printf '%s\n' "head=$paths_head_oid の ci.yml の取得に失敗しました"
+          exit 2
+        fi
+        printf '%s\n' "$changed_paths" \
+          | python3 "$SCRIPT_DIR/ci_paths_ignored.py" --workflow "$ci_workflow" 2>&1
+      ) || ci_paths_rc=$?
+      case "$ci_paths_rc" in
+        0)
+          ci_paths_ignored=1
+          info "全変更パスが CI の paths-ignore に一致します。CI は起動しません (head=$paths_head_oid)"
+          ;;
+        1) info "CI の paths-ignore に一致しない変更があります。従来どおり CI を確認します" ;;
+        *) info "CI 起動の判定ができません。従来どおり CI を確認します: $ci_paths_reason" ;;
+      esac
+    else
+      info "python3 が無いため CI 起動の判定ができません。従来どおり CI を確認します"
+    fi
+  else
+    info "head の取得失敗または変更により CI 起動の判定ができません。従来どおり CI を確認します"
+  fi
+else
+  info "変更ファイルの取得に失敗したため CI 起動の判定ができません。従来どおり CI を確認します"
+fi
+
 has_fail=0
 has_pending=0
 checks_reported=0
@@ -107,8 +145,8 @@ refresh_checks() {
 
 # ゼロ件は「paths-ignore で CI が起動しない (Spikes のみ等)」と「push 直後で check run
 # 未登録」を API 上区別できない (Issue #46)。実測では未登録ウィンドウが PR 作成後
-# 約3秒・既存 PR への push 後 約21秒あったため、ゼロ件は即受理せず実測値の約3倍を
-# 上限に猶予リトライしてから受理する。
+# 約3秒・既存 PR への push 後 約21秒あったため、paths-ignore で起動しないと判定できた
+# 場合以外は、実測値の約3倍を上限に猶予リトライしてから受理する。
 #
 # 猶予は pending 待機中にも要る。待機中に head へ push されると rollup が新 head へ
 # 切り替わって一度ゼロ件へ落ちるため、初回だけ猶予を入れる作りだと「pending を待って
@@ -126,6 +164,11 @@ verify_checks() {
     [[ "$has_fail" -eq 0 ]] || die "PR #$pr_number の checks に失敗があります"
 
     if [[ "$checks_reported" -eq 0 ]]; then
+      if [[ "$ci_paths_ignored" -eq 1 ]]; then
+        info "全変更パスが CI の paths-ignore に一致し checks がゼロ件のため、猶予を省いて受理します"
+        checks_grace_skipped=1
+        return 0
+      fi
       if [[ "$grace" -ge "$GRACE_LIMIT_SECONDS" ]]; then
         info "PR #$pr_number に checks がありません。CI が起動しない変更 (Spikes のみ等) とみなして checks 検証をスキップします"
         return 0
@@ -157,6 +200,13 @@ commit_title="${pr_title} (#${pr_number})"
 if [[ "$dry_run" -eq 1 ]]; then
   info "[dry-run] gh api -X PUT repos/$repo_nwo/pulls/$pr_number/merge -f merge_method=squash -f commit_title=\"$commit_title\""
   exit 0
+fi
+
+if [[ "$checks_grace_skipped" -eq 1 ]]; then
+  merge_head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid) \
+    || die "マージ直前の head 取得に失敗しました"
+  [[ "$merge_head_oid" == "$paths_head_oid" ]] \
+    || die "paths-ignore 判定後に PR の head が変わったためマージを中止します"
 fi
 
 merge_sha=$(gh api -X PUT "repos/$repo_nwo/pulls/$pr_number/merge" \
@@ -236,6 +286,11 @@ if [[ "$delete_local" -eq 1 ]]; then
       info "警告: ローカルブランチ '$pr_head' はマージした PR の head と一致しないため削除をスキップしました (local=$local_head_oid, pr_head=$pr_head_oid)"
     fi
   fi
+fi
+
+if [[ "$ci_paths_ignored" -eq 1 ]]; then
+  info "全変更パスが CI の paths-ignore に一致するため、main の CI 探索をスキップしました"
+  exit 0
 fi
 
 if [[ "$no_wait_main_ci" -eq 1 ]]; then

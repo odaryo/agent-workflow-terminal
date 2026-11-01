@@ -86,7 +86,40 @@ struct TerminalTabSessionRuleTests {
       TerminalTabSessionRule.onOpen(
         sessionExists: testCase.sessionExists,
         tabsInDirectory: testCase.tabsInDirectory,
-        isNewlyAdded: testCase.isNewlyAdded
+        isNewlyAdded: testCase.isNewlyAdded,
+        isRestored: false
+      ) == testCase.expected
+    )
+  }
+
+  @Test(
+    "復元時は新規追加と閉じる判定を優先しsessionの存在を確認できなければ作成を問う (設計書 §3.3)",
+    arguments: [
+      .init(sessionExists: true, tabsInDirectory: 1, isNewlyAdded: true, expected: .attachOrCreate),
+      .init(sessionExists: true, tabsInDirectory: 2, isNewlyAdded: true, expected: .attachOrCreate),
+      .init(
+        sessionExists: false, tabsInDirectory: 1, isNewlyAdded: true, expected: .attachOrCreate),
+      .init(
+        sessionExists: false, tabsInDirectory: 2, isNewlyAdded: true, expected: .attachOrCreate),
+      .init(sessionExists: nil, tabsInDirectory: 1, isNewlyAdded: true, expected: .attachOrCreate),
+      .init(sessionExists: nil, tabsInDirectory: 2, isNewlyAdded: true, expected: .attachOrCreate),
+      .init(
+        sessionExists: true, tabsInDirectory: 1, isNewlyAdded: false, expected: .attachOrCreate),
+      .init(
+        sessionExists: true, tabsInDirectory: 2, isNewlyAdded: false, expected: .attachOrCreate),
+      .init(sessionExists: false, tabsInDirectory: 1, isNewlyAdded: false, expected: .offerCreate),
+      .init(sessionExists: false, tabsInDirectory: 2, isNewlyAdded: false, expected: .closeTab),
+      .init(sessionExists: nil, tabsInDirectory: 1, isNewlyAdded: false, expected: .offerCreate),
+      .init(sessionExists: nil, tabsInDirectory: 2, isNewlyAdded: false, expected: .offerCreate),
+    ] as [OnOpenCase]
+  )
+  func onOpenRestored(testCase: OnOpenCase) {
+    #expect(
+      TerminalTabSessionRule.onOpen(
+        sessionExists: testCase.sessionExists,
+        tabsInDirectory: testCase.tabsInDirectory,
+        isNewlyAdded: testCase.isNewlyAdded,
+        isRestored: true
       ) == testCase.expected
     )
   }

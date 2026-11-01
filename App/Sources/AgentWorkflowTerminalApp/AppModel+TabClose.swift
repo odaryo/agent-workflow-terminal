@@ -57,6 +57,7 @@ extension AppModel {
   func discardTab(_ key: TerminalSessionKey) {
     guard tabKeys.contains(key) else { return }
     newlyAddedTabs.remove(key)
+    restoredTabs.remove(key)
     if selectedTab == key {
       if let neighbor = neighborTab(of: key) {
         select(neighbor)

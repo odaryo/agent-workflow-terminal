@@ -42,6 +42,43 @@ struct TmuxOrphanedServerProbeIntegrationTests {
     }
   }
 
+  // 非 ASCII を TMUX_TMPDIR ではなく -L の名前に入れるのは、IsolatedTmuxServer が親プロセスの
+  // TMUX_TMPDIR しか使わないため。ファイル名側の非 ASCII も lsof (LC_ALL=C) が `\xe6…` と
+  // エスケープすることは実測した (2026-11-02、tmux 3.8、Issue #500)。
+  @Test("非 ASCII を含む socket を消すと、生きている server の lsof probe は undetermined")
+  func reportsNonASCIISocketPathAsUndetermined() async throws {
+    let socketName = uniqueSocketName("orphaned-日本")
+    try await IsolatedTmuxServer.withServer(socketName: socketName) { runner in
+      let identity = try #require(
+        WorktreeIdentity(rawValue: "/repo/.git/worktrees/orphaned-nonascii"))
+      let session = TmuxSessionName(identity: identity)
+      let operations = TmuxSessionOperations(runner: runner)
+      try await operations.create(session: session, workingDirectory: "/private/tmp")
+      let pidOutput = try await runner.run(arguments: ["display-message", "-p", "#{pid}"])
+      let serverPID = try #require(
+        Int32(pidOutput.stdout.trimmingCharacters(in: .whitespacesAndNewlines)))
+      try #require(serverPID > 0)
+      let pathOutput = try await runner.run(arguments: ["display-message", "-p", "#{socket_path}"])
+      let socketPath = pathOutput.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      try #require(socketPath.contains("日本"))
+
+      // socket が無いまま body を抜けると withServer の停止処理が server に届かない。
+      defer { restoreSocket(serverPID: serverPID, socketPath: socketPath) }
+      try FileManager.default.removeItem(atPath: socketPath)
+      try #require(!FileManager.default.fileExists(atPath: socketPath))
+
+      // tmux の stderr は生のバイトでパスを出す。lsof (LC_ALL=C) だけが \xe6… とエスケープする。
+      await #expect(throws: TmuxSessionOperationError.serverSocketMissing(socketPath: socketPath)) {
+        try await operations.exists(session: session)
+      }
+      let result = await TmuxOrphanedServerProbe().probe(socketPath: socketPath)
+      guard case .undetermined = result else {
+        Issue.record("server は生きているので absent にしてはならないが、\(result) が返った")
+        return
+      }
+    }
+  }
+
   @Test("一度も起動していない socket の server は absent")
   func reportsNeverStartedSocketAsAbsent() async throws {
     let runner = try TmuxRunner(

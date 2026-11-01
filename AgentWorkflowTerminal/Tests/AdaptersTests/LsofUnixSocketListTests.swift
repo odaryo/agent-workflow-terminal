@@ -31,6 +31,38 @@ struct LsofUnixSocketListTests {
       LsofUnixSocketList.processIDs(listening: "/private/tmp/tmux-501/awtm500", in: output) == [])
   }
 
+  @Test(
+    "後方だけが一致するパスは一致しない",
+    arguments: [
+      ("/x/default", "p15199\nf6\nn/y/x/default\n"),
+      ("/x/default", "p15199\nf6\nndefault\n"),
+    ])
+  func rejectsSuffixOnlyMatches(socketPath: String, output: String) {
+    #expect(LsofUnixSocketList.processIDs(listening: socketPath, in: output) == [])
+  }
+
+  @Test(
+    "0 以下の PID と数字として読めない p 行は無視する",
+    arguments: [
+      "p0\nf6\nn/socket\n",
+      "p-5\nf6\nn/socket\n",
+      "pabc\nf6\nn/socket\n",
+    ])
+  func ignoresInvalidProcessIDs(output: String) {
+    #expect(LsofUnixSocketList.processIDs(listening: "/socket", in: output) == [])
+  }
+
+  @Test(
+    "読めない p 行の後の n 行を、その前の PID に結び付けない",
+    arguments: [
+      "p123\nf6\nn/other\npabc\nf6\nn/socket\n",
+      "p123\nf6\nn/other\np\nf6\nn/socket\n",
+      "p123\nf6\nn/other\np99999999999\nf6\nn/socket\n",
+    ])
+  func doesNotCarryProcessIDAcrossUnreadableLine(output: String) {
+    #expect(LsofUnixSocketList.processIDs(listening: "/socket", in: output) == [])
+  }
+
   @Test("複数 PID は重複を除いて数値の昇順で返し、未知の接頭辞は無視する")
   func sortsProcessIDsAndIgnoresOtherFields() {
     let output = """

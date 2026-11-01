@@ -39,12 +39,29 @@ public struct TmuxOrphanedServerProbe: Sendable {
         environment: ["LC_ALL": "C"], timeout: timeout)
       if result.exitCode == 0 {
         let processIDs = LsofUnixSocketList.processIDs(listening: socketPath, in: result.stdout)
-        return processIDs.isEmpty ? .absent : .orphaned(processIDs: processIDs)
+        if !processIDs.isEmpty { return .orphaned(processIDs: processIDs) }
+        return absenceUnlessEscaped(socketPath)
       }
-      if result.exitCode == 1, result.stdout.isEmpty { return .absent }
+      // lsof はどのエラーでも exit 1 を返すので、stderr のある exit 1 は「一致が無い」と区別できない。
+      if result.exitCode == 1, result.stdout.isEmpty, result.stderr.isEmpty {
+        return absenceUnlessEscaped(socketPath)
+      }
       return .undetermined("lsof exit \(result.exitCode): \(result.stderr)")
     } catch {
       return .undetermined("lsof: \(error)")
     }
+  }
+
+  /// lsof (revision 4.91) の `n` 行は socket のパスをバイトのまま出すとは限らない (Issue #500 の
+  /// レビューの計測、tmux 3.8)。非 ASCII は `LC_ALL=C` で `\xe6…` に、タブと `\` は locale によらず
+  /// `\t` / `\\` になり、制御文字は `^A` になってリテラルの `^A` と区別できない。tmux の stderr は
+  /// 生のバイトなので、こうしたパスでは server が生きていても完全一致しない。逆変換して照合しないのは、
+  /// `^A` のように元のバイト列が一意に決まらない表記があるため。一致が無いことを不在と言えるのは、
+  /// lsof がそのまま出すと分かっている文字だけのパスに限る。
+  private func absenceUnlessEscaped(_ socketPath: String) -> TmuxOrphanedServerProbeResult {
+    let mayBeEscaped = socketPath.utf8.contains { byte in
+      byte < 0x20 || byte > 0x7E || byte == UInt8(ascii: "\\") || byte == UInt8(ascii: "^")
+    }
+    return mayBeEscaped ? .undetermined("socket path contains characters lsof escapes") : .absent
   }
 }

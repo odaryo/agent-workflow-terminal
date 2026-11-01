@@ -283,6 +283,60 @@ struct GitWorktreeDetectorPrunableTests {
     }
   }
 
+  // 実 git は入れない作業ツリーで即座に exit 128 になり、rev-parse を撃っても同じ結果へ戻るため、
+  // rev-parse を眠らせないと「撃たない」ことを観測できない。
+  // root では探索権限の制限が効かず、この経路を再現できない。
+  @Test("入れない prunable の worktree では rev-parse を走らせずに到達不能として検出する")
+  func unsearchablePrunableWorktreeIsDetectedWithoutRevParse() async throws {
+    try await withGitRepository { repository in
+      let worktree = repository.root.appending(path: "wt-blocked")
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-blocked", worktree.path])
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o000], ofItemAtPath: worktree.path)
+      defer {
+        try? FileManager.default.setAttributes(
+          [.posixPermissions: 0o755], ofItemAtPath: worktree.path)
+      }
+      try await requirePrunable(worktree, in: repository)
+      let shim = try repository.sleepingGitShim(revParseIn: worktree.path)
+
+      let result =
+        try await repository
+        .detector(executable: shim, entryTimeout: GitTestRepository.stalledEntryTimeout)
+        .scan()
+
+      #expect(result.failures.isEmpty)
+      let blocked = try #require(result.detected.first { $0.worktreePath == worktree.path })
+      #expect(!blocked.isReachable)
+      #expect(!blocked.isProjectRoot)
+      #expect(
+        blocked.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-blocked".utf8))
+    }
+  }
+
+  @Test("祖先が通常ファイルに置き換わった prunable の worktree は、失敗にせず除外する")
+  func prunableWorktreeUnderRegularFileAncestorIsSkipped() async throws {
+    try await withGitRepository { repository in
+      let ancestor = repository.root.appending(path: "anc")
+      let worktree = ancestor.appending(path: "w")
+      try await repository.git(["worktree", "add", "-q", "-b", "under-file", worktree.path])
+      try FileManager.default.removeItem(at: ancestor)
+      try Data().write(to: ancestor)
+      try await requirePrunable(worktree, in: repository)
+      var info = stat()
+      let status = lstat(worktree.path, &info)
+      let lstatErrno = errno
+      try #require(status == -1)
+      try #require(lstatErrno == ENOTDIR)
+
+      let result = try await repository.detector().scan()
+
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.failures.isEmpty)
+    }
+  }
+
   @Test("通常ファイルに置き換わった unlocked worktree は除外する")
   func prunableRegularFileAtWorkingTreePathIsSkipped() async throws {
     try await withGitRepository { repository in
@@ -298,5 +352,12 @@ struct GitWorktreeDetectorPrunableTests {
       #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
       #expect(result.failures.isEmpty)
     }
+  }
+
+  private func requirePrunable(_ worktree: URL, in repository: GitTestRepository) async throws {
+    let listing = try await repository.runner(globalConfig: "").run(.worktreeList())
+    let entry = try #require(
+      GitWorktreeList.parse(output: listing.stdout).entries.first { $0.path == worktree.path })
+    try #require(entry.prunableReason != nil)
   }
 }

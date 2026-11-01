@@ -118,6 +118,87 @@ struct TmuxWorktreePaneSourceTests {
     #expect(identifiers == (0..<5).map { PaneID(rawValue: "%2\($0)") })
   }
 
+  @Test("番号ごとに、その番号の session の pane だけを返す (設計書 §12.2)")
+  func selectsPanesBySessionKey() async throws {
+    let sessions = try SessionsOfTwoWorktrees()
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 0, stdout: try mixedOutput(sessions), stderr: ""))
+    let source = try makeSource(spy)
+
+    #expect(try await source.panes(of: sessions.first).map(\.id.rawValue) == ["%11", "%12"])
+    #expect(try await source.panes(of: sessions.second).map(\.id.rawValue) == ["%21", "%22"])
+    #expect(try await source.panes(of: sessions.otherFirst).map(\.id.rawValue) == ["%31"])
+    #expect(try await source.panes(of: sessions.otherSecond).map(\.id.rawValue) == ["%41"])
+    #expect(try await source.panes(of: sessions.twentieth).map(\.id.rawValue) == ["%29"])
+  }
+
+  @Test("worktree を渡すと番号 1 の session と同じ pane を返す")
+  func worktreePanesMatchPrimarySession() async throws {
+    let sessions = try SessionsOfTwoWorktrees()
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 0, stdout: try mixedOutput(sessions), stderr: ""))
+    let source = try makeSource(spy)
+
+    let byWorktree = try await source.panes(of: sessions.worktree)
+
+    #expect(byWorktree == (try await source.panes(of: sessions.first)))
+    #expect(byWorktree.map(\.id.rawValue) == ["%11", "%12"])
+  }
+
+  @Test("概要も番号ごとに、その番号の session の pane だけを返す")
+  func selectsSummaryReadingsBySessionKey() async throws {
+    let sessions = try SessionsOfTwoWorktrees()
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 0, stdout: try mixedOutput(sessions), stderr: ""))
+    let source = try makeSource(spy)
+
+    let first = try await source.summaryReadings(of: sessions.first)
+    let second = try await source.summaryReadings(of: sessions.second)
+    let otherFirst = try await source.summaryReadings(of: sessions.otherFirst)
+    let byWorktree = try await source.summaryReadings(of: sessions.worktree)
+
+    #expect(first.map(\.pane.id.rawValue) == ["%11", "%12"])
+    #expect(second.map(\.pane.id.rawValue) == ["%21", "%22"])
+    #expect(otherFirst.map(\.pane.id.rawValue) == ["%31"])
+    #expect(byWorktree == first)
+  }
+
+  @Test("位置付きの概要も番号ごとに、その番号の session の pane だけを返す")
+  func selectsLocatedSummaryReadingsBySessionKey() async throws {
+    let sessions = try SessionsOfTwoWorktrees()
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 0, stdout: try mixedOutput(sessions), stderr: ""))
+    let source = try makeSource(spy)
+
+    let first = try await source.locatedSummaryReadings(of: sessions.first)
+    let second = try await source.locatedSummaryReadings(of: sessions.second)
+    let otherFirst = try await source.locatedSummaryReadings(of: sessions.otherFirst)
+    let byWorktree = try await source.locatedSummaryReadings(of: sessions.worktree)
+
+    #expect(first.map(\.readings.pane.id.rawValue) == ["%11", "%12"])
+    #expect(second.map(\.readings.pane.id.rawValue) == ["%21", "%22"])
+    #expect(otherFirst.map(\.readings.pane.id.rawValue) == ["%31"])
+    #expect(byWorktree == first)
+  }
+
+  /// 同じ worktree の番号 1・2 と別の worktree の番号 1・2 を交互に並べ、番号 2 の名前に
+  /// 前方一致する番号 20 の session も混ぜる。
+  private func mixedOutput(_ sessions: SessionsOfTwoWorktrees) throws -> String {
+    let rows: [(TerminalSessionKey, String)] = [
+      (sessions.second, "%21"),
+      (sessions.first, "%11"),
+      (sessions.otherFirst, "%31"),
+      (sessions.twentieth, "%29"),
+      (sessions.otherSecond, "%41"),
+      (sessions.first, "%12"),
+      (sessions.second, "%22"),
+    ]
+    return try rows.map { key, paneID in
+      try fixture(session: TmuxSessionName(key: key).rawValue, paneID: paneID)
+    }
+    .joined()
+  }
+
   private func makeSource(_ spy: WorktreePaneProcessSpy) throws -> TmuxWorktreePaneSource {
     TmuxWorktreePaneSource(
       runner: try makeTmuxRunner(socketName: "pane-source-test", processRunner: spy))
@@ -135,6 +216,26 @@ struct TmuxWorktreePaneSourceTests {
     #expect(line.hasPrefix("%0\\037"))
     return paneID + line.dropFirst(2).replacingOccurrences(of: "summary-fixture", with: session)
       + "\n"
+  }
+}
+
+private struct SessionsOfTwoWorktrees {
+  let worktree: WorktreeIdentity
+  let first: TerminalSessionKey
+  let second: TerminalSessionKey
+  let twentieth: TerminalSessionKey
+  let otherFirst: TerminalSessionKey
+  let otherSecond: TerminalSessionKey
+
+  init() throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/feature"))
+    let other = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/other"))
+    self.worktree = worktree
+    first = .primary(worktree)
+    second = try #require(TerminalSessionKey(identity: worktree, index: 2))
+    twentieth = try #require(TerminalSessionKey(identity: worktree, index: 20))
+    otherFirst = .primary(other)
+    otherSecond = try #require(TerminalSessionKey(identity: other, index: 2))
   }
 }
 

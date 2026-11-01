@@ -13,7 +13,8 @@ usage() {
 checks が完了かつ成功) を検証したうえで squash マージする。
 checks がゼロ件の場合は check run 未登録ウィンドウを考慮して最大60秒待ってから受理する。
 全変更パス (rename の旧パスも含む) が CI の paths-ignore に一致すると判定できた場合は、
-ゼロ件の猶予とマージ後の main CI 探索を省略する。判定不能なら従来どおり待機する。
+ゼロ件の猶予を省略し、マージ時の main が判定時と同じなら main CI 探索も省略する。
+判定不能なら従来どおり待機する。
   --wait-checks      checks が pending の場合、15秒間隔・最大15分ポーリングして待つ
   --delete-local     マージ後、ローカルの head ブランチを削除する
                      (作業ツリーが checkout 中の場合は警告を出してスキップする)
@@ -314,8 +315,15 @@ if [[ "$delete_local" -eq 1 ]]; then
 fi
 
 if [[ "$ci_paths_ignored" -eq 1 ]]; then
-  info "全変更パスが CI の paths-ignore に一致するため、main の CI 探索をスキップしました"
-  exit 0
+  if merge_parent_oid=$(gh api "repos/$repo_nwo/commits/$merge_sha" --jq '.parents[0].sha'); then
+    if [[ "$merge_parent_oid" == "$paths_main_oid" ]]; then
+      info "全変更パスが CI の paths-ignore に一致し、マージ時の main も判定時と同じため、main の CI 探索をスキップしました"
+      exit 0
+    fi
+    info "マージ時の main が paths-ignore 判定時と一致しないため、従来どおり main の CI を確認します"
+  else
+    info "マージコミットの親の取得に失敗したため、従来どおり main の CI を確認します"
+  fi
 fi
 
 if [[ "$no_wait_main_ci" -eq 1 ]]; then

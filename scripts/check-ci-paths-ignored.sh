@@ -59,6 +59,8 @@ printf '%s\n' 'AgentWorkflowTerminal/Sources/TerminalCore/Example.swift' >"$work
 printf '%s\n' 'Spikes/gate1/Example.swift' >"$work_dir/spikes.txt"
 expect_rc "$DETECTOR" 1 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/swift.txt" '実物 ci.yml: Swift'
 expect_rc "$DETECTOR" 0 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/spikes.txt" '実物 ci.yml: Spikes'
+printf '%s\n' 'docs/roadmap.md' 'CLAUDE.md' >"$work_dir/docs-md.txt"
+expect_rc "$DETECTOR" 0 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/docs-md.txt" '実物 ci.yml: docs と md'
 printf '%s\n' 'docs/roadmap.md' 'CLAUDE.md' '.claude/agents/reviewer.md' >"$work_dir/docs.txt"
 printf '%s\n' 'docs/roadmap.md' '.claude/settings.json' >"$work_dir/settings.txt"
 expect_rc "$DETECTOR" 2 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/docs.txt" '実物 ci.yml: .claude/ の md を含む'

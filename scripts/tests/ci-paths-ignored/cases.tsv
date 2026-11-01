@@ -36,5 +36,5 @@
 2	workflows/unicode.yml	files/unicode.txt
 1	workflows/single-nested.yml	files/single-nested.txt
 0	workflows/single-direct.yml	files/single-direct.txt
-2	workflows/single-empty.yml	files/single-empty.txt
+0	workflows/single-empty.yml	files/single-empty.txt
 1	workflows/literal-dot.yml	files/literal-dot.txt

@@ -18,16 +18,20 @@ enum ExternalFileOpening {
   }
 
   static func isSupported(path: String) -> Bool {
+    guard !path.hasSuffix("/") else { return false }
     let name = (path as NSString).lastPathComponent
-    guard name != ".md", name != ".html" else { return false }
     let suffix = (name as NSString).pathExtension.lowercased()
     return suffix == "html" || suffix == "md"
   }
 
   static func resolve(worktreeRoot: URL, relativePath: String) throws(ResolutionError) -> URL {
-    let root = worktreeRoot.resolvingSymlinksInPath().standardizedFileURL
-    let file = root.appending(path: relativePath).resolvingSymlinksInPath().standardizedFileURL
-    guard !relativePath.hasPrefix("/"), file.pathComponents.starts(with: root.pathComponents) else {
+    let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+    guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+      throw .outsideWorktree
+    }
+    let root = try resolvedURL(path: worktreeRoot.path)
+    let file = try resolvedURL(path: root.path + "/" + relativePath)
+    guard file.pathComponents.starts(with: root.pathComponents) else {
       throw .outsideWorktree
     }
     guard let values = try? file.resourceValues(forKeys: [.isRegularFileKey]),
@@ -36,6 +40,14 @@ enum ExternalFileOpening {
       throw .missingFile
     }
     return file
+  }
+
+  private static func resolvedURL(path: String) throws(ResolutionError) -> URL {
+    // resolvingSymlinksInPath() は途中の要素を解決できないと .. を字面で畳み、
+    // symlink を辿らないパスを返すため、境界の判定には使わない。
+    guard let pointer = realpath(path, nil) else { throw .missingFile }
+    defer { free(pointer) }
+    return URL(fileURLWithPath: String(cString: pointer))
   }
 }
 

@@ -18,6 +18,7 @@ struct DiffHunkView: View {
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
       .onChange(of: file.path) { externalOpening.reset() }
+      .onChange(of: model.selection) { externalOpening.reset() }
       .onChange(of: model.worktreeRoot) { externalOpening.reset() }
       .onDisappear { externalOpening.reset() }
     } else {

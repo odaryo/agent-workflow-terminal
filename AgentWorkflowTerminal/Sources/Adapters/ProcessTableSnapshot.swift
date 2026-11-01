@@ -1,7 +1,7 @@
 import Foundation
 import TerminalCore
 
-/// `ps -Ao pid=,ppid=,comm=` の1行。`name` は `comm` の最後のパス要素で、空白を含み得る。
+/// `ps` の PID・PPID・comm または ucomm の1行。`name` は最後のパス要素で、空白を含み得る。
 struct ProcessTableRow: Sendable, Equatable {
   let pid: Int32
   let parentPID: Int32
@@ -20,6 +20,27 @@ struct ProcessTableSnapshot: Sendable {
     // 同一 pid が2行現れることは無いが、現れた場合は先着を残す (後着で上書きしない)。
     self.rowsByPID = Dictionary(rows.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
     self.childrenByParentPID = Dictionary(grouping: rows, by: \.parentPID)
+  }
+
+  func sessionActivity(of panes: [(pid: Int32, isDead: Bool)]) -> TerminalSessionActivity {
+    // 二重 fork で木から離れたプロセスは見えない (sleep と bash のループは kill-session 後も生存、#457 で実測)。
+    var activity = TerminalSessionActivity.shellOnly
+    for pane in panes where !pane.isDead {
+      guard let root = rowsByPID[pane.pid] else {
+        activity = .undetermined
+        continue
+      }
+      let name = root.name.hasPrefix("-") ? root.name.dropFirst() : root.name[...]
+      switch name {
+      case "sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu":
+        // 子を持たない shell builtin の処理は §3.1 の「shell 以外」に含めず、shellOnly とする。
+        // 子の名前を見て shell を除くとスクリプトを見落とすため、確認が余分に出る向きを選ぶ。
+        if !(childrenByParentPID[root.pid] ?? []).isEmpty { return .running }
+      default:
+        return .running
+      }
+    }
+    return activity
   }
 
   /// dead pane は呼び出し側で除外済みなので、直接 exec された Agent を拾うため `root` 自身から辿る。
@@ -56,7 +77,8 @@ struct ProcessTableSnapshot: Sendable {
         let fields = line.split(maxSplits: 2, whereSeparator: \.isWhitespace)
         guard fields.count == 3, let pid = Int32(fields[0]), let parentPID = Int32(fields[1])
         else { return nil }
-        let command = String(fields[2])
+        // `ucomm` は最後の列でも 16 桁まで空白で埋められる (macOS の ps で実測、#457)。
+        let command = String(fields[2].reversed().drop(while: \.isWhitespace).reversed())
         return ProcessTableRow(
           pid: pid, parentPID: parentPID,
           name: command.split(separator: "/").last.map(String.init) ?? command

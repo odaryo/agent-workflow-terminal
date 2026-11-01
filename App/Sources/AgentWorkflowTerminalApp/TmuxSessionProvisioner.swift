@@ -236,7 +236,7 @@ extension TmuxOrphanedServerProbeResult {
       let kill = processIDs.map { "kill -USR1 \($0)" }.joined(separator: " / ")
       return
         "tmux の socket (\(socketPath)) が消えていますが、tmux server (pid \(pids)) はまだ動いています。"
-        + "ターミナルで `\(kill)` を実行すると socket が作り直され、再試行で繋がります。"
+        + "ターミナルで `\(kill)` を実行すると socket が作り直されるので、その後にもう一度操作してください。"
     case .undetermined(let reason):
       return
         "tmux の socket (\(socketPath)) が見つかりません。tmux server が動いているかを確かめられなかったため、"

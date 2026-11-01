@@ -15,17 +15,23 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「Ag
   build                 scripts/build-app.sh で最終バンドルを作る
   launch [--project P]  最終バンドルを起動し、ウィンドウを既定の大きさに整える
   activate              アプリを前面に出し、実際に前面になったことを確認する
-  texts                 メインペインの静的テキストをすべて出す (状態の読み取り用)
-  find <部分文字列>      その文字列を含む静的テキストの "x y w h" を出す
-  click <x> <y>         activate してから実 HID クリックを送る
-  click-text <部分文字列> find した要素の中心を click する
-  expect <部分文字列>    メインペインのどこかにその文字列があれば成功、無ければ失敗
+  texts                 全ウィンドウの AX 要素を role と4種の文言属性付きで1要素1行に出す
+  find <文字列> [--exact] [--role AXRole]
+                        AX の文言に最初に一致する要素の "x y w h" を出す (既定は部分一致)
+  click <x> <y>         activate 後、座標上のアプリを確認して実 HID クリックを送る
+  click-text <文字列> [--exact] [--role AXRole]
+                        find した要素の中心を activate してから click する
+  expect <文字列> [--exact] [--role AXRole]
+                        find で見つかれば成功、無ければ失敗 (ボタン・タブ・sheet も対象)
   type <文字列>          今フォーカスがある所へ打鍵する (改行は拒否する)
   focused               フォーカスを持つ要素の role / description / value を出す
   value <部分文字列>     フォーカス中の要素の値にその文字列があれば成功、無ければ失敗
   quit                  起動したアプリを終了する
   selftest [--no-build] 行選択が効くところまでを1コマンドで通す (ハーネス自身の動作確認)
   -h, --help            このヘルプを表示
+
+検索対象: AXTitle / AXValue / AXDescription / AXAttributedDescription。
+texts の各文言は引用符付きで、改行などはエスケープして出す。
 
 **必ず最終バンドル (scripts/build-app.sh の出力) を対象にすること。** probe ビルドで
 確認した結果を完了報告に使わない。
@@ -49,64 +55,22 @@ app_activate() {
 }
 
 app_texts() {
-  osascript <<EOS
-tell application "System Events" to tell process "${APP_NAME}"
-  set out to ""
-  repeat with e in static texts of group 1 of window 1
-    set out to out & "[" & (value of e as string) & "]"
-  end repeat
-  return out
-end tell
-EOS
+  swift "$SCRIPT_DIR/ui-ax.swift" "$APP_NAME" list
 }
 
-# 座標を決め打ちしない。Accessibility が返す要素の位置と大きさから中心を出す。
-#
-# `entire contents` では Diff の行に届かない。SwiftUI の LazyVStack がぶら下がる
-# scroll area の中身は再帰列挙に現れないため (実測: entire contents は 51 要素しか返さず
-# 行のテキストを含まなかった)、scroll area の直下も明示的に舐める。
 app_find() {
-  local needle="$1" geom
-  geom=$(osascript <<EOS
-tell application "System Events" to tell process "${APP_NAME}"
-  set g to group 1 of window 1
-  set out to "NONE"
-  repeat with e in static texts of g
-    try
-      if (value of e as string) contains "${needle}" then
-        set p to position of e
-        set s to size of e
-        set out to ((item 1 of p) as string) & " " & ((item 2 of p) as string) & " " & ((item 1 of s) as string) & " " & ((item 2 of s) as string)
-      end if
-    end try
-  end repeat
-  if out is "NONE" then
-    repeat with sa in scroll areas of g
-      repeat with ue in UI elements of sa
-        try
-          repeat with e in static texts of ue
-            if (value of e as string) contains "${needle}" then
-              set p to position of e
-              set s to size of e
-              set out to ((item 1 of p) as string) & " " & ((item 2 of p) as string) & " " & ((item 1 of s) as string) & " " & ((item 2 of s) as string)
-              exit repeat
-            end if
-          end repeat
-        end try
-      end repeat
-    end repeat
-  end if
-  return out
-end tell
-EOS
-)
-  [ "$geom" != "NONE" ] || die "要素が見つかりません: ${needle}"
-  echo "$geom"
+  swift "$SCRIPT_DIR/ui-ax.swift" "$APP_NAME" find "$@"
+}
+
+app_click_text() {
+  local geom
+  geom=$(app_find "$@") || return 1
+  app_click "$(echo "$geom" | awk '{print $1 + int($3 / 2)}')" "$(echo "$geom" | awk '{print $2 + int($4 / 2)}')"
 }
 
 app_click() {
   app_activate
-  swift "$SCRIPT_DIR/ui-click.swift" "$1" "$2"
+  swift "$SCRIPT_DIR/ui-click.swift" "$1" "$2" || return 1
   sleep 1
 }
 
@@ -138,7 +102,7 @@ EOS
 }
 
 # `entire contents` を舐めない。`AXFocusedUIElement` はアプリが持つ「今の宛先」そのもので、
-# app_find が届かない階層 (LazyVStack の中など) にあっても1発で取れる。
+# 階層を探索せずに取得できる。
 #
 # **フォーカスがどこにも無いことは失敗ではなく観測結果**として出す。#278 の確定部分は
 # 「打鍵がどこにも入らない」なので、これを表せないと修正前の対照が取れない。
@@ -168,8 +132,7 @@ end tell
 EOS
 }
 
-# `expect` のテキスト入力版。`app_texts` は static text しか見ないので、TextEditor に
-# 入った文字はそちらでは読めない。
+# 他の要素に同じ文字があっても打鍵の成功と誤認しないよう、フォーカス中の値だけを見る。
 app_value() {
   local needle="$1" focused
   focused=$(app_focused)
@@ -228,19 +191,12 @@ selftest() {
   trap 'rm -f "${SELFTEST_PROBE:-}"; app_quit' EXIT
   printf 'probe line one\nprobe line two\nprobe line three\n' >"$SELFTEST_PROBE"
   app_launch "$main_worktree"
-  osascript >/dev/null <<EOS
-tell application "System Events" to tell process "${APP_NAME}"
-  set frontmost to true
-  set w to window 1
-  click button 1 of scroll area 1 of group 1 of w
-  delay 1
-  click menu button "Viewer" of group 1 of w
-  delay 1
-  click (first UI element of (UI element 1 of menu button "Viewer" of group 1 of w) whose title is "Diff")
-  delay 2
-  click button 3 of group 1 of w
-end tell
-EOS
+  # ボタンの順番は UI の変更でずれたため、文言と role で対象を特定する (#414)。
+  app_click_text "Project Root" --exact --role AXButton
+  app_click_text "Viewer" --exact --role AXMenuButton
+  swift "$SCRIPT_DIR/ui-ax.swift" "$APP_NAME" press "Diff" --exact --role AXMenuItem
+  sleep 2
+  app_click_text "開く" --exact --role AXButton
   sleep 4
   local geom x y
   geom=$(app_find "probe line two")
@@ -248,7 +204,7 @@ EOS
   y=$(echo "$geom" | awk '{print $2 + int($4 / 2)}')
   info "行 'probe line two' を ($x, $y) でクリックします"
   app_click "$x" "$y"
-  if app_texts | grep -q "選択中"; then
+  if app_find "選択中" >/dev/null; then
     info "PASS: 行選択が効いています"
   else
     info "実際の表示: $(app_texts)"
@@ -300,7 +256,7 @@ case "$command" in
   texts) app_texts ;;
   find)
     [ $# -ge 1 ] || die "find には検索する文字列が必要です"
-    app_find "$1"
+    app_find "$@"
     ;;
   click)
     [ $# -ge 2 ] || die "click には x と y が必要です"
@@ -308,12 +264,11 @@ case "$command" in
     ;;
   click-text)
     [ $# -ge 1 ] || die "click-text には検索する文字列が必要です"
-    geom=$(app_find "$1")
-    app_click "$(echo "$geom" | awk '{print $1 + int($3 / 2)}')" "$(echo "$geom" | awk '{print $2 + int($4 / 2)}')"
+    app_click_text "$@"
     ;;
   expect)
     [ $# -ge 1 ] || die "expect には検索する文字列が必要です"
-    app_texts | grep -q -- "$1" || die "見つかりませんでした: $1"
+    app_find "$@" >/dev/null
     ;;
   type)
     [ $# -ge 1 ] || die "type には打鍵する文字列が必要です"

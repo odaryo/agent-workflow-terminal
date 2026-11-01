@@ -122,7 +122,9 @@ struct TerminalTabLayoutTests {
     layout.removeTab(third)
 
     // 閉じたタブの session は消えているので、existing にも現れない。
-    let names = [TmuxSessionName(key: .primary(directory)).rawValue, TmuxSessionName(key: second).rawValue]
+    let names = [
+      TmuxSessionName(key: .primary(directory)).rawValue, TmuxSessionName(key: second).rawValue,
+    ]
     #expect(layout.addTab(in: directory, existingSessionNames: names) == third)
   }
 
@@ -132,15 +134,16 @@ struct TerminalTabLayoutTests {
     let names = try [7, 1, 3].map { TmuxSessionName(key: try key(directory, index: $0)).rawValue }
     var layout = TerminalTabLayout()
 
-    #expect(layout.addTab(in: directory, existingSessionNames: names) == (try key(directory, index: 8)))
+    let expected = try key(directory, index: 8)
+    #expect(layout.addTab(in: directory, existingSessionNames: names) == expected)
   }
 
   @Test("primary だけに戻った layout は既定と等しい")
   func layoutBackToPrimaryEqualsDefault() throws {
     let directory = try identity("a")
     var layout = TerminalTabLayout()
-    let added = try #require(layout.addTab(in: directory, existingSessionNames: []))
-    layout.removeTab(added)
+    let added = layout.addTab(in: directory, existingSessionNames: [])
+    layout.removeTab(try #require(added))
 
     #expect(layout == TerminalTabLayout())
   }

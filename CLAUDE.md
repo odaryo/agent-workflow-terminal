@@ -125,7 +125,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 
 **The loop**
 1. Director writes an Issue-style spec: 背景 / 要求 / スコープ (files allowed to change) / 完了条件 (the exact GREEN commands) / "on ambiguity or contradiction, stop and ask". Treat a reported workaround as a spec defect and widen the scope explicitly in the next round rather than blaming the implementer. The spec must forbid committing and pushing, because the implementer does neither.
-2. Implementer delivers; the `gate-runner` runs the GREEN commands and the Director judges from its raw output (trust but verify — the implementer's own "lint passed" is not the gate).
+2. Implementer delivers (for test-first code, after the RED step below); the `gate-runner` runs the GREEN commands and the Director judges from its raw output (trust but verify — the implementer's own "lint passed" is not the gate).
 3. Reviewer reviews adversarially, classifying Critical / Major / Minor and separating code defects from **spec defects** (the pilot found both).
 4. Critical findings go back to the implementer as a fix spec (Codex: a new `codex exec` with the measurements restated; fallback agents: `SendMessage` to the same agent). **Review findings are hypotheses**: any claim in a fix spec about external behavior must be re-verified by the implementer with a measurement before coding — the pilot's only regression came from implementing a reviewer's unverified premise. Continue looping while each round is backed by fresh measurement; escalate to the user when a round fails without new evidence or a design question emerges. **An agent's own "I measured it" is a claim, not evidence** — Issue #23 had an implementer's measured claim refuted by the reviewer, and two reviewers reach opposite conclusions from reading the same source. Ask for the method and the raw output, not the conclusion; when two rounds disagree, adopt neither and send it back to measurement.
 5. Completion is reported only with GREEN + no Critical remaining — and at that point the Director merges (see **Merge authority**).
@@ -135,25 +135,29 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 compact された。費用の 67% はこのコンテキストを毎回読み直す cache read なので、費用は書いた量ではなく
 **1回の実装役の長さ**で決まる。
 
-- **1 implementer = 1 Issue。** 複数の Issue を1つの implementer に渡さない (`#373 + #366`、
-  `#359/#354/#355` の2件がこの形だった)。関連する Issue でも、順に別の implementer へ渡す。
+上の計測は Claude の implementer についてのものだが、以下の分け方は標準の Codex にも予備の Claude 実装役にも
+そのまま当てはめる。
+
+- **1 実装役 = 1 Issue。** 複数の Issue を1つの実装役 (1つの `codex exec`、1つの予備エージェント) に渡さない
+  (`#373 + #366`、`#359/#354/#355` の2件がこの形だった)。関連する Issue でも、順に別の実装役へ渡す。
 - **Core 側と App 側を分けて渡す。** Issue が `TerminalCore` / `Adapters` と `App/` の両方を触るなら spec を
-  2つに分け、先に Core 側を `implementer` (Opus) へ渡す。レビューまで終えて API が固まってから、App 側を
-  **新しいエージェントとして** `implementer-app` (Sonnet) へ渡し、spec には Core 側で確定した型と関数名を書く。
-  `App/` だけを触る Issue は最初から `implementer-app` へ渡す。片側だけでもなお大きいとき (要求が独立した
-  機能を複数含むとき) は、渡す前に Issue を分割して起票し直す (`scripts/wf-issue-create.sh`)。
-- **Codex でも同じ分け方をする。** 上の計測は Claude の implementer についてのものだが、1 Issue = 1 実装役、
-  Core 側と App 側を別々の `codex exec` にすること (App 側の prompt には Core 側で確定した型と関数名を書く)、
-  UI 確認を実装役にさせないことは Codex にもそのまま当てはめる。
+  2つに分け、先に Core 側を渡す (Codex: 1つ目の `codex exec`、予備: `implementer`)。レビューまで終えて API が
+  固まってから、App 側を**新しい実装役として**渡し (Codex: 別の `codex exec`、予備: `implementer-app`)、spec には
+  Core 側で確定した型と関数名を書く。`App/` だけを触る Issue は最初から App 側として渡す。片側だけでもなお
+  大きいとき (要求が独立した機能を複数含むとき) は、渡す前に Issue を分割して起票し直す (`scripts/wf-issue-create.sh`)。
+- **テストファーストは RED の確認で実装役を区切る。** Codex はテストを実行できないので、ドメインロジックと
+  CLI 出力パーサ (`docs/coding-guidelines.md` で TDD が必須のもの) は、1つ目の `codex exec` でテストだけを書かせる。
+  `gate-runner` で `swift test` を回して、書いたテストが期待どおりの理由で落ちる (RED) ことを生出力で確かめてから、
+  2つ目の `codex exec` で実装させる。2つ目の prompt には RED の出力を添える。
 - **UI の動作確認は `ui-verifier` (Sonnet) へ渡す。** 実装役は `verify-app-ui.sh` を回さず、スクリーンショットも
   読まない。実測ではこれが implementer の費用の約 25% を占め、しかもコンテキストが最も大きい終盤に行われて
   いた (スクリーンショット1枚 ≈ 3.6k トークンが、以後のすべてのリクエストに乗る)。Director は spec と同時に
   UI 確認項目 (操作と期待する表示) を書き、App 側の GREEN を `gate-runner` の生出力で確かめてから `ui-verifier` に
   渡す。失敗は ui-verifier の報告 (コマンド・生出力・スクリーンショットのパス) を添えて実装役へ返す (Codex なら
   新しい `codex exec`、予備の `implementer-app` なら `SendMessage`)。
-- 追い修正を同じエージェントへ返す規則 (Roles) は、各側の中で引き続き適用する。ただし実装役は 265k 付近で
-  compact されて要約から再開するので、**同じエージェントだから計測結果を覚えているとは限らない**。追い修正の
-  spec には、前提にした計測結果を書き直して添えること。
+- 予備の Claude 実装役を使うときは、追い修正を同じエージェントへ返す規則 (Roles) を各側の中で適用する。ただし
+  実装役は 265k 付近で compact されて要約から再開するので、**同じエージェントだから計測結果を覚えているとは
+  限らない**。Codex でも予備でも、追い修正の spec には前提にした計測結果を書き直して添えること。
 
 **Merge authority.** GREEN + no Critical remaining **is** the merge condition, and the Director acts on it — `scripts/wf-pr-merge.sh <PR>` **without waiting for the user's judgment**. The script mechanically verifies the rest (OPEN / non-draft / base=main / not CONFLICTING / checks complete and green), so the Director's own judgment reduces to one question: did an adversarial review run, and did it leave no Critical? For changes that skip the pipeline (below), GREEN alone is the condition. Escalate instead of merging when a Critical is unresolved, when no review was run on a change that needed one, when a design decision is still open, or when the user has said to hold that specific PR.
 

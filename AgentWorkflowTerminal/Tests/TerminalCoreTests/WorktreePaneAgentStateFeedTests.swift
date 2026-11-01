@@ -334,7 +334,7 @@ actor ScriptedPaneSource: WorktreePaneSource {
 
   init(results: [Result<[PaneSnapshot], TestError>]) { self.results = results }
 
-  func panes(of worktree: WorktreeIdentity) async throws -> [PaneSnapshot] {
+  func panes(of session: TerminalSessionKey) async throws -> [PaneSnapshot] {
     let index = min(callCount, results.count - 1)
     callCount += 1
     return try results[index].get()

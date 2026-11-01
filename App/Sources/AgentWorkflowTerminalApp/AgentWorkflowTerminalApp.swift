@@ -101,6 +101,9 @@ struct ProjectView: View {
     }
     .toolbar {
       if model.didCompleteInitialScan || model.projectRoot != nil || !model.worktrees.isEmpty {
+        // CI の Xcode 16.4 (Swift 6.1、macOS 15 SDK) には macOS 26 の API が無く、#available だけ
+        // ではコンパイルできない (#431)。Xcode 26 の Swift 6.2 以上でだけ使う。
+        #if compiler(>=6.2)
         if #available(macOS 26, *) {
           taskTabsToolbar.sharedBackgroundVisibility(.hidden)
         } else {
@@ -109,6 +112,9 @@ struct ProjectView: View {
         if #available(macOS 26, *) {
           ToolbarSpacer(.flexible)
         }
+        #else
+        taskTabsToolbar
+        #endif
         // primaryAction は macOS では leading 側に配置される。
         ToolbarItem(placement: .automatic) {
           ViewerDrawerToolbar(layout: $model.viewerDrawerLayout)

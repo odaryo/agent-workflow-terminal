@@ -26,11 +26,9 @@ struct ToolbarContextMenu: NSViewRepresentable {
   final class MenuView: NSView {
     var items: [Item] = []
     private var actionTargets: [ActionTarget] = []
+    // 外すのは window から外れたとき (viewDidMoveToWindow) だけ。isolated deinit は CI の Swift 6.1
+    // では実験的機能で使えない。外し損ねても、モニタは weak self なのでイベントをそのまま返す。
     private var eventMonitor: Any?
-
-    isolated deinit {
-      removeEventMonitor()
-    }
 
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()

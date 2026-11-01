@@ -77,8 +77,10 @@ struct ProjectSessionCleanupTests {
       "/repo/.gitworktrees/alpha",
       "/repo/.git/worktreesalpha",
       "/repo/.git/modules/sub",
+      "/repo/.git/worktrees/wt/modules/sub",
       "/repo",
       "/repo/.git/worktrees",
+      "/repo/.git/worktrees/",
     ]
   )
   func identitiesOfOtherProjectsAreExcluded(foreign: String) throws {

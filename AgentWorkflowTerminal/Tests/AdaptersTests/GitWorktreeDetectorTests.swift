@@ -401,6 +401,7 @@ private typealias StubHandler = @Sendable ([String]) -> StubResult
 
 /// `-C` の作業ツリーごとに `rev-parse --git-dir --git-common-dir` の応答を差し替える。
 /// Project 自身への問い合わせは `worktree list` と common dir 単独の2つで、引数で見分ける。
+/// main でない entry の `--show-toplevel` には作業ツリー自身を返す (祖先へ遡っていない実挙動)。
 private func stubHandler(
   listOutput: String,
   gitDirectories: @escaping @Sendable (String) -> StubResult
@@ -408,6 +409,7 @@ private func stubHandler(
   { arguments in
     guard let directory = repositoryDirectory(of: arguments) else { return .failure(.cancelled) }
     if arguments.contains("worktree") { return success(listOutput) }
+    if arguments.contains("--show-toplevel") { return success("\(directory)\n") }
     guard arguments.contains("--git-dir") else { return success("\(commonDirectory)\n") }
     return gitDirectories(directory)
   }

@@ -8,6 +8,8 @@ extension AppModel {
       let worktree = worktrees.first(where: { $0.identity == identity }),
       worktree.activation == .active, worktree.detected.isReachable
     else { return }
+    guard !tabClosing.isTerminating else { return }
+    tabClosing.cancel()
     closing.open(
       target: worktree.detected,
       context: WorktreeCloseContext(

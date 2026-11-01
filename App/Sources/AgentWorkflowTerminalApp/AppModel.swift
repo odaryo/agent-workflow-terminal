@@ -6,14 +6,16 @@ import TerminalCore
 @MainActor
 final class AppModel: ObservableObject {
   @Published private(set) var projectRoot: DetectedWorktree? {
-    didSet { paneObservations.observe(inventory) }
+    didSet { paneObservations.observe(inventory, tabs: tabKeys) }
   }
   @Published private(set) var worktrees: [TaskWorktree] = [] {
-    didSet { paneObservations.observe(inventory) }
+    didSet { paneObservations.observe(inventory, tabs: tabKeys) }
   }
   @Published var selectedTab: TerminalSessionKey?
   @Published var openedTabs: Set<TerminalSessionKey> = []
-  @Published private(set) var tabLayout = TerminalTabLayout()
+  @Published private(set) var tabLayout = TerminalTabLayout() {
+    didSet { paneObservations.observe(inventory, tabs: tabKeys) }
+  }
   var newlyAddedTabs: Set<TerminalSessionKey> = []
 
   @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
@@ -33,7 +35,7 @@ final class AppModel: ObservableObject {
   let tmuxExecutable: URL?
   /// `nil` は tmux を使えない起動。`tmuxExecutable` が `nil` の起動と同じ集合になる。
   let sessions: TmuxSessionProvisioner?
-  /// pane 観測はここで worktree ごとに1本だけ回す (Issue #189)。タブ・Drawer・Overview はどれも
+  /// pane 観測はここで session ごとに1本だけ回す (Issue #189)。タブ・Drawer・Overview はどれも
   /// これを読み、自分で観測を起こさない。
   let paneObservations: PaneObservationStore
   let diffModels = DiffViewerModelStore()
@@ -412,8 +414,8 @@ final class AppModel: ObservableObject {
   ///   観測が走り続ける (Issue #237)。
   ///
   /// 返すのは `paneObservations` の購読で、呼ぶたびに観測を起こすことはない (Issue #189)。
-  func agentPaneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
-    guard inventory.observesPaneStates(of: identity) else { return nil }
-    return paneObservations.paneStates(of: identity)
+  func agentPaneStates(of key: TerminalSessionKey) -> AsyncStream<[PaneAgentState]>? {
+    guard inventory.observesPaneStates(of: key.identity) else { return nil }
+    return paneObservations.paneStates(of: key)
   }
 }

@@ -30,14 +30,21 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     #expect(try await makeOperations(stub).exists(session: name) == false)
   }
 
-  @Test(
-    "server が動いていないことも存否としては false へ畳む",
-    arguments: tmuxServerAbsentStderrs
-  )
-  func reportsMissingServerAsFalse(stderr: String) async throws {
-    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: stderr))
+  @Test("server が動いていないことも存否としては false へ畳む")
+  func reportsMissingServerAsFalse() async throws {
+    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerNotRunningStderr))
 
     #expect(try await makeOperations(stub).exists(session: try sessionName()) == false)
+  }
+
+  @Test("socket が無い場合は session 不在に畳まず serverSocketMissing を投げる")
+  func reportsMissingSocketOnExistenceCheck() async throws {
+    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerSocketMissingStderr))
+    let operations = try makeOperations(stub)
+
+    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
+      try await operations.exists(session: try sessionName())
+    }
   }
 
   @Test(
@@ -90,12 +97,21 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     }
   }
 
-  @Test("server ごと落ちている場合も終了は成功にしない", arguments: tmuxServerAbsentStderrs)
-  func reportsMissingServerOnKill(stderr: String) async throws {
+  @Test(
+    "server の停止と socket の欠落を区別し、終了を成功にしない",
+    arguments: [
+      (tmuxServerNotRunningStderr, TmuxSessionOperationError.serverNotRunning),
+      (tmuxServerSocketMissingStderr, TmuxSessionOperationError.serverSocketMissing),
+    ]
+  )
+  func reportsMissingServerOnKill(
+    stderr: String,
+    expectedError: TmuxSessionOperationError
+  ) async throws {
     let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: stderr))
     let operations = try makeOperations(stub)
 
-    await #expect(throws: TmuxSessionOperationError.serverNotRunning) {
+    await #expect(throws: expectedError) {
       try await operations.kill(session: try sessionName())
     }
   }
@@ -114,7 +130,7 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
         == prefix + ["list-sessions", "-F", "#{session_name}"])
   }
 
-  @Test("server が動いていなければ一覧は空になる", arguments: tmuxServerAbsentStderrs)
+  @Test("server が動いていない場合も socket が無い場合も一覧は空になる", arguments: tmuxServerAbsentStderrs)
   func listsNothingWithoutServer(stderr: String) async throws {
     let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: stderr))
 

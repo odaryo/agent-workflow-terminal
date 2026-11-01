@@ -92,14 +92,20 @@ struct TmuxSessionOperationsCreateTests: TmuxSessionOperationsTestSupport {
   }
 
   @Test(
-    "server が動いていなければ session を作らない",
-    arguments: tmuxServerAbsentStderrs
+    "server の停止と socket の欠落を区別し、session を作らない",
+    arguments: [
+      (tmuxServerNotRunningStderr, TmuxSessionOperationError.serverNotRunning),
+      (tmuxServerSocketMissingStderr, TmuxSessionOperationError.serverSocketMissing),
+    ]
   )
-  func doesNotCreateSessionWithoutServer(stderr: String) async throws {
+  func doesNotCreateSessionWithoutServer(
+    stderr: String,
+    expectedError: TmuxSessionOperationError
+  ) async throws {
     let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: stderr))
     let operations = try makeOperations(stub)
 
-    await #expect(throws: TmuxSessionOperationError.serverNotRunning) {
+    await #expect(throws: expectedError) {
       try await operations.create(
         session: try sessionName(), workingDirectory: workingDirectory)
     }

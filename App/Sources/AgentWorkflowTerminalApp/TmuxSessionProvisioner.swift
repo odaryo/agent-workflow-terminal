@@ -34,7 +34,7 @@ struct TmuxSessionProvisioner: Sendable {
   func sessionNames() async throws(TmuxSessionOperationError) -> [String] {
     do {
       return try await operations.list()
-    } catch .serverNotRunning {
+    } catch .serverNotRunning, .serverSocketMissing {
       return []
     }
   }
@@ -46,7 +46,7 @@ struct TmuxSessionProvisioner: Sendable {
   func terminate(_ key: TerminalSessionKey) async throws(TmuxSessionOperationError) {
     do {
       try await operations.kill(session: TmuxSessionName(key: key))
-    } catch .sessionNotFound, .serverNotRunning {
+    } catch .sessionNotFound, .serverNotRunning, .serverSocketMissing {
       return
     }
   }
@@ -62,7 +62,7 @@ struct TmuxSessionProvisioner: Sendable {
     } catch .sessionAlreadyExists {
       // 設計書 §3.3 の Resume。`exists` で先に分けないのは、`exists` と `create` の間に
       // 他のクライアントが同じ名前を作る窓があり、そこで返るこの値も Resume だからである。
-    } catch .serverNotRunning {
+    } catch .serverNotRunning, .serverSocketMissing {
       return await attachCommandBootstrappingServer(
         session: session, workingDirectory: workingDirectory)
     } catch {
@@ -84,8 +84,9 @@ struct TmuxSessionProvisioner: Sendable {
       + runner.serverScopedArguments(["attach-session", "-t", "=\(session.rawValue)"])
   }
 
-  /// server が動いていないときだけ通る経路。`create` は server を起こさないと決めているので
-  /// (`TmuxSessionOperations.create` の doc)、起こす側をここに置く。
+  /// `create` は server を起こさないと決めているので (`TmuxSessionOperations.create` の doc)、
+  /// 起こす側をここに置く。socket 欠落も従来どおりこの経路へ通すが、生存中の server の
+  /// socket が消えた場合の二重 server は Issue #500 で扱う。
   ///
   /// - Important: **`tmux start-server` では代用できない。** tmux 3.4 は session を1つも持たない
   ///   server を即座に終了させるため、`start-server` は rc=0 を返しても server を残さない
@@ -156,7 +157,7 @@ extension TmuxSessionOperationError {
       設定に失敗した session が残っています。手で `tmux kill-session -t =\(session.rawValue)` \
       してください: 原因 \(cause) / 後始末の失敗 \(cleanupFailure)
       """
-    case .serverNotRunning:
+    case .serverNotRunning, .serverSocketMissing:
       "tmux server が動いていないため、session を用意できません。"
     default:
       "tmux session を用意できません: \(self)"

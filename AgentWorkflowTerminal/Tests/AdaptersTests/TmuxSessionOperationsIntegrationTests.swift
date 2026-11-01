@@ -184,12 +184,14 @@ struct TmuxSessionOperationsIntegrationTests {
   /// socket ファイルを一度も作っていない状態は、tmux を使ったことがないユーザーの初回状態であり、
   /// tmux 3.4 は `no server running on ` ではなく
   /// `error connecting to <path> (No such file or directory)` を返す。
-  @Test("一度も起動していない server では存否が false、一覧が空になる")
-  func foldsNeverStartedServerIntoAbsence() async throws {
+  @Test("一度も起動していない server でも存否は serverSocketMissing を投げ、一覧は空になる")
+  func reportsNeverStartedServerAsMissingSocket() async throws {
     let socketName = uniqueSocketName("never-started")
     let operations = TmuxSessionOperations(runner: try neverStartedRunner(socketName))
 
-    #expect(try await operations.exists(session: try sessionName()) == false)
+    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
+      try await operations.exists(session: try sessionName())
+    }
     #expect(try await operations.list().isEmpty)
     #expect(FileManager.default.fileExists(atPath: socketPath(socketName)) == false)
   }
@@ -199,7 +201,7 @@ struct TmuxSessionOperationsIntegrationTests {
     let socketName = uniqueSocketName("never-created")
     let operations = TmuxSessionOperations(runner: try neverStartedRunner(socketName))
 
-    await #expect(throws: TmuxSessionOperationError.serverNotRunning) {
+    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
       try await operations.create(session: try sessionName(), workingDirectory: "/private/tmp")
     }
     #expect(FileManager.default.fileExists(atPath: socketPath(socketName)) == false)

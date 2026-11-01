@@ -4,11 +4,17 @@ import Testing
 
 @testable import Adapters
 
-/// tmux 3.4 が実際に返す server 不在のメッセージ。socket ファイルの状態で書き分けられる。
-/// 実測: `-L <既に落ちた server の socket>` と `-L <一度も使っていない名前>` を撃って採取。
+/// tmux 3.4 で、終了後に socket が残った server への問い合わせから採取。
+let tmuxServerNotRunningStderr = "no server running on /private/tmp/tmux-501/default\n"
+
+/// tmux 3.4 で、一度も使っていない socket 名への問い合わせから採取。
+/// 同じ文言は生存中の server の socket だけが消えた場合にも出るため、server 不在を断定できない。
+let tmuxServerSocketMissingStderr =
+  "error connecting to /private/tmp/tmux-501/default (No such file or directory)\n"
+
 let tmuxServerAbsentStderrs = [
-  "no server running on /private/tmp/tmux-501/default\n",
-  "error connecting to /private/tmp/tmux-501/default (No such file or directory)\n",
+  tmuxServerNotRunningStderr,
+  tmuxServerSocketMissingStderr,
 ]
 
 /// 同じ `error connecting to ` の前置きを持つが、server 不在ではない失敗 (実測)。

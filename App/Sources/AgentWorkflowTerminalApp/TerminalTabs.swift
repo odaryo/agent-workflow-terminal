@@ -140,7 +140,8 @@ private struct TerminalTabContent: View {
   /// - Important: **終わった理由は名乗らない。** 観測できるのは「端末のプロセスが終わった」
   ///   ことだけで、`detach` なのか最後の pane での `exit` なのかは区別できない
   ///   (どちらも client の終了状態は 0。隔離ソケットで実測、Issue #234)。前者では session が
-  ///   残り、後者では session ごと消えて再 attach は新しい session を作る。区別できない
+  ///   残り、後者では session ごと消える。session が消えていれば、再 attach はこのディレクトリの
+  ///   最後のタブだけ新しい session を作り、それ以外はタブを閉じる。区別できない
   ///   ものを断定して見せない (設計書 §12.3 の `Unknown` と同じ理由)。
   private var exitedOverlay: some View {
     VStack(spacing: 10) {
@@ -148,8 +149,9 @@ private struct TerminalTabContent: View {
       Text("この端末のプロセスが終了しました").font(.headline)
       Text(
         """
-        tmux から detach したか、session が終了しています。再 attach すると session を\
-        用意し直します — 残っていれば同じ session に、消えていれば新しい session になります。
+        tmux から detach したか、session が終了しています。再 attach すると、session が残っていれば\
+        同じ session に繋ぎ直します。消えていれば、このディレクトリの最後のタブなら新しい session を作り、\
+        そうでなければタブを閉じます。
         """
       )
       .foregroundStyle(.secondary)
@@ -157,8 +159,9 @@ private struct TerminalTabContent: View {
       Button("再 attach") {
         // 世代を上げて `.task` を再走させる。`restart()` (同じ argv の再実行) では復帰しない
         // 場合がある — attach の argv は `-A` を持たないので、session が消えていると
-        // `can't find session` で終わる (隔離ソケットで実測、Issue #234)。provisioner を
-        // 通せば、残っていれば Resume、消えていれば §4.2 / §4.4 の保証付きで作り直しになる。
+        // `can't find session` で終わる (隔離ソケットで実測、Issue #234)。
+        // 再準備では、session が消えていれば最後のタブだけ provisioner を通して
+        // §4.2 / §4.4 の保証付きで作り直し、それ以外はタブを閉じる。
         attempt += 1
         preparation = .preparing
       }

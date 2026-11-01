@@ -9,9 +9,13 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// 設計書 §3.3 の「既存 session があれば Resume する」を上位が判断できるよう、成功にも
   /// 一般エラーにも丸めずに返す。
   case sessionAlreadyExists(TmuxSessionName)
-  /// server が動いていない。tmux 3.4 はこれを socket ファイルの状態で2通りに書き分ける
-  /// (`TmuxSessionOperations.isServerAbsent` に実測した文字列がある)。
+  /// tmux 3.4 実測: exit 1 と stderr `no server running on <path>\n`。
   case serverNotRunning
+  /// `error connecting to <path> (No such file or directory)\n` だけでは、一度も起動していない
+  /// server と、socket ファイルだけ消えて生きている server を区別できない。
+  /// Issue #492 の tmux 3.8 実測: `has-session` は rc=1 でも server pid は生存し、
+  /// USR1 で socket を作り直すと rc=0 に戻った。session 不在と断定しないために分ける。
+  case serverSocketMissing
   /// tmux は pane をそこへ入れられなくても exit 0 で session を作り、cwd を `$HOME` へ落とす
   /// (tmux 3.4 実測)。族の輪郭は「ディレクトリとして chdir できない値すべて」であって、閉じた
   /// 列挙は無い。実測した代表例は、不在・通常ファイル・**chdir できない権限**
@@ -123,8 +127,8 @@ public struct TmuxSessionOperations: Sendable {
     self.canEnterDirectory = canEnterDirectory
   }
 
-  /// - Returns: server が動いていない場合も `false`。§3.3 で見たいのは「Resume できる session が
-  ///   あるか」だけで、server の生死は同じ答えに畳めるため。分類できない失敗は投げる。
+  /// - Returns: server の停止を確認できた場合も `false`。socket が無いだけでは session の
+  ///   不在を断定できないため、`serverSocketMissing` は投げる (Issue #492)。
   public func exists(session: TmuxSessionName) async throws(TmuxSessionOperationError) -> Bool {
     do {
       return try await probe(session) == .present
@@ -148,7 +152,8 @@ public struct TmuxSessionOperations: Sendable {
   /// しか効かない (実測)。そのため設定は最初の window を捨てた**あと**、残った window に対して
   /// 行う。順序を入れ替えると、捨てる window に設定して消える。
   ///
-  /// - Important: **server が動いていなければ session を作らず `serverNotRunning` を返す。**
+  /// - Important: **server の停止または socket 欠落なら session を作らず、それぞれ
+  ///   `serverNotRunning` / `serverSocketMissing` を返す。**
   ///   起動できないからではなく、起動してしまうと `TmuxRunner` が渡す限定環境
   ///   (`LC_ALL=C` と `HOME` / `PATH` / `TMUX_TMPDIR` だけ) がユーザーの既定 server の
   ///   global environment になり、ユーザー自身が素の端末で作る pane まで巻き込むからである。
@@ -265,7 +270,8 @@ public struct TmuxSessionOperations: Sendable {
   }
 
   /// - Note: 「もう無かった」を成功へ丸めず `sessionNotFound` で返す。server ごと落ちていた
-  ///   場合も同様に `serverNotRunning` を返す。どちらを成功と見なすかは Close の選択肢
+  ///   場合は `serverNotRunning`、socket が無い場合は `serverSocketMissing` を返す。
+  ///   どれを成功と見なすかは Close の選択肢
   ///   (§3.4) ごとに違うため、ここでは決めない。
   public func kill(session: TmuxSessionName) async throws(TmuxSessionOperationError) {
     _ = try await run(["kill-session", "-t", "=\(session.rawValue)"], session: session)
@@ -277,14 +283,15 @@ public struct TmuxSessionOperations: Sendable {
   /// 作れるので、prefix はアプリの管理下であることの証明にならない。どれが管理下かは、安定 ID
   /// から導出した名前 (`TmuxSessionName`) と突き合わせて上位が判断する。
   ///
-  /// - Returns: server が動いていなければ空配列。session が1つも無いことと同じ答えになるため。
+  /// - Returns: server の停止または socket 欠落なら空配列。socket 欠落時も従来の一覧の
+  ///   契約を維持するが、session 不在の証明にはならない (Issue #492)。
   public func list() async throws(TmuxSessionOperationError) -> [String] {
     do {
       let result = try await run(["list-sessions", "-F", "#{session_name}"], session: nil)
       return result.stdout.split(separator: "\n").map(String.init)
     } catch {
       switch error {
-      case .serverNotRunning: return []
+      case .serverNotRunning, .serverSocketMissing: return []
       default: throw error
       }
     }
@@ -295,7 +302,7 @@ public struct TmuxSessionOperations: Sendable {
     case absent
   }
 
-  /// server が動いていなければ `serverNotRunning` を投げる。`exists` は畳み、`create` は畳まない。
+  /// server の停止と socket 欠落は投げ分ける。`exists` が畳むのは停止だけで、`create` は畳まない。
   private func probe(
     _ session: TmuxSessionName
   ) async throws(TmuxSessionOperationError) -> SessionPresence {
@@ -323,12 +330,10 @@ public struct TmuxSessionOperations: Sendable {
         messageTarget: Self.messageTarget(of: target)
       )
     } catch {
-      // 対象が既に消えているのと、server ごと落ちて session も道連れになったのは、後始末の目的
-      // としては同じ。後者を `leftoverSession` にすると「§4.2 / §4.4 を満たさない session が
-      // 残っている」という嘘の申告になる (実測: server 停止後の `kill-session` は
-      // `no server running on <path>` / `error connecting to <path> (...)` を返し、session は無い)。
+      // session 不在と server 停止に加え、socket 欠落も従来どおり原因だけを返す (Issue #492)。
+      // socket 欠落は session 不在の証明ではないが、ここでは既存の後始末の契約を維持する。
       switch error {
-      case .sessionNotFound, .serverNotRunning: throw cause
+      case .sessionNotFound, .serverNotRunning, .serverSocketMissing: throw cause
       default: throw .leftoverSession(session, cause: cause, cleanupFailure: error)
       }
     }
@@ -357,8 +362,11 @@ public struct TmuxSessionOperations: Sendable {
     guard case .commandFailed(let exitCode, _, let stderr) = error, exitCode == 1 else {
       return .tmux(error)
     }
-    if isServerAbsent(stderr) {
+    if isServerNotRunning(stderr) {
       return .serverNotRunning
+    }
+    if isServerSocketMissing(stderr) {
+      return .serverSocketMissing
     }
     guard let session, let target else {
       return .tmux(error)
@@ -372,20 +380,15 @@ public struct TmuxSessionOperations: Sendable {
     }
   }
 
-  /// tmux 3.4 は server 不在を socket ファイルの状態で2通りに書き分ける (実測)。
-  ///
-  /// - 起動後に終了して socket が残っている: `no server running on <path>\n`
-  /// - 一度も起動しておらず socket が無い: `error connecting to <path> (No such file or directory)\n`
-  ///
-  /// 後者は tmux を使ったことがないユーザーの初回状態であり、§3.3 の入口の正常系である。
-  /// ただし `error connecting to ` の前置きは server 不在以外にも使われるため、末尾の errno まで
-  /// 見て畳む。畳んではいけない例 (いずれも実測):
+  private static func isServerNotRunning(_ stderr: String) -> Bool {
+    stderr.hasPrefix("no server running on ")
+  }
+
+  /// `error connecting to ` の前置きだけでは socket 欠落にも分類できないため、末尾の errno まで
+  /// 見る。分類してはいけない例 (tmux 3.4 実測):
   /// `... (File name too long)` / `... (Socket operation on non-socket)`
-  private static func isServerAbsent(_ stderr: String) -> Bool {
-    if stderr.hasPrefix("no server running on ") {
-      return true
-    }
-    return stderr.hasPrefix("error connecting to ")
+  private static func isServerSocketMissing(_ stderr: String) -> Bool {
+    stderr.hasPrefix("error connecting to ")
       && stderr.hasSuffix(" (No such file or directory)\n")
   }
 
@@ -402,7 +405,7 @@ public struct TmuxSessionOperations: Sendable {
   ///   同じ扱いにはできない。
   /// - 末尾が `;`: argv がそこでコマンド列として切れ、`new-session` は exit 1 で session を作らない。
   ///   escape しても変わらない。値の途中の `;` は残るので弾かない。stderr は server の状態で変わり、
-  ///   server があれば `unknown command: -P`、無ければ `isServerAbsent` が畳む server 不在の
+  ///   server があれば `unknown command: -P`、無ければ `mapFailure` が分類する接続失敗の
   ///   メッセージになる (いずれも実測)。`create` は事前拒否と server guard の後ろなので到達しない。
   /// - `#[` を含む: `formatEscaped` が効かない唯一の入力 (理由はそちらの doc コメント)。
   ///   代償として、`#[` を含む名前の worktree は session を持てない。`mkdir '#[fg=red]'` は

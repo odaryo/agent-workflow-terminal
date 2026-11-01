@@ -133,7 +133,8 @@ public struct PaneNotificationPlanner: Sendable {
 
   /// 基準を取れない session を待つ上限。
   public static let summaryMaximumDelay = Duration.seconds(30)
-  /// pane 一覧の取得間隔2秒をまたぐ移動を引き継ぐため、その数倍を待つ (#494)。
+  /// pane 一覧の取得間隔2秒をまたぐ移動を引き継ぐため、その数倍を待つ (#494)。server の再起動で振り直された
+  /// 同じ ID も引き継ぐが、`pane_pid` で区別しない: 起きる条件が狭く、害は通知1回の欠落に留まる (#507)。
   public static let paneHandoffGrace = Duration.seconds(10)
 
   private enum KnownState: Sendable, Hashable {

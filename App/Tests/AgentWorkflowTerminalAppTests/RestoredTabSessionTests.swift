@@ -188,10 +188,10 @@ private struct SessionExistenceRunner: ProcessRunning {
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
     outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
-    switch exists {
-    case true: .init(exitCode: 0, stdout: "", stderr: "")
-    case false: .init(exitCode: 1, stdout: "", stderr: "no server running on /tmp/awt-test\n")
-    case nil: .init(exitCode: 1, stdout: "", stderr: "permission denied\n")
-    }
+    // Swift 6.1 (CI) は `Bool?` の `true` / `false` / `nil` の switch を網羅と認めない。
+    guard let exists else { return .init(exitCode: 1, stdout: "", stderr: "permission denied\n") }
+    return exists
+      ? .init(exitCode: 0, stdout: "", stderr: "")
+      : .init(exitCode: 1, stdout: "", stderr: "no server running on /tmp/awt-test\n")
   }
 }

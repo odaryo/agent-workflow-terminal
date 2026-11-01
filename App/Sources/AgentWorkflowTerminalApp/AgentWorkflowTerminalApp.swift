@@ -169,12 +169,14 @@ struct ProjectView: View {
           }
           .id(key)
           .overlay {
-            ToolbarContextMenu(items: [
-              .action(title: "新規タブ", isEnabled: true) { openNewTab(in: key.identity) },
-              .action(title: "タブを閉じる", isEnabled: model.canCloseTab(key)) {
-                model.requestCloseTab(key)
-              },
-            ])
+            TabSummaryMenu(
+              model: model,
+              items: [
+                .action(title: "新規タブ", isEnabled: true) { openNewTab(in: key.identity) },
+                .action(title: "タブを閉じる", isEnabled: model.canCloseTab(key)) {
+                  model.requestCloseTab(key)
+                },
+              ])
           }
           if key == model.tabLayout.tabs(in: key.identity).last, !model.tabbedWorktrees.isEmpty {
             Divider().frame(height: 22).padding(.horizontal, 2)
@@ -182,6 +184,7 @@ struct ProjectView: View {
         } else if let worktree = model.tabbedWorktrees.first(where: { $0.identity == key.identity })
         {
           WorktreeTab(
+            model: model,
             worktree: worktree,
             index: key.index,
             selected: model.selectedTab == key,
@@ -260,6 +263,7 @@ private struct InactiveWorktreeMenu: View {
 }
 
 private struct WorktreeTab: View {
+  let model: AppModel
   let worktree: TaskWorktree
   let index: Int
   let selected: Bool
@@ -277,23 +281,27 @@ private struct WorktreeTab: View {
   var body: some View {
     if worktree.detected.isReachable {
       tab.overlay {
-        ToolbarContextMenu(items: [
-          .action(title: "新規タブ", isEnabled: true) { openNewTab() },
-          .action(title: "タブを閉じる", isEnabled: canCloseTab) { closeTab() },
-          .separator,
-          .action(title: "Active にする", isEnabled: worktree.activation != .active) {
-            setActivation(.active)
-          },
-          // Inactive 化は Close の選択肢1からだけ行う。§3.4 の拒否 (detached HEAD・作業途中) は
-          // 選択肢1にも掛かり、直接 Inactive にする項目はその抜け道になる。
-          .action(title: "Close…", isEnabled: true) { requestClose() },
-        ])
+        TabSummaryMenu(
+          model: model,
+          items: [
+            .action(title: "新規タブ", isEnabled: true) { openNewTab() },
+            .action(title: "タブを閉じる", isEnabled: canCloseTab) { closeTab() },
+            .separator,
+            .action(title: "Active にする", isEnabled: worktree.activation != .active) {
+              setActivation(.active)
+            },
+            // Inactive 化は Close の選択肢1からだけ行う。§3.4 の拒否 (detached HEAD・作業途中) は
+            // 選択肢1にも掛かり、直接 Inactive にする項目はその抜け道になる。
+            .action(title: "Close…", isEnabled: true) { requestClose() },
+          ])
       }
     } else {
       tab.overlay {
-        ToolbarContextMenu(items: [
-          .action(title: "タブを閉じる", isEnabled: canCloseTab) { closeTab() }
-        ])
+        TabSummaryMenu(
+          model: model,
+          items: [
+            .action(title: "タブを閉じる", isEnabled: canCloseTab) { closeTab() }
+          ])
       }
     }
   }

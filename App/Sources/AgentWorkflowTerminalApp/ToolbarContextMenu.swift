@@ -8,6 +8,17 @@ struct ToolbarContextMenu: NSViewRepresentable {
   enum Item {
     case action(title: String, isEnabled: Bool, perform: @MainActor @Sendable () -> Void)
     case separator
+    case heading(title: String)
+    case entry(Entry)
+  }
+
+  struct Entry {
+    let title: String
+    let symbol: (name: String, color: NSColor)?
+    let accessibilityLabel: String
+    let indentationLevel: Int
+    let isChecked: Bool
+    let perform: @MainActor @Sendable () -> Void
   }
 
   let items: [Item]
@@ -77,6 +88,12 @@ struct ToolbarContextMenu: NSViewRepresentable {
         switch item {
         case .separator:
           menu.addItem(.separator())
+        case .heading(let title):
+          let menuItem = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+          menuItem.isEnabled = false
+          menu.addItem(menuItem)
+        case .entry(let entry):
+          menu.addItem(makeEntry(entry))
         case .action(let title, let isEnabled, let perform):
           let target = ActionTarget(perform: perform)
           let menuItem = NSMenuItem(
@@ -88,6 +105,23 @@ struct ToolbarContextMenu: NSViewRepresentable {
         }
       }
       return menu
+    }
+
+    private func makeEntry(_ entry: Entry) -> NSMenuItem {
+      let target = ActionTarget(perform: entry.perform)
+      let menuItem = NSMenuItem(
+        title: entry.title, action: #selector(ActionTarget.invoke), keyEquivalent: "")
+      menuItem.target = target
+      menuItem.indentationLevel = entry.indentationLevel
+      menuItem.state = entry.isChecked ? .on : .off
+      menuItem.setAccessibilityLabel(entry.accessibilityLabel)
+      if let symbol = entry.symbol {
+        menuItem.image = NSImage(
+          systemSymbolName: symbol.name, accessibilityDescription: nil
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(paletteColors: [symbol.color]))
+      }
+      actionTargets.append(target)
+      return menuItem
     }
   }
 

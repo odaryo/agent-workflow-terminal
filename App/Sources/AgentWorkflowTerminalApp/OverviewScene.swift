@@ -86,10 +86,10 @@ private struct OverviewProjectSection: View {
     let overview = makeAgentPaneOverview([input]).first
     Section(model.project.displayName) {
       ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
-        worktreeRows(projectRoot, title: sessionTitle(projectRoot.session))
+        worktreeRows(projectRoot, title: model.sessionTitle(projectRoot.session))
       }
       ForEach(overview?.tasks ?? [], id: \.session) { task in
-        worktreeRows(task, title: sessionTitle(task.session))
+        worktreeRows(task, title: model.sessionTitle(task.session))
       }
     }
   }
@@ -119,22 +119,9 @@ private struct OverviewProjectSection: View {
     OverviewProjectInput(
       project: model.project.commonDirectory,
       projectRootSessions: model.tabKeys.filter { $0.identity == model.projectRoot?.identity }
-        .compactMap { worktreeInput($0) },
+        .compactMap { model.worktreeInput($0) },
       tasks: model.tabKeys.filter { $0.identity != model.projectRoot?.identity }
-        .compactMap { worktreeInput($0) })
-  }
-
-  private func sessionTitle(_ key: TerminalSessionKey) -> String {
-    let title = model.worktreeTitle(of: key.identity)
-    return key.index > 1 ? "\(title) \(key.index)" : title
-  }
-
-  private func worktreeInput(_ key: TerminalSessionKey) -> OverviewWorktreeInput? {
-    guard model.inventory.observesPaneStates(of: key.identity), let observed = store.observed[key]
-    else { return nil }
-    return OverviewWorktreeInput(
-      session: key, paneStates: observed.displayStates, details: observed.details,
-      mainPane: model.mainPane(of: key.identity))
+        .compactMap { model.worktreeInput($0) })
   }
 }
 

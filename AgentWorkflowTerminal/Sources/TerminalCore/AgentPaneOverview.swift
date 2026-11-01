@@ -122,6 +122,19 @@ public struct OverviewProject: Sendable, Hashable {
   public var projectRoot: OverviewWorktree? { projectRootSessions.first }
 }
 
+public struct TabSummary: Sendable, Hashable {
+  public let session: TerminalSessionKey
+  public let rows: [OverviewRow]
+}
+
+/// 入力はタブ列の順で渡し、状態によって並べ替えない (設計書 §5.3)。
+public func makeTabSummaries(_ tabs: [OverviewWorktreeInput]) -> [TabSummary] {
+  tabs.map { input in
+    let overview = overviewWorktree(input)
+    return TabSummary(session: overview.session, rows: overview.rows)
+  }
+}
+
 /// 設計書 §13 の並び順。
 ///
 /// - Project は入力 (登録) の順で固定する。並べ替えると、見ている場所が状態の変化で動く。

@@ -335,8 +335,9 @@ final class AppModel: ObservableObject {
     do {
       names = try await sessions?.sessionNames() ?? []
     } catch {
+      // 空の一覧で並べ直すとタブが全部消える。取得できなかったときは今のタブを残す (Issue #500)。
       warning = "tmux の session の一覧を取得できないため、タブを復元できませんでした: \(error)"
-      names = []
+      return
     }
     guard
       worktrees.contains(where: {

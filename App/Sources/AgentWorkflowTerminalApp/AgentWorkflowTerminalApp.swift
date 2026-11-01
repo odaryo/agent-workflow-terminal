@@ -123,11 +123,17 @@ struct ProjectView: View {
         }
       }
     }
+    .frame(minWidth: ViewerDrawerMetrics.minimumWindowWidth(for: model.viewerDrawerLayout))
+    .onAppear {
+      var restored = ViewerArrangementPreferences.restoredLayout()
+      if let content = model.viewerDrawerLayout.content { restored.open(content) }
+      model.viewerDrawerLayout = restored
+    }
     .onReceive(model.paneObservations.$terminalFocusRequest.dropFirst()) { _ in
       keyboardFocus.requestFocus()
     }
     .onChange(of: model.selectedIdentity) { _, _ in
-      keyboardFocus.tabSelectionChanged(drawerLayout: model.viewerDrawerLayout)
+      keyboardFocus.tabSelectionChanged()
     }
     .onChange(of: model.viewerDrawerLayout) { old, new in
       keyboardFocus.drawerLayoutChanged(from: old, to: new)
@@ -148,12 +154,26 @@ private struct ViewerDrawerToolbar: View {
       .menuStyle(.borderlessButton)
 
       if layout.isOpen {
-        Menu("表示方法", systemImage: "rectangle.on.rectangle") {
-          Button("並べて表示") { layout.setPresentation(.inline) }
-          Button("オーバーレイ") { layout.setPresentation(.overlay) }
-          Button("フルスクリーン") { layout.setPresentation(.fullscreen) }
+        if let content = layout.content, let arrangement = layout.arrangement(for: content) {
+          Picker(
+            "中身の並び",
+            selection: Binding(
+              get: { arrangement },
+              set: { layout.setArrangement($0, for: content) })
+          ) {
+            Label("左右", systemImage: "rectangle.split.2x1")
+              .accessibilityLabel("左右に並べる")
+              .help("左右に並べる")
+              .tag(ViewerContentArrangement.sideBySide)
+            Label("上下", systemImage: "rectangle.split.1x2")
+              .accessibilityLabel("上下に並べる")
+              .help("上下に並べる")
+              .tag(ViewerContentArrangement.stacked)
+          }
+          .pickerStyle(.segmented)
+          .labelsHidden()
+          .fixedSize()
         }
-        .menuStyle(.borderlessButton)
 
         Button("Viewer を閉じる", systemImage: "xmark") { layout.close() }
           .labelStyle(.iconOnly)

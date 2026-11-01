@@ -142,7 +142,7 @@ struct ProjectView: View {
     ToolbarItem(placement: .navigation) {
       HStack(spacing: 0) {
         ProjectTabStrip { tabs }
-        NewTaskButton(isDisabled: model.projectRoot == nil, action: startNewTask)
+        NewTaskButton(isDisabled: model.projectRoot == nil, action: openNewProjectRootTab)
         InactiveWorktreeMenu(
           worktrees: model.inactiveWorktrees,
           activate: { model.setActivation(.active, of: $0) }
@@ -158,12 +158,12 @@ struct ProjectView: View {
     HStack(spacing: 4) {
       ForEach(model.tabKeys, id: \.self) { key in
         if key.identity == model.projectRoot?.identity {
-          ProjectRootTab(selected: model.selectedTab == key) {
+          ProjectRootTab(index: key.index, selected: model.selectedTab == key) {
             model.select(key)
           }
           .overlay {
             ToolbarContextMenu(items: [
-              .action(title: NewTaskMenuItem.title, isEnabled: true, perform: startNewTask)
+              .action(title: "新規タブ", isEnabled: true) { openNewTab(in: key.identity) }
             ])
           }
           if key == model.tabLayout.tabs(in: key.identity).last, !model.tabbedWorktrees.isEmpty {
@@ -173,13 +173,13 @@ struct ProjectView: View {
         {
           WorktreeTab(
             worktree: worktree,
+            index: key.index,
             selected: model.selectedTab == key,
             agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
             select: { model.select(key) },
             setActivation: { model.setActivation($0, of: worktree.identity) },
             requestClose: { model.requestClose(of: worktree.identity) },
-            startNewTask: startNewTask,
-            isNewTaskDisabled: model.projectRoot == nil
+            openNewTab: { openNewTab(in: key.identity) }
           )
         }
       }
@@ -189,12 +189,13 @@ struct ProjectView: View {
 }
 
 private struct ProjectRootTab: View {
+  let index: Int
   let selected: Bool
   let action: () -> Void
 
   var body: some View {
     Button(action: action) {
-      Label("Project Root", systemImage: "shippingbox")
+      Label(index > 1 ? "Project Root \(index)" : "Project Root", systemImage: "shippingbox")
         .labelStyle(.titleAndIcon)
         .fontWeight(.medium)
         .padding(.horizontal, 8)
@@ -247,6 +248,7 @@ private struct InactiveWorktreeMenu: View {
 
 private struct WorktreeTab: View {
   let worktree: TaskWorktree
+  let index: Int
   let selected: Bool
   /// `AppModel.paneStates` を直に受けない。観測の可否を判定する経路を1本にし、タブ側と
   /// ドロワー側で食い違わないようにするため (Issue #237)。
@@ -254,8 +256,7 @@ private struct WorktreeTab: View {
   let select: () -> Void
   let setActivation: (WorktreeActivation) -> Void
   let requestClose: () -> Void
-  let startNewTask: () -> Void
-  let isNewTaskDisabled: Bool
+  let openNewTab: () -> Void
   @State private var representativeState: WorktreeRepresentativeState?
 
   var body: some View {
@@ -264,9 +265,7 @@ private struct WorktreeTab: View {
     if worktree.detected.isReachable {
       tab.overlay {
         ToolbarContextMenu(items: [
-          .action(
-            title: NewTaskMenuItem.title, isEnabled: !isNewTaskDisabled
-          ) { startNewTask() },
+          .action(title: "新規タブ", isEnabled: true, perform: openNewTab),
           .separator,
           .action(title: "Active にする", isEnabled: worktree.activation != .active) {
             setActivation(.active)
@@ -285,7 +284,7 @@ private struct WorktreeTab: View {
     Button(action: select) {
       HStack(spacing: 6) {
         AgentStateIcon(presentation: statePresentation)
-        Text(worktree.detected.tabName)
+        Text(tabName)
           .foregroundStyle(worktree.activation == .active ? Color.primary : Color.secondary)
         Text(stateLabel).foregroundStyle(.secondary)
       }
@@ -301,7 +300,7 @@ private struct WorktreeTab: View {
     }
     .buttonStyle(.plain)
     // 記号の label (状態名、§5.3) を合成に任せず明示する。Overview の行では合成されなかった。
-    .accessibilityLabel("\(worktree.detected.tabName) \(statePresentation.label)")
+    .accessibilityLabel("\(tabName) \(statePresentation.label)")
     // 到達不能な worktree は一覧から消さずに残す (設計書 §3.2)。消すと安定 ID が消失に見え、
     // 復帰したときにユーザーが意図した Active/Inactive が失われる。
     .disabled(!worktree.detected.isReachable)
@@ -314,6 +313,10 @@ private struct WorktreeTab: View {
         representativeState = state
       }
     }
+  }
+
+  private var tabName: String {
+    index > 1 ? "\(worktree.detected.tabName) \(index)" : worktree.detected.tabName
   }
 
   private var stateLabel: String {

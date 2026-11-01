@@ -31,6 +31,14 @@ struct TmuxSessionProvisioner: Sendable {
     self.tmuxExecutable = tmuxExecutable
   }
 
+  func sessionNames() async throws(TmuxSessionOperationError) -> [String] {
+    do {
+      return try await operations.list()
+    } catch .serverNotRunning {
+      return []
+    }
+  }
+
   /// - Returns: 成功時は surface へ渡す attach の argv。
   func attachCommand(
     for key: TerminalSessionKey,

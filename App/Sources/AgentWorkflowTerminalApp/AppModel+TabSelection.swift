@@ -11,13 +11,16 @@ extension AppModel {
   /// Active 化そのものは open/attach を伴わず、session の用意はタブを選んだ時点に留める
   /// (§3.3: session が無いときに Terminal が黙って作らない)。
   func select(_ key: TerminalSessionKey) {
-    if key.identity != projectRoot?.identity {
-      guard let worktree = worktrees.first(where: { $0.identity == key.identity }),
-        worktree.activation == .active, worktree.detected.isReachable
-      else { return }
-    }
+    guard canOpenTab(in: key.identity) else { return }
     selectedTab = key
     openedTabs.insert(key)
+  }
+
+  func canOpenTab(in identity: WorktreeIdentity) -> Bool {
+    if identity == projectRoot?.identity { return true }
+    return worktrees.contains {
+      $0.identity == identity && $0.activation == .active && $0.detected.isReachable
+    }
   }
 
   func select(_ worktree: TaskWorktree) {

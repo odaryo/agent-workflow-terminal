@@ -198,6 +198,20 @@ final class AppModel: ObservableObject {
       directories: [projectRoot?.identity].compactMap { $0 } + tabbedWorktrees.map(\.identity))
   }
 
+  func selectNewTab(in identity: WorktreeIdentity, existingSessionNames: [String]) {
+    guard canOpenTab(in: identity) else { return }
+    guard let key = tabLayout.addTab(in: identity, existingSessionNames: existingSessionNames)
+    else {
+      reportTabOpeningFailure("タブ番号の上限 (9999) に達したため、新しいタブを開けません。")
+      return
+    }
+    select(key)
+  }
+
+  func reportTabOpeningFailure(_ detail: String) {
+    warning = detail
+  }
+
   func removeTabs(in identity: WorktreeIdentity) {
     for key in tabLayout.tabs(in: identity) { tabLayout.removeTab(key) }
   }

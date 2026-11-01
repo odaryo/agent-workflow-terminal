@@ -21,6 +21,7 @@ struct AgentWorkflowTerminalApp: App {
     // 複製できる形にして壊れた状態で開けるようにはしない (Issue #238 / #372)。
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
+        .modifier(HiddenWindowTitle())
         .frame(minWidth: 480, minHeight: 320)
     }
     .defaultSize(width: 900, height: 560)
@@ -46,6 +47,17 @@ struct AgentWorkflowTerminalApp: App {
   }
 }
 
+private struct HiddenWindowTitle: ViewModifier {
+  @ViewBuilder
+  func body(content: Content) -> some View {
+    if #available(macOS 15, *) {
+      content.toolbar(removing: .title)
+    } else {
+      content
+    }
+  }
+}
+
 struct ProjectView: View {
   @ObservedObject var model: AppModel
   @StateObject var keyboardFocus = TerminalKeyboardFocus()
@@ -60,48 +72,6 @@ struct ProjectView: View {
       // 端末が潰れないのは、`WarningBar` がどちらも1行に丸めているためである。
       if let scanFailureWarning = model.scanFailureWarning {
         WarningBar(text: scanFailureWarning) { model.dismissScanFailureWarning() }
-        Divider()
-      }
-      if model.didCompleteInitialScan || model.projectRoot != nil || !model.worktrees.isEmpty {
-        HStack(spacing: 0) {
-          ScrollView(.horizontal) {
-            // `LazyHStack` にしない。Active タブの代表状態は画面外でも観測し続ける必要があり
-            // (Needs Attention を色で知らせる)、lazy にすると観測の有無がスクロール位置で
-            // 変わる。対象が Active だけに絞られたので、観測の数はタブの数を超えない。
-            HStack(spacing: 4) {
-              if let projectRoot = model.projectRoot {
-                ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
-                  model.selectProjectRoot()
-                }
-                .contextMenu { NewTaskMenuItem(isDisabled: false, action: startNewTask) }
-                if !model.tabbedWorktrees.isEmpty {
-                  Divider().frame(height: 22).padding(.horizontal, 2)
-                }
-              }
-              ForEach(model.tabbedWorktrees, id: \.identity) { worktree in
-                WorktreeTab(
-                  worktree: worktree,
-                  selected: model.selectedIdentity == worktree.identity,
-                  agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
-                  select: { model.select(worktree) },
-                  setActivation: { model.setActivation($0, of: worktree.identity) },
-                  requestClose: { model.requestClose(of: worktree.identity) },
-                  startNewTask: startNewTask,
-                  isNewTaskDisabled: model.projectRoot == nil
-                )
-              }
-            }
-            .padding(6)
-          }
-          .scrollIndicators(.hidden)
-          NewTaskButton(isDisabled: model.projectRoot == nil, action: startNewTask)
-          InactiveWorktreeMenu(
-            worktrees: model.inactiveWorktrees,
-            activate: { model.setActivation(.active, of: $0) }
-          )
-          ViewerDrawerToolbar(layout: $model.viewerDrawerLayout)
-            .padding(.trailing, 6)
-        }
         Divider()
       }
       WorktreeClosePanelHost(closing: model.closing)
@@ -123,6 +93,18 @@ struct ProjectView: View {
         }
       }
     }
+    .toolbar {
+      if model.didCompleteInitialScan || model.projectRoot != nil || !model.worktrees.isEmpty {
+        if #available(macOS 26, *) {
+          taskTabsToolbar.sharedBackgroundVisibility(.hidden)
+        } else {
+          taskTabsToolbar
+        }
+        ToolbarItem(placement: .primaryAction) {
+          ViewerDrawerToolbar(layout: $model.viewerDrawerLayout)
+        }
+      }
+    }
     .onReceive(model.paneObservations.$terminalFocusRequest.dropFirst()) { _ in
       keyboardFocus.requestFocus()
     }
@@ -132,6 +114,49 @@ struct ProjectView: View {
     .onChange(of: model.viewerDrawerLayout) { old, new in
       keyboardFocus.drawerLayoutChanged(from: old, to: new)
     }
+  }
+
+  private var taskTabsToolbar: some ToolbarContent {
+    ToolbarItem(placement: .navigation) {
+      HStack(spacing: 0) {
+        ProjectTabStrip { tabs }
+        NewTaskButton(isDisabled: model.projectRoot == nil, action: startNewTask)
+        InactiveWorktreeMenu(
+          worktrees: model.inactiveWorktrees,
+          activate: { model.setActivation(.active, of: $0) }
+        )
+      }
+    }
+  }
+
+  private var tabs: some View {
+    // `LazyHStack` にしない。Active タブの代表状態は画面外でも観測し続ける必要があり
+    // (Needs Attention を色で知らせる)、lazy にすると観測の有無がスクロール位置で
+    // 変わる。対象が Active だけに絞られたので、観測の数はタブの数を超えない。
+    HStack(spacing: 4) {
+      if let projectRoot = model.projectRoot {
+        ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
+          model.selectProjectRoot()
+        }
+        .contextMenu { NewTaskMenuItem(isDisabled: false, action: startNewTask) }
+        if !model.tabbedWorktrees.isEmpty {
+          Divider().frame(height: 22).padding(.horizontal, 2)
+        }
+      }
+      ForEach(model.tabbedWorktrees, id: \.identity) { worktree in
+        WorktreeTab(
+          worktree: worktree,
+          selected: model.selectedIdentity == worktree.identity,
+          agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
+          select: { model.select(worktree) },
+          setActivation: { model.setActivation($0, of: worktree.identity) },
+          requestClose: { model.requestClose(of: worktree.identity) },
+          startNewTask: startNewTask,
+          isNewTaskDisabled: model.projectRoot == nil
+        )
+      }
+    }
+    .padding(6)
   }
 }
 

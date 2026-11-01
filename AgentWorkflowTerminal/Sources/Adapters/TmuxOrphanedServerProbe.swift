@@ -35,7 +35,7 @@ public struct TmuxOrphanedServerProbe: Sendable {
   public func probe(socketPath: String) async -> TmuxOrphanedServerProbeResult {
     do {
       let result = try await runner.run(
-        executableURL: executable, arguments: ["-U", "-a", "-c", "tmux", "-F", "pn"],
+        executableURL: executable, arguments: ["-w", "-U", "-a", "-c", "tmux", "-F", "pn"],
         environment: ["LC_ALL": "C"], timeout: timeout)
       if result.exitCode == 0 {
         let processIDs = LsofUnixSocketList.processIDs(listening: socketPath, in: result.stdout)
@@ -43,6 +43,8 @@ public struct TmuxOrphanedServerProbe: Sendable {
         return absenceUnlessEscaped(socketPath)
       }
       // lsof はどのエラーでも exit 1 を返すので、stderr のある exit 1 は「一致が無い」と区別できない。
+      // 照会と無関係な警告 (応答しないマウントの stat 失敗など) でここに落ちないよう `-w` で警告を
+      // 抑える。`-w` でも不正な引数などの本物のエラーは stderr に残る (lsof 4.91 で計測、#500)。
       if result.exitCode == 1, result.stdout.isEmpty, result.stderr.isEmpty {
         return absenceUnlessEscaped(socketPath)
       }

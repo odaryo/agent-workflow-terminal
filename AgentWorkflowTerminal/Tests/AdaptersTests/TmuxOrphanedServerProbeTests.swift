@@ -14,7 +14,7 @@ struct TmuxOrphanedServerProbeTests {
       await runner.invocations == [
         .init(
           executableURL: URL(fileURLWithPath: "/usr/sbin/lsof"),
-          arguments: ["-U", "-a", "-c", "tmux", "-F", "pn"], timeout: .seconds(3))
+          arguments: ["-w", "-U", "-a", "-c", "tmux", "-F", "pn"], timeout: .seconds(3))
       ])
   }
 

@@ -59,6 +59,10 @@ printf '%s\n' 'AgentWorkflowTerminal/Sources/TerminalCore/Example.swift' >"$work
 printf '%s\n' 'Spikes/gate1/Example.swift' >"$work_dir/spikes.txt"
 expect_rc "$DETECTOR" 1 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/swift.txt" '実物 ci.yml: Swift'
 expect_rc "$DETECTOR" 0 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/spikes.txt" '実物 ci.yml: Spikes'
+printf '%s\n' 'docs/roadmap.md' 'CLAUDE.md' '.claude/agents/reviewer.md' >"$work_dir/docs.txt"
+printf '%s\n' 'docs/roadmap.md' '.claude/settings.json' >"$work_dir/settings.txt"
+expect_rc "$DETECTOR" 0 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/docs.txt" '実物 ci.yml: docs と md'
+expect_rc "$DETECTOR" 1 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/settings.txt" '実物 ci.yml: settings.json を含む'
 
 # 構文エラーを変異の検出成功に数えず、正常に動く複製の規則の違いで失敗することを確かめる。
 python3 - "$DETECTOR" "$work_dir/mutant.py" <<'PY'

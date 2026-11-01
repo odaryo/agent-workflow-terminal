@@ -67,6 +67,81 @@ struct WorktreeCloseOrphanedServerTests {
     #expect(await runner.invocations.count == 1)
   }
 
+  @Test("一覧が socket 欠落を投げても、probe が absent なら番号1の終了へ進んで worktree を削除する")
+  func removesWorktreeWhenListReportsMissingSocketOfAbsentServer() async throws {
+    let runner = OrphanedServerRunnerStub(result: stubFailure(stderr: ""))
+    let harness = try listFailingHarness(runner: runner)
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
+
+    #expect(outcome.failure == nil)
+    #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
+    #expect(await runner.invocations.count == 1)
+    #expect(await killSessionCount(harness) == 1)
+    #expect(
+      await harness.git.repositoryInvocations.map(\.arguments)
+        == [gitArgv("worktree", "remove", "--", "/repo/wt")])
+  }
+
+  @Test("一覧が socket 欠落を投げ、取り残された server があれば、session の終了も削除も撃たずに失敗する")
+  func refusesRemovalWhenListReportsMissingSocketOfOrphanedServer() async throws {
+    let runner = OrphanedServerRunnerStub(
+      result: stubSuccess(stdout: "p123\nf6\nn/private/tmp/tmux-501/default\n"))
+    let harness = try listFailingHarness(runner: runner)
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
+
+    #expect(outcome.completed.isEmpty)
+    #expect(outcome.failure?.step == .terminateSession)
+    #expect(
+      outcome.failure?.reason
+        == .orphanedTmuxServer(
+          socketPath: "/private/tmp/tmux-501/default", .orphaned(processIDs: [123])))
+    #expect(outcome.skipped == [.removeWorktree(force: false)])
+    #expect(await runner.invocations.count == 1)
+    #expect(await killSessionCount(harness) == 0)
+    #expect(await harness.git.repositoryInvocations.isEmpty)
+  }
+
+  @Test("一覧が socket 欠落を投げ、probe が確定できなければ、session の終了も削除も撃たずに失敗する")
+  func refusesRemovalWhenListReportsMissingSocketOfUndeterminedServer() async throws {
+    let runner = OrphanedServerRunnerStub(
+      result: .failure(.timedOut(exitCode: nil, stdout: "", stderr: "")))
+    let harness = try listFailingHarness(runner: runner)
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
+
+    #expect(outcome.completed.isEmpty)
+    #expect(outcome.skipped == [.removeWorktree(force: false)])
+    #expect(await killSessionCount(harness) == 0)
+    #expect(await harness.git.repositoryInvocations.isEmpty)
+    let failure = try #require(outcome.failure)
+    guard case .orphanedTmuxServer("/private/tmp/tmux-501/default", .undetermined) = failure.reason
+    else {
+      Issue.record("socket path と undetermined を保持する失敗を期待したが、\(failure.reason) が返った")
+      return
+    }
+  }
+
+  /// `kill-session` は成功させる。一覧の socket 欠落だけで probe に至ることを確かめるため。
+  private func listFailingHarness(runner: OrphanedServerRunnerStub) throws -> WorktreeCloseHarness {
+    try WorktreeCloseHarness(
+      tmux: .init { arguments in
+        if arguments.contains("list-sessions") {
+          return stubFailure(stderr: tmuxServerSocketMissingStderr)
+        }
+        return stubSuccess()
+      },
+      orphanedServerProbe: TmuxOrphanedServerProbe(runner: runner))
+  }
+
+  private func killSessionCount(_ harness: WorktreeCloseHarness) async -> Int {
+    await harness.tmux.invocations.filter { $0.arguments.contains("kill-session") }.count
+  }
+
   private func harness(runner: OrphanedServerRunnerStub) throws -> WorktreeCloseHarness {
     try WorktreeCloseHarness(
       tmux: .init { arguments in

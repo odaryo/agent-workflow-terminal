@@ -423,7 +423,8 @@ public struct WorktreeCloseExecutor: Sendable {
   /// 成功とする**。選択肢2〜4 が求めているのは「この worktree の
   /// session がもう無いこと」であり、session 不在と server 停止はその結果を満たしている。
   /// socket 欠落は生存中の server でも起き、session 不在の証拠にはならない (Issue #492 で計測)。
-  /// socket 欠落時は lsof で probe し、不在を確定できた場合だけ続ける。取り残された server が
+  /// 一覧と終了のどちらで socket 欠落が出ても lsof で probe し、不在を確定できた場合だけ続ける
+  /// (一覧なら空の一覧として番号1の終了へ進む)。取り残された server が
   /// ある場合と確かめられない場合は、Agent が動いたまま worktree を消さないよう失敗にする
   /// (Issue #500、Director 決定3、2026-11-02)。
   /// session 不在や server 停止を失敗にすると、session が先に消えた worktree では
@@ -443,7 +444,15 @@ public struct WorktreeCloseExecutor: Sendable {
   /// 番号1は一覧取得直後に作られる場合もあるため、一覧に無くても従来どおり終了を試みる。
   private func terminateSession(_ step: WorktreeCloseStep) async -> WorktreeCloseStepFailure? {
     do {
-      let names = try await sessionOperations.list()
+      let names: [String]
+      do {
+        names = try await sessionOperations.list()
+      } catch .serverSocketMissing(let socketPath) {
+        if let failure = await failureUnlessServerAbsent(socketPath: socketPath, step: step) {
+          return failure
+        }
+        names = []
+      }
       let indices = Set(TmuxSessionName.indices(of: identity, in: names)).union([1]).sorted()
       for index in indices {
         guard let key = TerminalSessionKey(identity: identity, index: index) else { continue }
@@ -452,18 +461,26 @@ public struct WorktreeCloseExecutor: Sendable {
         } catch .sessionNotFound, .serverNotRunning {
           continue
         } catch .serverSocketMissing(let socketPath) {
-          let result = await orphanedServerProbe.probe(socketPath: socketPath)
-          switch result {
-          case .absent: continue
-          case .orphaned, .undetermined:
-            return WorktreeCloseStepFailure(
-              step: step, reason: .orphanedTmuxServer(socketPath: socketPath, result))
+          if let failure = await failureUnlessServerAbsent(socketPath: socketPath, step: step) {
+            return failure
           }
         }
       }
       return nil
     } catch {
       return WorktreeCloseStepFailure(step: step, reason: .tmux(error))
+    }
+  }
+
+  private func failureUnlessServerAbsent(
+    socketPath: String, step: WorktreeCloseStep
+  ) async -> WorktreeCloseStepFailure? {
+    let result = await orphanedServerProbe.probe(socketPath: socketPath)
+    switch result {
+    case .absent: return nil
+    case .orphaned, .undetermined:
+      return WorktreeCloseStepFailure(
+        step: step, reason: .orphanedTmuxServer(socketPath: socketPath, result))
     }
   }
 

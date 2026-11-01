@@ -301,15 +301,17 @@ public struct TmuxSessionOperations: Sendable {
   /// 作れるので、prefix はアプリの管理下であることの証明にならない。どれが管理下かは、安定 ID
   /// から導出した名前 (`TmuxSessionName`) と突き合わせて上位が判断する。
   ///
-  /// - Returns: server の停止または socket 欠落なら空配列。socket 欠落時も従来の一覧の
-  ///   契約を維持するが、session 不在の証明にはならない (Issue #492)。
+  /// - Returns: server の停止なら空配列。
+  /// - Throws: socket 欠落は空配列へ畳まず `serverSocketMissing` を投げる。生存中の server の
+  ///   socket が消えた場合も同じ stderr になり (Issue #492)、空にすると呼び出し元が取り残された
+  ///   server を probe できない (Issue #500)。
   public func list() async throws(TmuxSessionOperationError) -> [String] {
     do {
       let result = try await run(["list-sessions", "-F", "#{session_name}"], session: nil)
       return result.stdout.split(separator: "\n").map(String.init)
     } catch {
       switch error {
-      case .serverNotRunning, .serverSocketMissing: return []
+      case .serverNotRunning: return []
       default: throw error
       }
     }

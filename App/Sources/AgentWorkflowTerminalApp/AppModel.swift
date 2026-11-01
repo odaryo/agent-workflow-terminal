@@ -183,12 +183,18 @@ final class AppModel: ObservableObject {
       return
     case .success(let scan):
       let saved = await prepare(for: scan)
+      var sessionNames: [String]?
+      do {
+        sessionNames = try await sessions?.sessionNames()
+      } catch {
+        warning = "tmux の session の一覧を取得できないため、前回のタブを復元できませんでした: \(error)"
+      }
       applyInitial(
         restoreWorktreeInventory(
           detected: scan.detected,
           saved: saved,
           unobserved: scan.failures.map(\.worktreePath)
-        ))
+        ), sessionNames: sessionNames)
       report(scanFailures: scan.failures)
     }
 
@@ -270,16 +276,19 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func applyInitial(_ result: WorktreeScanResult) {
+  private func applyInitial(_ result: WorktreeScanResult, sessionNames: [String]?) {
     projectRoot = result.inventory.projectRoot
     worktrees = result.inventory.taskWorktrees
+    if let sessionNames {
+      tabLayout.restore(
+        from: sessionNames,
+        identities: [projectRoot?.identity].compactMap { $0 } + worktrees.map(\.identity))
+    }
     didCompleteInitialScan = true
-    if let projectRoot {
-      selectedTab = .primary(projectRoot.identity)
-      openedTabs.insert(.primary(projectRoot.identity))
+    if projectRoot != nil {
+      selectProjectRoot()
     } else if let first = firstSelectableWorktree {
-      selectedTab = .primary(first.identity)
-      openedTabs.insert(.primary(first.identity))
+      select(first)
     }
     // 選べる worktree が無いことは `message` へ書かない。書くと Inactive を Active 化しても
     // 消えないままになる (`emptyStateMessage`)。

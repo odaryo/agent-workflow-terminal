@@ -72,7 +72,7 @@ TerminalはAgent開発フローの表示・操作・レビューを支援する�
 Diffは対象タスクと比較元を指定して閲覧できるようにする。**表示先はViewer Drawerとし、別窓
 (組み込み別窓・外部ツール連携とも)は設けない — 確定(2026-10-08)。** 2026-09-07に記録した
 「別窓で閲覧したい」は撤回し、比較元の指定はDrawerの中で実現する。Code・Evidenceも同じくDrawerで開く(§6)。
-この決定はアプリ内での閲覧先についてのものであり、Code Viewerで開いている`.html`／`.md`ファイルを
+この決定はアプリ内での閲覧先についてのものであり、Code ViewerとDiffに出ている`.html`／`.md`ファイルを
 OSの既定アプリへ渡す導線(§7.3)はこれを覆さない — 確定(2026-11-01)。URLをOSの外部ブラウザで開く
 (§6.2、§18)のと同じ扱いである。
 Gitツリー表示は追加候補であり必須ではない。編集はviや外部IDEで行う。
@@ -660,8 +660,13 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 
 **`.html`／`.md`をOSの既定アプリで開く — 確定(2026-11-01、Issue #434)。**
 
-- Code Viewerで開いている`.html`／`.md`ファイルを、OSの既定アプリで開く導線を設ける
-  (`NSWorkspace.shared.open`)。`.html`は既定のブラウザ、`.md`は既定のアプリで開く。
+- Code Viewerで開いている`.html`／`.md`ファイルと、Diffに出ている`.html`／`.md`ファイルを、
+  OSの既定アプリで開く導線を設ける(`NSWorkspace.shared.open`)。`.html`は既定のブラウザ、`.md`は
+  既定のアプリで開く。それ以外の拡張子には出さない。
+- 渡すのは作業ツリーにある今のファイルとする。Code Viewerの履歴で選んだ過去commitの版や、
+  Diffの比較元側の版は実ファイルが無いため対象外とする。Diffから開くときも、差分のどちらかの側では
+  なく作業ツリーの今のファイルを開く。作業ツリーに無い(削除・rename済み)、既定アプリが無いなどで
+  開けなかったときは、黙って失敗せずに理由を表示する。
 - アプリ内の別windowやアプリ内レンダリング(Markdownプレビュー、Web Preview)は作らない(§1.2、§18)。
 - Mac専用とする。iOSクライアントには設けない(実行hostはMacであり、ファイルはMac上にある)。
 
@@ -1524,7 +1529,7 @@ Terminalはユーザーの`~/.gitconfig`に依存しない決定的な出力を�
 
 - アプリ内Web Previewは実装しない。
 - 通常URLも`localhost`も、すべてOSの外部ブラウザで開く。
-- Code Viewerの`.html`／`.md`ファイルも、アプリ内では描画せずOSの既定アプリで開く(§7.3、2026-11-01 確定)。
+- Code ViewerとDiffの`.html`／`.md`ファイルも、アプリ内では描画せずOSの既定アプリで開く(§7.3、2026-11-01 確定)。
 - GUI確認はMac/PC上の外部ブラウザをAgentが操作して行う。
 - Terminalアプリはbrowser、DevTools、DOM Inspector、Console、Network panelを再実装しない。
 - PC画面をモバイルから操作するVNC機能は持たない。
@@ -2309,7 +2314,7 @@ PR_READY
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Code／Diff／EvidenceはViewer Drawerで開き、別窓は設けない。Diffの比較元の指定はDrawer内で行う
-- [x] Code Viewerの`.html`／`.md`はOSの既定アプリで開ける(Mac専用)。アプリ内レンダリングはしない(2026-11-01)
+- [x] Code ViewerとDiffの`.html`／`.md`は、作業ツリーの今のファイルをOSの既定アプリで開ける(Mac専用)。アプリ内レンダリングはしない(2026-11-01)
 - [x] submodule内のuntrackedファイルはDiffで観測しない(`--ignore-submodules=untracked`を明示)
 - [x] Diffはsnapshot、Refreshで新snapshot
 - [x] Base branchはupstream→`origin/HEAD`の既定branch→ユーザー選択の順で決め、結果をタスクタブごとに記憶する

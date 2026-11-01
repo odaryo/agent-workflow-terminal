@@ -96,8 +96,8 @@ struct TerminalTabLayoutTests {
     #expect(layout.tabs(in: directory) == [.primary(directory), added])
   }
 
-  @Test("途中のタブを外しても欠番を詰めず最大indexの次を追加する")
-  func removedGapIsNotReused() throws {
+  @Test("途中の番号を外しても欠番は詰めない")
+  func removedGapIsNotFilled() throws {
     let directory = try identity("a")
     let second = try key(directory, index: 2)
     let third = try key(directory, index: 3)
@@ -109,6 +109,40 @@ struct TerminalTabLayoutTests {
 
     #expect(layout.addTab(in: directory, existingSessionNames: []) == fourth)
     #expect(layout.tabs(in: directory) == [.primary(directory), third, fourth])
+  }
+
+  @Test("最大の番号のタブを外した後は、その番号を再び使う (設計書 §3.5 の最大 + 1)")
+  func removedMaximumIsReusedWhenSessionIsGone() throws {
+    let directory = try identity("a")
+    let second = try key(directory, index: 2)
+    let third = try key(directory, index: 3)
+    var layout = TerminalTabLayout()
+    #expect(layout.addTab(in: directory, existingSessionNames: []) == second)
+    #expect(layout.addTab(in: directory, existingSessionNames: []) == third)
+    layout.removeTab(third)
+
+    // 閉じたタブの session は消えているので、existing にも現れない。
+    let names = [TmuxSessionName(key: .primary(directory)).rawValue, TmuxSessionName(key: second).rawValue]
+    #expect(layout.addTab(in: directory, existingSessionNames: names) == third)
+  }
+
+  @Test("existing に同じディレクトリの名前が複数あれば最大の次を使う")
+  func multipleExistingNamesUseTheirMaximum() throws {
+    let directory = try identity("a")
+    let names = try [7, 1, 3].map { TmuxSessionName(key: try key(directory, index: $0)).rawValue }
+    var layout = TerminalTabLayout()
+
+    #expect(layout.addTab(in: directory, existingSessionNames: names) == (try key(directory, index: 8)))
+  }
+
+  @Test("primary だけに戻った layout は既定と等しい")
+  func layoutBackToPrimaryEqualsDefault() throws {
+    let directory = try identity("a")
+    var layout = TerminalTabLayout()
+    let added = try #require(layout.addTab(in: directory, existingSessionNames: []))
+    layout.removeTab(added)
+
+    #expect(layout == TerminalTabLayout())
   }
 
   @Test("既存sessionに9999があれば追加できずlayoutは変わらない", arguments: [false, true])

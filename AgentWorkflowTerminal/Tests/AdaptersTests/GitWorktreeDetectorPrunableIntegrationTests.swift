@@ -54,6 +54,81 @@ struct GitWorktreeDetectorPrunableTests {
     }
   }
 
+  @Test("bare 配置で lock した worktree の .git が消えたら、祖先への解決を失敗として返す")
+  func missingGitFileInLockedBareWorktreeIsReportedAsAncestorResolution() async throws {
+    try await withGitRepository { repository in
+      let project = repository.root.appending(path: "proj")
+      let bare = project.appending(path: ".bare")
+      try await repository.git(["clone", "-q", "--bare", repository.mainWorktree.path, bare.path])
+      try "gitdir: ./.bare\n".write(
+        to: project.appending(path: ".git"), atomically: true, encoding: .utf8)
+      for name in ["feat", "keep"] {
+        try await repository.git(
+          ["worktree", "add", "-q", "-b", name, project.appending(path: name).path],
+          in: "proj")
+      }
+      let removed = project.appending(path: "feat")
+      let kept = project.appending(path: "keep")
+      try await repository.git(["worktree", "lock", removed.path], in: "proj")
+      try FileManager.default.removeItem(at: removed.appending(path: ".git"))
+      let detector = try GitWorktreeDetector(
+        projectDirectory: project, processRunner: FoundationProcessRunner())
+
+      let result = try await detector.scan()
+
+      #expect(!result.detected.contains { $0.isProjectRoot })
+      #expect(result.detected.map(\.worktreePath) == [kept.path])
+      let reachable = try #require(result.detected.first)
+      #expect(reachable.isReachable)
+      #expect(result.failures.map(\.worktreePath) == [removed.path])
+      let failure = try #require(result.failures.first)
+      #expect(failure.reason == .resolvedToAncestorRepository)
+    }
+  }
+
+  @Test("main 内で lock した worktree の .git が消えても Project Root と安定 ID が重複しない")
+  func missingGitFileInLockedNestedWorktreeIsReportedAsAncestorResolution() async throws {
+    try await withGitRepository { repository in
+      let nested = repository.mainWorktree.appending(path: ".worktrees/x")
+      try await repository.git(["worktree", "add", "-q", "-b", "nested", nested.path])
+      try await repository.git(["worktree", "lock", nested.path])
+      try FileManager.default.removeItem(at: nested.appending(path: ".git"))
+
+      let result = try await repository.detector().scan()
+
+      let identities = result.detected.map(\.identity)
+      #expect(Set(identities).count == identities.count)
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(
+        result.detected.filter(\.isProjectRoot).map(\.worktreePath)
+          == [repository.mainWorktree.path])
+      #expect(result.failures.map(\.worktreePath) == [nested.path])
+      let failure = try #require(result.failures.first)
+      #expect(failure.reason == .resolvedToAncestorRepository)
+    }
+  }
+
+  @Test("兄弟配置で lock した worktree の .git が消えたら、gitDirectory の exit 128 を返す")
+  func missingGitFileInLockedSiblingWorktreeRemainsGitDirectoryFailure() async throws {
+    try await withGitRepository { repository in
+      let sibling = repository.root.appending(path: "sib")
+      try await repository.git(["worktree", "add", "-q", "-b", "sib", "../sib"])
+      try await repository.git(["worktree", "lock", sibling.path])
+      try FileManager.default.removeItem(at: sibling.appending(path: ".git"))
+
+      let result = try await repository.detector().scan()
+
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.failures.map(\.worktreePath) == [sibling.path])
+      let failure = try #require(result.failures.first)
+      guard case .gitDirectory(.commandFailed(let exitCode, _, _)) = failure.reason else {
+        Issue.record("想定と違う失敗の種類: \(failure)")
+        return
+      }
+      #expect(exitCode == 128)
+    }
+  }
+
   // root では探索権限の制限が効かず、この経路を再現できない。
   @Test("親に入れない unlocked worktree は admin 側の安定 ID で到達不能として検出する")
   func unsearchableParentOfUnlockedWorktreeIsDetectedAsUnreachable() async throws {

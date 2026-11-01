@@ -91,13 +91,18 @@ struct ProjectView: View {
         ViewerDrawerView(
           layout: $model.viewerDrawerLayout,
           worktree: model.selectedWorktree,
+          selectedSession: model.selectedTab,
           diffModels: model.diffModels,
           mainPanes: model.mainPanes,
-          agentPaneStates: model.agentPaneStates(of:),
-          keyboardFocus: keyboardFocus
-        ) {
-          TerminalTabs(model: model, keyboardFocus: keyboardFocus)
-        }
+          agentPaneStates: { identity in
+            let key =
+              model.selectedTab.flatMap { $0.identity == identity ? $0 : nil }
+              ?? .primary(identity)
+            return model.agentPaneStates(of: key)
+          },
+          keyboardFocus: keyboardFocus,
+          terminal: { TerminalTabs(model: model, keyboardFocus: keyboardFocus) }
+        )
       }
     }
     .toolbar {
@@ -180,7 +185,7 @@ struct ProjectView: View {
             worktree: worktree,
             index: key.index,
             selected: model.selectedTab == key,
-            agentPaneStates: { model.agentPaneStates(of: worktree.identity) },
+            agentPaneStates: { model.agentPaneStates(of: key) },
             select: { model.select(key) },
             setActivation: { model.setActivation($0, of: worktree.identity) },
             requestClose: { model.requestClose(of: worktree.identity) },

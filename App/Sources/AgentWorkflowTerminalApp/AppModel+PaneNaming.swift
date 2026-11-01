@@ -11,8 +11,10 @@ extension AppModel {
   /// 別の pane に印が付く (`PaneObservationStore.Observed.processIDs`)。
   func mainPane(of identity: WorktreeIdentity) -> PaneID? {
     guard let registration = mainPanes.registry.registration(for: identity),
-      paneObservations.observed[identity]?.processIDs[registration.pane]
-        == registration.processID
+      paneObservations.observed.contains(where: { key, observed in
+        key.identity == identity
+          && observed.processIDs[registration.pane] == registration.processID
+      })
     else { return nil }
     return registration.pane
   }

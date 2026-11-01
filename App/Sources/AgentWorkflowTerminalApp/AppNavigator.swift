@@ -16,10 +16,13 @@ final class AppNavigator: ObservableObject {
   ///
   /// - Returns: pane へ移れなかった理由。
   func reveal(
-    _ model: AppModel, worktree: WorktreeIdentity, pane: PaneID?, in projects: ProjectsModel
+    _ model: AppModel, worktree: WorktreeIdentity, session: TerminalSessionKey? = nil,
+    pane: PaneID?, in projects: ProjectsModel
   ) async -> String? {
     projects.select(model.project.commonDirectory)
-    if model.projectRoot?.identity == worktree {
+    if let session, model.tabKeys.contains(session) {
+      model.select(session)
+    } else if model.projectRoot?.identity == worktree {
       model.selectProjectRoot()
     } else if let task = model.worktrees.first(where: { $0.identity == worktree }) {
       model.select(task)

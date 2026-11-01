@@ -2,16 +2,9 @@ import Adapters
 import Foundation
 import TerminalCore
 
-/// worktree 1件を、その pane の Agent 状態列へ写す。#153 の `WorktreePaneAgentStateFeed` を
-/// 起動時に1箇所で束ねるための境界であり、タブ側はこの型越しにしか観測経路を触らない。
-///
-/// - Important: 入力は `DetectedWorktree` であって `TaskWorktree` ではない。**Project Root の
-///   pane も観測する**ため (§9.2.2 の送信可否がこの観測に依存しており、`TaskWorktree` を
-///   要求すると Project Root タブで送信が恒久的に不可になる)。§2.3 が禁じているのは Project
-///   Root に Active/Inactive を持たせることで、pane を観測することではない。`TaskWorktree` の
-///   precondition はそのまま残す。
+/// Project Root も対象にする。TaskWorktree に限定すると §9.2.2 の送信が恒久的に不可になる。
 typealias WorktreePaneStatesFeed =
-  @Sendable (DetectedWorktree) -> AsyncStream<WorktreePaneAgentStates>
+  @Sendable (TerminalSessionKey) -> AsyncStream<WorktreePaneAgentStates>
 
 /// fallback adapter が Agent とみなすプロセス名。§12.7 の「現在の Agent プロセス」も同じ集合で
 /// 判定する — 別の集合にすると、状態は Agent と出るのに連携変数が「現役でない」と捨てられる。
@@ -34,7 +27,7 @@ func makeWorktreePaneStatesFeed(
     intervals: AgentObservationIntervals(signals: .seconds(2), liveness: .seconds(5)),
     paneListInterval: .seconds(2)
   )
-  return { worktree in
-    feed.snapshots(of: worktree.identity, panes: paneSource, signals: signalSource)
+  return { key in
+    feed.snapshots(of: key, panes: paneSource, signals: signalSource)
   }
 }

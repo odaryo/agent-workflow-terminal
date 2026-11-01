@@ -387,7 +387,7 @@ struct PaneNotificationPlannerTests: PaneNotificationPlannerTesting {
 
     #expect(notification.isSuppressed(whileShowing: worktree) == suppressed)
     #expect(!notification.isSuppressed(whileShowing: other))
-    #expect(!notification.isSuppressed(whileShowing: nil))
+    #expect(!notification.isSuppressed(whileShowing: nil as WorktreeIdentity?))
     #expect(!PaneNotification.attentionSummary(count: 1).isSuppressed(whileShowing: worktree))
   }
 }

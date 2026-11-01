@@ -5,6 +5,7 @@ import TerminalCore
 struct DiffHunkView: View {
   @ObservedObject var model: DiffViewerModel
   let file: UnifiedDiffFile?
+  @StateObject private var externalOpening = ExternalFileOpeningState()
 
   private var selection: DiffViewerModel.FileSelection? { model.selection }
 
@@ -16,6 +17,9 @@ struct DiffHunkView: View {
         content(of: file)
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+      .onChange(of: file.path) { externalOpening.reset() }
+      .onChange(of: model.worktreeRoot) { externalOpening.reset() }
+      .onDisappear { externalOpening.reset() }
     } else {
       ContentUnavailableView("ファイルを選択してください", systemImage: "doc.text")
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -24,7 +28,22 @@ struct DiffHunkView: View {
 
   private func header(_ file: UnifiedDiffFile) -> some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(file.path).font(.callout.monospaced()).lineLimit(1).truncationMode(.middle)
+      HStack(spacing: 8) {
+        Text(file.path).font(.callout.monospaced()).lineLimit(1).truncationMode(.middle)
+        Spacer(minLength: 0)
+        if ExternalFileOpening.isSupported(path: file.path) {
+          Button("既定のアプリで開く", systemImage: "arrow.up.forward.app") {
+            externalOpening.open(worktreeRoot: model.worktreeRoot, relativePath: file.path)
+          }
+          .labelStyle(.iconOnly)
+          .help("既定のアプリで開く")
+        }
+      }
+      if let reason = externalOpening.failureReason {
+        Label(reason, systemImage: "exclamationmark.triangle")
+          .font(.caption)
+          .fixedSize(horizontal: false, vertical: true)
+      }
       if let origin = selection?.origin {
         Text("出所: \(origin.label)").font(.caption2).foregroundStyle(.secondary)
       }

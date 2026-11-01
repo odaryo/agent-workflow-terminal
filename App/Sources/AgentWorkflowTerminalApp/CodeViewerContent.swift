@@ -6,6 +6,7 @@ import TerminalCore
 struct CodeViewerContent: View {
   @ObservedObject var model: FileBrowserModel
   @ObservedObject var history: CodeHistoryModel
+  @StateObject private var externalOpening = ExternalFileOpeningState()
 
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
@@ -25,6 +26,10 @@ struct CodeViewerContent: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    .onChange(of: model.selection?.id) { externalOpening.reset() }
+    .onChange(of: model.worktreeRoot) { externalOpening.reset() }
+    .onChange(of: history.mode) { externalOpening.reset() }
+    .onDisappear { externalOpening.reset() }
   }
 
   /// blame は §7.2 で本文をそのまま展開するファイルに限る (確認を経て開いたものは含めない)。
@@ -54,6 +59,20 @@ struct CodeViewerContent: View {
             .fixedSize()
         }
         Spacer(minLength: 0)
+        if history.mode == .current, let selection = model.selection,
+          ExternalFileOpening.isSupported(path: selection.id)
+        {
+          Button("既定のアプリで開く", systemImage: "arrow.up.forward.app") {
+            externalOpening.open(worktreeRoot: model.worktreeRoot, relativePath: selection.id)
+          }
+          .labelStyle(.iconOnly)
+          .help("既定のアプリで開く")
+        }
+      }
+      if let reason = externalOpening.failureReason {
+        Label(reason, systemImage: "exclamationmark.triangle")
+          .font(.caption)
+          .fixedSize(horizontal: false, vertical: true)
       }
       // Drawer のペインは狭い (実測で本文側が約 240 pt)。ファイル名と同じ行に置くと名前が潰れる。
       Picker("表示", selection: modeBinding) {

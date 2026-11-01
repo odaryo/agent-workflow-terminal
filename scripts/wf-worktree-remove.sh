@@ -170,22 +170,28 @@ resolve_session_name
 # 対象 session が在るかどうか。素の `tmux` を使うので、見に行く server は `$TMUX` (tmux pane の
 # 中なら、その pane の server) が無ければ既定 server。アプリが session を作るのも同じ選び方
 # なので、通常はアプリのものと同じ server を見る。tmux が無い・server が動いていない場合は
-# has-session が失敗するので、そのまま「無い」として扱う。
+# list-sessions が失敗するので、そのまま「無い」として扱う。
+matching_sessions=""
 session_exists() {
+  matching_sessions=""
   [[ -n "$session_name" ]] || return 1
   command -v tmux >/dev/null 2>&1 || return 1
-  tmux has-session -t "=$session_name" 2>/dev/null
+  matching_sessions=$(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+    | grep -E -e "^${session_name}(-([2-9]|[1-9][0-9]{1,3}))?$")
+  [[ -n "$matching_sessions" ]]
 }
 
 # 消さない側を既定にしている。worktree の削除条件 (未コミット変更が無いなど) は「その worktree で
 # 動いている agent が居ない」ことを意味せず、session の破棄は取り返しがつかないため (Issue #343)。
 report_session() {
-  local tense="$1"
+  local tense="$1" name
   # 導出できなかった場合は削除の前に報告済み。
   session_exists || return 0
   # `$tense` を波括弧で囲むのは、直後の全角句点まで変数名として読まれるため
   # (実測 bash 3.2.57 / macOS: `tense。: unbound variable` で落ちた)。
-  info "tmux session '$session_name' が${tense}。消すには: tmux kill-session -t '=$session_name'"
+  while IFS= read -r name; do
+    info "tmux session '$name' が${tense}。消すには: tmux kill-session -t '=$name'"
+  done <<<"$matching_sessions"
 }
 
 # --kill-session で撃つ相手が居なかったときに出す。無言で終わると、もともと session が無かったのか、
@@ -273,7 +279,9 @@ if [[ "$dry_run" -eq 1 ]]; then
   if [[ "$kill_session" -eq 1 ]]; then
     # 実行時と同じ判断・同じ出力にする (導出できていない場合は上で既に止まっている)。
     if session_exists; then
-      info "[dry-run] tmux kill-session -t '=$session_name'"
+      while IFS= read -r name; do
+        info "[dry-run] tmux kill-session -t '=$name'"
+      done <<<"$matching_sessions"
     else
       report_no_session
     fi
@@ -327,12 +335,14 @@ if [[ "$kill_session" -eq 1 ]]; then
   if session_exists; then
     # 必ず `=` の完全一致で、自分が導出した名前だけを撃つ。前方一致や `kill-server` は
     # 使わない (CLAUDE.md「外部 CLI を計測するときの作法」)。
-    kill_error=""
-    if ! kill_error=$(tmux kill-session -t "=$session_name" 2>&1); then
-      die "worktree は削除済みですが、tmux session '$session_name' の削除に失敗しました: $kill_error"
-    fi
-    [[ -z "$kill_error" ]] || info "$kill_error"
-    info "tmux session を削除しました: $session_name"
+    while IFS= read -r name; do
+      kill_error=""
+      if ! kill_error=$(tmux kill-session -t "=$name" 2>&1); then
+        die "worktree は削除済みですが、tmux session '$name' の削除に失敗しました: $kill_error"
+      fi
+      [[ -z "$kill_error" ]] || info "$kill_error"
+      info "tmux session を削除しました: $name"
+    done <<<"$matching_sessions"
   else
     report_no_session
   fi

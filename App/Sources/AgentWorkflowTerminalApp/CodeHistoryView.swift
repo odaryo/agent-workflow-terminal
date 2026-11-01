@@ -87,20 +87,21 @@ struct CodeHistoryView: View {
 
   private func detailHeader(_ entry: GitFileHistoryEntry) -> some View {
     VStack(alignment: .leading, spacing: 4) {
-      // Drawer のペインは約 240 pt しかない。固定幅の要素を1行に並べると、ペインより広がって
-      // 左右が切れる (実測)。1行に1要素ずつ置く。
+      // Drawer は 240 pt まで狭まり、固定幅の要素を横に並べると左右が切れうる。
+      // 収まるときだけ横に並べ、収まらなければ縦に積む。
       Text("commit \(entry.abbreviatedCommitID) 時点")
         .font(.callout.monospaced())
         .fontWeight(.medium)
-      Picker("過去版の表示", selection: pastViewBinding) {
-        Text("コード").tag(CodeHistoryModel.PastView.code)
-        Text("Diff").tag(CodeHistoryModel.PastView.diff)
+      ViewThatFits(in: .horizontal) {
+        HStack {
+          pastViewPicker
+          showCurrentButton
+        }
+        VStack(alignment: .leading, spacing: 4) {
+          pastViewPicker
+          showCurrentButton
+        }
       }
-      .pickerStyle(.segmented)
-      .labelsHidden()
-      .fixedSize()
-      Button("現在の版に戻る", systemImage: "arrow.uturn.backward") { model.showCurrent() }
-        .font(.caption)
       Text(displayText(entry.summary))
         .font(.caption)
         .lineLimit(2)
@@ -117,6 +118,23 @@ struct CodeHistoryView: View {
     }
     .padding(8)
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var pastViewPicker: some View {
+    Picker("過去版の表示", selection: pastViewBinding) {
+      Text("コード").tag(CodeHistoryModel.PastView.code)
+      Text("Diff").tag(CodeHistoryModel.PastView.diff)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+    .fixedSize()
+  }
+
+  private var showCurrentButton: some View {
+    Button("現在の版に戻る", systemImage: "arrow.uturn.backward") { model.showCurrent() }
+      .font(.caption)
+      .labelStyle(.iconOnly)
+      .help("現在の版に戻る")
   }
 
   private var pastViewBinding: Binding<CodeHistoryModel.PastView> {

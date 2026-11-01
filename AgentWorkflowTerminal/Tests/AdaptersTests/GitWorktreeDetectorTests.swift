@@ -56,8 +56,9 @@ struct GitWorktreeDetectorTests {
 
   // MARK: - 除外
 
-  @Test("prunable な entry は検出結果に含めず、安定 ID も問い合わせない")
-  func skipsPrunableEntries() async throws {
+  // /wt/gone がホストに存在しないことを前提とする。存在するが入れない場合は除外対象ではない。
+  @Test("存在しない prunable entry は検出結果に含めず、安定 ID も問い合わせない")
+  func skipsNonexistentPrunableEntries() async throws {
     let listOutput =
       singleWorktreeList
       + "worktree /wt/gone\0detached\0prunable gitdir file points to non-existent location\0\0"

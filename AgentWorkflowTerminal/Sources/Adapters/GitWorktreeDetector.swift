@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import TerminalCore
 
@@ -93,14 +94,16 @@ public struct GitWorktreeScanResult: Sendable, Equatable {
 ///   渡された一覧を「そのスキャン時点の完全な一覧」として権威的に解釈し、載っていない安定 ID を
 ///   消失とみなす。1件でも黙って落として返すと、その worktree は消失扱いになり、次のスキャンで
 ///   復帰したときに**ユーザーが意図して Inactive にしていた worktree が自動 Active 化される**。
-///   `detected` から外れてよいのは、作業ツリーがこの Project のものとして**存在しない**と
-///   判定できた entry だけである (`isScannable` / `describe`)。その除外自体の代償は Issue #137。
-/// - Important: 安定 ID は必ず git に問い合わせる。`git rev-parse --path-format=absolute` の
+///   検出できない entry は `failures` に残す。ただし bare、到達不能と確認できない
+///   `prunable`、common dir が別 Project の entry は対象外として除外する (`isScannable` /
+///   `describe`)。`prunable` だけでは不在の証拠にならない (Issue #496)。除外自体の代償は Issue #137。
+/// - Important: 到達可能な作業ツリーの安定 ID は git に問い合わせる。`git rev-parse --path-format=absolute` の
 ///   出力は symlink 解決とディスク上の大小文字への矯正を経た正規形であり、`WorktreeIdentity` が
 ///   正規化しない設計はこの出力をそのまま渡すことで成立している。作業ツリーのパスと
 ///   `worktrees/<name>` を文字列連結して組み立てると、その前提が消える。git は管理ディレクトリ名を
 ///   サニタイズするので (git 2.50.1 実測: `wt2 with space` → `worktrees/wt2-with-space`)、
-///   連結した文字列はそもそも実際の安定 ID と一致しない。
+///   連結した文字列はそもそも実際の安定 ID と一致しない。到達不能な場合も作業ツリーパスから
+///   組み立てず、common dir 配下の管理ディレクトリと照合する (`administrativeDirectory`)。
 public struct GitWorktreeDetector: Sendable {
   /// `--path-format=absolute` は**それ以降のオプションにだけ効く**ため、位置に意味がある
   /// (git 2.31 以降。サポート下限は 2.39 なので使える)。1回の実行で管理ディレクトリと
@@ -133,8 +136,12 @@ public struct GitWorktreeDetector: Sendable {
   ///   (実測: 10 コアの機で 0.3 秒ブロックする `Task.detached` を10本作ると10本は並列に走るが、
   ///   11本目は 0.308 秒まで走れない。トップレベルの `Task` は MainActor 隔離を継承して直列になり、
   ///   10本で 3.110 秒かかった)、応答しないマウントでは git が回復しても述語だけが無期限に残る。
-  ///   そのため `describe` はこの述語を **git が exit code を返した失敗にだけ**撃つ。
-  ///   git が終了しなかった場合 (timeout 等) は述語を撃たず、述語が詰まる窓は閉じている。ただし
+  ///   そのため非 prunable の entry では **git が exit code を返した失敗にだけ**撃つ。
+  ///   prunable の事前判定は例外である。`.git` を消しただけの入れるディレクトリを通すと、
+  ///   `rev-parse` が祖先へ遡り、bare 配置では偽の Project Root を検出する (Issue #496 の
+  ///   レビュアー計測)。入れない場合は `rev-parse` が必ず失敗するため、事前判定後は直接
+  ///   admin 側で照合する。この事前判定には同期 FS I/O が詰まる窓が残る。
+  ///   非 prunable で git が終了しなかった場合 (timeout 等) は述語を撃たない。ただし
   ///   `ProcessRunner` は deadline 後も子の終了通知を待つため、子が死ななければ `GitRunner.run` の
   ///   `await` 自体が解けず、応答しないマウントで git 自体が戻らない窓は別に残る。
   ///   `commandFailed` を返しつつ後続の `stat` は詰まるマウントは残るが、それは実測できておらず、
@@ -226,7 +233,7 @@ public struct GitWorktreeDetector: Sendable {
 
     var detected: [DetectedWorktree] = []
     var failures: [GitWorktreeEntryFailure] = []
-    for entry in parsed.entries where Self.isScannable(entry) {
+    for entry in parsed.entries where isScannable(entry) {
       switch try await describe(entry, projectCommonDirectory: commonDirectory) {
       case .detected(let worktree): detected.append(worktree)
       case .absent: continue
@@ -238,12 +245,14 @@ public struct GitWorktreeDetector: Sendable {
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。
   ///
-  /// - `prunable`: 安定 ID を引けない (`rev-parse` が exit 128。git 2.50.1 実測)。
-  ///   `git worktree prune` は書き込み操作であり §17.2 で Agent へ委譲済み。
-  ///   **作業ツリーが実在しないことは根拠にできない。** `.git` ファイルが消えるだけで
-  ///   `prunable gitdir file points to non-existent location` が付き、作業ツリーもユーザーの
-  ///   未コミットの変更もそのまま残る (git 2.50.1 実測)。つまりここでは、cwd としては完全に
-  ///   使えるディレクトリを、安定 ID を引けないという理由だけで落としている。
+  /// - `prunable`: Issue #496 の git 2.50.1 実測では、unlocked の作業ツリーを `chmod 000` にすると
+  ///   `prunable gitdir file points to non-existent location` が付き、locked では付かない。
+  ///   `.git` ファイルの消失でも同じ理由が付くため、`prunable` は作業ツリーの不在の証拠に
+  ///   ならない。一方、`.git` を消しただけの入れるディレクトリで `rev-parse` を走らせると
+  ///   祖先へ遡り、bare 配置では偽の Project Root になる (同 Issue のレビュアー計測)。
+  ///   入れない場合は必ず失敗するため、通した entry は git を走らせず admin 側で照合する。
+  ///   symlink のリンク先まで対象を広げないため、存在と種別の確認には `lstat` を使う。
+  ///   `git worktree prune` は書き込み操作であり設計書 §17.2 で Agent へ委譲済み。
   /// - bare: 作業ツリーが無い。`rev-parse` 自体は exit 0 で使える安定 ID を返すが (git 2.50.1
   ///   実測: `--git-dir` も `--git-common-dir` も bare ディレクトリ自身)、`worktreePath` が
   ///   指すのは git ディレクトリであって checkout ではないため、タブの cwd にも tmux session の
@@ -254,17 +263,23 @@ public struct GitWorktreeDetector: Sendable {
   ///   付けない (git 2.50.1 実測)。可搬ボリューム上の worktree を lock するのは
   ///   `git worktree --help` が勧める運用なので異常系ではない。到達できない作業ツリーは
   ///   `describe` が Project Root 側の admin ディレクトリと照合して検出結果へ残す。
-  private static func isScannable(_ entry: GitWorktreeEntry) -> Bool {
-    entry.prunableReason == nil && !entry.isBare
+  private func isScannable(_ entry: GitWorktreeEntry) -> Bool {
+    guard !entry.isBare else { return false }
+    guard entry.prunableReason != nil else { return true }
+    var info = stat()
+    guard lstat(entry.path, &info) == 0 else { return errno == EACCES }
+    return info.st_mode & S_IFMT == S_IFDIR && !isWorktreeReachable(entry.path)
   }
 
   /// - Returns: `.absent` になるのは、common dir がこの Project のものでない entry (下記の2つ目)
   ///   だけ。到達できない作業ツリー (1つ目) は `isReachable == false` の `.detected` になる。
   ///   それ以外の失敗は `.failed` で返し、黙って落とさない。
-  ///   - 作業ツリーへ到達できない: `locked` で `prunable` が抑止された entry がここへ来る。
+  ///   - 作業ツリーへ到達できない: `locked` で `prunable` が抑止された entry に加え、
+  ///     `prunable` でも入れないディレクトリ、または祖先の探索権限が無い entry がここへ来る
+  ///     (Issue #496)。prunable は事前判定済みなので `rev-parse` を走らせず admin 側で照合する。
   ///     stderr の文言ではなく作業ツリーの到達可能性で判定するのは、git のメッセージが版と
-  ///     locale で変わるためである。到達可能性を確かめるのは git が exit code を返した失敗
-  ///     (`commandFailed`) に限る。git が終了しなかった失敗は不在の証拠にならず、述語が
+  ///     locale で変わるためである。非 prunable で到達可能性を確かめるのは、git が exit code を
+  ///     返した失敗 (`commandFailed`) に限る。git が終了しなかった失敗は不在の証拠にならず、述語が
   ///     打ち切れない FS 呼び出しに入る (`isReachableWorkingTree`)。確かめなかった失敗も、
   ///     到達できた作業ツリーでの失敗も `GitWorktreeEntryFailure.Reason.gitDirectory` に回す。
   ///     到達不能なら common dir 配下の `worktrees/*/gitdir` と作業ツリーパスを照合し、対応した
@@ -278,6 +293,9 @@ public struct GitWorktreeDetector: Sendable {
     _ entry: GitWorktreeEntry,
     projectCommonDirectory: WorktreeIdentity
   ) async throws(GitWorktreeScanError) -> EntryOutcome {
+    if entry.prunableReason != nil {
+      return describeUnreachable(entry, projectCommonDirectory: projectCommonDirectory)
+    }
     let runner: GitRunner
     do {
       runner = try makeRunner(URL(fileURLWithPath: entry.path))
@@ -295,17 +313,7 @@ public struct GitWorktreeDetector: Sendable {
       ).stdout
     } catch {
       if case .commandFailed = error, !isWorktreeReachable(entry.path) {
-        guard let identity = findAdministrativeDirectory(entry.path, projectCommonDirectory) else {
-          return .failed(entry.path, .administrativeDirectoryNotFound)
-        }
-        return .detected(
-          DetectedWorktree(
-            identity: identity,
-            worktreePath: entry.path,
-            branch: entry.branch.map(Self.shortBranchName),
-            isProjectRoot: false,
-            isReachable: false
-          ))
+        return describeUnreachable(entry, projectCommonDirectory: projectCommonDirectory)
       }
       return .failed(entry.path, .gitDirectory(error))
     }
@@ -334,6 +342,23 @@ public struct GitWorktreeDetector: Sendable {
       ))
   }
 
+  private func describeUnreachable(
+    _ entry: GitWorktreeEntry,
+    projectCommonDirectory: WorktreeIdentity
+  ) -> EntryOutcome {
+    guard let identity = findAdministrativeDirectory(entry.path, projectCommonDirectory) else {
+      return .failed(entry.path, .administrativeDirectoryNotFound)
+    }
+    return .detected(
+      DetectedWorktree(
+        identity: identity,
+        worktreePath: entry.path,
+        branch: entry.branch.map(Self.shortBranchName),
+        isProjectRoot: false,
+        isReachable: false
+      ))
+  }
+
   /// `<common>/worktrees/<作業ツリー名>` を文字列連結せずに列挙して照合するのは、git が管理
   /// ディレクトリ名をサニタイズするためである (git 2.50.1 実測: `wt2 with space` →
   /// `worktrees/wt2-with-space`)。名前から組み立てた文字列は実際の安定 ID と一致しない。
@@ -357,7 +382,7 @@ public struct GitWorktreeDetector: Sendable {
   ///   効くので残す。
   /// - Note: `isReachableWorkingTree` と同じく、打ち切る手段の無い同期 FS I/O をここでも行う。
   ///   `contentsOfDirectory` と `Data(contentsOf:)` はどちらも timeout も cancellation も取らない。
-  ///   撃つのは git が exit code を返し、かつ作業ツリーへ到達できないと分かった entry に限られるが、
+  ///   prunable の事前判定か git が exit code を返した失敗で、到達不能と分かった entry に限られるが、
   ///   読む先は Project Root 側であって作業ツリーではないので、応答しないマウント上の作業ツリーで
   ///   ここが詰まることは無い。
   private static func administrativeDirectory(

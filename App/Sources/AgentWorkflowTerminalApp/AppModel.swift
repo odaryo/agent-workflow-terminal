@@ -261,6 +261,8 @@ final class AppModel: ObservableObject {
       guard updated.inventory != inventory else { continue }
       projectRoot = updated.inventory.projectRoot
       worktrees = updated.inventory.taskWorktrees
+      // 消えた worktree を選択したままだと描画先が無くなり、端末が空になる (Issue #496)。
+      reconcileTabSelection()
       save()
     }
   }
@@ -358,6 +360,24 @@ final class AppModel: ObservableObject {
   private func close(_ identity: WorktreeIdentity) {
     openedTabs = openedTabs.filter { $0.identity != identity }
     guard selectedIdentity == identity else { return }
+    selectFallbackTab()
+  }
+
+  private func reconcileTabSelection() {
+    let tabs = Set(tabKeys)
+    openedTabs.formIntersection(tabs)
+    guard let selectedTab else { return }
+    let isSelectable =
+      if selectedTab.identity == projectRoot?.identity {
+        projectRoot?.isReachable == true
+      } else {
+        inventory.selectableTaskWorktrees.contains { $0.identity == selectedTab.identity }
+      }
+    guard !tabs.contains(selectedTab) || !isSelectable else { return }
+    selectFallbackTab()
+  }
+
+  private func selectFallbackTab() {
     // 到達不能な Project Root へは移さない。`selectProjectRoot()` は worktree の選択と違って
     // 到達可能性を見ないので、自動で呼ぶこの経路が「開けない Project Root を勝手に開く」
     // 入口になる (`select(_:)` の doc コメントにある `$HOME` へ落ちる `new-session`)。

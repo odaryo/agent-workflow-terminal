@@ -12,8 +12,8 @@ public enum ProjectSessionCleanup {
   /// worktree の安定 ID がこの形になることは git 2.50.1 で実測した (通常の `worktree add`、
   /// symlink 経由のパス、`--relative-paths`、到達不能な worktree、bare repository、NFC の非 ASCII
   /// パス。Issue #406)。`<common>/worktrees/<wt>/modules/<sub>` は submodule の common dir で、
-  /// 別 Project になりうるため、接頭辞だけでは判定しない。接頭辞は `String.hasPrefix` ではなく UTF-8 バイト列で比べる —
-  /// `hasPrefix` は正準等価を見るので、NFD 表記の別 Project を同じものと答える
+  /// 別 Project になりうるため、接頭辞だけでは判定しない。接頭辞は `String.hasPrefix` ではなく
+  /// UTF-8 バイト列で比べる — `hasPrefix` は正準等価を見るので、NFD 表記の別 Project を同じものと答える
   /// (`WorktreeIdentity` の同一性がバイト列であるのと揃える)。
   public static func sessions(
     projectCommonDirectory: WorktreeIdentity,

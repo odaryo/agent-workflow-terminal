@@ -1360,6 +1360,10 @@ accessibility labelで意味を伝える(原則は§5.3)。paneの応答終了�
   タスク完了表示の解除(§12.7)は生の状態で判定し、保持で遅らせない。
 - Overviewを開く操作は⌘⇧O(メニュー「Overview を表示」)とする(§5.4)。
 
+**Project Rootに複数のsessionがあるときの並び — 現在の推奨(2026-11-01、Issue #456)。** Project Rootの
+別枠の中では、session(タブ)ごとの項目をタブ列と同じ順(§5.3の作業概要一覧と同じ)に並べ、
+Needs Attentionがあっても並べ替えない。
+
 ## 14. Evidence
 
 ### 14.1 責務分担
@@ -2040,6 +2044,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - iPhone上のAgent TUI縮小戦略
 - `+ New Task`で開いたProject Rootのタブ(中でAgentが動いたままのsession)の、Agentがworktreeを作った後の扱い(§3.1)
 - 同じディレクトリの2つ目以降のsession名の接尾辞の形(§3.5。現在の推奨は`-<n>`)
+- OverviewでProject Rootに複数のsessionがあるときの並べ方(§13。現在の推奨はタブ列と同じ順で、注意状態で並べ替えない)
 - Diffコメントの送信先(メインpane、§9.2)の候補に、同じworktreeの他のタブのsessionのpaneを含めるか
 - タブの右クリックの作業概要一覧で、1つのタブにAgent paneが複数あるときの表し方(§5.3)
 - keyboard shortcutの一覧(⌘修飾をアプリが使い端末への打鍵に触れない原則は§5.4で確定)
@@ -2439,6 +2444,7 @@ PR_READY
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
 - [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)
 - [ ] 同じディレクトリの2つ目以降のsession名の接尾辞を`-<n>`(作る時点の最大値+1、2〜9999)にする — ユーザー確認待ち(§3.5)
+- [ ] OverviewでProject Rootに複数のsessionがあるとき、タブ列と同じ順に並べ注意状態で並べ替えない — ユーザー確認待ち(§13)
 - [ ] Macのローカル通知の起動直後の基準とまとめ通知・前面時の判断待ちの抑止・要対応(種別不明)の通知・bundle外での無効化 — ユーザー確認待ち(§11.2)
 
 # 付録C. 参照先

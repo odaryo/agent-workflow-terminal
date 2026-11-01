@@ -32,8 +32,24 @@ private actor GateProcessRunner: ProcessRunning {
   }
 }
 
+private func waitForLaunches(_ expectedLaunches: Int, runner: GateProcessRunner) async throws {
+  let clock = ContinuousClock()
+  let deadline = clock.now.advanced(by: .seconds(30))
+  while true {
+    let launches = await runner.launches
+    if launches >= expectedLaunches { return }
+    if clock.now >= deadline {
+      Issue.record("1回目の要求が runner に届かなかった: launches = \(launches)")
+      return
+    }
+    try await Task.sleep(for: .milliseconds(10))
+  }
+}
+
 /// `async let` で始めた呼び出しが actor へ届くまでの猶予。届かないまま release すると
 /// 起動が2回になってテストが落ちるので、見逃す方向へは倒れない。
+/// 2回目の要求が cache の in-flight に合流したことは直接観測できないため、この猶予を残す。
+/// 待ちが足りなければ起動が2回になって落ち、見逃しにはならない (#470)。
 ///
 /// `Task.yield()` の空回しで待たないのは、協調スレッドを占有して同じプロセスで並行に走る
 /// 他 suite の待ち合わせを飢えさせるため (実測: それで `WorktreePaneAgentStateFeedTests` が
@@ -54,7 +70,7 @@ struct ObservationSnapshotSharingTests {
       timeToLive: .zero, timeSource: ManualTimeSource())
 
     async let first = cache.snapshot()
-    try await waitForArrival()
+    try await waitForLaunches(1, runner: runner)
     #expect(await runner.launches == 1)
     async let second = cache.snapshot()
     try await waitForArrival()
@@ -104,7 +120,7 @@ struct ObservationSnapshotSharingTests {
       timeToLive: .zero, timeSource: ManualTimeSource())
 
     async let first: [TmuxPane] = cache.panes()
-    try await waitForArrival()
+    try await waitForLaunches(1, runner: runner)
     #expect(await runner.launches == 1)
     async let second: [TmuxPane] = cache.panes()
     try await waitForArrival()

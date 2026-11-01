@@ -12,8 +12,8 @@ private let isSendGateIntegrationEnabled =
 )
 struct DiffCommentSendGateIntegrationTests {
 
-  /// Issue #240 の計測をそのまま回帰にする。前景で `sleep` が走っている pane へ貼ると、注入は
-  /// 成功として返るが本文は tty のバッファに残り、`sleep` が終わってシェルが読んだ時点で
+  /// Issue #240 の計測を回帰にする。前景が合図を待っている pane へ貼ると、注入は
+  /// 成功として返るが本文は tty のバッファに残り、待機が終わってシェルが読んだ時点で
   /// **コマンドとして実行される**。gate 経由なら1バイトも送らないので実行もされない。
   @Test("Working 中の pane へは送らない (対照: 状態を見ない経路では本文が実行される)")
   func doesNotSendToWorkingPane() async throws {
@@ -21,15 +21,18 @@ struct DiffCommentSendGateIntegrationTests {
     try await IsolatedTmuxServer.withServer(socketName: socketName) { runner in
       let workspace = try IntegrationWorkspace()
       defer { workspace.remove() }
+      let releasePath = workspace.path(for: "release-working-panes")
 
       // 対照: 状態を見ない修正前の経路。
       let control = IntegrationExecutionProbe(workspace: workspace, name: "control")
-      let controlPane = try await makeWorkingPane(runner, label: "control")
+      let controlPane = try await makeWorkingPane(
+        runner, label: "control", releasePath: releasePath)
       try await TmuxTextInjection(runner: runner).inject(control.text, into: controlPane)
 
       // 修正後: 同じ pane 構成に対し `DiffCommentSendGate` を通す。
       let guarded = IntegrationExecutionProbe(workspace: workspace, name: "guarded")
-      let guardedPane = try await makeWorkingPane(runner, label: "guarded")
+      let guardedPane = try await makeWorkingPane(
+        runner, label: "guarded", releasePath: releasePath)
       let sendability = DiffCommentSendGate.sendability(
         toPane: guardedPane, states: [Self.state(.working, pane: guardedPane)])
       if case .allowed = sendability {
@@ -38,15 +41,16 @@ struct DiffCommentSendGateIntegrationTests {
 
       // 「まだ実行されていない」は、窓の中に居ることを確かめてからでないと意味を持たない。
       let insideWindow = try await isInsideSleepWindow(runner, pane: controlPane)
-      #expect(insideWindow, "sleep が先に終わったため、この計測は条件を再現できていない")
+      #expect(insideWindow, "待機が先に終わったため、この計測は条件を再現できていない")
       if insideWindow { #expect(!control.didExecute) }
       print(
         "[measure] 窓の中 (SLEEP_END 未出力)? \(insideWindow) "
           + "/ control marker exists? \(control.didExecute) "
           + "/ guarded sendability=\(sendability)")
-      try await waitUntil("対照の pane で sleep が終わり、本文が実行される") { control.didExecute }
+      try Data().write(to: URL(fileURLWithPath: releasePath))
+      try await waitUntil("対照の pane で待機が終わり、本文が実行される") { control.didExecute }
       print(
-        "[measure] sleep 終了後: control marker exists? \(control.didExecute) "
+        "[measure] 待機終了後: control marker exists? \(control.didExecute) "
           + "/ guarded marker exists? \(guarded.didExecute)")
       #expect(sendability == .blocked(.paneState(.working)))
       #expect(control.didExecute)
@@ -106,23 +110,36 @@ struct DiffCommentSendGateIntegrationTests {
     PaneAgentState(id: pane, state: state, lastUpdatedAt: Date())
   }
 
-  /// 前景で `sleep` を走らせ、終わったらシェルが tty を読む pane。Issue #240 の計測と同じ形。
+  /// 時間で窓を決めると負荷で外れるため、テスト側の合図で待機を終える (#405)。
+  /// `[` と `sleep` は tty の入力を読まないことを前提とし、注入本文を後続のシェルへ残す。
+  /// 合図が来ない場合も永久に待たないよう、600回 (約60秒) で待機を打ち切る。
   ///
-  /// `/bin/sh` を明示するのは、tmux が command 文字列を**既定 shell 経由**で走らせるため
-  /// (実測: 文字列だけ渡すと `#{pane_current_command}` は `zsh` / `bash` になる)。
+  /// パスはスクリプトへ埋め込まず位置引数で渡し、空白や引用符を shell に再解釈させない。
   /// `pane_current_command` は待ち合わせの目印に使えないので、pane 自身に窓の開始と終了を
-  /// 画面へ書かせ、それで同期する。時間で待つと負荷の高いマシンで判定が反転する。
-  private func makeWorkingPane(_ runner: TmuxRunner, label: String) async throws -> PaneID {
+  /// 画面へ書かせ、それで同期する。
+  private func makeWorkingPane(
+    _ runner: TmuxRunner, label: String, releasePath: String
+  ) async throws -> PaneID {
+    let script = #"""
+      echo SLEEP_START
+      remaining=600
+      while [ ! -e "$1" ] && [ "$remaining" -gt 0 ]; do
+        sleep 0.1
+        remaining=$((remaining - 1))
+      done
+      echo SLEEP_END
+      exec /bin/sh
+      """#
     let pane = try await makePane(
       runner, label: label,
-      command: [#"/bin/sh -c "echo SLEEP_START; sleep 4; echo SLEEP_END; exec /bin/sh""#])
-    try await waitUntil("前景の sleep が始まる") {
+      command: ["/bin/sh", "-c", script, "sh", releasePath])
+    try await waitUntil("前景の待機が始まる") {
       try await capturePane(runner, pane: pane).contains("SLEEP_START")
     }
     return pane
   }
 
-  /// 前景の `sleep` がまだ終わっていないこと。これを確かめずに「まだ実行されていない」と
+  /// 前景の待機がまだ終わっていないこと。これを確かめずに「まだ実行されていない」と
   /// assert すると、窓が閉じた後の観測を「送られていない証拠」と読み違える。
   private func isInsideSleepWindow(_ runner: TmuxRunner, pane: PaneID) async throws -> Bool {
     try await !capturePane(runner, pane: pane).contains("SLEEP_END")

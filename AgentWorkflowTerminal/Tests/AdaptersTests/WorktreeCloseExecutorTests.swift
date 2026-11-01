@@ -89,7 +89,8 @@ struct WorktreeCloseExecutorTests {
 
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(expectedSessionName)"]
+        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(expectedSessionName)"],
       ])
   }
 
@@ -111,7 +112,14 @@ struct WorktreeCloseExecutorTests {
   @Test("session がもう無いことと server が動いていないことは Close の成功")
   func treatsAbsentSessionAndStoppedServerAsSuccess() async throws {
     for stderr in ["can't find session: awt-feature-a-219261c3\n"] + tmuxServerAbsentStderrs {
-      let harness = try WorktreeCloseHarness(tmux: .init(result: stubFailure(stderr: stderr)))
+      let harness = try WorktreeCloseHarness(
+        tmux: .init { arguments in
+          if arguments.contains("list-sessions") {
+            return stderr.hasPrefix("can't find session:")
+              ? stubSuccess() : stubFailure(stderr: stderr)
+          }
+          return stubFailure(stderr: stderr)
+        })
 
       let outcome = try await harness.run(
         try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
@@ -380,5 +388,100 @@ struct WorktreeCloseExecutorTests {
     for invocation in deletingPreflight {
       expectFixedGitInvocation(invocation, timeout: .seconds(30))
     }
+  }
+}
+
+extension WorktreeCloseExecutorTests {
+  @Test("一覧の番号1・2・3を番号順にすべて終了する")
+  func terminatesAllNumberedSessions() async throws {
+    let base = "awt-feature-a-219261c3"
+    let harness = try WorktreeCloseHarness(
+      tmux: .init { arguments in
+        if arguments.contains("list-sessions") {
+          return stubSuccess(stdout: "\(base)-3\n\(base)\n\(base)-2\nawt-feature-b-e7b88064-2\n")
+        }
+        return stubSuccess()
+      })
+
+    let outcome = try await harness.run(try harness.plan(.terminateSession(.keepWorktree)))
+
+    #expect(
+      outcome == WorktreeCloseOutcome(completed: [.terminateSession], failure: nil, skipped: []))
+    #expect(
+      await harness.tmux.invocations.map(\.arguments) == [
+        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-2"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-3"],
+      ])
+  }
+
+  @Test("一覧が空でも番号1の session は終了する")
+  func terminatesPrimarySessionWhenListIsEmpty() async throws {
+    let harness = try WorktreeCloseHarness()
+
+    let outcome = try await harness.run(try harness.plan(.terminateSession(.keepWorktree)))
+
+    #expect(
+      outcome == WorktreeCloseOutcome(completed: [.terminateSession], failure: nil, skipped: []))
+    #expect(
+      await harness.tmux.invocations.map(\.arguments) == [
+        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=awt-feature-a-219261c3"],
+      ])
+  }
+
+  @Test("一覧取得に失敗したら session 終了も worktree 削除も進めない")
+  func stopsBeforeRemovalWhenSessionListingFails() async throws {
+    let stderr = "list-sessions failed\n"
+    let harness = try WorktreeCloseHarness(
+      tmux: .init { arguments in
+        arguments.contains("list-sessions") ? stubFailure(stderr: stderr) : stubSuccess()
+      })
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
+
+    #expect(outcome.completed.isEmpty)
+    #expect(outcome.failure?.step == .terminateSession)
+    #expect(
+      outcome.failure?.reason
+        == .tmux(.tmux(.commandFailed(exitCode: 1, stdout: "", stderr: stderr))))
+    #expect(outcome.skipped == [.removeWorktree(force: false)])
+    #expect(await harness.git.repositoryInvocations.isEmpty)
+    #expect(
+      await harness.tmux.invocations.map(\.arguments) == [
+        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"]
+      ])
+  }
+
+  @Test("2つ目の session 終了に失敗したら残りの終了も worktree 削除も進めない")
+  func stopsAtSecondSessionTerminationFailure() async throws {
+    let base = "awt-feature-a-219261c3"
+    let stderr = "kill-session failed\n"
+    let harness = try WorktreeCloseHarness(
+      tmux: .init { arguments in
+        if arguments.contains("list-sessions") {
+          return stubSuccess(stdout: "\(base)-3\n\(base)-2\n\(base)\n")
+        }
+        return arguments.last == "=\(base)-2" ? stubFailure(stderr: stderr) : stubSuccess()
+      })
+
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
+
+    #expect(outcome.completed.isEmpty)
+    #expect(outcome.failure?.step == .terminateSession)
+    #expect(
+      outcome.failure?.reason
+        == .tmux(.tmux(.commandFailed(exitCode: 1, stdout: "", stderr: stderr))))
+    #expect(outcome.skipped == [.removeWorktree(force: false)])
+    #expect(await harness.git.repositoryInvocations.isEmpty)
+    #expect(
+      await harness.tmux.invocations.map(\.arguments) == [
+        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)"],
+        ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-2"],
+      ])
   }
 }

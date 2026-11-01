@@ -76,7 +76,7 @@ swift build --triple arm64-apple-ios17.0-simulator \
   --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 ```
 
-CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、arm64 iOS 17 simulator triple と
+CI の `Static checks & iOS build` ジョブの `Build (iOS Simulator)` 段も同じコマンドを実行し、arm64 iOS 17 simulator triple と
 iOS Simulator SDK を使って、テストターゲットを除く全ターゲットがコンパイルできることを検証します。
 テストターゲット、
 実機向け triple のコンパイル、simulator・実機での実行時動作は検証範囲外です。
@@ -137,10 +137,10 @@ AWT_RIPGREP_INTEGRATION=1 swift test --filter RipgrepSearchIntegrationTests
 
 ### CI での統合テスト
 
-3つのフラグは CI の `Integration Test (real CLIs)` job がまとめて有効にします。tmux と ripgrep は
-macos-15 runner イメージに入っていないため、この job が `brew install` で導入します。**版数は
+3つのフラグは CI の `Build & Test (SwiftPM, unit + integration)` job の統合テストの段がまとめて有効にします。tmux と ripgrep は
+macos-15 runner イメージに入っていないため、この job が単体テストの後に `brew install` で導入します。**版数は
 固定せず runner の既定を使い、`tmux -V` / `git --version` / `rg --version` をログに残します。**
-サポート下限版数が未決 (Issue #16) の段階で pin すると、外界のドリフトを検出するというこの job の
+サポート下限版数が未決 (Issue #16) の段階で pin すると、外界のドリフトを検出するという統合テストの
 目的自体が消えるためです。
 
 skip は静かに起きます — 環境変数が無いと `.enabled(if:)` の suite は skip されますが

@@ -33,7 +33,8 @@ public struct OverviewPaneDetail: Sendable, Hashable {
 }
 
 public struct OverviewWorktreeInput: Sendable {
-  public var worktree: WorktreeIdentity
+  public var session: TerminalSessionKey
+  public var worktree: WorktreeIdentity { session.identity }
   /// Agent pane だけ。`.absent` の pane は観測の時点で除かれている (§5.2)。
   public var paneStates: [PaneDisplayState]
   /// 非 Agent pane の概要が混ざってよい。行にするかは `paneStates` だけで決める。
@@ -41,29 +42,48 @@ public struct OverviewWorktreeInput: Sendable {
   public var mainPane: PaneID?
 
   public init(
-    worktree: WorktreeIdentity, paneStates: [PaneDisplayState],
+    session: TerminalSessionKey, paneStates: [PaneDisplayState],
     details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil
   ) {
-    self.worktree = worktree
+    self.session = session
     self.paneStates = paneStates
     self.details = details
     self.mainPane = mainPane
+  }
+
+  public init(
+    worktree: WorktreeIdentity, paneStates: [PaneDisplayState],
+    details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil
+  ) {
+    self.init(
+      session: .primary(worktree), paneStates: paneStates, details: details, mainPane: mainPane)
   }
 }
 
 public struct OverviewProjectInput: Sendable {
   public var project: WorktreeIdentity
-  public var projectRoot: OverviewWorktreeInput?
-  /// tab の順。並べ替えの同順位はこの順を保つ。
+  /// Project Root のタブの順。出力もこの順のままで、状態では並べ替えない (設計書 §13)。
+  public var projectRootSessions: [OverviewWorktreeInput]
+  /// tab の順。並べ替えの同順位はこの順を保つ。同じ worktree の session は別々の要素として
+  /// 渡し、束ねない (設計書 §12.2)。
   public var tasks: [OverviewWorktreeInput]
+
+  public var projectRoot: OverviewWorktreeInput? { projectRootSessions.first }
+
+  public init(
+    project: WorktreeIdentity, projectRootSessions: [OverviewWorktreeInput],
+    tasks: [OverviewWorktreeInput]
+  ) {
+    self.project = project
+    self.projectRootSessions = projectRootSessions
+    self.tasks = tasks
+  }
 
   public init(
     project: WorktreeIdentity, projectRoot: OverviewWorktreeInput?,
     tasks: [OverviewWorktreeInput]
   ) {
-    self.project = project
-    self.projectRoot = projectRoot
-    self.tasks = tasks
+    self.init(project: project, projectRootSessions: projectRoot.map { [$0] } ?? [], tasks: tasks)
   }
 }
 
@@ -87,21 +107,25 @@ public enum OverviewRow: Sendable, Hashable {
 }
 
 public struct OverviewWorktree: Sendable, Hashable {
-  public let worktree: WorktreeIdentity
+  public let session: TerminalSessionKey
+  public var worktree: WorktreeIdentity { session.identity }
   /// 空にならない。Agent pane が無ければ `[.noAgentPane]`。
   public let rows: [OverviewRow]
 }
 
 public struct OverviewProject: Sendable, Hashable {
   public let project: WorktreeIdentity
-  public let projectRoot: OverviewWorktree?
+  /// 入力の順のまま。
+  public let projectRootSessions: [OverviewWorktree]
   public let tasks: [OverviewWorktree]
+
+  public var projectRoot: OverviewWorktree? { projectRootSessions.first }
 }
 
 /// 設計書 §13 の並び順。
 ///
 /// - Project は入力 (登録) の順で固定する。並べ替えると、見ている場所が状態の変化で動く。
-/// - Project Root は Task と混ぜず別枠に置く。
+/// - Project Root は Task と混ぜず別枠に置く。その session どうしは入力 (タブ) の順で固定する。
 /// - Task は Needs Attention の pane を含むものを先に、それぞれ pane の最終更新の最大値が新しい順。
 ///   Agent pane の無い Task は最後。同順位は入力 (tab) の順。
 /// - Task 内の pane は Needs Attention を先に、それぞれ最終更新の新しい順。同順位は入力の順。
@@ -112,7 +136,7 @@ public func makeAgentPaneOverview(_ projects: [OverviewProjectInput]) -> [Overvi
   projects.map { project in
     OverviewProject(
       project: project.project,
-      projectRoot: project.projectRoot.map(overviewWorktree),
+      projectRootSessions: project.projectRootSessions.map(overviewWorktree),
       tasks: stableSorted(project.tasks.map(overviewWorktree), by: taskPrecedes))
   }
 }
@@ -125,7 +149,7 @@ private func overviewWorktree(_ input: OverviewWorktreeInput) -> OverviewWorktre
         detail: input.details[state.paneID] ?? OverviewPaneDetail(),
         isMain: state.paneID == input.mainPane))
   }
-  return OverviewWorktree(worktree: input.worktree, rows: panes.isEmpty ? [.noAgentPane] : panes)
+  return OverviewWorktree(session: input.session, rows: panes.isEmpty ? [.noAgentPane] : panes)
 }
 
 private func panePrecedes(_ lhs: PaneDisplayState, _ rhs: PaneDisplayState) -> Bool {

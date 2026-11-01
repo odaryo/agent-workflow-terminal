@@ -1,6 +1,7 @@
 import SwiftUI
+import TerminalCore
 
-private enum DiffContentMetrics {
+enum DiffContentMetrics {
   static let fileListWidth: CGFloat = 240
   static let diffMinimumWidth: CGFloat = 200
   static let commentsWidth: CGFloat = 260
@@ -12,39 +13,36 @@ private enum DiffContentMetrics {
 }
 
 struct DiffContentLayout<FileList: View, Diff: View, Comments: View>: View {
+  let arrangement: ViewerContentArrangement
   @ViewBuilder var fileList: () -> FileList
   @ViewBuilder var diff: () -> Diff
   @ViewBuilder var comments: () -> Comments
 
   var body: some View {
-    GeometryReader { proxy in
-      let wide = proxy.size.width >= DiffContentMetrics.wideMinimumWidth
-      // 条件分岐でビューを作り直すと、コメント入力のフォーカスや一覧の位置が失われる。
-      let layout = wide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-      layout {
+    switch arrangement {
+    case .sideBySide:
+      HStack(spacing: 0) {
         fileList()
-          .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-          .frame(
-            width: wide ? DiffContentMetrics.fileListWidth : nil,
-            height: wide ? nil : DiffContentMetrics.fileListHeight)
-        divider(wide: wide)
+          .frame(width: DiffContentMetrics.fileListWidth)
+        Divider().frame(width: DiffContentMetrics.dividerThickness)
         diff()
-          .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-        divider(wide: wide)
+          .frame(minWidth: DiffContentMetrics.diffMinimumWidth, maxWidth: .infinity)
+        Divider().frame(width: DiffContentMetrics.dividerThickness)
         comments()
-          .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
-          .frame(
-            width: wide ? DiffContentMetrics.commentsWidth : nil,
-            height: wide ? nil : DiffContentMetrics.commentsHeight)
+          .frame(width: DiffContentMetrics.commentsWidth)
       }
-      .frame(width: proxy.size.width, height: proxy.size.height)
+      .frame(maxHeight: .infinity)
+    case .stacked:
+      VSplitView {
+        fileList()
+          .frame(
+            minHeight: 60, idealHeight: DiffContentMetrics.fileListHeight, maxHeight: .infinity)
+        diff()
+          .frame(minWidth: 0, maxWidth: .infinity, minHeight: 80, maxHeight: .infinity)
+        comments()
+          .frame(
+            minHeight: 80, idealHeight: DiffContentMetrics.commentsHeight, maxHeight: .infinity)
+      }
     }
-  }
-
-  private func divider(wide: Bool) -> some View {
-    Divider()
-      .frame(
-        width: wide ? DiffContentMetrics.dividerThickness : nil,
-        height: wide ? nil : DiffContentMetrics.dividerThickness)
   }
 }

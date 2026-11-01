@@ -1,6 +1,14 @@
 public protocol WorktreePaneSource: Sendable {
   /// 実装体は tmux `list-panes` の順序を保つ。session がまだ無ければ throw せず空配列を返す。
-  func panes(of worktree: WorktreeIdentity) async throws -> [PaneSnapshot]
+  /// 返すのはその session の pane だけで、同じ worktree の他の session の pane を混ぜない
+  /// (設計書 §12.2)。
+  func panes(of session: TerminalSessionKey) async throws -> [PaneSnapshot]
+}
+
+extension WorktreePaneSource {
+  public func panes(of worktree: WorktreeIdentity) async throws -> [PaneSnapshot] {
+    try await panes(of: .primary(worktree))
+  }
 }
 
 /// `states(of:)` の各配信に、それが揃った観測かどうかを添えたもの。
@@ -42,36 +50,56 @@ public struct WorktreePaneAgentStateFeed: Sendable {
   /// (設計書 §5.2)。空配列は Agent pane が1つも無いことを表し、代表状態の `nil` を Idle 表示へ
   /// 変換する規則は表示層に留める。
   public func states(
-    of worktree: WorktreeIdentity,
+    of session: TerminalSessionKey,
     panes paneSource: any WorktreePaneSource,
     signals signalSource: any AgentSignalSource,
     timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
   ) -> AsyncStream<[PaneAgentState]> {
     AsyncStream { continuation in
       let stop = run(
-        of: worktree, output: .states(continuation), panes: paneSource, signals: signalSource,
+        of: session, output: .states(continuation), panes: paneSource, signals: signalSource,
         timeSource: timeSource)
       continuation.onTermination = { _ in stop() }
     }
   }
 
+  public func states(
+    of worktree: WorktreeIdentity,
+    panes paneSource: any WorktreePaneSource,
+    signals signalSource: any AgentSignalSource,
+    timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
+  ) -> AsyncStream<[PaneAgentState]> {
+    states(
+      of: .primary(worktree), panes: paneSource, signals: signalSource, timeSource: timeSource)
+  }
+
   /// `states(of:)` と同じ観測に `isComplete` を添える。`isComplete` だけが変わった回も配信する。
   public func snapshots(
-    of worktree: WorktreeIdentity,
+    of session: TerminalSessionKey,
     panes paneSource: any WorktreePaneSource,
     signals signalSource: any AgentSignalSource,
     timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
   ) -> AsyncStream<WorktreePaneAgentStates> {
     AsyncStream { continuation in
       let stop = run(
-        of: worktree, output: .snapshots(continuation), panes: paneSource,
+        of: session, output: .snapshots(continuation), panes: paneSource,
         signals: signalSource, timeSource: timeSource)
       continuation.onTermination = { _ in stop() }
     }
   }
 
-  private func run(
+  public func snapshots(
     of worktree: WorktreeIdentity,
+    panes paneSource: any WorktreePaneSource,
+    signals signalSource: any AgentSignalSource,
+    timeSource: any ContinuousTimeSource = SystemContinuousTimeSource()
+  ) -> AsyncStream<WorktreePaneAgentStates> {
+    snapshots(
+      of: .primary(worktree), panes: paneSource, signals: signalSource, timeSource: timeSource)
+  }
+
+  private func run(
+    of session: TerminalSessionKey,
     output: WorktreePaneFeedCoordinator.Output,
     panes paneSource: any WorktreePaneSource,
     signals signalSource: any AgentSignalSource,
@@ -87,7 +115,7 @@ public struct WorktreePaneAgentStateFeed: Sendable {
     let pollTask = Task {
       while !Task.isCancelled {
         do {
-          let panes = try await paneSource.panes(of: worktree)
+          let panes = try await paneSource.panes(of: session)
           guard !Task.isCancelled else { break }
           await coordinator.receive(panes)
         } catch {

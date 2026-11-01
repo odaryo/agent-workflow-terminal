@@ -31,7 +31,10 @@ struct TmuxSessionDetachOnDestroyTests: TmuxSessionOperationsTestSupport {
     "server の停止と socket の欠落を既存のエラー写像で区別する",
     arguments: [
       (tmuxServerNotRunningStderr, TmuxSessionOperationError.serverNotRunning),
-      (tmuxServerSocketMissingStderr, TmuxSessionOperationError.serverSocketMissing),
+      (
+        tmuxServerSocketMissingStderr,
+        TmuxSessionOperationError.serverSocketMissing(socketPath: "/private/tmp/tmux-501/default")
+      ),
     ]
   )
   func reportsMissingServer(

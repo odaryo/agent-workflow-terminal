@@ -229,7 +229,9 @@ struct TmuxSessionOperationsIntegrationTests {
     let socketName = uniqueSocketName("never-started")
     let operations = TmuxSessionOperations(runner: try neverStartedRunner(socketName))
 
-    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
+    await #expect(
+      throws: TmuxSessionOperationError.serverSocketMissing(socketPath: socketPath(socketName))
+    ) {
       try await operations.exists(session: try sessionName())
     }
     #expect(try await operations.list().isEmpty)
@@ -241,7 +243,9 @@ struct TmuxSessionOperationsIntegrationTests {
     let socketName = uniqueSocketName("never-created")
     let operations = TmuxSessionOperations(runner: try neverStartedRunner(socketName))
 
-    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
+    await #expect(
+      throws: TmuxSessionOperationError.serverSocketMissing(socketPath: socketPath(socketName))
+    ) {
       try await operations.create(session: try sessionName(), workingDirectory: "/private/tmp")
     }
     #expect(FileManager.default.fileExists(atPath: socketPath(socketName)) == false)

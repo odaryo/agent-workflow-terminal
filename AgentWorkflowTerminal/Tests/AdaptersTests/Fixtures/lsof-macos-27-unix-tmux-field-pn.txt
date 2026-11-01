@@ -1,0 +1,6 @@
+p15199
+f6
+n/private/tmp/tmux-501/awtm50015196
+p20378
+f6
+n/private/tmp/tmux-501/default

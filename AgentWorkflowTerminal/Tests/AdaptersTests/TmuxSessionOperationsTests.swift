@@ -42,7 +42,10 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerSocketMissingStderr))
     let operations = try makeOperations(stub)
 
-    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
+    await #expect(
+      throws: TmuxSessionOperationError.serverSocketMissing(
+        socketPath: "/private/tmp/tmux-501/default")
+    ) {
       try await operations.exists(session: try sessionName())
     }
   }
@@ -101,7 +104,10 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     "server の停止と socket の欠落を区別し、終了を成功にしない",
     arguments: [
       (tmuxServerNotRunningStderr, TmuxSessionOperationError.serverNotRunning),
-      (tmuxServerSocketMissingStderr, TmuxSessionOperationError.serverSocketMissing),
+      (
+        tmuxServerSocketMissingStderr,
+        TmuxSessionOperationError.serverSocketMissing(socketPath: "/private/tmp/tmux-501/default")
+      ),
     ]
   )
   func reportsMissingServerOnKill(

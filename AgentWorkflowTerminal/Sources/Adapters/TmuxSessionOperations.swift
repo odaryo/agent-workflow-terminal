@@ -16,7 +16,7 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// server と、socket ファイルだけ消えて生きている server を区別できない。
   /// Issue #492 の tmux 3.8 実測: `has-session` は rc=1 でも server pid は生存し、
   /// USR1 で socket を作り直すと rc=0 に戻った。session 不在と断定しないために分ける。
-  case serverSocketMissing
+  case serverSocketMissing(socketPath: String)
   /// tmux は pane をそこへ入れられなくても exit 0 で session を作り、cwd を `$HOME` へ落とす
   /// (tmux 3.4 実測)。族の輪郭は「ディレクトリとして chdir できない値すべて」であって、閉じた
   /// 列挙は無い。実測した代表例は、不在・通常ファイル・**chdir できない権限**
@@ -384,8 +384,8 @@ public struct TmuxSessionOperations: Sendable {
     if isServerNotRunning(stderr) {
       return .serverNotRunning
     }
-    if isServerSocketMissing(stderr) {
-      return .serverSocketMissing
+    if let socketPath = missingServerSocketPath(stderr) {
+      return .serverSocketMissing(socketPath: socketPath)
     }
     guard let session, let target else {
       return .tmux(error)
@@ -407,9 +407,11 @@ public struct TmuxSessionOperations: Sendable {
   /// `error connecting to ` の前置きだけでは socket 欠落にも分類できないため、末尾の errno まで
   /// 見る。分類してはいけない例 (tmux 3.4 実測):
   /// `... (File name too long)` / `... (Socket operation on non-socket)`
-  private static func isServerSocketMissing(_ stderr: String) -> Bool {
-    stderr.hasPrefix("error connecting to ")
-      && stderr.hasSuffix(" (No such file or directory)\n")
+  private static func missingServerSocketPath(_ stderr: String) -> String? {
+    let prefix = "error connecting to "
+    let suffix = " (No such file or directory)\n"
+    guard stderr.hasPrefix(prefix), stderr.hasSuffix(suffix) else { return nil }
+    return String(stderr.dropFirst(prefix.count).dropLast(suffix.count))
   }
 
   /// `formatEscaped` を通しても pane が渡した値を得られない作業ディレクトリを、tmux へ渡す前に弾く。

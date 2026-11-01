@@ -77,7 +77,9 @@ actor TmuxAllSessionPaneListCache {
     } catch {
       // server ごと居ない場合は「pane が無い」であって障害ではない。`-t` を渡していた頃に
       // 必要だった `can't find window:` の分岐は、`-a` が session を指さないので要らなくなった
-      // (session 不在は「その名前の行が0件」として現れる)。
+      // (session 不在は「その名前の行が0件」として現れる)。socket 欠落も不在へ畳む
+      // (Issue #500、Director 決定4、2026-11-02)。attach 済みの client は fd で繋がったままで、
+      // 誤った書き込みは bootstrap と Close で止める。観測のたびの lsof 起動コストを避ける。
       if error.isServerAbsent { return .success([]) }
       return .failure(.tmux(error))
     }
@@ -175,7 +177,9 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
       return Int32(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     } catch {
       // server 不在は「同一性を確かめられなかった」であって障害ではない。判定は
-      // `TmuxRunnerError.isServerAbsent` の1箇所に集めている (形が2つあるため)。
+      // `TmuxRunnerError.isServerAbsent` の1箇所に集め、socket 欠落も同じ不在へ畳む
+      // (Issue #500、Director 決定4)。attach 済みの client は fd で繋がったままであり、誤った
+      // 書き込みは bootstrap と Close で止めるため、観測のたびに lsof は起動しない。
       if error.isServerAbsent { return nil }
       throw .tmux(error)
     }

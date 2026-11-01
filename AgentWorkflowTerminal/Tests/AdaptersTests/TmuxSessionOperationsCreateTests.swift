@@ -97,7 +97,10 @@ struct TmuxSessionOperationsCreateTests: TmuxSessionOperationsTestSupport {
     "server の停止と socket の欠落を区別し、session を作らない",
     arguments: [
       (tmuxServerNotRunningStderr, TmuxSessionOperationError.serverNotRunning),
-      (tmuxServerSocketMissingStderr, TmuxSessionOperationError.serverSocketMissing),
+      (
+        tmuxServerSocketMissingStderr,
+        TmuxSessionOperationError.serverSocketMissing(socketPath: "/private/tmp/tmux-501/default")
+      ),
     ]
   )
   func doesNotCreateSessionWithoutServer(

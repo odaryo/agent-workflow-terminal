@@ -141,7 +141,7 @@ struct ProjectView: View {
   private var taskTabsToolbar: some ToolbarContent {
     ToolbarItem(placement: .navigation) {
       HStack(spacing: 0) {
-        ProjectTabStrip { tabs }
+        ProjectTabStrip(scrollTarget: model.selectedTab) { tabs }
         NewTaskButton(isDisabled: model.projectRoot == nil, action: openNewProjectRootTab)
         InactiveWorktreeMenu(
           worktrees: model.inactiveWorktrees,
@@ -161,6 +161,7 @@ struct ProjectView: View {
           ProjectRootTab(index: key.index, selected: model.selectedTab == key) {
             model.select(key)
           }
+          .id(key)
           .overlay {
             ToolbarContextMenu(items: [
               .action(title: "新規タブ", isEnabled: true) { openNewTab(in: key.identity) }
@@ -181,6 +182,7 @@ struct ProjectView: View {
             requestClose: { model.requestClose(of: worktree.identity) },
             openNewTab: { openNewTab(in: key.identity) }
           )
+          .id(key)
         }
       }
     }

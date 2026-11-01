@@ -116,8 +116,9 @@ public enum PaneNotification: Sendable, Hashable {
 ///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
 ///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
 ///   飲み込むため。
-/// - Important: 他の session や猶予中に既に記憶がある pane は基準で上書きせず、まとめ通知にも
-///   数えない (#494)。基準の時点で初めて知った判断待ちの pane は個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
+/// - Important: 他の session や猶予中に既知の状態の記憶がある pane は基準で上書きせず、まとめ通知の
+///   対象にも新たに加えない (#494)。完了表示の記憶だけでは状態を知ったことにならないため、状態の
+///   記憶がない pane の判断待ちは基準で個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
 ///   起動直後は Project ごと・session (タブ) ごとに基準を取る時刻がずれるので、まとめ通知は
 ///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 session が基準を取り終えた時点で
 ///   出す。基準を取れない session が残っても、最初の候補から `summaryMaximumDelay` で出す。
@@ -292,7 +293,7 @@ public struct PaneNotificationPlanner: Sendable {
 
     var notifications: [PaneNotification] = []
     for (paneID, display) in displays.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-      attach(paneID, to: session)
+      attach(paneID, to: session, at: instant)
       var isSilent = isBaseline
       if isBaseline || panes[paneID]?.awaitsCompletionBaseline == true {
         if undetermined.contains(paneID) {
@@ -333,9 +334,8 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func takeBaseline(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) {
-    if panes[pane.id] != nil {
-      attach(pane.id, to: session)
-      panes[pane.id]?.isSummaryMember = false
+    attach(pane.id, to: session, at: instant)
+    if panes[pane.id]?.lastKnown != nil {
       if Self.isPlainUnknown(pane) {
         if panes[pane.id]?.unknownSince == nil { panes[pane.id]?.unknownSince = instant }
       } else {
@@ -344,7 +344,7 @@ public struct PaneNotificationPlanner: Sendable {
       }
       return
     }
-    var memory = PaneMemory(session: session)
+    var memory = panes[pane.id] ?? PaneMemory(session: session)
     memory.lastKnown = Self.known(pane)
     memory.unknownSince = Self.isPlainUnknown(pane) ? instant : nil
     memory.didNotifyUnknown = false
@@ -361,7 +361,7 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func transition(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) -> PaneNotificationKind? {
-    attach(pane.id, to: session)
+    attach(pane.id, to: session, at: instant)
     var memory = panes[pane.id] ?? PaneMemory(session: session)
     defer { panes[pane.id] = memory }
 
@@ -417,7 +417,9 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   private mutating func flushSummary(at instant: ContinuousClock.Instant) -> PaneNotification? {
-    let members = panes.filter(\.value.isSummaryMember)
+    // 閉じたタブの pane を数えないため、猶予中は除く (#488 stoppingSessionRemovesItsSummaryMembers)。
+    // その印まで消すと、移動中の pane が戻ったときに通知を失う (#494 のレビュー M2 / P2)。
+    let members = panes.filter { $0.value.isSummaryMember && $0.value.missingSince == nil }
     guard let startedAt = summaryStartedAt, !members.isEmpty else {
       summaryStartedAt = nil
       return nil
@@ -438,7 +440,14 @@ public struct PaneNotificationPlanner: Sendable {
 
   // #494 の計測では join-pane / link-window で同じ ID が別の session に現れる。
   // (session, pane) を鍵にすると link-window が二重に鳴るため、pane ごとの記憶を付け替える。
-  private mutating func attach(_ paneID: PaneID, to session: TerminalSessionKey) {
+  private mutating func attach(
+    _ paneID: PaneID, to session: TerminalSessionKey, at instant: ContinuousClock.Instant
+  ) {
+    if let memory = panes[paneID], memory.missingSince != nil,
+      memory.isSummaryMember, summaryStartedAt == nil
+    {
+      summaryStartedAt = instant
+    }
     panes[paneID, default: PaneMemory(session: session)].session = session
     panes[paneID]?.missingSince = nil
   }
@@ -451,7 +460,6 @@ public struct PaneNotificationPlanner: Sendable {
       if panes[paneID]?.missingSince == nil { panes[paneID]?.missingSince = instant }
       panes[paneID]?.unknownSince = nil
       panes[paneID]?.didNotifyUnknown = false
-      panes[paneID]?.isSummaryMember = false
     }
   }
 

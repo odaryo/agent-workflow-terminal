@@ -17,7 +17,7 @@ struct PaneNotificationPlannerHandoffTests: PaneNotificationPlannerTesting {
     sessionB = try #require(TerminalSessionKey(identity: identities.worktree, index: 2))
   }
 
-  @Test("m2 / m2b: 移動先で状態と完了のどちらを先に観測しても再通知しない", arguments: [true, false])
+  @Test("Q1: 移動先で状態と完了のどちらを先に観測しても20秒間再通知しない", arguments: [true, false])
   func movedPaneKeepsAnnouncedAttentionAndToken(completionsFirst: Bool) {
     let start = Self.clock.now
     var planner = twoSessions(at: start, panesA: [pane("%2", .working)])
@@ -38,10 +38,15 @@ struct PaneNotificationPlannerHandoffTests: PaneNotificationPlannerTesting {
       #expect(states(&planner, [pane("%2", .question)], in: sessionB, at: moved).isEmpty)
       #expect(displays(&planner, ["%2": .completed(Self.first)], in: sessionB, at: moved).isEmpty)
     }
-    #expect(states(&planner, [pane("%2", .question)], in: sessionB, at: moved).isEmpty)
-    #expect(displays(&planner, ["%2": .completed(Self.first)], in: sessionB, at: moved).isEmpty)
+    for seconds in 1...20 {
+      let observed = moved.advanced(by: .seconds(seconds))
+      #expect(states(&planner, [pane("%2", .question)], in: sessionB, at: observed).isEmpty)
+      #expect(
+        displays(&planner, ["%2": .completed(Self.first)], in: sessionB, at: observed).isEmpty)
+    }
+    let later = moved.advanced(by: .seconds(20))
     #expect(
-      displays(&planner, ["%2": .completed(Self.second)], in: sessionB, at: moved)
+      displays(&planner, ["%2": .completed(Self.second)], in: sessionB, at: later)
         == [notification(in: sessionB, paneID: "%2", kind: .taskCompleted, completion: Self.second)]
     )
   }

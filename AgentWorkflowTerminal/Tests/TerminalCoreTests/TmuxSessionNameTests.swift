@@ -188,4 +188,63 @@ struct TmuxSessionNameTests {
   func anyUnderscoreGitSlugTakesTheParentComponent() throws {
     #expect(try name("/repo/.git/worktrees/_git").rawValue == "awt-worktrees-4419bcd2")
   }
+
+  @Test("primary key は index 1 で従来の導出名と一致する")
+  func primaryKeyPreservesIdentityAndName() throws {
+    let identity = try #require(WorktreeIdentity(rawValue: Self.taskIdentityPath))
+    let key = TerminalSessionKey.primary(identity)
+
+    #expect(key.identity == identity)
+    #expect(key.index == 1)
+    #expect(try #require(TerminalSessionKey(identity: identity, index: 1)) == key)
+    #expect(TmuxSessionName(key: key) == TmuxSessionName(identity: identity))
+  }
+
+  @Test("2番目以降の key は導出名に番号を付ける", arguments: [2, 9999])
+  func numberedKeyAppendsIndex(index: Int) throws {
+    let identity = try #require(WorktreeIdentity(rawValue: Self.taskIdentityPath))
+    let key = try #require(TerminalSessionKey(identity: identity, index: index))
+
+    #expect(key.identity == identity)
+    #expect(key.index == index)
+    #expect(
+      TmuxSessionName(key: key).rawValue == "awt-feature-a-\(Self.taskIdentityHash8)-\(index)")
+  }
+
+  @Test("1...9999 の範囲外の key は作れない", arguments: [0, 10000, -1])
+  func rejectsOutOfRangeSessionIndex(index: Int) throws {
+    let identity = try #require(WorktreeIdentity(rawValue: Self.taskIdentityPath))
+
+    #expect(TerminalSessionKey(identity: identity, index: index) == nil)
+  }
+
+  @Test("同じ identity の正しい番号だけを重複なく昇順に返す")
+  func indicesExcludeMalformedAndForeignNames() throws {
+    let identity = try #require(WorktreeIdentity(rawValue: Self.taskIdentityPath))
+    let base = TmuxSessionName(identity: identity).rawValue
+    let foreign = try name("/another/.git/worktrees/feature-a").rawValue
+    let names = [
+      base + "-9999", base + "-3", base + "-2", base, base + "-2", base,
+      base + "-1", base + "-0", base + "-02", base + "-10000", base + "-2x",
+      base + "-2-3", String(base.dropLast()), String(base.dropLast()) + "-2",
+      foreign, foreign + "-4", base + "-", base + "-+2", " " + base, base + "-2\n",
+    ]
+
+    #expect(TmuxSessionName.indices(of: identity, in: names) == [1, 2, 3, 9999])
+    #expect(TmuxSessionName.indices(of: identity, in: []) == [])
+  }
+
+  @Test(
+    "次の番号は欠番を詰めず最大値に1を足し上限で止まる",
+    arguments: [
+      ([String](), Optional(2)), ([""], Optional(2)), (["-3"], Optional(4)),
+      (["", "-2", "-5"], Optional(6)), (["-9999"], nil),
+    ])
+  func nextIndexFollowsMaximum(suffixes: [String], expected: Int?) throws {
+    let identity = try #require(WorktreeIdentity(rawValue: Self.taskIdentityPath))
+    let base = TmuxSessionName(identity: identity).rawValue
+
+    #expect(TmuxSessionName.nextIndex(of: identity, in: suffixes.map { base + $0 }) == expected)
+  }
+
 }

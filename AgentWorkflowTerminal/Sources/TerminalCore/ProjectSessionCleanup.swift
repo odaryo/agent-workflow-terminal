@@ -4,7 +4,7 @@ public enum ProjectSessionCleanup {
   /// そのものなので、保存も観測も無い Project でも Project Root の session を導出できるため。
   /// 到達不能な Project では `observed` が空になり、`saved` だけが task worktree の手がかりになる。
   ///
-  /// `existingSessionNames` との照合は導出名との完全一致だけで行う。`awt-` 接頭辞は管理下に
+  /// `existingSessionNames` との照合は番号を含む導出名との完全一致だけで行う。`awt-` 接頭辞は管理下に
   /// あることの証明にならない (`TmuxSessionOperations.list()` の注釈)。
   ///
   /// 候補は Project Root そのものか `<common>/worktrees/` 直下の1要素だけに絞る。保存ファイルや
@@ -27,7 +27,6 @@ public enum ProjectSessionCleanup {
       + (saved?.taskWorktrees.map(\.identity) ?? [])
       + observed
     let linkedWorktreePrefix = Array((projectCommonDirectory.rawValue + "/worktrees/").utf8)
-    let existing = Set(existingSessionNames)
 
     var seen: Set<TmuxSessionName> = []
     var result: [TmuxSessionName] = []
@@ -37,9 +36,12 @@ public enum ProjectSessionCleanup {
         && identity.rawValue.utf8.count > linkedWorktreePrefix.count
         && !identity.rawValue.utf8.dropFirst(linkedWorktreePrefix.count).contains(UInt8(ascii: "/")))
     {
-      let name = TmuxSessionName(identity: identity)
-      guard existing.contains(name.rawValue), seen.insert(name).inserted else { continue }
-      result.append(name)
+      for index in TmuxSessionName.indices(of: identity, in: existingSessionNames) {
+        guard let key = TerminalSessionKey(identity: identity, index: index) else { continue }
+        let name = TmuxSessionName(key: key)
+        guard seen.insert(name).inserted else { continue }
+        result.append(name)
+      }
     }
     return result
   }

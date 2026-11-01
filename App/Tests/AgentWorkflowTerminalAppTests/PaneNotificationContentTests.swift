@@ -53,6 +53,25 @@ struct PaneNotificationContentTests {
     #expect(NotificationTarget(userInfo: ["project": "relative"]) == .overview)
   }
 
+  @Test("追加タブの session を userInfo に保持する")
+  func sessionTargetRoundTrip() throws {
+    let session = try #require(TerminalSessionKey(identity: worktree, index: 2))
+    let target = NotificationTarget.pane(
+      project: project, session: session, pane: PaneID(rawValue: "%4"))
+    #expect(NotificationTarget(userInfo: target.userInfo) == target)
+  }
+
+  @Test("タブ番号のない既存通知は primary に移り、不正な番号は Overview に倒す")
+  func legacyAndInvalidSessionTargets() {
+    var info = target.userInfo
+    info.removeValue(forKey: "sessionIndex")
+    #expect(NotificationTarget(userInfo: info) == target)
+    for index in ["0", "10000", "invalid"] {
+      info["sessionIndex"] = index
+      #expect(NotificationTarget(userInfo: info) == .overview)
+    }
+  }
+
   @Test("pane の呼び名は Overview と同じ (メイン / window.pane / pane ID)")
   func paneNames() {
     let pane = PaneID(rawValue: "%7")
@@ -87,6 +106,6 @@ struct PaneNotificationContentTests {
   }
 
   private var target: NotificationTarget {
-    .pane(project: project, worktree: worktree, pane: PaneID(rawValue: "%3"))
+    .pane(project: project, session: .primary(worktree), pane: PaneID(rawValue: "%3"))
   }
 }

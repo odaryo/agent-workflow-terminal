@@ -4,20 +4,21 @@ import UserNotifications
 
 /// 通知を開いたときの移動先 (§11.2 の表)。
 enum NotificationTarget: Sendable, Hashable {
-  case pane(project: WorktreeIdentity, worktree: WorktreeIdentity, pane: PaneID)
+  case pane(project: WorktreeIdentity, session: TerminalSessionKey, pane: PaneID)
   /// まとめ通知 (§11.2: 開くと Overview へ移る)。
   case overview
 
   private static let projectKey = "project"
   private static let worktreeKey = "worktree"
+  private static let sessionIndexKey = "sessionIndex"
   private static let paneKey = "pane"
 
   var userInfo: [String: String] {
     switch self {
-    case .pane(let project, let worktree, let pane):
+    case .pane(let project, let session, let pane):
       [
-        Self.projectKey: project.rawValue, Self.worktreeKey: worktree.rawValue,
-        Self.paneKey: pane.rawValue,
+        Self.projectKey: project.rawValue, Self.worktreeKey: session.identity.rawValue,
+        Self.paneKey: pane.rawValue, Self.sessionIndexKey: String(session.index),
       ]
     case .overview: [:]
     }
@@ -32,7 +33,14 @@ enum NotificationTarget: Sendable, Hashable {
       self = .overview
       return
     }
-    self = .pane(project: project, worktree: worktree, pane: PaneID(rawValue: pane))
+    let rawIndex = userInfo[Self.sessionIndexKey] ?? "1"
+    guard let index = (rawIndex as? String).flatMap(Int.init),
+      let session = TerminalSessionKey(identity: worktree, index: index)
+    else {
+      self = .overview
+      return
+    }
+    self = .pane(project: project, session: session, pane: PaneID(rawValue: pane))
   }
 }
 

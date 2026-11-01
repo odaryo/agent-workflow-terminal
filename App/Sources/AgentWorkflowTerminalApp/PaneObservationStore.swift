@@ -3,11 +3,11 @@ import Foundation
 import SwiftUI
 import TerminalCore
 
-/// Project 1件 (`AppModel`) の pane 観測を worktree ごとに1本だけ回し、その結果を配る (Issue #189)。
+/// Project 1件 (`AppModel`) の pane 観測を session ごとに1本だけ回し、その結果を配る (Issue #189)。
 ///
 /// タブの代表状態、Drawer の送信可否、Overview (設計書 §13) はどれもここを読む。view が観測を
 /// 起こすと、view の無い worktree (非選択の Project、描画されていないタブ) が観測されず、view が
-/// 2つあれば同じ worktree を二重に観測する。
+/// 2つあれば同じ session を二重に観測する。
 ///
 /// - Important: 観測してよい worktree の判定は `WorktreeInventory.observesPaneStates(of:)` だけに
 ///   任せる (Inactive を観測しない、Issue #237)。
@@ -25,7 +25,7 @@ final class PaneObservationStore: ObservableObject {
     var processIDs: [PaneID: Int32] = [:]
   }
 
-  @Published private(set) var observed: [WorktreeIdentity: Observed] = [:]
+  @Published private(set) var observed: [TerminalSessionKey: Observed] = [:]
   /// 値に意味は無く、変わったことが「メイン window の端末へフォーカスを戻せ」を表す。
   @Published private(set) var terminalFocusRequest = 0
 
@@ -38,10 +38,11 @@ final class PaneObservationStore: ObservableObject {
   /// `nil` は通知を出さない起動 (bundle の外、設計書 §11.2)。
   private let notifier: PaneNotifier?
 
-  private var observations: [WorktreeIdentity: Observation] = [:]
-  private var subscribers: [WorktreeIdentity: [UUID: AsyncStream<[PaneAgentState]>.Continuation]] =
-    [:]
-  private var stabilizers: [WorktreeIdentity: PaneDisplayStateStabilizer] = [:]
+  private var observations: [TerminalSessionKey: Observation] = [:]
+  private var subscribers:
+    [TerminalSessionKey: [UUID: AsyncStream<[PaneAgentState]>.Continuation]] =
+      [:]
+  private var stabilizers: [TerminalSessionKey: PaneDisplayStateStabilizer] = [:]
   private var completions = PaneTaskCompletionTracker()
   private var completionEntries: [PaneID: PaneSummaryEntry<AgentStampedValue>] = [:]
   private var isStopped = false
@@ -72,53 +73,42 @@ final class PaneObservationStore: ObservableObject {
     paneOperations = dependencies.tmuxRunner.map(TmuxPaneOperations.init(runner:))
   }
 
-  /// `inventory` が変わるたびに呼ぶ。観測の対象を揃え、外れた worktree の観測は止める。
-  func observe(_ inventory: WorktreeInventory) {
+  func observe(_ inventory: WorktreeInventory, tabs: [TerminalSessionKey]) {
     guard !isStopped, feed != nil else { return }
-    var targets: [DetectedWorktree] = []
-    if let projectRoot = inventory.projectRoot,
-      inventory.observesPaneStates(of: projectRoot.identity)
-    {
-      targets.append(projectRoot)
+    let targets = tabs.filter { inventory.observesPaneStates(of: $0.identity) }
+    let wanted = Set(targets)
+    for session in Array(observations.keys) where !wanted.contains(session) {
+      stop(session)
     }
-    targets += inventory.taskWorktrees.map(\.detected).filter {
-      inventory.observesPaneStates(of: $0.identity)
-    }
-    // feed が使うのは identity だけなので、branch などが変わっても観測し直さない。し直すと
-    // 安定化の保持と最終更新が初期化され、Overview の並びが動く。
-    let wanted = Set(targets.map(\.identity))
-    for identity in observations.keys where !wanted.contains(identity) {
-      stop(identity)
-    }
-    for worktree in targets where observations[worktree.identity] == nil {
-      start(worktree)
+    for session in targets where observations[session] == nil {
+      start(session)
     }
   }
 
-  /// 登録解除した Project の観測を止める。以後 `observe(_:)` は何もしない。
+  /// 登録解除した Project の観測を止める。以後 `observe(_:tabs:)` は何もしない。
   func stopAll() {
     isStopped = true
-    for identity in Array(observations.keys) {
-      stop(identity)
+    for session in Array(observations.keys) {
+      stop(session)
     }
   }
 
   /// 生の pane 状態の購読。呼んでも観測は増えない。最新の値があれば最初にそれを流す。
   /// `nil` は tmux を使えない起動。
-  func paneStates(of identity: WorktreeIdentity) -> AsyncStream<[PaneAgentState]>? {
+  func paneStates(of session: TerminalSessionKey) -> AsyncStream<[PaneAgentState]>? {
     guard feed != nil else { return nil }
     let token = UUID()
     return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-      guard observations[identity] != nil else {
+      guard observations[session] != nil else {
         continuation.finish()
         return
       }
-      subscribers[identity, default: [:]][token] = continuation
-      if let current = observed[identity]?.paneStates {
+      subscribers[session, default: [:]][token] = continuation
+      if let current = observed[session]?.paneStates {
         continuation.yield(current)
       }
       continuation.onTermination = { [weak self] _ in
-        Task { @MainActor in self?.subscribers[identity]?[token] = nil }
+        Task { @MainActor in self?.subscribers[session]?[token] = nil }
       }
     }
   }
@@ -151,34 +141,33 @@ final class PaneObservationStore: ObservableObject {
 
   // MARK: - 観測
 
-  private func start(_ worktree: DetectedWorktree) {
+  private func start(_ session: TerminalSessionKey) {
     guard let feed else { return }
-    let identity = worktree.identity
     let states = Task { [weak self] in
-      for await snapshot in feed(worktree) {
+      for await snapshot in feed(session) {
         guard !Task.isCancelled else { return }
-        self?.receive(snapshot, for: identity)
+        self?.receive(snapshot, for: session)
       }
     }
     let summaries = Task { [weak self] in
       while !Task.isCancelled {
-        await self?.refreshSummaries(of: identity)
+        await self?.refreshSummaries(of: session)
         try? await Task.sleep(for: Self.summaryInterval)
       }
     }
-    observations[identity] = Observation(states: states, summaries: summaries)
-    observed[identity] = Observed()
-    notifier?.observationStarted(identity)
+    observations[session] = Observation(states: states, summaries: summaries)
+    observed[session] = Observed()
+    notifier?.observationStarted(session)
   }
 
-  private func stop(_ identity: WorktreeIdentity) {
-    observations.removeValue(forKey: identity)?.cancel()
-    notifier?.observationStopped(identity)
-    for continuation in subscribers.removeValue(forKey: identity)?.values ?? [:].values {
+  private func stop(_ session: TerminalSessionKey) {
+    observations.removeValue(forKey: session)?.cancel()
+    notifier?.observationStopped(session)
+    for continuation in subscribers.removeValue(forKey: session)?.values ?? [:].values {
       continuation.finish()
     }
-    stabilizers[identity] = nil
-    if let gone = observed.removeValue(forKey: identity) {
+    stabilizers[session] = nil
+    if let gone = observed.removeValue(forKey: session) {
       for paneID in gone.details.keys {
         completions.forget(paneID: paneID)
         completionEntries[paneID] = nil
@@ -186,9 +175,9 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
-  private func receive(_ snapshot: WorktreePaneAgentStates, for identity: WorktreeIdentity) {
+  private func receive(_ snapshot: WorktreePaneAgentStates, for session: TerminalSessionKey) {
     let panes = snapshot.panes
-    guard var current = observed[identity] else { return }
+    guard var current = observed[session] else { return }
     current.paneStates = panes
     for pane in panes {
       // 解除の判定は生の状態で行う (§12.7)。安定化した状態で遅らせない。
@@ -197,40 +186,41 @@ final class PaneObservationStore: ObservableObject {
       current.details[pane.id, default: OverviewPaneDetail()].isTaskCompleted =
         display.isCompleted
     }
-    observed[identity] = current
-    stabilize(identity, at: clock.now)
-    for continuation in subscribers[identity]?.values ?? [:].values {
+    observed[session] = current
+    stabilize(session, at: clock.now)
+    for continuation in subscribers[session]?.values ?? [:].values {
       continuation.yield(panes)
     }
-    notifier?.statesObserved(snapshot, in: identity)
+    notifier?.statesObserved(snapshot, in: session)
   }
 
-  private func stabilize(_ identity: WorktreeIdentity, at instant: ContinuousClock.Instant) {
-    guard var current = observed[identity], let panes = current.paneStates else { return }
-    var stabilizer = stabilizers[identity] ?? PaneDisplayStateStabilizer()
+  private func stabilize(_ session: TerminalSessionKey, at instant: ContinuousClock.Instant) {
+    guard var current = observed[session], let panes = current.paneStates else { return }
+    var stabilizer = stabilizers[session] ?? PaneDisplayStateStabilizer()
     current.displayStates = stabilizer.observe(panes, at: instant)
-    stabilizers[identity] = stabilizer
-    if observed[identity] != current {
-      observed[identity] = current
+    stabilizers[session] = stabilizer
+    if observed[session] != current {
+      observed[session] = current
     }
-    observations[identity]?.deadline?.cancel()
-    observations[identity]?.deadline = stabilizer.nextDeadline.map { deadline in
+    observations[session]?.deadline?.cancel()
+    observations[session]?.deadline = stabilizer.nextDeadline.map { deadline in
       Task { [weak self, clock] in
         do {
           try await clock.sleep(until: deadline)
         } catch {
           return
         }
-        self?.stabilize(identity, at: deadline)
+        guard !Task.isCancelled else { return }
+        self?.stabilize(session, at: deadline)
       }
     }
   }
 
-  private func refreshSummaries(of identity: WorktreeIdentity) async {
+  private func refreshSummaries(of session: TerminalSessionKey) async {
     guard let paneSource, let signalSource else { return }
     let located: [LocatedPaneSummaryReadings]
     do {
-      located = try await paneSource.locatedSummaryReadings(of: identity)
+      located = try await paneSource.locatedSummaryReadings(of: session)
     } catch {
       // 読めなかった回は前回の概要を保つ。消すと、一時的な失敗で目的と現在地が瞬く。
       return
@@ -259,7 +249,7 @@ final class PaneObservationStore: ObservableObject {
       details[summary.paneID] = OverviewPaneDetail(
         location: item.location, purpose: summary.purpose.value, status: summary.status.value)
     }
-    guard !Task.isCancelled, var current = observed[identity] else { return }
+    guard !Task.isCancelled, var current = observed[session] else { return }
     let rawStates = Dictionary(
       (current.paneStates ?? []).map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
     for summary in summaries {
@@ -280,10 +270,10 @@ final class PaneObservationStore: ObservableObject {
     completionEntries.merge(entries) { _, new in new }
     current.details = details
     current.processIDs = processIDs
-    if observed[identity] != current {
-      observed[identity] = current
+    if observed[session] != current {
+      observed[session] = current
     }
-    notifier?.completionsObserved(displays, undetermined: undetermined, in: identity)
+    notifier?.completionsObserved(displays, undetermined: undetermined, in: session)
   }
 
   private static func hasValue(_ reading: PaneUserOptionReading) -> Bool {

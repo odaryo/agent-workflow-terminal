@@ -58,8 +58,8 @@ private struct OverviewView: View {
           ForEach(projects.availableModels, id: \.project.commonDirectory) { model in
             OverviewProjectSection(
               model: model, store: model.paneObservations, mainPanes: model.mainPanes,
-              reveal: { worktree, pane in
-                Task { await reveal(model, worktree: worktree, pane: pane) }
+              reveal: { session, pane in
+                Task { await reveal(model, session: session, pane: pane) }
               })
           }
         }
@@ -69,10 +69,10 @@ private struct OverviewView: View {
   }
 
   /// §13 の行の選択。
-  private func reveal(_ model: AppModel, worktree: WorktreeIdentity, pane: PaneID?) async {
+  private func reveal(_ model: AppModel, session: TerminalSessionKey, pane: PaneID?) async {
     navigator.overviewNotice = nil
     navigator.overviewNotice = await navigator.reveal(
-      model, worktree: worktree, pane: pane, in: projects)
+      model, worktree: session.identity, session: session, pane: pane, in: projects)
   }
 }
 
@@ -80,16 +80,16 @@ private struct OverviewProjectSection: View {
   @ObservedObject var model: AppModel
   @ObservedObject var store: PaneObservationStore
   @ObservedObject var mainPanes: MainPaneCoordinator
-  let reveal: (WorktreeIdentity, PaneID?) -> Void
+  let reveal: (TerminalSessionKey, PaneID?) -> Void
 
   var body: some View {
     let overview = makeAgentPaneOverview([input]).first
     Section(model.project.displayName) {
-      if let projectRoot = overview?.projectRoot {
-        worktreeRows(projectRoot, title: "Project Root")
+      ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
+        worktreeRows(projectRoot, title: sessionTitle(projectRoot.session))
       }
-      ForEach(overview?.tasks ?? [], id: \.worktree) { task in
-        worktreeRows(task, title: model.worktreeTitle(of: task.worktree))
+      ForEach(overview?.tasks ?? [], id: \.session) { task in
+        worktreeRows(task, title: sessionTitle(task.session))
       }
     }
   }
@@ -100,10 +100,10 @@ private struct OverviewProjectSection: View {
     ForEach(worktree.rows, id: \.rowID) { row in
       switch row {
       case .pane(let pane):
-        OverviewPaneRow(pane: pane, store: store) { reveal(worktree.worktree, pane.paneID) }
+        OverviewPaneRow(pane: pane, store: store) { reveal(worktree.session, pane.paneID) }
       case .noAgentPane:
         Button {
-          reveal(worktree.worktree, nil)
+          reveal(worktree.session, nil)
         } label: {
           Text("Agent pane なし").foregroundStyle(.secondary).padding(.leading, 12)
             .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
@@ -118,16 +118,23 @@ private struct OverviewProjectSection: View {
   private var input: OverviewProjectInput {
     OverviewProjectInput(
       project: model.project.commonDirectory,
-      projectRoot: model.projectRoot.flatMap { worktreeInput($0.identity) },
-      tasks: model.tabbedWorktrees.compactMap { worktreeInput($0.identity) })
+      projectRootSessions: model.tabKeys.filter { $0.identity == model.projectRoot?.identity }
+        .compactMap { worktreeInput($0) },
+      tasks: model.tabKeys.filter { $0.identity != model.projectRoot?.identity }
+        .compactMap { worktreeInput($0) })
   }
 
-  private func worktreeInput(_ identity: WorktreeIdentity) -> OverviewWorktreeInput? {
-    guard model.inventory.observesPaneStates(of: identity), let observed = store.observed[identity]
+  private func sessionTitle(_ key: TerminalSessionKey) -> String {
+    let title = model.worktreeTitle(of: key.identity)
+    return key.index > 1 ? "\(title) \(key.index)" : title
+  }
+
+  private func worktreeInput(_ key: TerminalSessionKey) -> OverviewWorktreeInput? {
+    guard model.inventory.observesPaneStates(of: key.identity), let observed = store.observed[key]
     else { return nil }
     return OverviewWorktreeInput(
-      worktree: identity, paneStates: observed.displayStates, details: observed.details,
-      mainPane: model.mainPane(of: identity))
+      session: key, paneStates: observed.displayStates, details: observed.details,
+      mainPane: model.mainPane(of: key.identity))
   }
 }
 

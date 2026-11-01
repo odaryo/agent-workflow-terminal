@@ -39,31 +39,31 @@ final class PaneNotifier {
 
   // MARK: - PaneObservationStore からの入力
 
-  func observationStarted(_ worktree: WorktreeIdentity) {
-    planner.startObserving(worktree, at: clock.now)
+  func observationStarted(_ session: TerminalSessionKey) {
+    planner.startObserving(session, at: clock.now)
     deliver([])
   }
 
-  func observationStopped(_ worktree: WorktreeIdentity) {
-    planner.stopObserving(worktree)
+  func observationStopped(_ session: TerminalSessionKey) {
+    planner.stopObserving(session)
     deliver([])
   }
 
-  func statesObserved(_ snapshot: WorktreePaneAgentStates, in worktree: WorktreeIdentity) {
+  func statesObserved(_ snapshot: WorktreePaneAgentStates, in session: TerminalSessionKey) {
     refreshSettings()
-    deliver(planner.observeStates(snapshot, in: worktree, at: clock.now))
+    deliver(planner.observeStates(snapshot, in: session, at: clock.now))
   }
 
-  /// `displays` はその worktree の全 pane の完了表示。`undetermined` は Agent プロセスを
+  /// `displays` はその session の全 pane の完了表示。`undetermined` は Agent プロセスを
   /// 特定できなかった pane。
   func completionsObserved(
     _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
-    in worktree: WorktreeIdentity
+    in session: TerminalSessionKey
   ) {
     refreshSettings()
     deliver(
       planner.observeCompletions(
-        displays, undetermined: undetermined, in: worktree, at: clock.now))
+        displays, undetermined: undetermined, in: session, at: clock.now))
   }
 
   // MARK: - 出す
@@ -82,7 +82,7 @@ final class PaneNotifier {
   private func deliver(_ notifications: [PaneNotification]) {
     let now = clock.now
     let all = notifications + planner.setSummaryGate(isOpen: isSummaryGateOpen, at: now)
-    let showing = showingWorktree
+    let showing = showingSession
     for notification in all where !notification.isSuppressed(whileShowing: showing) {
       if let content = content(for: notification) {
         poster?.post(content)
@@ -92,9 +92,9 @@ final class PaneNotifier {
   }
 
   /// アプリが前面で、メイン window に表示しているタブ。
-  private var showingWorktree: WorktreeIdentity? {
+  private var showingSession: TerminalSessionKey? {
     guard NSApp.isActive else { return nil }
-    return projects?.selectedModel?.selectedIdentity
+    return projects?.selectedModel?.selectedTab
   }
 
   private func schedule() {
@@ -118,7 +118,7 @@ final class PaneNotifier {
       return .summary(count: count)
     case .pane(let event):
       guard let model = model(containing: event.worktree) else { return nil }
-      let observed = model.paneObservations.observed[event.worktree]
+      let observed = model.paneObservations.observed[event.session]
       let detail = observed?.details[event.paneID]
       let subject = PaneNotificationContent.Subject(
         projectName: model.project.displayName,
@@ -128,7 +128,7 @@ final class PaneNotifier {
           location: detail?.location),
         status: detail?.status,
         target: .pane(
-          project: model.project.commonDirectory, worktree: event.worktree, pane: event.paneID))
+          project: model.project.commonDirectory, session: event.session, pane: event.paneID))
       return .pane(
         kind: event.kind, subject: subject,
         unknownMinutes: Int(planner.settings.unknownThreshold.components.seconds / 60))
@@ -152,7 +152,8 @@ final class PaneNotifier {
     switch target {
     case .overview:
       navigator.showOverview(notice: nil)
-    case .pane(let project, let worktree, let pane):
+    case .pane(let project, let session, let pane):
+      let worktree = session.identity
       guard
         let model = projects.availableModels.first(where: {
           $0.project.commonDirectory == project
@@ -162,18 +163,19 @@ final class PaneNotifier {
         navigator.showOverview(notice: Self.goneNotice)
         return
       }
-      let observed = model.paneObservations.observed[worktree]
+      let observed = model.paneObservations.observed[session]
       let paneExists =
         observed?.details[pane] != nil
         || observed?.paneStates?.contains { $0.id == pane } == true
       if paneExists {
         if let failure = await navigator.reveal(
-          model, worktree: worktree, pane: pane, in: projects)
+          model, worktree: worktree, session: session, pane: pane, in: projects)
         {
           projects.showWarning(failure)
         }
       } else {
-        _ = await navigator.reveal(model, worktree: worktree, pane: nil, in: projects)
+        _ = await navigator.reveal(
+          model, worktree: worktree, session: session, pane: nil, in: projects)
         projects.showWarning(Self.goneNotice)
       }
     }

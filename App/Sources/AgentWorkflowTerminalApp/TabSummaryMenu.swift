@@ -27,14 +27,7 @@ struct TabSummaryMenu: View {
     return [.separator, .heading(title: "全タブ")]
       + model.tabKeys.flatMap { key -> [ToolbarContextMenu.Item] in
         let summary = summaries[key]
-        let presentation: AgentStatePresentation
-        if let summary {
-          presentation = AgentStatePresentation(
-            state: summary.representative?.state ?? .idle,
-            category: summary.representative?.category ?? .idle)
-        } else {
-          presentation = .unobserved("観測なし")
-        }
+        let presentation: AgentStatePresentation? = summary == nil ? .unobserved("観測なし") : nil
         let heading = entry(
           title: model.sessionTitle(key), presentation: presentation, key: key,
           indentationLevel: 0, isChecked: model.selectedTab == key)

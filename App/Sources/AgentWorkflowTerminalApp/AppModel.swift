@@ -434,6 +434,7 @@ final class AppModel: ObservableObject {
     case .unexpectedGitDirectoryOutput, .invalidGitDirectoryPath, .invalidCommonDirectoryPath:
       "git の出力を解釈できません"
     case .administrativeDirectoryNotFound: "管理ディレクトリを特定できません"
+    case .resolvedToAncestorRepository: "worktree の .git が見つからず、祖先の repository を指しています"
     }
   }
 

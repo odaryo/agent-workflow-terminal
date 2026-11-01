@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-01(1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-01(Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -184,7 +184,7 @@ Dedicated tmux session and Task Tab become available
 - タブ(Project Rootのタブを含む)の右クリックメニューの「新規タブ」は、そのタブと同じディレクトリ(worktreeまたはProject Root)で新しいsessionを作り、タブとして開く。2026-10-31(Issue #407)の右クリックメニューの「新しいタスク…」は、これに置き換える。
 - タブ列右端の`＋`ボタン(`+ New Task`)は、Project Rootのディレクトリで新しいタブを開く。2026-10-31(#407)の「既存のProject Rootタブへ移るだけ」を置き換える。
 - 新しいタブは、同じディレクトリのタブ群の末尾に置く。タブ列はディレクトリごとにまとまって並ぶ。
-- 新しいタブは選んだ状態で開き、その端末にキーボードフォーカスを渡す。Drawerがフルスクリーンのときは、並べて表示に戻してから開く(#407のとおり)。
+- 新しいタブは選んだ状態で開き、その端末にキーボードフォーカスを渡す。
 - 新しいsessionではAgentを起動しない。起動コマンドを付けずにsessionを作り、シェルが立ち上がるだけにする。既存のタブのsessionと同じ作り方である。アプリはAgentの起動コマンドを持たず、Agentの起動はユーザーがその端末で行う。
 - 新しいsessionにも、sessionを作るときに適用するoption(§4.2の`window-size`、§4.4の`history-limit`)を設定する。
 - Project Rootタブを持たないbare repositoryのProject(§2.3)では`＋`を無効にし、理由をツールチップで示す(#407のとおり)。worktreeのタブの「新規タブ」は使える。
@@ -596,12 +596,11 @@ Code、Diff、Evidenceは常設せず、必要時にViewer Drawerとして開く
 └──────────────────────┴──────────────────┘
 ```
 
-- MacとiPad横画面では右Drawerを基本とする。
-- 通常はAgent領域を縮めて並べる。
-- 必要ならDrawerをAgent上へのOverlayに切り替えられる。
-- ViewerだけをFullscreen表示できる。
-- Drawerを閉じた時点がOverlayなら次回もOverlayで開き、InlineまたはFullscreenなら次回はInlineで開く。
-- iPhoneでは基本的にFullscreen sheetとして表示する。
+- MacではDrawerを端末の右にだけ置く。iPad横画面の配置はiOS版を作る段階で決め、この節では扱わない。
+- **Drawerは常にAgent領域を縮めて並べて表示する。Agent上へのOverlayと、ViewerだけのFullscreen表示は設けない — 確定(2026-11-01、Issue #430)。** それまでの「必要ならOverlayに切り替えられる」「ViewerだけをFullscreen表示できる」「閉じた時点がOverlayなら次回もOverlayで開く」を撤回する。QAで、表示方法は並べて表示だけでよいとユーザーが判断した。
+- **Drawerの中身(Code／Diff)の並びは、CodeとDiffで別々に「左右」か「上下」から選べる — 確定(2026-11-01、Issue #430)。** Codeはファイル一覧と本文、Diffはファイル一覧・差分・コメントの並びである。既定はCodeが「左右」、Diffが「上下」。Diffの幅による自動の切り替え(#420)はやめ、選んだ並びに固定する。選んだ並びは、Drawerの開閉、CodeとDiffの切り替え、アプリの再起動をまたいで保つ。「上下」のときは区切りをドラッグして高さを変えられる。これは1つの中身の内部の並びであり、下の「Drawer内部を分割しない」(別の中身を並べない)とは別の話である。
+- **選んだ並びが収まる幅を、Drawerの最小幅にする — 確定(2026-11-01、Issue #430)。** 「左右」を選んでいる間は、Drawerをその並びの最小幅より狭められず、代わりに端末が狭くなる。「上下」なら最小幅は従来のまま(240pt)。自動の切り替えをやめても、狭いDrawerで中身がはみ出さないためである。
+- iPhoneでは基本的にFullscreen sheetとして表示する(iOS版の話であり、上のFullscreen表示の撤回はMacについてのもの)。
 - Drawerは常に1ペインとし、Drawer内部を分割しない(2026-10-31 決定。それまでの「最大2分割」を廃止)。
 - Code／Diff／Evidenceのうち別の内容を開くと、開いているペインを置き換える。
 - Viewer側に多分割レイアウトは持たせない。
@@ -2299,7 +2298,9 @@ PR_READY
 - [x] Agent Terminal中心
 - [x] Viewer Drawerは常に1ペインで、別の内容を開くと置き換える(2026-10-31、最大2分割を廃止)
 - [x] Code／Diff／Evidenceを必要時だけ表示
-- [x] Viewer DrawerはOverlayで閉じた場合だけ次回もOverlayで開き、Inline／Fullscreenで閉じた場合はInlineで開く
+- [x] MacのViewer Drawerは端末の右に並べて表示するだけとし、Overlay／Fullscreen表示は設けない
+- [x] Drawerの中身(Code／Diff)の並びはそれぞれ「左右」か「上下」から選び、開閉・切り替え・再起動をまたいで保つ。既定はCodeが左右、Diffが上下。幅による自動の切り替えはしない。「上下」は区切りをドラッグできる
+- [x] 選んだ並びが収まる幅をDrawerの最小幅にする(「上下」は240pt)
 - [x] File Browserはignoredを含む全ファイル、lazy load
 - [x] trackedファイルのGit状態はindex／worktreeの2軸を保持し、ディレクトリへ配下の状態を集約しない
 - [x] 大容量ファイルのデフォルト閾値は1 MiB／50,000行、バイナリは先頭8 KiBのNULバイトで判定

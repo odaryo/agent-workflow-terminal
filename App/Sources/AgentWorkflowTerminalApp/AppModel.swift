@@ -320,8 +320,36 @@ final class AppModel: ObservableObject {
     if activation == .inactive {
       tabClosing.cancel()
       close(identity)
+    } else {
+      Task { await restoreTabsOnActivation(of: identity) }
     }
     save()
+  }
+
+  // 起動時の写しは Inactive の間に古くなり、再起動の有無で復元結果が食い違うため、
+  // Active 化のたびに session の一覧を取り直す (Issue #489)。
+  private func restoreTabsOnActivation(of identity: WorktreeIdentity) async {
+    let names: [String]
+    do {
+      names = try await sessions?.sessionNames() ?? []
+    } catch {
+      warning = "tmux の session の一覧を取得できないため、タブを復元できませんでした: \(error)"
+      names = []
+    }
+    guard
+      worktrees.contains(where: {
+        $0.identity == identity && $0.activation == .active && $0.detected.isReachable
+      })
+    else { return }
+
+    tabLayout.restore(from: names, identities: [identity])
+    let keys = Set(tabKeys)
+    openedTabs = openedTabs.filter { $0.identity != identity || keys.contains($0) }
+    if let selectedTab, selectedTab.identity == identity, !keys.contains(selectedTab),
+      let first = tabLayout.tabs(in: identity).first
+    {
+      select(first)
+    }
   }
 
   /// タブから外れた worktree の端末を残さない。残すと、表示されていない NSView が first

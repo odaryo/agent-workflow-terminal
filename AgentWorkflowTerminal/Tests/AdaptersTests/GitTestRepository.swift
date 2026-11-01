@@ -21,6 +21,12 @@ func withGitRepository(_ body: (GitTestRepository) async throws -> Void) async t
 }
 
 struct GitTestRepository {
+  // #342 は 200 ミリ秒だと負荷下の本物の git まで timeout した (2026-11-01 に CI で再発)。
+  // 5 秒で本物の git に余裕を持たせ、閾値を上げるだけで shim が完走する偽陰性を避けるため、
+  // sleep は閾値の6倍を保つ。テストは閾値ぶん (約5秒) 長くなる。
+  static let stalledEntryTimeout = Duration.seconds(5)
+  private static let gitShimSleepSeconds = 30
+
   let root: URL
   let mainWorktree: URL
   private let executableURL: URL
@@ -130,7 +136,7 @@ struct GitTestRepository {
       "  previous=\"$argument\"",
       "done",
       "if [ \"$directory\" = '\(worktreePath)' ] && [ \"$revparse\" = 1 ]; then",
-      "  exec /bin/sleep 30",
+      "  exec /bin/sleep \(Self.gitShimSleepSeconds)",
       "fi",
       "exec '\(executableURL.path)' \"$@\"",
     ]

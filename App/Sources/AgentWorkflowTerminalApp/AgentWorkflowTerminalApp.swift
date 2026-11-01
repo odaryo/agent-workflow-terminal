@@ -23,6 +23,7 @@ struct AgentWorkflowTerminalApp: App {
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
         // 内側の frame の最小幅は window に効かなかったため、Window 直下にだけ置く (#430 計測)。
+        // ただし Drawer を開いて値が上がっても、ドラッグの下限は 480 のまま (#477、未解決)。
         .frame(minWidth: minimumWindowWidth, minHeight: 320)
         .onPreferenceChange(ProjectMinimumWindowWidthKey.self) { [width = $minimumWindowWidth] in
           width.wrappedValue = $0

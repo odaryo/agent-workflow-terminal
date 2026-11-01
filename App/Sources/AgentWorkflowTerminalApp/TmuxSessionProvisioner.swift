@@ -39,6 +39,10 @@ struct TmuxSessionProvisioner: Sendable {
     }
   }
 
+  func exists(_ key: TerminalSessionKey) async throws(TmuxSessionOperationError) -> Bool {
+    try await operations.exists(session: TmuxSessionName(key: key))
+  }
+
   func terminate(_ key: TerminalSessionKey) async throws(TmuxSessionOperationError) {
     do {
       try await operations.kill(session: TmuxSessionName(key: key))

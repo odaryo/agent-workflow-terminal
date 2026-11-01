@@ -14,6 +14,7 @@ final class AppModel: ObservableObject {
   @Published var selectedTab: TerminalSessionKey?
   @Published var openedTabs: Set<TerminalSessionKey> = []
   @Published private(set) var tabLayout = TerminalTabLayout()
+  var newlyAddedTabs: Set<TerminalSessionKey> = []
 
   @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
     didSet { saveViewerArrangements(replacing: oldValue) }
@@ -103,6 +104,7 @@ final class AppModel: ObservableObject {
       reportTabOpeningFailure("タブ番号の上限 (9999) に達したため、新しいタブを開けません。")
       return
     }
+    newlyAddedTabs.insert(key)
     select(key)
   }
 
@@ -120,6 +122,7 @@ final class AppModel: ObservableObject {
   }
 
   func removeTabs(in identity: WorktreeIdentity) {
+    newlyAddedTabs = newlyAddedTabs.filter { $0.identity != identity }
     for key in tabLayout.tabs(in: identity) { tabLayout.removeTab(key) }
   }
   /// 通常の Task Tab に並べる worktree (設計書 §3.2)。

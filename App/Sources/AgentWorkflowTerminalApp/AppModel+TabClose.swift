@@ -50,15 +50,21 @@ extension AppModel {
         reportTabClosingFailure("タブ「\(tabTitle(key))」の session を終了できません: \(error)")
         return
       }
-      if selectedTab == key {
-        if let neighbor = neighborTab(of: key) {
-          select(neighbor)
-        } else {
-          selectedTab = nil
-        }
-      }
-      removeTab(key)
+      discardTab(key)
     }
+  }
+
+  func discardTab(_ key: TerminalSessionKey) {
+    guard tabKeys.contains(key) else { return }
+    newlyAddedTabs.remove(key)
+    if selectedTab == key {
+      if let neighbor = neighborTab(of: key) {
+        select(neighbor)
+      } else {
+        selectedTab = nil
+      }
+    }
+    removeTab(key)
   }
 
   private func neighborTab(of key: TerminalSessionKey) -> TerminalSessionKey? {
@@ -69,7 +75,7 @@ extension AppModel {
       ?? tabs[..<index].last(where: canSelect)
   }
 
-  private func tabTitle(_ key: TerminalSessionKey) -> String {
+  func tabTitle(_ key: TerminalSessionKey) -> String {
     let name =
       if key.identity == projectRoot?.identity {
         "Project Root"

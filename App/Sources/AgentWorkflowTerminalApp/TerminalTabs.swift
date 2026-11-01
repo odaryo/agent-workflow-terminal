@@ -63,14 +63,22 @@ private struct TerminalTabContent: View {
         case .ready(let command):
           terminal(command: command, generation: attempt)
         case .failed(let reason):
-          ContentUnavailableView(
-            "tmux session を用意できません", systemImage: "exclamationmark.triangle",
-            description: Text(reason))
+          ContentUnavailableView {
+            Label("tmux session を用意できません", systemImage: "exclamationmark.triangle")
+          } description: {
+            Text(reason)
+          } actions: {
+            Button("再試行") {
+              // `preparation` だけを戻しても `.task(id:)` の鍵が変わらず再走しない。
+              attempt += 1
+              preparation = .preparing
+            }
+          }
         }
       }
     }
     // 1つの世代につき1回だけ走らせる。用意し直すと、その worktree の端末が動いている最中に
-    // surface を作り替えることになる。世代が上がるのは、下の再 attach を押したときだけ。
+    // surface を作り替えることになる。世代が上がるのは、再試行か再 attach を押したときだけ。
     .task(id: TerminalSessionAttempt(key: key, attempt: attempt)) {
       guard let sessions, case .preparing = preparation else { return }
       guard await shouldOpen(), !Task.isCancelled else { return }

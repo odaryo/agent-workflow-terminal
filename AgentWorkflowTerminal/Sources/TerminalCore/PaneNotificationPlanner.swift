@@ -50,7 +50,8 @@ public struct PaneNotificationSettings: Sendable, Hashable {
 }
 
 public struct PaneNotificationEvent: Sendable, Hashable {
-  public let worktree: WorktreeIdentity
+  public let session: TerminalSessionKey
+  public var worktree: WorktreeIdentity { session.identity }
   public let paneID: PaneID
   public let kind: PaneNotificationKind
   /// `.taskCompleted` のときだけ入る。
@@ -60,7 +61,14 @@ public struct PaneNotificationEvent: Sendable, Hashable {
     worktree: WorktreeIdentity, paneID: PaneID, kind: PaneNotificationKind,
     completion: AgentStampedValue?
   ) {
-    self.worktree = worktree
+    self.init(session: .primary(worktree), paneID: paneID, kind: kind, completion: completion)
+  }
+
+  public init(
+    session: TerminalSessionKey, paneID: PaneID, kind: PaneNotificationKind,
+    completion: AgentStampedValue?
+  ) {
+    self.session = session
     self.paneID = paneID
     self.kind = kind
     self.completion = completion
@@ -71,6 +79,11 @@ public enum PaneNotification: Sendable, Hashable {
   case pane(PaneNotificationEvent)
   /// 「判断待ちが N 件あります」(§11.2)。開くと Overview へ移る。
   case attentionSummary(count: Int)
+
+  public func isSuppressed(whileShowing session: TerminalSessionKey?) -> Bool {
+    guard case .pane(let event) = self, let session else { return false }
+    return event.kind.isAttention && event.session == session
+  }
 
   /// アプリが前面で、`worktree` のタブがメイン window で選択されている間に出さないもの。
   /// ユーザーがその画面を見ているので判断待ちは出さず、タスク完了は出す (§11.2、現在の推奨)。
@@ -92,7 +105,7 @@ public enum PaneNotification: Sendable, Hashable {
 ///   種類なら知らせたものとする)。無効な種類で始まった判断待ちが有効な種類へ移ったら新しい
 ///   遷移として通知する — 続きとみなすと、無効にした種類が有効な種類の通知を飲み込む。
 ///   知らせたかどうかはその時点の設定で決まり、後から設定を変えても遡って変わらない。
-/// - Important: worktree ごとの最初の観測は基準であり遷移とみなさない。状態の基準は
+/// - Important: session (タブ) ごとの最初の観測は基準であり遷移とみなさない。状態の基準は
 ///   `WorktreePaneAgentStates.isComplete` が初めて真になった観測で、それより前の観測は捨てる
 ///   — feed の最初の yield は adapter の結果が無いので `[]` になり、それを基準にすると次の観測で
 ///   判断待ちの pane が全部個別に鳴る (#387)。完了表示の基準は最初の `observeCompletions` で、
@@ -102,9 +115,9 @@ public enum PaneNotification: Sendable, Hashable {
 ///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
 ///   飲み込むため。
 /// - Important: 基準の時点で判断待ちの pane は個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
-///   起動直後は Project ごと・worktree ごとに基準を取る時刻がずれるので、まとめ通知は
-///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 worktree が基準を取り終えた時点で
-///   出す。基準を取れない worktree が残っても、最初の候補から `summaryMaximumDelay` で出す。
+///   起動直後は Project ごと・session (タブ) ごとに基準を取る時刻がずれるので、まとめ通知は
+///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 session が基準を取り終えた時点で
+///   出す。基準を取れない session が残っても、最初の候補から `summaryMaximumDelay` で出す。
 /// - Important: 時刻で満了するもの (長時間の `Unknown`、まとめ通知の上限) は自律的に満了しない。
 ///   上位レイヤは `nextDeadline` に `advance(to:)` を呼ぶ義務がある
 ///   (`PaneDisplayStateStabilizer` と同じ契約)。
@@ -113,7 +126,7 @@ public enum PaneNotification: Sendable, Hashable {
 public struct PaneNotificationPlanner: Sendable {
   public var settings: PaneNotificationSettings
 
-  /// 基準を取れない worktree を待つ上限。
+  /// 基準を取れない session を待つ上限。
   public static let summaryMaximumDelay = Duration.seconds(30)
 
   private enum KnownState: Sendable, Hashable {
@@ -129,7 +142,7 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   private struct PaneMemory: Sendable {
-    let worktree: WorktreeIdentity
+    let session: TerminalSessionKey
     var lastKnown: KnownState?
     var unknownSince: ContinuousClock.Instant?
     var didNotifyUnknown = false
@@ -142,14 +155,14 @@ public struct PaneNotificationPlanner: Sendable {
     var isSummaryMember = false
   }
 
-  private struct WorktreeMemory: Sendable {
+  private struct SessionMemory: Sendable {
     var hasStatesBaseline = false
     var hasCompletionsBaseline = false
     /// 直近の状態の観測に現れた pane。概要の読み取りから消えても、ここに居れば記憶を捨てない。
     var observedPanes: Set<PaneID> = []
   }
 
-  private var worktrees: [WorktreeIdentity: WorktreeMemory] = [:]
+  private var sessions: [TerminalSessionKey: SessionMemory] = [:]
   private var panes: [PaneID: PaneMemory] = [:]
   private var isSummaryGateOpen = false
   private var summaryStartedAt: ContinuousClock.Instant?
@@ -172,21 +185,45 @@ public struct PaneNotificationPlanner: Sendable {
     return deadlines.min()
   }
 
-  /// 観測を始めた worktree だけを扱う。再び呼ぶと記憶を捨てて基準を取り直す。
   public mutating func startObserving(
     _ worktree: WorktreeIdentity, at instant: ContinuousClock.Instant
   ) {
-    stopObserving(worktree)
-    worktrees[worktree] = WorktreeMemory()
+    startObserving(.primary(worktree), at: instant)
   }
 
-  /// worktree の Inactive 化・Project の登録解除。その pane の記憶をすべて捨てる。
   public mutating func stopObserving(_ worktree: WorktreeIdentity) {
-    worktrees[worktree] = nil
-    panes = panes.filter { $0.value.worktree != worktree }
+    stopObserving(.primary(worktree))
   }
 
-  /// 起動直後のまとめ通知を待たせる外部条件 (Project の一覧と初回の worktree 検出が終わったか)。
+  public mutating func observeStates(
+    _ snapshot: WorktreePaneAgentStates, in worktree: WorktreeIdentity,
+    at instant: ContinuousClock.Instant
+  ) -> [PaneNotification] {
+    observeStates(snapshot, in: .primary(worktree), at: instant)
+  }
+
+  public mutating func observeCompletions(
+    _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
+    in worktree: WorktreeIdentity, at instant: ContinuousClock.Instant
+  ) -> [PaneNotification] {
+    observeCompletions(displays, undetermined: undetermined, in: .primary(worktree), at: instant)
+  }
+
+  /// 観測を始めた session だけを扱う。再び呼ぶと記憶を捨てて基準を取り直す。
+  public mutating func startObserving(
+    _ session: TerminalSessionKey, at instant: ContinuousClock.Instant
+  ) {
+    stopObserving(session)
+    sessions[session] = SessionMemory()
+  }
+
+  /// タブを閉じたときなど、その session の pane の記憶をすべて捨てる。
+  public mutating func stopObserving(_ session: TerminalSessionKey) {
+    sessions[session] = nil
+    panes = panes.filter { $0.value.session != session }
+  }
+
+  /// 起動直後のまとめ通知を待たせる外部条件 (Project の一覧と初回の session 検出が終わったか)。
   public mutating func setSummaryGate(
     isOpen: Bool, at instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
@@ -195,24 +232,24 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   public mutating func observeStates(
-    _ snapshot: WorktreePaneAgentStates, in worktree: WorktreeIdentity,
+    _ snapshot: WorktreePaneAgentStates, in session: TerminalSessionKey,
     at instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
-    guard var memory = worktrees[worktree] else { return [] }
+    guard var memory = sessions[session] else { return [] }
     memory.observedPanes = Set(snapshot.panes.map(\.id))
     if !memory.hasStatesBaseline {
       guard snapshot.isComplete else { return [] }
       memory.hasStatesBaseline = true
-      worktrees[worktree] = memory
+      sessions[session] = memory
       for pane in snapshot.panes {
-        takeBaseline(pane, in: worktree, at: instant)
+        takeBaseline(pane, in: session, at: instant)
       }
       return due(at: instant)
     }
-    worktrees[worktree] = memory
+    sessions[session] = memory
 
     var notifications: [PaneNotification] = []
-    for (paneID, pane) in panes where pane.worktree == worktree {
+    for (paneID, pane) in panes where pane.session == session {
       if !memory.observedPanes.contains(paneID) {
         // 観測なし。直前の既知の状態は保ち、Unknown の継続だけ切る。
         panes[paneID]?.unknownSince = nil
@@ -220,35 +257,35 @@ public struct PaneNotificationPlanner: Sendable {
       }
     }
     for pane in snapshot.panes {
-      if let kind = transition(pane, in: worktree, at: instant) {
-        notifications.append(.pane(event(pane.id, in: worktree, kind: kind)))
+      if let kind = transition(pane, in: session, at: instant) {
+        notifications.append(.pane(event(pane.id, in: session, kind: kind)))
       }
     }
     return notifications + due(at: instant)
   }
 
-  /// `displays` はその worktree の全 pane (Agent でない pane を含む) の完了表示。ここにも直近の
+  /// `displays` はその session の全 pane (Agent でない pane を含む) の完了表示。ここにも直近の
   /// 状態の観測にも無い pane は消えたものとして記憶を捨てる。`undetermined` はこの回 Agent
   /// プロセスを特定できなかった pane (`PaneTaskCompletionTracker.isUndetermined`)。
   public mutating func observeCompletions(
     _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
-    in worktree: WorktreeIdentity, at instant: ContinuousClock.Instant
+    in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
-    guard var memory = worktrees[worktree] else { return [] }
+    guard var memory = sessions[session] else { return [] }
     panes = panes.filter { paneID, pane in
-      pane.worktree != worktree || displays[paneID] != nil
+      pane.session != session || displays[paneID] != nil
         || memory.observedPanes.contains(paneID)
     }
     let isBaseline = !memory.hasCompletionsBaseline
     memory.hasCompletionsBaseline = true
-    worktrees[worktree] = memory
+    sessions[session] = memory
 
     var notifications: [PaneNotification] = []
     for (paneID, display) in displays.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
       var isSilent = isBaseline
       if isBaseline || panes[paneID]?.awaitsCompletionBaseline == true {
         if undetermined.contains(paneID) {
-          panes[paneID, default: PaneMemory(worktree: worktree)].awaitsCompletionBaseline = true
+          panes[paneID, default: PaneMemory(session: session)].awaitsCompletionBaseline = true
           continue
         }
         panes[paneID]?.awaitsCompletionBaseline = false
@@ -259,17 +296,17 @@ public struct PaneNotificationPlanner: Sendable {
       case .none: continue
       case .completed(let completed): value = completed
       case .dismissed(let dismissed):
-        panes[paneID, default: PaneMemory(worktree: worktree)].notifiedCompletions.insert(
+        panes[paneID, default: PaneMemory(session: session)].notifiedCompletions.insert(
           dismissed)
         continue
       }
-      let inserted = panes[paneID, default: PaneMemory(worktree: worktree)]
+      let inserted = panes[paneID, default: PaneMemory(session: session)]
         .notifiedCompletions.insert(value).inserted
       if inserted, !isSilent, settings.enabledKinds.contains(.taskCompleted) {
         notifications.append(
           .pane(
             PaneNotificationEvent(
-              worktree: worktree, paneID: paneID, kind: .taskCompleted, completion: value)))
+              session: session, paneID: paneID, kind: .taskCompleted, completion: value)))
       }
     }
     return notifications + due(at: instant)
@@ -282,9 +319,9 @@ public struct PaneNotificationPlanner: Sendable {
   // MARK: - 内部
 
   private mutating func takeBaseline(
-    _ pane: PaneAgentState, in worktree: WorktreeIdentity, at instant: ContinuousClock.Instant
+    _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) {
-    var memory = panes[pane.id] ?? PaneMemory(worktree: worktree)
+    var memory = panes[pane.id] ?? PaneMemory(session: session)
     memory.lastKnown = Self.known(pane)
     memory.unknownSince = Self.isPlainUnknown(pane) ? instant : nil
     memory.didNotifyUnknown = false
@@ -299,9 +336,9 @@ public struct PaneNotificationPlanner: Sendable {
 
   /// 通知すべき遷移なら、その種類を返す。無効な種類でも記憶は進める。
   private mutating func transition(
-    _ pane: PaneAgentState, in worktree: WorktreeIdentity, at instant: ContinuousClock.Instant
+    _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) -> PaneNotificationKind? {
-    var memory = panes[pane.id] ?? PaneMemory(worktree: worktree)
+    var memory = panes[pane.id] ?? PaneMemory(session: session)
     defer { panes[pane.id] = memory }
 
     if Self.isPlainUnknown(pane) {
@@ -345,7 +382,7 @@ public struct PaneNotificationPlanner: Sendable {
           since.advanced(by: settings.unknownThreshold) <= instant
         else { continue }
         panes[paneID]?.didNotifyUnknown = true
-        notifications.append(.pane(event(paneID, in: memory.worktree, kind: .prolongedUnknown)))
+        notifications.append(.pane(event(paneID, in: memory.session, kind: .prolongedUnknown)))
       }
     }
     if let summary = flushSummary(at: instant) {
@@ -360,7 +397,7 @@ public struct PaneNotificationPlanner: Sendable {
       summaryStartedAt = nil
       return nil
     }
-    let isSettled = isSummaryGateOpen && worktrees.values.allSatisfy(\.hasStatesBaseline)
+    let isSettled = isSummaryGateOpen && sessions.values.allSatisfy(\.hasStatesBaseline)
     guard isSettled || startedAt.advanced(by: Self.summaryMaximumDelay) <= instant else {
       return nil
     }
@@ -375,9 +412,9 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   private func event(
-    _ paneID: PaneID, in worktree: WorktreeIdentity, kind: PaneNotificationKind
+    _ paneID: PaneID, in session: TerminalSessionKey, kind: PaneNotificationKind
   ) -> PaneNotificationEvent {
-    PaneNotificationEvent(worktree: worktree, paneID: paneID, kind: kind, completion: nil)
+    PaneNotificationEvent(session: session, paneID: paneID, kind: kind, completion: nil)
   }
 
   /// `nil` は直前の既知の状態を保つ回 (Needs Attention でない `Unknown`)。

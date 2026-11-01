@@ -16,6 +16,9 @@ struct TerminalTabs: View {
             key: key,
             worktree: worktree,
             sessions: model.sessions,
+            shouldOpen: { await model.shouldOpenTab(key) },
+            didPrepare: { model.didPrepareTab(key) },
+            didExit: { await model.handleTabExit(key) },
             focusRequest: keyboardFocus.focusRequest(isTabSelected: model.selectedTab == key)
           )
           .opacity(model.selectedTab == key ? 1 : 0)
@@ -37,6 +40,9 @@ private struct TerminalTabContent: View {
   let key: TerminalSessionKey
   let worktree: DetectedWorktree
   let sessions: TmuxSessionProvisioner?
+  let shouldOpen: @MainActor () async -> Bool
+  let didPrepare: @MainActor () -> Void
+  let didExit: @MainActor () async -> Void
   let focusRequest: TerminalFocusRequest?
   @State private var preparation = TerminalSessionPreparation.preparing
   /// attach の試行番号。**世代の識別子**であり、失敗の再試行回数ではない。
@@ -44,6 +50,7 @@ private struct TerminalTabContent: View {
   @State private var attempt = 0
   /// どの世代を覆うかの規則は `TerminalCore` が持つ。ここはその答えを表示へ配るだけ。
   @State private var exitObservation = TerminalExitObservation()
+  @State private var handledExitGeneration: Int?
 
   var body: some View {
     Group {
@@ -66,11 +73,13 @@ private struct TerminalTabContent: View {
     // surface を作り替えることになる。世代が上がるのは、下の再 attach を押したときだけ。
     .task(id: TerminalSessionAttempt(key: key, attempt: attempt)) {
       guard let sessions, case .preparing = preparation else { return }
+      guard await shouldOpen(), !Task.isCancelled else { return }
       let result = await sessions.attachCommand(
         for: key, workingDirectory: worktree.worktreePath)
       // Why not 書いてしまう: cancel 後のこの task はもう古い世代のものであり、その結果で
       // 新しい世代の用意を上書きすると、表示と argv の世代が食い違う。
       guard !Task.isCancelled else { return }
+      if case .success = result { didPrepare() }
       preparation =
         switch result {
         case .success(let command): .ready(command)
@@ -95,7 +104,14 @@ private struct TerminalTabContent: View {
         // 端末が持っている first responder を誰も降ろさないため、覆いを見ながらの打鍵が
         // 別 worktree の生きた session へ入る (Issue #234)。
         keyboardParticipation: hasExited ? .withdrawn : .normal,
-        stateChanged: { state in exitObservation.observe(state, generation: generation) }
+        stateChanged: { state in
+          guard generation == attempt else { return }
+          exitObservation.observe(state, generation: generation)
+          if state == .exited, handledExitGeneration != generation {
+            handledExitGeneration = generation
+            Task { await didExit() }
+          }
+        }
       )
       // 世代ごとに別の NSView にする。`GhosttySurfaceView` は `start()` の時点の argv を
       // 保持するので、使い回されると再 attach の新しい argv が効かない。加えて、非同期に

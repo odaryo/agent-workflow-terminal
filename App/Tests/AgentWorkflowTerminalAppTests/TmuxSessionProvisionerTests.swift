@@ -7,6 +7,44 @@ import Testing
 
 @Suite("タブ単位の session 終了 (§3.1)")
 struct TmuxSessionProvisionerTests {
+  @Test("指定した番号の session を完全一致で確認する", arguments: [1, 3])
+  func checksExactSession(index: Int) async throws {
+    let key = try makeKey(index: index)
+    let process = TerminationProcessRunner(result: .init(exitCode: 0, stdout: "", stderr: ""))
+    let provisioner = try makeProvisioner(process)
+
+    #expect(try await provisioner.exists(key))
+    #expect(
+      await process.calls == [
+        ["-u", "has-session", "-t", "=\(TmuxSessionName(key: key).rawValue)"]
+      ])
+  }
+
+  @Test("session または server が無ければ存在確認は false", arguments: [true, false])
+  func absentSessionDoesNotExist(serverAbsent: Bool) async throws {
+    let key = try makeKey(index: 2)
+    let stderr =
+      serverAbsent
+      ? "no server running on /tmp/awt-test\n"
+      : "can't find session: \(TmuxSessionName(key: key).rawValue)\n"
+    let process = TerminationProcessRunner(result: .init(exitCode: 1, stdout: "", stderr: stderr))
+    let provisioner = try makeProvisioner(process)
+
+    #expect(try await !provisioner.exists(key))
+  }
+
+  @Test("分類できない存在確認の失敗を呼び出し側へ返す")
+  func preservesExistenceFailure() async throws {
+    let key = try makeKey(index: 2)
+    let process = TerminationProcessRunner(
+      result: .init(exitCode: 1, stdout: "", stderr: "permission denied\n"))
+    let provisioner = try makeProvisioner(process)
+
+    await #expect(throws: TmuxSessionOperationError.self) {
+      try await provisioner.exists(key)
+    }
+  }
+
   @Test("指定した番号の session だけを完全一致で終了する", arguments: [1, 3])
   func terminatesExactSession(index: Int) async throws {
     let key = try makeKey(index: index)

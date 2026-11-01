@@ -66,18 +66,16 @@ struct DiffViewerPane: View {
   @ViewBuilder
   private var controls: some View {
     VStack(alignment: .leading, spacing: 6) {
-      VStack(alignment: .leading, spacing: 6) {
-        Picker("種別", selection: $model.kind) {
-          Text("Commit").tag(DiffViewerModel.Kind.commit)
-          Text("Base").tag(DiffViewerModel.Kind.base)
-          Text("Branch").tag(DiffViewerModel.Kind.branch)
+      // Drawer は 240pt まで狭まるため、固定幅の要素の横並びだけでははみ出しうる。
+      ViewThatFits(in: .horizontal) {
+        HStack(spacing: 6) {
+          kindPicker.fixedSize()
+          refreshButton
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        Button(model.currentSnapshot == nil ? "開く" : "Refresh", systemImage: "arrow.clockwise") {
-          Task { await model.openSnapshot() }
+        VStack(alignment: .leading, spacing: 6) {
+          kindPicker
+          refreshButton
         }
-        .disabled(model.isLoading)
       }
       subjectSelector
       if let snapshot = model.currentSnapshot {
@@ -97,6 +95,25 @@ struct DiffViewerPane: View {
       }
     }
     .padding(8)
+  }
+
+  private var kindPicker: some View {
+    Picker("種別", selection: $model.kind) {
+      Text("Commit").tag(DiffViewerModel.Kind.commit)
+      Text("Base").tag(DiffViewerModel.Kind.base)
+      Text("Branch").tag(DiffViewerModel.Kind.branch)
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+  }
+
+  private var refreshButton: some View {
+    Button(model.currentSnapshot == nil ? "開く" : "Refresh", systemImage: "arrow.clockwise") {
+      Task { await model.openSnapshot() }
+    }
+    .labelStyle(.iconOnly)
+    .help(model.currentSnapshot == nil ? "開く" : "Refresh")
+    .disabled(model.isLoading)
   }
 
   /// 登録済みの送信先を見せ、いつでも選び直せるようにする (§12.7)。

@@ -4,7 +4,9 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
+> 最終更新: 2026-11-01(`+ New Task`をProject Rootの常設sessionへのwindow追加に変え、モバイルも同じ操作とした。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+>
+> 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
 > 参照会話: `AI開発フロー整理` (`6a9211a1-6a4c-83ec-9903-b3514cd9c595`)
 >
@@ -155,7 +157,9 @@ worktree作成は原則としてAgent側が担当する。
 ```text
 User selects + New Task
         ↓
-User starts a normal interactive Agent in the Project Root terminal
+Terminal adds a tmux window to the Project Root session and opens it as a new tab
+        ↓
+User starts a normal interactive Agent in that window
         ↓
 User and Agent clarify the task
         ↓
@@ -168,9 +172,13 @@ Worktree is registered/activated
 Dedicated tmux session and Task Tab become available
 ```
 
-**Macアプリの`+ New Task`はProject Rootタブへ移り、その端末にキーボードフォーカスを渡すだけとする — 確定(2026-10-31、Issue #407)。** アプリはAgentを起動せず、起動コマンドも持たない。Agentの起動はユーザーがProject Rootの端末で行い、Agent(または`git worktree add`)が作ったworktreeは§3.2の自動Active化でタブになる。入口はタブ列右端の`＋`ボタンと、タブ(Project Rootタブを含む)の右クリックメニューの「新しいタスク…」の2つ。Drawerがフルスクリーンのときは端末が見えないので、並べて表示に戻してから移る。Project Rootタブを持たないbare repositoryのProject(§2.3)では、どちらの入口も無効にして理由をツールチップで示す。
+**`+ New Task`はProject Rootの常設tmux sessionにwindowを1つ追加し、それを新しいタブとして開いて選び、その端末にキーボードフォーカスを渡す — 確定(2026-11-01)。** 2026-10-31(Issue #407)の「既存のProject Rootタブへ移るだけ」を置き換える。アプリはAgentを起動せず、起動コマンドも持たない。Agentの起動はユーザーがその端末で行う。Agent(または`git worktree add`)が作ったworktreeは、§3.2の自動Active化で従来どおり専用tmux sessionを持つTask Tabになり、「1 task = 1 worktree = 1 Task Tab = 1専用session」は変えない。New Taskのタブはworktreeのタブではなく、Project Root sessionのwindowを表示するタブである。入口(タブ列右端の`＋`ボタンと、タブ(Project Rootタブを含む)の右クリックメニューの「新しいタスク…」)、Drawerがフルスクリーンのときは並べて表示に戻してから開くこと、Project Rootタブを持たないbare repositoryのProject(§2.3)ではどちらの入口も無効にして理由をツールチップで示すことは#407のとおりとする。
 
-モバイルからも`+ New Task`を開始できる。ただし、モバイルアプリ自身がGit worktreeを作るのではなく、Mac上のAgentを起動して同じフローへ入る。
+**モバイルの`+ New Task`もMacと同じ操作とする — 確定(2026-11-01)。** モバイルアプリ自身はGit worktreeを作らず、Agentも起動しない。Project Rootのsessionにwindowを追加し、そのwindowへattachする。MacでNew Taskとして開いたwindowは、モバイルからも同じsessionの同じwindowとして開ける(逆も同じ)。
+
+tmuxは同じsessionへattachした全クライアントで現在のwindowを共有する。Macの複数のタブや、MacとモバイルがProject Root sessionの別々のwindowを同時に表示するには、クライアントごとにgrouped session(`new-session -t <Project Root session>`)を作ってattachする — 現在の推奨(未計測)。追加したwindowにも`window-size`(§4.2)を設定する。
+
+Agentがworktreeを作った後のNew Taskのタブ(中でAgentが動いたままのwindow)の扱い — 残してユーザーが閉じるのか、Agentがそのwindowでworktreeへ移って作業を続けてよいのか — は未確定とする(§25)。
 
 ### 3.2 検出とActive/Inactive
 
@@ -1973,6 +1981,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - Project／Task Tab／Overviewの詳細レイアウト(Overviewのウィンドウ形態と概要の入力箇所は§13で確定。メインwindowは1枚で、選択中の1 Projectを表示しツールバーのメニューで切り替えることは確定(2026-10-08))
 - Drawerの初期幅、最大幅、split比率
 - iPhone上のAgent TUI縮小戦略
+- `+ New Task`で開いたタブ(Project Root sessionのwindow)の、Agentがworktreeを作った後の扱い(§3.1)
 - keyboard shortcutの一覧(⌘修飾をアプリが使い端末への打鍵に触れない原則は§5.4で確定)
 
 ### Agent
@@ -2231,7 +2240,8 @@ PR_READY
 - [x] worktreeごとに独立tmux session
 - [x] worktreeの安定IDは管理ディレクトリの絶対パス、tmux session名は安定IDだけから導出する`awt-<slug>-<安定IDのSHA-256先頭8桁>`
 - [x] アプリはユーザーの既定tmuxサーバを使い、専用socketへ隔離しない
-- [x] Macアプリの`+ New Task`(タブ列の`＋`とタブの右クリック)はProject Rootタブへ移り端末にフォーカスを渡すだけで、Agentは起動しない。bare repositoryのProjectでは無効
+- [x] `+ New Task`(タブ列の`＋`とタブの右クリック)はProject Rootの常設sessionにwindowを追加して新しいタブとして開き、端末にフォーカスを渡す。Agentは起動しない。bare repositoryのProjectでは無効
+- [x] モバイルの`+ New Task`もProject Root sessionにwindowを追加してattachする。モバイルはworktreeを作らずAgentも起動しない
 - [x] 観測中に新規出現したworktreeは自動Active化、初回スキャンで見つかったworktreeはInactiveから始める
 - [x] Active/Inactiveは再起動を跨いで復元する。停止中に現れたworktreeはInactiveから始め、停止中に消えたworktreeは落とさず到達不能として保持する
 - [x] GRDB正式採用までの再起動を跨ぐ状態はApplication Support配下のJSONへ暫定保存する(schema／migrationの決定とはしない)
@@ -2359,6 +2369,7 @@ PR_READY
 - [ ] hostctl over SSHを正式採用 — protocol PoC待ち
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
 - [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)
+- [ ] Mac・モバイルがProject Root sessionの別windowを同時に表示するためのgrouped session(`new-session -t`) — 計測待ち(§3.1)
 - [ ] Macのローカル通知の起動直後の基準とまとめ通知・前面時の判断待ちの抑止・要対応(種別不明)の通知・bundle外での無効化 — ユーザー確認待ち(§11.2)
 
 # 付録C. 参照先

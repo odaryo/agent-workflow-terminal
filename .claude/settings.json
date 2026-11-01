@@ -17,6 +17,7 @@
       "Bash(tmux list-sessions:*)",
       "Bash(tmux list-panes:*)",
       "Bash(rg:*)",
+      "Bash(scripts/wf-ci-rerun.sh:*)",
       "Bash(scripts/wf-commit.sh:*)",
       "Bash(scripts/wf-ghostty-publish.sh:*)",
       "Bash(scripts/wf-push.sh:*)",

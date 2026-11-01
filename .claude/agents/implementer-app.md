@@ -1,6 +1,6 @@
 ---
 name: implementer-app
-description: App/ (SwiftUI と libghostty 連携の UI 配線) だけを触る実装役。Director が書いた spec を受けて App/ 配下を編集する。TerminalCore / Adapters の変更が要ると分かったら止まって報告する。コミットと push は行わない。UI の動作確認は ui-verifier が担当する。
+description: Codex (標準の実装役) が使えないときの予備で、App/ (SwiftUI と libghostty 連携の UI 配線) だけを触る実装役。Director が書いた spec を受けて App/ 配下を編集する。TerminalCore / Adapters の変更が要ると分かったら止まって報告する。コミットと push は行わない。UI の動作確認は ui-verifier が担当する。
 model: sonnet
 tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch, Skill
 ---

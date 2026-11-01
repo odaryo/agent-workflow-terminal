@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: 標準の実装役。Director が書いた spec (背景 / 要求 / スコープ / 完了条件) を受けて実装する。ファイルの編集だけを行い、コミットと push は行わない (Director が検証してコミットする)。小さな追い修正も、新しいエージェントを立てず SendMessage で同じエージェントへ返すこと。
+description: Codex (標準の実装役) が使えないときの予備の実装役。Director が書いた spec (背景 / 要求 / スコープ / 完了条件) を受けて実装する。ファイルの編集だけを行い、コミットと push は行わない (Director が検証してコミットする)。小さな追い修正も、新しいエージェントを立てず SendMessage で同じエージェントへ返すこと。
 model: opus
 tools: Bash, Read, Edit, Write, Grep, Glob, WebFetch, Skill
 ---

@@ -10,7 +10,7 @@ tools: Bash, Read, Grep, Glob
 ## 手順
 
 - Director が指定した worktree のルートから `scripts/verify-app-ui.sh build` で最終バンドルを作り、`launch` から始める。probe ビルドで確認した結果を報告に使わない。
-- 状態の判定は `expect` / `texts` / `find` / `value` など AX の出力で行う。スクリーンショットは証跡として Director が指定したディレクトリへ撮るが、**Read するのは AX では読めないもの (描画やレイアウト) を判定するときだけ**にする。1枚ごとにコンテキストが約 3.6k トークン増え、以後のすべてのリクエストに乗るため。
+- 状態の判定は `expect` / `texts` / `find` / `value` など AX の出力で行う。**macOS 27 (Darwin 27.0) ではこれらが要素を見つけられない (#414)** ので、直るまでは CLAUDE.md の「macOS 27 (Darwin 27.0) ではハーネスの要素探索が動かない」の段の手順 (osascript で AX を直接読む、ラベルは `AXAttributedDescription`) に切り替える。最初に `scripts/verify-app-ui.sh selftest --no-build` を1回回し、通らなければ切り替えたことを報告に書く。スクリーンショットは証跡として Director が指定したディレクトリへ撮るが、**Read するのは AX では読めないもの (描画やレイアウト) を判定するときだけ**にする。1枚ごとにコンテキストが約 3.6k トークン増え、以後のすべてのリクエストに乗るため。
 - 終わったら `quit` でアプリを終了する。
 
 ## 報告の形式

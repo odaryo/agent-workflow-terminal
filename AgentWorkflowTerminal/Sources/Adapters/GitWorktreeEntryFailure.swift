@@ -53,18 +53,23 @@ public struct GitWorktreeEntryFailure: Sendable, Equatable {
     ///    main の中で Project Root と ID が重複した。Project の common dir に絞るのは、別
     ///    repository に置き換わった entry も、置き換わった先の main として git ディレクトリと
     ///    common dir が等しくなるためである (それは 2 と 3 も素通りして `.absent` になる)。
-    /// 2. `--is-bare-repository` が `true`。linked worktree が bare になることは無いので、別の bare
-    ///    repository の中 (`other.git/w`) へ遡ったことになる。これは git ディレクトリと common dir
-    ///    が等しく common dir が別 Project で、prefix も空なので、置き換わった entry と同じ形になる。
+    /// 2. `--is-bare-repository` が `true`。別の bare repository の中 (`other.git/w`) へ遡った場合で、
+    ///    git ディレクトリと common dir が等しく common dir が別 Project で、prefix も空なので、
+    ///    3 だけでは置き換わった entry と同じ形になる。`config.worktree` に `core.bare=true` を置いた
+    ///    linked worktree もここに当たるが、git 自身もそこでは作業ツリーの操作を拒む
+    ///    (`fatal: this operation must be run in a work tree`、再々レビューの計測)。
     /// 3. `--show-prefix` が空でない。entry のディレクトリが作業ツリーの根でなく、祖先の作業ツリーの
-    ///    中にいる。
+    ///    中にいる。逆は成り立たない: 遡った先の作業ツリーが `core.worktree` で entry を含まない
+    ///    場所を指していれば prefix は空になり、ここを素通りする。git-config(1) が「most likely a
+    ///    misconfiguration」と呼ぶ設定の上でだけ起きる。linked 側の `core.worktree` が entry の
+    ///    祖先を指していれば、正常な worktree でも prefix が空でなくなり失敗になる。
     ///
     /// git 2.50.1 実測 (Issue #502 の再レビューと実装時の計測):
     ///
     /// | 場合 | `--is-bare-repository` | `--show-prefix` |
     /// | --- | --- | --- |
     /// | 祖先へ遡った (`.worktrees/y`、別 repository の中の `w`、main の中の `.worktrees/x`) | `false` | 空でない |
-    /// | 正常な linked (`feat`、linked 側の `core.worktree`、`worktree move`、大小違い、NFC 記録) | `false` | 空 |
+    /// | 正常な linked (`feat`、entry の祖先を指さない linked 側の `core.worktree`、`worktree move`、大小違い、NFC 記録) | `false` | 空 |
     /// | 別 repository に置き換わった `rep` | `false` | 空 |
     /// | 遡った先が bare (`proj/z`、`other.git/w`) | `true` | exit 0 で空 |
     ///

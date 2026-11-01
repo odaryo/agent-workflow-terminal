@@ -14,6 +14,46 @@ private let isTmuxIntegrationEnabled =
 )
 struct TmuxSessionOperationsIntegrationTests {
 
+  @Test("global が off でも作成した session の detach-on-destroy は on になる")
+  func createdSessionOverridesGlobalDetachOnDestroy() async throws {
+    try await withServer("session-create-detach") { runner, workingDirectory in
+      _ = try await runner.run(arguments: ["set-option", "-g", "detach-on-destroy", "off"])
+      let name = try sessionName()
+
+      try await TmuxSessionOperations(runner: runner).create(
+        session: name, workingDirectory: workingDirectory)
+
+      #expect(
+        try await lines(
+          runner, ["show-options", "-t", "=\(name.rawValue):", "-v", "detach-on-destroy"])
+          == ["on"])
+      #expect(
+        try await lines(runner, ["show-options", "-g", "-v", "detach-on-destroy"]) == ["off"])
+    }
+  }
+
+  @Test("create を通さず作った既存 session にも detach-on-destroy on を設定できる")
+  func ensuresDetachOnDestroyForExistingSession() async throws {
+    try await withServer("session-resume-detach") { runner, _ in
+      _ = try await runner.run(arguments: ["set-option", "-g", "detach-on-destroy", "off"])
+      let name = try sessionName()
+      _ = try await runner.run(arguments: ["new-session", "-d", "-s", name.rawValue])
+      #expect(
+        try await lines(
+          runner, ["show-options", "-A", "-t", "=\(name.rawValue):", "-v", "detach-on-destroy"])
+          == ["off"])
+
+      try await TmuxSessionOperations(runner: runner).ensureDetachOnDestroy(session: name)
+
+      #expect(
+        try await lines(
+          runner, ["show-options", "-t", "=\(name.rawValue):", "-v", "detach-on-destroy"])
+          == ["on"])
+      #expect(
+        try await lines(runner, ["show-options", "-g", "-v", "detach-on-destroy"]) == ["off"])
+    }
+  }
+
   @Test("作成した session は最初の pane に history-limit が、残った window に window-size が効く")
   func createdSessionAppliesProductDefaultsWhereTheyTakeEffect() async throws {
     try await withServer("session-create") { runner, workingDirectory in

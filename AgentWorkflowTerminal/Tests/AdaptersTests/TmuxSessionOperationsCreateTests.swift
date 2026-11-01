@@ -36,6 +36,7 @@ struct TmuxSessionOperationsCreateTests: TmuxSessionOperationsTestSupport {
           ";", "new-window", "-d", "-t", sessionID, "-c", escapedWorkingDirectory,
           ";", "kill-window", "-t", "\(sessionID):^",
           ";", "set-option", "-w", "-t", "\(sessionID):", "window-size", "smallest",
+          ";", "set-option", "-t", sessionID, "detach-on-destroy", "on",
         ])
   }
 
@@ -59,6 +60,7 @@ struct TmuxSessionOperationsCreateTests: TmuxSessionOperationsTestSupport {
           ";", "new-window", "-d", "-t", sessionID, "-c", escapedWorkingDirectory,
           ";", "kill-window", "-t", "\(sessionID):^",
           ";", "set-option", "-w", "-t", "\(sessionID):", "window-size", windowSize.rawValue,
+          ";", "set-option", "-t", sessionID, "detach-on-destroy", "on",
         ])
   }
 

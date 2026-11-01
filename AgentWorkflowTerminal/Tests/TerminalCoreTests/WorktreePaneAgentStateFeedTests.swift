@@ -105,14 +105,13 @@ struct WorktreePaneAgentStateFeedTests {
 
       await context.clock.advance()
       await context.paneSource.waitForCalls(2)
-      for _ in 0..<20 { await Task.yield() }
+      await context.channel.waitForReselection(of: testCase.changed.id, cancellations: 1)
       let selectedAdapterID = await context.channel.adapterID(for: testCase.changed.id)
       #expect(selectedAdapterID == testCase.expectedAdapterID)
       guard selectedAdapterID == testCase.expectedAdapterID else { continue }
       await context.channel.send(.idle, to: testCase.changed.id)
 
       #expect(await iterator.next()?.first?.adapterID == testCase.expectedAdapterID)
-      for _ in 0..<20 { await Task.yield() }
       #expect(await context.channel.cancellationCount == 1)
     }
   }

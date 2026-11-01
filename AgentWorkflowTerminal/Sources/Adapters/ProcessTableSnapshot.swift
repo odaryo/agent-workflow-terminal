@@ -23,7 +23,7 @@ struct ProcessTableSnapshot: Sendable {
   }
 
   func sessionActivity(of panes: [(pid: Int32, isDead: Bool)]) -> TerminalSessionActivity {
-    // 二重 fork で木から離れたプロセスは対象外とする (kill-session でも終了しない)。
+    // 二重 fork で木から離れたプロセスは見えない (sleep と bash のループは kill-session 後も生存、#457 で実測)。
     var activity = TerminalSessionActivity.shellOnly
     for pane in panes where !pane.isDead {
       guard let root = rowsByPID[pane.pid] else {

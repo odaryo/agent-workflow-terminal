@@ -1,0 +1,3 @@
+docs/a.txt
+README.md
+Spikes/x.swift

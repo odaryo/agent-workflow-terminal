@@ -1,0 +1,5 @@
+on:
+  push:
+    paths-ignore: ['docs/x*.md']
+  pull_request:
+    paths-ignore: ['docs/x*.md']

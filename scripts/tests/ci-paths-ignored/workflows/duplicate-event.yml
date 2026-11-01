@@ -1,0 +1,10 @@
+name: CI
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["Spikes/**", "docs/**", "**.md"]
+  push:
+    paths-ignore: ["docs/**"]
+  pull_request:
+    paths-ignore: ["Spikes/**", "docs/**", "**.md"]
+jobs: {}

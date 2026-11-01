@@ -42,7 +42,10 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerSocketMissingStderr))
     let operations = try makeOperations(stub)
 
-    await #expect(throws: TmuxSessionOperationError.serverSocketMissing) {
+    await #expect(
+      throws: TmuxSessionOperationError.serverSocketMissing(
+        socketPath: "/private/tmp/tmux-501/default")
+    ) {
       try await operations.exists(session: try sessionName())
     }
   }
@@ -101,7 +104,10 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     "server の停止と socket の欠落を区別し、終了を成功にしない",
     arguments: [
       (tmuxServerNotRunningStderr, TmuxSessionOperationError.serverNotRunning),
-      (tmuxServerSocketMissingStderr, TmuxSessionOperationError.serverSocketMissing),
+      (
+        tmuxServerSocketMissingStderr,
+        TmuxSessionOperationError.serverSocketMissing(socketPath: "/private/tmp/tmux-501/default")
+      ),
     ]
   )
   func reportsMissingServerOnKill(
@@ -130,11 +136,26 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
         == prefix + ["list-sessions", "-F", "#{session_name}"])
   }
 
-  @Test("server が動いていない場合も socket が無い場合も一覧は空になる", arguments: tmuxServerAbsentStderrs)
-  func listsNothingWithoutServer(stderr: String) async throws {
-    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: stderr))
+  @Test("server が動いていない場合の一覧は空になる")
+  func listsNothingWithoutServer() async throws {
+    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerNotRunningStderr))
 
     #expect(try await makeOperations(stub).list().isEmpty)
+  }
+
+  /// socket 欠落は生存中の server でも起きるので、一覧を空にすると呼び出し元が取り残された
+  /// server を probe できない (Issue #500)。
+  @Test("socket が無い場合の一覧は空にせず、socket のパスを付けて serverSocketMissing を投げる")
+  func throwsSocketMissingOnList() async throws {
+    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerSocketMissingStderr))
+    let operations = try makeOperations(stub)
+
+    await #expect(
+      throws: TmuxSessionOperationError.serverSocketMissing(
+        socketPath: "/private/tmp/tmux-501/default")
+    ) {
+      try await operations.list()
+    }
   }
 
   @Test("server 不在ではない接続失敗で一覧を空へ畳まない", arguments: tmuxNotServerAbsentStderrs)

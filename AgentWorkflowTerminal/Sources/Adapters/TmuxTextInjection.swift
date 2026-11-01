@@ -65,8 +65,10 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
   /// 不一致では buffer が消費されず1バイトも届かない)。
   case paneIdentityMismatch(PaneID)
   /// 1バイトも届いていない。`TmuxRunnerError.isServerAbsent` の判定に従い、server 停止と
-  /// socket 欠落を現在は同じ不在へ畳む。ENOENT は生存中の server の socket が消えた場合にも
-  /// 出るため (tmux 3.8、Issue #492 で計測)、この畳み込みの見直しは Issue #500 で扱う。
+  /// socket 欠落を同じ不在へ畳む。ENOENT は生存中の server の socket が消えた場合にも
+  /// 出る (tmux 3.8、Issue #492 で計測) が、attach 済みの client は fd で繋がったままである。
+  /// 誤った書き込みは bootstrap と Close で止め、観測のたびの lsof 起動コストを避ける
+  /// (Issue #500、Director 決定4、2026-11-02)。
   /// **送信先が別 pane になった**のとは別物なので混ぜない — この失敗だけでは、別の送信先を
   /// 選び直すべきか判断できない。
   case serverNotRunning

@@ -116,7 +116,9 @@ public enum PaneNotification: Sendable, Hashable {
 ///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
 ///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
 ///   飲み込むため。
-/// - Important: 基準の時点で判断待ちの pane は個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
+/// - Important: 他の session や猶予中に既知の状態の記憶がある pane は基準で上書きせず、まとめ通知の
+///   対象にも新たに加えない (#494)。完了表示の記憶だけでは状態を知ったことにならないため、状態の
+///   記憶がない pane の判断待ちは基準で個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
 ///   起動直後は Project ごと・session (タブ) ごとに基準を取る時刻がずれるので、まとめ通知は
 ///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 session が基準を取り終えた時点で
 ///   出す。基準を取れない session が残っても、最初の候補から `summaryMaximumDelay` で出す。
@@ -130,6 +132,8 @@ public struct PaneNotificationPlanner: Sendable {
 
   /// 基準を取れない session を待つ上限。
   public static let summaryMaximumDelay = Duration.seconds(30)
+  /// pane 一覧の取得間隔2秒をまたぐ移動を引き継ぐため、その数倍を待つ (#494)。
+  public static let paneHandoffGrace = Duration.seconds(10)
 
   private enum KnownState: Sendable, Hashable {
     case state(AgentState)
@@ -144,7 +148,8 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   private struct PaneMemory: Sendable {
-    let session: TerminalSessionKey
+    var session: TerminalSessionKey
+    var missingSince: ContinuousClock.Instant?
     var lastKnown: KnownState?
     var unknownSince: ContinuousClock.Instant?
     var didNotifyUnknown = false
@@ -162,12 +167,14 @@ public struct PaneNotificationPlanner: Sendable {
     var hasCompletionsBaseline = false
     /// 直近の状態の観測に現れた pane。概要の読み取りから消えても、ここに居れば記憶を捨てない。
     var observedPanes: Set<PaneID> = []
+    var completionPanes: Set<PaneID> = []
   }
 
   private var sessions: [TerminalSessionKey: SessionMemory] = [:]
   private var panes: [PaneID: PaneMemory] = [:]
   private var isSummaryGateOpen = false
   private var summaryStartedAt: ContinuousClock.Instant?
+  private var lastInstant: ContinuousClock.Instant?
 
   public init(settings: PaneNotificationSettings = PaneNotificationSettings()) {
     self.settings = settings
@@ -211,18 +218,19 @@ public struct PaneNotificationPlanner: Sendable {
     observeCompletions(displays, undetermined: undetermined, in: .primary(worktree), at: instant)
   }
 
-  /// 観測を始めた session だけを扱う。再び呼ぶと記憶を捨てて基準を取り直す。
+  /// 再開時は session の基準を取り直すが、猶予内の pane の通知済み記録は引き継ぐ。
   public mutating func startObserving(
     _ session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) {
+    expireMissingPanes(at: instant)
     stopObserving(session)
     sessions[session] = SessionMemory()
   }
 
-  /// タブを閉じたときなど、その session の pane の記憶をすべて捨てる。
+  /// 他の session にも居ない pane は猶予に入れる。時刻引数が無いため直近の入力時刻を使う。
   public mutating func stopObserving(_ session: TerminalSessionKey) {
     sessions[session] = nil
-    panes = panes.filter { $0.value.session != session }
+    if let lastInstant { updateMissingPanes(at: lastInstant) }
   }
 
   /// 起動直後のまとめ通知を待たせる外部条件 (Project の一覧と初回の session 検出が終わったか)。
@@ -237,6 +245,7 @@ public struct PaneNotificationPlanner: Sendable {
     _ snapshot: WorktreePaneAgentStates, in session: TerminalSessionKey,
     at instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
+    expireMissingPanes(at: instant)
     guard var memory = sessions[session] else { return [] }
     memory.observedPanes = Set(snapshot.panes.map(\.id))
     if !memory.hasStatesBaseline {
@@ -246,6 +255,7 @@ public struct PaneNotificationPlanner: Sendable {
       for pane in snapshot.panes {
         takeBaseline(pane, in: session, at: instant)
       }
+      updateMissingPanes(at: instant)
       return due(at: instant)
     }
     sessions[session] = memory
@@ -263,27 +273,27 @@ public struct PaneNotificationPlanner: Sendable {
         notifications.append(.pane(event(pane.id, in: session, kind: kind)))
       }
     }
+    updateMissingPanes(at: instant)
     return notifications + due(at: instant)
   }
 
   /// `displays` はその session の全 pane (Agent でない pane を含む) の完了表示。ここにも直近の
-  /// 状態の観測にも無い pane は消えたものとして記憶を捨てる。`undetermined` はこの回 Agent
+  /// 状態の観測にも無く、他の session にも居ない pane は猶予に入れる。`undetermined` はこの回 Agent
   /// プロセスを特定できなかった pane (`PaneTaskCompletionTracker.isUndetermined`)。
   public mutating func observeCompletions(
     _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
     in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) -> [PaneNotification] {
+    expireMissingPanes(at: instant)
     guard var memory = sessions[session] else { return [] }
-    panes = panes.filter { paneID, pane in
-      pane.session != session || displays[paneID] != nil
-        || memory.observedPanes.contains(paneID)
-    }
+    memory.completionPanes = Set(displays.keys)
     let isBaseline = !memory.hasCompletionsBaseline
     memory.hasCompletionsBaseline = true
     sessions[session] = memory
 
     var notifications: [PaneNotification] = []
     for (paneID, display) in displays.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+      attach(paneID, to: session, at: instant)
       var isSilent = isBaseline
       if isBaseline || panes[paneID]?.awaitsCompletionBaseline == true {
         if undetermined.contains(paneID) {
@@ -311,6 +321,7 @@ public struct PaneNotificationPlanner: Sendable {
               session: session, paneID: paneID, kind: .taskCompleted, completion: value)))
       }
     }
+    updateMissingPanes(at: instant)
     return notifications + due(at: instant)
   }
 
@@ -323,6 +334,16 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func takeBaseline(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) {
+    attach(pane.id, to: session, at: instant)
+    if panes[pane.id]?.lastKnown != nil {
+      if Self.isPlainUnknown(pane) {
+        if panes[pane.id]?.unknownSince == nil { panes[pane.id]?.unknownSince = instant }
+      } else {
+        panes[pane.id]?.unknownSince = nil
+        panes[pane.id]?.didNotifyUnknown = false
+      }
+      return
+    }
     var memory = panes[pane.id] ?? PaneMemory(session: session)
     memory.lastKnown = Self.known(pane)
     memory.unknownSince = Self.isPlainUnknown(pane) ? instant : nil
@@ -340,6 +361,7 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func transition(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) -> PaneNotificationKind? {
+    attach(pane.id, to: session, at: instant)
     var memory = panes[pane.id] ?? PaneMemory(session: session)
     defer { panes[pane.id] = memory }
 
@@ -377,6 +399,7 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   private mutating func due(at instant: ContinuousClock.Instant) -> [PaneNotification] {
+    expireMissingPanes(at: instant)
     var notifications: [PaneNotification] = []
     if settings.enabledKinds.contains(.prolongedUnknown) {
       for (paneID, memory) in panes.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
@@ -394,7 +417,9 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   private mutating func flushSummary(at instant: ContinuousClock.Instant) -> PaneNotification? {
-    let members = panes.filter(\.value.isSummaryMember)
+    // 閉じたタブの pane を数えないため、猶予中は除く (#488 stoppingSessionRemovesItsSummaryMembers)。
+    // その印まで消すと、移動中の pane が戻ったときに通知を失う (#494 のレビュー M2 / P2)。
+    let members = panes.filter { $0.value.isSummaryMember && $0.value.missingSince == nil }
     guard let startedAt = summaryStartedAt, !members.isEmpty else {
       summaryStartedAt = nil
       return nil
@@ -411,6 +436,40 @@ public struct PaneNotificationPlanner: Sendable {
       memory.lastKnown?.attentionKind.map(settings.enabledKinds.contains) ?? false
     }.count
     return count > 0 ? .attentionSummary(count: count) : nil
+  }
+
+  // #494 の計測では join-pane / link-window で同じ ID が別の session に現れる。
+  // (session, pane) を鍵にすると link-window が二重に鳴るため、pane ごとの記憶を付け替える。
+  private mutating func attach(
+    _ paneID: PaneID, to session: TerminalSessionKey, at instant: ContinuousClock.Instant
+  ) {
+    if let memory = panes[paneID], memory.missingSince != nil,
+      memory.isSummaryMember, summaryStartedAt == nil
+    {
+      summaryStartedAt = instant
+    }
+    panes[paneID, default: PaneMemory(session: session)].session = session
+    panes[paneID]?.missingSince = nil
+  }
+
+  private mutating func updateMissingPanes(at instant: ContinuousClock.Instant) {
+    let present = sessions.values.reduce(into: Set<PaneID>()) {
+      $0.formUnion($1.observedPanes.union($1.completionPanes))
+    }
+    for paneID in panes.keys where !present.contains(paneID) {
+      if panes[paneID]?.missingSince == nil { panes[paneID]?.missingSince = instant }
+      panes[paneID]?.unknownSince = nil
+      panes[paneID]?.didNotifyUnknown = false
+    }
+  }
+
+  // 猶予満了では通知しないため nextDeadline に含めず、次の時刻入力で破棄する。
+  private mutating func expireMissingPanes(at instant: ContinuousClock.Instant) {
+    lastInstant = instant
+    panes = panes.filter { _, memory in
+      guard let since = memory.missingSince else { return true }
+      return instant < since.advanced(by: Self.paneHandoffGrace)
+    }
   }
 
   private func event(

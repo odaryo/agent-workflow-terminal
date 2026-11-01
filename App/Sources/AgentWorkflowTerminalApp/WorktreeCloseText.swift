@@ -134,6 +134,8 @@ extension WorktreeCloseStepFailure.Reason {
     switch self {
     case .tmux(let error):
       "tmux session を終了できませんでした: \(error)"
+    case .orphanedTmuxServer(let socketPath, let result):
+      "tmux session を終了できませんでした: \(socketPath): \(result)"
     case .git(let error):
       error.closeDescription
     case .worktreeRemoval(let error, let registration):

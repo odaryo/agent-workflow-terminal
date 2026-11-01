@@ -130,6 +130,8 @@ struct WorktreeCloseHarness {
   init(
     tmux: TmuxSessionRunnerStub = .init(result: stubSuccess()),
     git: WorktreeCloseGitStub = gitStub(),
+    orphanedServerProbe: TmuxOrphanedServerProbe = TmuxOrphanedServerProbe(
+      runner: OrphanedServerRunnerStub(result: stubFailure(stderr: ""))),
     repositoryDirectory: URL = URL(fileURLWithPath: "/repo"),
     identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
     parentEnvironment: [String: String] = [:], existingFiles: Set<String> = []
@@ -145,6 +147,7 @@ struct WorktreeCloseHarness {
           socketName: "awt-test", processRunner: tmux,
           executableCandidates: [URL(fileURLWithPath: "/test/bin/tmux")], parentEnvironment: [:],
           isExecutableFile: { _ in true })),
+      orphanedServerProbe: orphanedServerProbe,
       processRunner: git, executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
       parentEnvironment: parentEnvironment, isExecutableFile: { _ in true },
       fileExists: { existingFiles.contains($0) })

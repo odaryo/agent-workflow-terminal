@@ -23,7 +23,7 @@ struct TmuxSessionActivityProbeIntegrationTests {
       _ = try await runner.run(
         arguments: ["new-session", "-d", "-s", name.rawValue] + command.arguments)
       try await waitForPane(runner: runner, session: name) { pid, isDead in
-        guard !isDead else { return false }
+        guard !isDead, let pid else { return false }
         let output = try await FoundationProcessRunner().run(
           executableURL: URL(fileURLWithPath: "/bin/ps"),
           arguments: ["-Ao", "pid=,ppid=,comm="], environment: ["LC_ALL": "C"],
@@ -88,7 +88,7 @@ struct TmuxSessionActivityProbeIntegrationTests {
 
   private func waitForPane(
     runner: TmuxRunner, session: TmuxSessionName,
-    condition: (Int32, Bool) async throws -> Bool
+    condition: (Int32?, Bool) async throws -> Bool
   ) async throws {
     let clock = ContinuousClock()
     let deadline = clock.now.advanced(by: .seconds(10))
@@ -99,9 +99,14 @@ struct TmuxSessionActivityProbeIntegrationTests {
           "list-panes", "-s", "-t", "=\(session.rawValue)", "-F", "#{pane_pid} #{pane_dead}",
         ])
       lastOutput = result.stdout
-      let fields = result.stdout.split(whereSeparator: \.isWhitespace)
-      let pid = try #require(fields.count == 2 ? Int32(fields[0]) : nil)
+      let fields = result.stdout.trimmingCharacters(in: .newlines)
+        .split(separator: " ", omittingEmptySubsequences: false)
+      try #require(fields.count == 2)
       try #require(fields[1] == "0" || fields[1] == "1")
+      let pid = Int32(fields[0])
+      if fields[1] == "0" {
+        try #require(pid != nil && (pid ?? 0) > 0)
+      }
       if try await condition(pid, fields[1] == "1") { return }
       try await Task.sleep(for: .milliseconds(20))
     } while clock.now < deadline

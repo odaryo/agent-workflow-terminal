@@ -26,6 +26,23 @@ struct TmuxSessionActivityProbeTests {
     #expect(await spy.processReads == 2)
   }
 
+  @Test(
+    "死んだ pane の空 PID は除外し、生存 pane の空 PID は undetermined",
+    arguments: [
+      (" 1\n", TerminalSessionActivity.shellOnly),
+      (" 1\n100 0\n", .shellOnly),
+      (" 1\n 0\n", .undetermined),
+      ("200 1\n100 0\n", .shellOnly),
+    ])
+  func handlesDeadPanePID(paneOutput: String, expected: TerminalSessionActivity) async throws {
+    let key = try makeKey()
+    let spy = ActivityProbeProcessSpy(
+      key: key, paneOutput: paneOutput, processTableOutput: "100 1 /bin/zsh\n")
+    let probe = try makeProbe(spy: spy)
+
+    #expect(await probe.activity(of: key) == expected)
+  }
+
   private func makeKey() throws -> TerminalSessionKey {
     .primary(try #require(WorktreeIdentity(rawValue: "/repo/.git")))
   }
@@ -48,11 +65,18 @@ enum ActivityProbeFailure: Sendable, CaseIterable {
 private actor ActivityProbeProcessSpy: ProcessRunning {
   private let key: TerminalSessionKey
   private let failure: ActivityProbeFailure?
+  private let paneOutput: String?
+  private let processTableOutput: String?
   private(set) var processReads = 0
 
-  init(key: TerminalSessionKey, failure: ActivityProbeFailure? = nil) {
+  init(
+    key: TerminalSessionKey, failure: ActivityProbeFailure? = nil,
+    paneOutput: String? = nil, processTableOutput: String? = nil
+  ) {
     self.key = key
     self.failure = failure
+    self.paneOutput = paneOutput
+    self.processTableOutput = processTableOutput
   }
 
   func run(
@@ -70,7 +94,8 @@ private actor ActivityProbeProcessSpy: ProcessRunning {
       #expect(arguments == ["-Ao", "pid=,ppid=,comm="])
       #expect(environment["LC_ALL"] == "C")
       let child = processReads > 1 ? "101 100 /bin/sleep\n" : ""
-      return ProcessRunResult(exitCode: 0, stdout: "100 1 /bin/sh\n" + child, stderr: "")
+      return ProcessRunResult(
+        exitCode: 0, stdout: processTableOutput ?? ("100 1 /bin/sh\n" + child), stderr: "")
     }
     if failure == .paneListLaunch {
       throw .launchFailed(executableURL: executableURL, message: "tmux unavailable")
@@ -81,6 +106,9 @@ private actor ActivityProbeProcessSpy: ProcessRunning {
         stderr: failure == .sessionMissing ? "can't find session: missing\n" : "list-panes failed")
     }
     #expect(arguments.contains("list-panes"))
+    if let paneOutput {
+      return ProcessRunResult(exitCode: 0, stdout: paneOutput, stderr: "")
+    }
     guard let formatIndex = arguments.firstIndex(of: "-F"),
       arguments.indices.contains(formatIndex + 1)
     else {

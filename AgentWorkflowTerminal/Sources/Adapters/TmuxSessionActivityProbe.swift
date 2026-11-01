@@ -47,13 +47,18 @@ public struct TmuxSessionActivityProbe: Sendable {
     var hasFailure = false
     for line in lines {
       let fields = line.split(separator: " ", omittingEmptySubsequences: false)
-      guard fields.count == 2, let pid = Int32(fields[0]), pid > 0,
-        fields[1] == "0" || fields[1] == "1"
+      guard fields.count == 2, fields[1] == "0" || fields[1] == "1"
       else {
         hasFailure = true
         continue
       }
-      panes.append((pid: pid, isDead: fields[1] == "1"))
+      // 死んだ pane の #{pane_pid} は空文字 (tmux 3.8 で実測) なので、PID を検証しない。
+      if fields[1] == "1" { continue }
+      guard let pid = Int32(fields[0]), pid > 0 else {
+        hasFailure = true
+        continue
+      }
+      panes.append((pid: pid, isDead: false))
     }
     return hasFailure ? nil : panes
   }

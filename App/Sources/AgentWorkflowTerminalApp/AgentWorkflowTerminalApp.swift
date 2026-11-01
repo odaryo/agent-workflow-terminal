@@ -8,7 +8,6 @@ import TerminalCore
 struct AgentWorkflowTerminalApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var projects: ProjectsModel
-  @State private var minimumWindowWidth: CGFloat = 480
 
   init() {
     _projects = StateObject(wrappedValue: ProjectsModel(dependencies: AppDependencies.make()))
@@ -24,12 +23,10 @@ struct AgentWorkflowTerminalApp: App {
       ProjectsWindowContent(projects: projects)
         .modifier(HiddenWindowTitle())
         .background { ToolbarDisplayModeLock() }
-        // 内側の frame は window に効かず (#430)、ここでも下限は 480 のまま (#477、未解決)。
-        .frame(minWidth: minimumWindowWidth, minHeight: 320)
-        .onPreferenceChange(ProjectMinimumWindowWidthKey.self) { [width = $minimumWindowWidth] in
-          width.wrappedValue = $0
-        }
+        // Drawer の下限は preference では root へ届かず、WindowExpansion で保持する (#477 計測)。
+        .frame(minWidth: 480, minHeight: 320)
     }
+    .windowResizability(.contentMinSize)
     .defaultSize(width: 900, height: 560)
     .commands {
       // `Window` だけで File メニューごと消えることは計測済みで、この行は多重防御。
@@ -127,7 +124,6 @@ struct ProjectView: View {
         }
       }
     }
-    .modifier(ProjectWindowWidthPreference(model: model))
     .onAppear {
       var restored = ViewerArrangementPreferences.restoredLayout()
       if let content = model.viewerDrawerLayout.content { restored.open(content) }

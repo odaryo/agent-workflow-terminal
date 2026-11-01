@@ -68,6 +68,39 @@ struct GitWorktreeDetectorIntegrationTests {
     }
   }
 
+  /// git は探索権限の無い unlocked worktree にも、削除済みと同じ `prunable` を付ける
+  /// (git 2.50.1 の Director 計測)。直後の削除済みテストと対にし、`prunable` だけで
+  /// 消失と判断すると、存在する worktree まで失われることを固定する (Issue #496)。
+  /// root で走らせるとパーミッションが効かないため、この経路は再現しない。
+  @Test("入れないだけの unlocked worktree は、admin 側の安定 ID で到達不能として検出する")
+  func unsearchableUnlockedWorktreeIsDetectedAsUnreachable() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["worktree", "add", "-q", "-b", "wt-unlocked", "../wt-unlocked"])
+      let unsearchable = repository.root.appending(path: "wt-unlocked")
+      try FileManager.default.setAttributes(
+        [.posixPermissions: 0o000], ofItemAtPath: unsearchable.path)
+      // 戻さないと後片付けの削除が Permission denied で失敗し、repository が /private/tmp に残る。
+      defer {
+        try? FileManager.default.setAttributes(
+          [.posixPermissions: 0o755], ofItemAtPath: unsearchable.path)
+      }
+
+      let result = try await repository.detector().scan()
+
+      #expect(
+        result.detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, unsearchable.path])
+      let blocked = try #require(result.detected.first { $0.worktreePath == unsearchable.path })
+      #expect(!blocked.isReachable)
+      #expect(
+        blocked.identity.utf8Bytes
+          == Array("\(repository.mainWorktree.path)/.git/worktrees/wt-unlocked".utf8))
+      #expect(blocked.branch == "wt-unlocked")
+      #expect(!blocked.isProjectRoot)
+      #expect(result.failures.isEmpty)
+    }
+  }
+
   @Test("作業ツリーを消した worktree は検出結果に現れず、スキャンも失敗しない")
   func prunableWorktreeIsSkippedWithoutFailingTheScan() async throws {
     try await withGitRepository { repository in

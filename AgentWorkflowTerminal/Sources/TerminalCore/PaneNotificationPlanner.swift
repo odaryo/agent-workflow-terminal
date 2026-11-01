@@ -80,13 +80,15 @@ public enum PaneNotification: Sendable, Hashable {
   /// 「判断待ちが N 件あります」(§11.2)。開くと Overview へ移る。
   case attentionSummary(count: Int)
 
+  /// アプリが前面でメイン window に選択中のタブを渡す (設計書 §11.2、現在の推奨)。
+  /// 判断待ちの抑止はそのタブだけに限り、同じ worktree の別タブには広げない。
   public func isSuppressed(whileShowing session: TerminalSessionKey?) -> Bool {
     guard case .pane(let event) = self, let session else { return false }
     return event.kind.isAttention && event.session == session
   }
 
-  /// アプリが前面で、`worktree` のタブがメイン window で選択されている間に出さないもの。
-  /// ユーザーがその画面を見ているので判断待ちは出さず、タスク完了は出す (§11.2、現在の推奨)。
+  /// 渡した worktree の全タブ (全 session) の判断待ちを抑止する。
+  /// 前面で選択中のタブだけを抑止する用途 (設計書 §11.2) では session 版を使う。
   public func isSuppressed(whileShowing worktree: WorktreeIdentity?) -> Bool {
     guard case .pane(let event) = self, let worktree else { return false }
     return event.kind.isAttention && event.worktree == worktree

@@ -107,6 +107,60 @@ struct PaneNotificationPlannerSessionTests: PaneNotificationPlannerTesting {
     #expect(planner.setSummaryGate(isOpen: true, at: start).isEmpty)
   }
 
+  @Test("停止した A の判断待ちは B の基準が揃ったときのまとめ通知に数えない")
+  func stoppingSessionRemovesItsSummaryMembers() {
+    let start = Self.clock.now
+    var planner = PaneNotificationPlanner()
+    planner.startObserving(sessionA, at: start)
+    planner.startObserving(sessionB, at: start)
+    #expect(planner.setSummaryGate(isOpen: true, at: start).isEmpty)
+    #expect(
+      planner.observeStates(complete([pane("%1", .question)]), in: sessionA, at: start)
+        .isEmpty)
+
+    planner.stopObserving(sessionA)
+
+    #expect(
+      planner.observeStates(complete([pane("%2", .permission)]), in: sessionB, at: start)
+        == [.attentionSummary(count: 1)])
+  }
+
+  @Test("A の観測なしは B の Unknown の継続時間と通知を消さない")
+  func missingPanesInOneSessionKeepOtherUnknownTimer() {
+    let start = Self.clock.now
+    let deadline = start.advanced(by: .seconds(600))
+    var planner = PaneNotificationPlanner(settings: Self.withProlongedUnknown)
+    planner.startObserving(sessionA, at: start)
+    planner.startObserving(sessionB, at: start)
+    #expect(
+      planner.observeStates(complete([pane("%1", .working)]), in: sessionA, at: start).isEmpty)
+    #expect(
+      planner.observeStates(complete([pane("%2", .unknown)]), in: sessionB, at: start).isEmpty)
+    #expect(planner.nextDeadline == deadline)
+
+    #expect(
+      planner.observeStates(complete([]), in: sessionA, at: start.advanced(by: .seconds(300)))
+        .isEmpty)
+
+    #expect(planner.nextDeadline == deadline)
+    #expect(
+      planner.advance(to: deadline)
+        == [notification(in: sessionB, paneID: "%2", kind: .prolongedUnknown)])
+  }
+
+  @Test("primary でないタブの長時間 Unknown の通知はその session を持つ")
+  func prolongedUnknownKeepsNonPrimarySession() {
+    let start = Self.clock.now
+    var planner = PaneNotificationPlanner(settings: Self.withProlongedUnknown)
+    planner.startObserving(sessionB, at: start)
+    #expect(
+      planner.observeStates(complete([pane("%2", .unknown)]), in: sessionB, at: start).isEmpty)
+
+    #expect(
+      planner.advance(to: start.advanced(by: .seconds(600)))
+        == [notification(in: sessionB, paneID: "%2", kind: .prolongedUnknown)])
+  }
+
   @Test("B の初回の完了表示は B の基準で、A の新しい完了 token を消費しない")
   func completionBaselinesAreIndependent() {
     let start = Self.clock.now

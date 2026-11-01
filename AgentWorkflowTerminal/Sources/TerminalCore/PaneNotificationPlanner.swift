@@ -116,9 +116,10 @@ public enum PaneNotification: Sendable, Hashable {
 ///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
 ///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
 ///   飲み込むため。
-/// - Important: 他の session や猶予中に既知の状態の記憶がある pane は基準で上書きせず、まとめ通知の
-///   対象にも新たに加えない (#494)。完了表示の記憶だけでは状態を知ったことにならないため、状態の
-///   記憶がない pane の判断待ちは基準で個別に鳴らさず、「判断待ちが N 件」1件にまとめる。
+/// - Important: 他の session や猶予中に既知の状態の記憶がある pane は、基準で `lastKnown` を上書き
+///   しない (#494)。完了表示の記憶だけでは状態を知ったことにならないため、状態の記憶がない pane の
+///   判断待ちは基準で個別に鳴らさず、「判断待ちが N 件」1件にまとめる。猶予から戻った pane は状態を
+///   観測するまで数えず、判断待ちの続きか plain `Unknown` でなければまとめ通知から外す (#508)。
 ///   起動直後は Project ごと・session (タブ) ごとに基準を取る時刻がずれるので、まとめ通知は
 ///   `setSummaryGate(isOpen:at:)` が開いていて、観測を始めた全 session が基準を取り終えた時点で
 ///   出す。基準を取れない session が残っても、最初の候補から `summaryMaximumDelay` で出す。
@@ -158,8 +159,18 @@ public struct PaneNotificationPlanner: Sendable {
     var notifiedCompletions: Set<AgentStampedValue> = []
     /// 完了表示の基準の時点に在ったが、Agent プロセスを特定できず基準を取れていない。
     var awaitsCompletionBaseline = false
-    /// 基準の時点で判断待ちだった。まとめ通知を出すまでの間だけ立つ。
+    /// 基準の時点で判断待ちだった。猶予中と状態の確認待ちの間は、まとめ通知に数えずに残す。
     var isSummaryMember = false
+    /// 猶予に入ってから、状態をまだ観測していない。完了表示だけで戻った時点で数えると、戻る前の
+    /// `lastKnown` で数えてしまう (#508 の H1 / H6: いまは Working なのに「判断待ち 1件」が鳴る)。
+    var awaitsStateAfterHandoff = false
+    /// 最初の基準から plain Unknown の pane は lastKnown が nil のまま他の session の基準に現れる。
+    /// そこで計時を始め直すと、長時間 Unknown の期限が後ろへずれる (#508)。
+    mutating func trackUnknown(isPlain: Bool, at instant: ContinuousClock.Instant) {
+      guard !isPlain || unknownSince == nil else { return }
+      unknownSince = isPlain ? instant : nil
+      didNotifyUnknown = false
+    }
   }
 
   private struct SessionMemory: Sendable {
@@ -293,7 +304,7 @@ public struct PaneNotificationPlanner: Sendable {
 
     var notifications: [PaneNotification] = []
     for (paneID, display) in displays.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-      attach(paneID, to: session, at: instant)
+      attach(paneID, to: session)
       var isSilent = isBaseline
       if isBaseline || panes[paneID]?.awaitsCompletionBaseline == true {
         if undetermined.contains(paneID) {
@@ -334,24 +345,19 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func takeBaseline(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) {
-    attach(pane.id, to: session, at: instant)
-    if panes[pane.id]?.lastKnown != nil {
-      if Self.isPlainUnknown(pane) {
-        if panes[pane.id]?.unknownSince == nil { panes[pane.id]?.unknownSince = instant }
-      } else {
-        panes[pane.id]?.unknownSince = nil
-        panes[pane.id]?.didNotifyUnknown = false
-      }
+    attach(pane.id, to: session)
+    var memory = panes[pane.id] ?? PaneMemory(session: session)
+    defer { panes[pane.id] = memory }
+    memory.trackUnknown(isPlain: Self.isPlainUnknown(pane), at: instant)
+    if memory.lastKnown != nil {
+      if memory.awaitsStateAfterHandoff { resumeSummary(&memory, observing: pane, at: instant) }
       return
     }
-    var memory = panes[pane.id] ?? PaneMemory(session: session)
+    memory.awaitsStateAfterHandoff = false
     memory.lastKnown = Self.known(pane)
-    memory.unknownSince = Self.isPlainUnknown(pane) ? instant : nil
-    memory.didNotifyUnknown = false
     let kind = memory.lastKnown?.attentionKind
     memory.isSummaryMember = kind != nil
     memory.isAttentionAnnounced = kind.map(settings.enabledKinds.contains) ?? false
-    panes[pane.id] = memory
     if memory.isSummaryMember, summaryStartedAt == nil {
       summaryStartedAt = instant
     }
@@ -361,33 +367,19 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func transition(
     _ pane: PaneAgentState, in session: TerminalSessionKey, at instant: ContinuousClock.Instant
   ) -> PaneNotificationKind? {
-    attach(pane.id, to: session, at: instant)
+    attach(pane.id, to: session)
     var memory = panes[pane.id] ?? PaneMemory(session: session)
     defer { panes[pane.id] = memory }
-
-    if Self.isPlainUnknown(pane) {
-      if memory.unknownSince == nil {
-        memory.unknownSince = instant
-        memory.didNotifyUnknown = false
-      }
-      return nil
-    }
-    memory.unknownSince = nil
-    memory.didNotifyUnknown = false
-
+    if memory.awaitsStateAfterHandoff { resumeSummary(&memory, observing: pane, at: instant) }
+    memory.trackUnknown(isPlain: Self.isPlainUnknown(pane), at: instant)
     guard let current = Self.known(pane) else { return nil }
-    let previous = memory.lastKnown
     guard let kind = current.attentionKind else {
       memory.lastKnown = current
       memory.isSummaryMember = false
       memory.isAttentionAnnounced = false
       return nil
     }
-    let crossesUnspecified =
-      current == .attentionUnspecified || previous == .attentionUnspecified
-    if previous?.attentionKind != nil,
-      current == previous || (crossesUnspecified && memory.isAttentionAnnounced)
-    {
+    if Self.continuesAttention(current, after: memory) {
       // 同じ判断待ちの続き。種類が分かったら、分かった方を覚える。
       if current != .attentionUnspecified { memory.lastKnown = current }
       return nil
@@ -396,6 +388,20 @@ public struct PaneNotificationPlanner: Sendable {
     memory.isSummaryMember = false
     memory.isAttentionAnnounced = settings.enabledKinds.contains(kind)
     return memory.isAttentionAnnounced ? kind : nil
+  }
+
+  /// 基準は `lastKnown` を上書きしない (#494) ので、外した pane の別の判断待ちは次の遷移で鳴る。
+  private mutating func resumeSummary(
+    _ memory: inout PaneMemory, observing pane: PaneAgentState,
+    at instant: ContinuousClock.Instant
+  ) {
+    memory.awaitsStateAfterHandoff = false
+    guard memory.isSummaryMember else { return }
+    if let current = Self.known(pane), !Self.continuesAttention(current, after: memory) {
+      memory.isSummaryMember = false
+    } else if summaryStartedAt == nil {
+      summaryStartedAt = instant
+    }
   }
 
   private mutating func due(at instant: ContinuousClock.Instant) -> [PaneNotification] {
@@ -419,7 +425,9 @@ public struct PaneNotificationPlanner: Sendable {
   private mutating func flushSummary(at instant: ContinuousClock.Instant) -> PaneNotification? {
     // 閉じたタブの pane を数えないため、猶予中は除く (#488 stoppingSessionRemovesItsSummaryMembers)。
     // その印まで消すと、移動中の pane が戻ったときに通知を失う (#494 のレビュー M2 / P2)。
-    let members = panes.filter { $0.value.isSummaryMember && $0.value.missingSince == nil }
+    let members = panes.filter { _, memory in
+      memory.isSummaryMember && memory.missingSince == nil && !memory.awaitsStateAfterHandoff
+    }
     guard let startedAt = summaryStartedAt, !members.isEmpty else {
       summaryStartedAt = nil
       return nil
@@ -440,14 +448,7 @@ public struct PaneNotificationPlanner: Sendable {
 
   // #494 の計測では join-pane / link-window で同じ ID が別の session に現れる。
   // (session, pane) を鍵にすると link-window が二重に鳴るため、pane ごとの記憶を付け替える。
-  private mutating func attach(
-    _ paneID: PaneID, to session: TerminalSessionKey, at instant: ContinuousClock.Instant
-  ) {
-    if let memory = panes[paneID], memory.missingSince != nil,
-      memory.isSummaryMember, summaryStartedAt == nil
-    {
-      summaryStartedAt = instant
-    }
+  private mutating func attach(_ paneID: PaneID, to session: TerminalSessionKey) {
     panes[paneID, default: PaneMemory(session: session)].session = session
     panes[paneID]?.missingSince = nil
   }
@@ -458,6 +459,7 @@ public struct PaneNotificationPlanner: Sendable {
     }
     for paneID in panes.keys where !present.contains(paneID) {
       if panes[paneID]?.missingSince == nil { panes[paneID]?.missingSince = instant }
+      panes[paneID]?.awaitsStateAfterHandoff = true
       panes[paneID]?.unknownSince = nil
       panes[paneID]?.didNotifyUnknown = false
     }
@@ -476,6 +478,14 @@ public struct PaneNotificationPlanner: Sendable {
     _ paneID: PaneID, in session: TerminalSessionKey, kind: PaneNotificationKind
   ) -> PaneNotificationEvent {
     PaneNotificationEvent(session: session, paneID: paneID, kind: kind, completion: nil)
+  }
+
+  /// 種別不明の注意状態をまたぐ行き来は、既に知らせた場合だけ続きとみなす (型の注釈を参照)。
+  private static func continuesAttention(_ current: KnownState, after memory: PaneMemory) -> Bool {
+    guard current.attentionKind != nil, memory.lastKnown?.attentionKind != nil else { return false }
+    let crossesUnspecified =
+      current == .attentionUnspecified || memory.lastKnown == .attentionUnspecified
+    return current == memory.lastKnown || (crossesUnspecified && memory.isAttentionAnnounced)
   }
 
   /// `nil` は直前の既知の状態を保つ回 (Needs Attention でない `Unknown`)。

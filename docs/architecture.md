@@ -2044,6 +2044,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - iPhone上のAgent TUI縮小戦略
 - `+ New Task`で開いたProject Rootのタブ(中でAgentが動いたままのsession)の、Agentがworktreeを作った後の扱い(§3.1)
 - 同じディレクトリの2つ目以降のsession名の接尾辞の形(§3.5。現在の推奨は`-<n>`)
+- OverviewでProject Rootに複数のsessionがあるときの並べ方(§13。現在の推奨はタブ列と同じ順で、注意状態で並べ替えない)
 - Diffコメントの送信先(メインpane、§9.2)の候補に、同じworktreeの他のタブのsessionのpaneを含めるか
 - タブの右クリックの作業概要一覧で、1つのタブにAgent paneが複数あるときの表し方(§5.3)
 - keyboard shortcutの一覧(⌘修飾をアプリが使い端末への打鍵に触れない原則は§5.4で確定)

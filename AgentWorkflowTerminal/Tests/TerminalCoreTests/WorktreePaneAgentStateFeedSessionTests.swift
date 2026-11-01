@@ -50,6 +50,17 @@ struct WorktreePaneAgentStateFeedSessionTests {
     #expect(await source.requestedSessions == [.primary(worktree), .primary(worktree)])
   }
 
+  // 今の製品コードは通らないが、`any WorktreePaneSource` 越しに worktree で呼ぶと既定実装に入る。
+  @Test("protocol の既定実装の worktree 版は番号 1 の session を問い合わせる")
+  func protocolWorktreeOverloadQueriesPrimarySession() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/test"))
+    let recorder = SessionRecordingPaneSource()
+    let source: any WorktreePaneSource = recorder
+
+    _ = try await source.panes(of: worktree)
+    #expect(await recorder.requestedSessions == [.primary(worktree)])
+  }
+
   private func makeFeed() -> WorktreePaneAgentStateFeed {
     let channel = ObservationChannel()
     return WorktreePaneAgentStateFeed(

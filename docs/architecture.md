@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-02(起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-02(`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -242,6 +242,13 @@ Active指定が消えることが分かり、それを仕様として受け入�
 ### 3.3 Active化とtmux
 
 Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
+
+**「人に確認する」の範囲 — 確定(2026-11-02)。** 次の2つは、確認の画面を挟まずにsessionを作る。
+- タブ列の`Inactive`メニューからworktreeを選んでActiveにしたとき。選ぶ操作そのものを新規作成の明示操作とみなす。
+- 観測中に新しく現れて、自動でActiveになったworktree(Agentが作ったもの)の最初のタブ。元からsessionが無く、
+  前のAgentが消えたわけではないので、確認しても伝えることが無いためである。
+
+確認を出すのは、下の「起動時の復元でsessionが消えていたタブ」だけである(Issue #526)。
 
 worktreeのActive状態とtmux sessionの存在は独立して扱う。
 
@@ -2393,6 +2400,7 @@ PR_READY
 - [x] attachが終わったタブは明示操作で再接続し、sessionが消えていれば保証付きで作り直す。自動再attachはしない
 - [x] attachが終わったタブは自動では閉じず、消えるのは人がCloseしたときだけ
 - [x] 起動時の復元でsessionが消えていたタブは、選んでもsessionを黙って作らず、表示中と同じ再接続の操作を出す(2026-11-02)
+- [x] `Inactive`メニューで選んだActive化と、観測中に自動でActiveになった新しいworktreeは、確認なしにsessionを作る(2026-11-02)
 - [x] Closeしたworktreeはタブ列の`Inactive`メニューからActiveへ戻す
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容

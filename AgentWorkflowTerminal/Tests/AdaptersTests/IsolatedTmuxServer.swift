@@ -19,6 +19,10 @@ enum IsolatedTmuxServer {
   private static let windowWidth = 200
   private static let windowHeight = 50
 
+  // 不在の判定だけでは、負荷で kill-server 自体が期限に掛かると停止を確認できず socket が残る (#467)。
+  private static let stopCommandTimeout: Duration = .seconds(10)
+  private static let terminationWaitTimeout: Duration = .seconds(5)
+
   /// `PATH` を既定の候補より先に見る。tmux の版差 (ローカル 3.4 / CI 3.7c) を1台で測るとき、
   /// 隔離展開した別版を `PATH` の先頭に置いて差し替えられるようにするため。
   static func executableURL() -> URL? {
@@ -117,13 +121,14 @@ enum IsolatedTmuxServer {
     socketURL: URL
   ) async {
     let read = try? await runner.run(
-      arguments: ["display-message", "-p", "#{pid}"], timeout: .seconds(1))
+      arguments: ["display-message", "-p", "#{pid}"], timeout: stopCommandTimeout)
     let serverPID = read.flatMap {
       pid_t($0.stdout.trimmingCharacters(in: .whitespacesAndNewlines))
     }
     var serverWasStopped: Bool
+    var killServerError: (any Error)?
     do {
-      _ = try await runner.run(arguments: ["kill-server"], timeout: .seconds(1))
+      _ = try await runner.run(arguments: ["kill-server"], timeout: stopCommandTimeout)
       serverWasStopped = true
     } catch let error as TmuxRunnerError where error.isServerAbsent {
       // server が既に消えているのは停止の最良の結果であって失敗ではない。ここを失敗と同じに
@@ -133,14 +138,16 @@ enum IsolatedTmuxServer {
     } catch {
       // timeout や実行失敗はここ。不在を確認できていないので socket は残す。
       serverWasStopped = false
+      killServerError = error
     }
     if !serverWasStopped, let serverPID {
       serverWasStopped = terminate(serverPID)
     }
     guard serverWasStopped else {
       // テストの成否は変えない。手で片付ける必要があることだけ伝える。
+      let reason = killServerError.map { String(describing: $0) } ?? "不明"
       FileHandle.standardError.write(
-        Data("警告: tmux server を停止できなかったため socket を残します: \(socketURL.path)\n".utf8)
+        Data("警告: tmux server を停止できなかったため socket を残します: \(socketURL.path): \(reason)\n".utf8)
       )
       return
     }
@@ -161,7 +168,7 @@ enum IsolatedTmuxServer {
     guard Darwin.kill(serverPID, SIGTERM) == 0 else { return errno == ESRCH }
 
     let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: .milliseconds(500))
+    let deadline = clock.now.advanced(by: terminationWaitTimeout)
     while clock.now < deadline {
       guard Darwin.kill(serverPID, 0) == 0 else { return errno == ESRCH }
       Darwin.usleep(10_000)

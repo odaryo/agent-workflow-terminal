@@ -38,7 +38,7 @@ swift format format --configuration .swift-format --recursive --in-place \
 swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
 ```
 
-`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, compiles `App/`, and runs format/lint over both packages. The app job downloads a prebuilt `GhosttyKit.xcframework` from a Release asset, so CI does not require the toolchain that builds the xcframework (the SwiftLint job installs SwiftLint via brew if the runner image lacks it).
+`swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, compiles `App/`, and runs format/lint over both packages. The app job downloads a prebuilt `GhosttyKit.xcframework` from a Release asset, so CI does not require the toolchain that builds the xcframework (the `checks` job installs SwiftLint via brew if the runner image lacks it). CI keeps its macOS jobs to three because the account-wide limit of five concurrent macOS runners is shared by every PR and `main` push in flight; add a new check as a step in an existing job, not as a new job.
 
 Domain logic and CLI-output parsers are written test-first with Swift Testing; UI rendering and libghostty integration are explicitly not unit-tested (spike + manual). See `docs/coding-guidelines.md`.
 
@@ -267,7 +267,7 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   — マージ直後の監督セッション (main で起動、途中でマージ) で canary が拒否されることを実測した
   (公式ドキュメントの「Direct edits to hooks in settings files are normally picked up automatically
   by the file watcher」と一致。一度「再起動が要る」と書いて撤回した経緯がある)。判定を変えたときは
-  `scripts/check-tmux-kill-guard.sh` の fixture で確かめる (CI の `shell-guard`)。
+  `scripts/check-tmux-kill-guard.sh` の fixture で確かめる (CI の `checks` ジョブの `Shell guard - fixtures`)。
 - **フックの fail-closed には閉じられない穴が4つある。** 判定スクリプトが**無い** / **実行権が
   無い** / **timeout を超えた** / **`python3` が無くて起動できない** ときは、いずれもツール
   呼び出しが**そのまま実行される** (実測 2026-09-09: 存在しないパス・`chmod -x` した exit 2 の
@@ -278,7 +278,7 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   はガードが働いた証拠にならない。**判定本体の構文エラーもこの穴に落ちる**: python3 は
   構文エラーで exit 1 を返し (実測)、exit 2 以外は block しないので**ガードごと無効になる**
   — bash 実装では exit 2 になり全 Bash 呼び出しが拒否される逆向きの事故だったので、
-  移行で向きが変わっている。CI の `shell-guard` が `py_compile` を別段で回すのはこのため。
+  移行で向きが変わっている。CI の `checks` ジョブが `py_compile` を別段 (`Shell guard - compile`) で回すのはこのため。
 - **ローカルと CI の tmux は同じ版とは限らない。片方での計測はもう片方の証拠にならない。** CI は
   `brew install tmux` で最新の bottle を入れるため、brew の更新で版が黙って変わる。2026-10-31 の
   実測ではローカルも CI も 3.8 だった。CI 側の版は、ジョブログの `Show external CLI versions` で

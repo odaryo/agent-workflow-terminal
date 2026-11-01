@@ -64,10 +64,11 @@ public enum TmuxTextInjectionError: Error, Sendable, Equatable {
   /// 入れ替わる窓は無い (実測: `if-shell -F` の分岐で `#{pid}` と `#{pane_pid}` を比べると、
   /// 不一致では buffer が消費されず1バイトも届かない)。
   case paneIdentityMismatch(PaneID)
-  /// tmux server が動いていない。1バイトも届いていない。socket が残ったまま server が消えた
-  /// 場合と socket 自体が無い場合の両方を含む (判定は `TmuxRunnerError.isServerAbsent`)。
-  /// **送信先が別 pane になった**のとは別物なので混ぜない — ユーザーに「選び直せ」と言っても
-  /// 選ぶ候補が無い。
+  /// 1バイトも届いていない。`TmuxRunnerError.isServerAbsent` の判定に従い、server 停止と
+  /// socket 欠落を現在は同じ不在へ畳む。ENOENT は生存中の server の socket が消えた場合にも
+  /// 出るため (tmux 3.8、Issue #492 で計測)、この畳み込みの見直しは Issue #500 で扱う。
+  /// **送信先が別 pane になった**のとは別物なので混ぜない — この失敗だけでは、別の送信先を
+  /// 選び直すべきか判断できない。
   case serverNotRunning
   /// 上記へ分類しなかった失敗。終了コード・stdout・stderr を加工せずに保持する。
   /// tmux の非ゼロ終了を「正常状態」と「エラー」へ一般に分類するのは Issue #62 の担当。

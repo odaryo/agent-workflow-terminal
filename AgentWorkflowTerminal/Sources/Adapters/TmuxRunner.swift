@@ -6,17 +6,19 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
   case process(ProcessRunnerError)
   case commandFailed(exitCode: Int32, stdout: String, stderr: String)
 
-  /// この socket に tmux server が居ないことを表す失敗か。
+  /// server 不在へ畳む失敗の判定を集める。socket 欠落は server 不在の証拠にはならないが、
+  /// 現在は同じ扱いを維持している (Issue #500 で扱う)。
   ///
-  /// **形は2つあり、どちらも「居ない」を意味する** (tmux 3.4 実測、`<path>` は socket の絶対パス):
+  /// stderr の形は2つある (tmux 3.4 実測、`<path>` は socket の絶対パス):
   ///
   /// | 状況 | stderr |
   /// | --- | --- |
   /// | socket は在るが server が消えた (kill / crash) | `no server running on <path>\n` |
-  /// | socket 自体が無い (未起動・削除済み) | `error connecting to <path> (No such file or directory)\n` |
+  /// | socket 自体が無い | `error connecting to <path> (No such file or directory)\n` |
   ///
-  /// 片方だけを見る述語を各所に置くと、同じ事実に食い違う判定が生まれる (実際に起きた) ため、
-  /// 判定はこの1箇所に集める。
+  /// ENOENT は未起動だけでなく、生存中の server の socket が消えた場合にも出る
+  /// (tmux 3.8、Issue #492 で計測)。片方だけを見る述語を各所に置くと判定が食い違うため、
+  /// ここに集めているが、この畳み込みの見直しは Issue #500 の担当。
   ///
   /// - Note: 3つ目に `error connecting to <path> (Socket operation on non-socket)` があるが、
   ///   これは「server が居ない」ではなく**その path が socket ではない**という設定の誤りなので

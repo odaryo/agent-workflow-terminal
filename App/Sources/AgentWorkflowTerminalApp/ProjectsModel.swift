@@ -197,7 +197,8 @@ final class ProjectsModel: ObservableObject {
     }
   }
 
-  /// 失敗の説明を返す。`sessionNotFound` と `serverNotRunning` は既に消えているので成功と同じ。
+  /// socket 欠落も従来どおり成功とするが、session 不在の証拠にはならない。
+  /// 生存中の server の socket が消えた場合の扱いは Issue #500 で決める。
   private func kill(_ sessions: [TmuxSessionName]) async -> [String] {
     guard let runner = dependencies.tmuxRunner else { return [] }
     let operations = TmuxSessionOperations(runner: runner)
@@ -207,7 +208,7 @@ final class ProjectsModel: ObservableObject {
         try await operations.kill(session: session)
       } catch {
         switch error {
-        case .sessionNotFound, .serverNotRunning: break
+        case .sessionNotFound, .serverNotRunning, .serverSocketMissing: break
         default: problems.append("tmux session「\(session.rawValue)」を終了できませんでした: \(error)")
         }
       }

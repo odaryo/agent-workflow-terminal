@@ -416,16 +416,20 @@ public struct WorktreeCloseExecutor: Sendable {
   /// Close の選択肢へ委ねている。**Close は `sessionNotFound` / `serverNotRunning` /
   /// `serverSocketMissing` を成功とする**。選択肢2〜4 が求めているのは「この worktree の
   /// session がもう無いこと」であり、session 不在と server 停止はその結果を満たしている。
-  /// socket 欠落は生存中の server でも起きるが、Close では従来どおり成功とする (Issue #492)。
-  /// 失敗にすると、session が先に消えた worktree では選択肢3・4 が二度と完了できず、
+  /// socket 欠落は生存中の server でも起き、session 不在の証拠にはならない (Issue #492 で計測)。
+  /// Close で従来どおり成功とするのは既知の残存挙動であり、Issue #500 で扱う。
+  /// session 不在や server 停止を失敗にすると、session が先に消えた worktree では
+  /// 選択肢3・4 が二度と完了できず、
   /// 途中まで進んだ Close をやり直すこともできない —— 実行は巻き戻せないので、やり直しは
   /// 必要な操作である。
   ///
   /// tmux 3.4 実測: 稼働中 server で存在しない session は rc=1 `can't find session: <名前>`、
-  /// server 停止後 (socket は残存) は rc=1 `no server running on <path>`、socket が一度も
-  /// 作られていなければ rc=1 `error connecting to <path> (No such file or directory)`。
+  /// server 停止後 (socket は残存) は rc=1 `no server running on <path>`、socket が無ければ
+  /// rc=1 `error connecting to <path> (No such file or directory)`。後者は未起動だけでなく、
+  /// 生存中の server の socket が消えた場合も含む (tmux 3.8、Issue #492 で計測)。
   ///
-  /// これ以外は畳まない。他の接続失敗も分類できない失敗も「session が無い」証拠には
+  /// 上記の socket 欠落を除き、不在と確認できない失敗は畳まない。他の接続失敗も
+  /// 分類できない失敗も「session が無い」証拠には
   /// ならず、agent プロセスが動いたまま worktree を消しにいくことになるためである。
   /// 一覧取得の失敗も同じ理由で停止する。§3.4 の Close は接尾辞付きもすべて終了する。
   /// 番号1は一覧取得直後に作られる場合もあるため、一覧に無くても従来どおり終了を試みる。

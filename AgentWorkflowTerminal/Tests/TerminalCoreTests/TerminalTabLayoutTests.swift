@@ -435,4 +435,17 @@ struct TerminalTabLayoutTests {
     #expect(second.addTab(in: directory, existingSessionNames: []) == extra)
     #expect(first == second)
   }
+
+  @Test("復元は既存のタブと併合せず、読んだ列で置き換える")
+  func restoreReplacesExistingTabsWithReadIndices() throws {
+    let directory = try identity("a")
+    var layout = TerminalTabLayout()
+    _ = layout.addTab(in: directory, existingSessionNames: [])
+    _ = layout.addTab(in: directory, existingSessionNames: [])
+    let fifth = try key(directory, index: 5)
+
+    layout.restore(from: [TmuxSessionName(key: fifth).rawValue], identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [fifth])
+  }
 }

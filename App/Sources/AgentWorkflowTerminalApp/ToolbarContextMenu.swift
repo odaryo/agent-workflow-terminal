@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-// `.toolbar` 内では `.contextMenu` が開かない (#431 の計測。本体側では開く)。
+// toolbar 内では `.contextMenu` も重ねた view の右クリックも届かない (#431)。
+// lldb では hitTest は mouseEntered 時だけ、menu(for:) は一度も呼ばれなかった。
 @MainActor
 struct ToolbarContextMenu: NSViewRepresentable {
   enum Item {
@@ -25,17 +26,52 @@ struct ToolbarContextMenu: NSViewRepresentable {
   final class MenuView: NSView {
     var items: [Item] = []
     private var actionTargets: [ActionTarget] = []
+    private var eventMonitor: Any?
 
-    override func hitTest(_ point: NSPoint) -> NSView? {
-      // 通常の左クリックと help の hover を SwiftUI の Button へ通す。
-      guard let event = NSApp.currentEvent,
-        event.type == .rightMouseDown || event.type == .rightMouseUp
-          || (event.type == .leftMouseDown && event.modifierFlags.contains(.control))
-      else { return nil }
-      return super.hitTest(point)
+    isolated deinit {
+      removeEventMonitor()
     }
 
-    override func menu(for event: NSEvent) -> NSMenu? {
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      guard window != nil else {
+        removeEventMonitor()
+        return
+      }
+      guard eventMonitor == nil else { return }
+      eventMonitor = NSEvent.addLocalMonitorForEvents(
+        matching: [.rightMouseDown, .leftMouseDown]
+      ) { [weak self] event in
+        // ローカルモニタは main thread で呼ばれる。条件外まで消費すると他のクリックを壊す。
+        let handled = MainActor.assumeIsolated {
+          self?.showContextMenu(for: event) ?? false
+        }
+        return handled ? nil : event
+      }
+    }
+
+    private func removeEventMonitor() {
+      guard let eventMonitor else { return }
+      NSEvent.removeMonitor(eventMonitor)
+      self.eventMonitor = nil
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+      nil
+    }
+
+    private func showContextMenu(for event: NSEvent) -> Bool {
+      guard let window, event.window === window, window.isVisible,
+        !isHiddenOrHasHiddenAncestor,
+        event.type == .rightMouseDown
+          || (event.type == .leftMouseDown && event.modifierFlags.contains(.control)),
+        bounds.contains(convert(event.locationInWindow, from: nil))
+      else { return false }
+      NSMenu.popUpContextMenu(makeMenu(), with: event, for: self)
+      return true
+    }
+
+    private func makeMenu() -> NSMenu {
       let menu = NSMenu()
       menu.autoenablesItems = false
       actionTargets = []

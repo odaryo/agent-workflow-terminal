@@ -3,6 +3,7 @@ import TerminalCore
 
 public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// tmux 3.4 実測: exit 1 と stderr `can't find session: <name>\n`。
+  /// tmux 3.8 の `set-option` 実測: exit 1 と stderr `no such session: =<name>:\n`。
   /// 「対象が既に無い」を成功へ丸めないのは `TmuxPaneOperations.paneNotFound` と同じ理由による。
   case sessionNotFound(TmuxSessionName)
   /// tmux 3.4 実測: exit 1 と stderr `duplicate session: <name>\n`。
@@ -142,6 +143,7 @@ public struct TmuxSessionOperations: Sendable {
 
   /// 設計書 §4.4 の `history-limit` と §4.2 の `window-size` が、**最初の pane と実際に残る
   /// window に効いた状態**の session を作る。
+  /// `detach-on-destroy` も `ensureDetachOnDestroy(session:)` と同じ理由で session 単位に設定する。
   ///
   /// tmux 3.4 では pane の履歴容量が pane 生成時に確定するため、`new-session` のあとに
   /// `set-option` しても最初の pane は既定値 (`2000`) のまま残る。そこで新しい window を
@@ -260,6 +262,7 @@ public struct TmuxSessionOperations: Sendable {
           ";", "new-window", "-d", "-t", sessionID, "-c", directoryArgument,
           ";", "kill-window", "-t", "\(sessionID):^",
           ";", "set-option", "-w", "-t", "\(sessionID):", "window-size", windowSize.rawValue,
+          ";", "set-option", "-t", sessionID, "detach-on-destroy", "on",
         ],
         session: session,
         messageTarget: sessionID
@@ -267,6 +270,21 @@ public struct TmuxSessionOperations: Sendable {
     } catch {
       try await cleanUp(target: sessionID, session: session, cause: error)
     }
+  }
+
+  /// Issue #491 の tmux 3.8 実測: global が `off` / `previous` だと session 消滅後も attach が
+  /// 終わらず、client が別の session へ移り、打鍵もそちらへ入る。session 単位の `on` は global
+  /// より優先されるため、ユーザーの global 設定を変えずにこの移動を防げる。
+  /// `-t =<名前>` は 3.8 で `no such session` になるが、末尾にコロンを付けた `=<名前>:` は通る。
+  public func ensureDetachOnDestroy(
+    session: TmuxSessionName
+  ) async throws(TmuxSessionOperationError) {
+    let target = "=\(session.rawValue):"
+    _ = try await run(
+      ["set-option", "-t", target, "detach-on-destroy", "on"],
+      session: session,
+      messageTarget: target
+    )
   }
 
   /// - Note: 「もう無かった」を成功へ丸めず `sessionNotFound` で返す。server ごと落ちていた
@@ -340,7 +358,8 @@ public struct TmuxSessionOperations: Sendable {
     throw cause
   }
 
-  /// `messageTarget` は tmux のメッセージに現れる target 表記。`=` は剥がされ (実測)、
+  /// `messageTarget` は tmux のメッセージに現れる target 表記。`can't find session` では `=` が
+  /// 剥がされ、`set-option` の `no such session` では `=<名前>:` がそのまま出る (実測)。
   /// session ID 指定では `$N` がそのまま出る。
   private func run(
     _ arguments: [String],
@@ -375,6 +394,7 @@ public struct TmuxSessionOperations: Sendable {
     // (実測: `nm -u` に gettext のシンボルが無く、メッセージは C の文字列リテラル)。
     switch stderr {
     case "can't find session: \(target)\n": return .sessionNotFound(session)
+    case "no such session: \(target)\n": return .sessionNotFound(session)
     case "duplicate session: \(target)\n": return .sessionAlreadyExists(session)
     default: return .tmux(error)
     }

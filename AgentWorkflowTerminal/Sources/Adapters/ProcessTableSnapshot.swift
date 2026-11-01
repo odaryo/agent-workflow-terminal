@@ -22,6 +22,25 @@ struct ProcessTableSnapshot: Sendable {
     self.childrenByParentPID = Dictionary(grouping: rows, by: \.parentPID)
   }
 
+  func sessionActivity(of panes: [(pid: Int32, isDead: Bool)]) -> TerminalSessionActivity {
+    var activity = TerminalSessionActivity.shellOnly
+    for pane in panes where !pane.isDead {
+      guard let root = rowsByPID[pane.pid] else {
+        activity = .undetermined
+        continue
+      }
+      let name = root.name.hasPrefix("-") ? root.name.dropFirst() : root.name[...]
+      switch name {
+      case "sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu":
+        // 子の名前を見て shell を除くとスクリプトを見落とすため、確認が余分に出る向きを選ぶ。
+        if !(childrenByParentPID[root.pid] ?? []).isEmpty { return .running }
+      default:
+        return .running
+      }
+    }
+    return activity
+  }
+
   /// dead pane は呼び出し側で除外済みなので、直接 exec された Agent を拾うため `root` 自身から辿る。
   func processTreeNames(of root: Int32) -> Set<String> {
     var pending = rowsByPID[root].map { [$0] } ?? []

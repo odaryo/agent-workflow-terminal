@@ -120,6 +120,7 @@ struct GitCloseWriteRunner: Sendable {
 public struct WorktreeCloseStepFailure: Error, Sendable, Equatable {
   public enum Reason: Sendable, Equatable {
     case tmux(TmuxSessionOperationError)
+    case orphanedTmuxServer(socketPath: String, TmuxOrphanedServerProbeResult)
     /// `branch --delete` の失敗。こちらは失敗すれば branch は残っており、読み直す対象が無い。
     case git(GitRunnerError)
     /// `worktree remove` の失敗。**「失敗した」だけでは何が起きたか決まらない**ので、
@@ -197,6 +198,7 @@ public struct WorktreeCloseExecutor: Sendable {
   private let identity: WorktreeIdentity
   private let worktreePath: String
   private let sessionOperations: TmuxSessionOperations
+  private let orphanedServerProbe: TmuxOrphanedServerProbe
   private let runner: GitCloseWriteRunner
   /// `worktree remove` の失敗後に登録を読み直すためだけに持つ。`GitCloseWriteRunner` と別なのは、
   /// あちらが `GitCloseWriteCommand` しか受け付けない —— それが「この層は2つの書き込みしか
@@ -233,12 +235,14 @@ public struct WorktreeCloseExecutor: Sendable {
     repositoryDirectory: URL,
     worktree: DetectedWorktree,
     sessionOperations: TmuxSessionOperations,
+    orphanedServerProbe: TmuxOrphanedServerProbe? = nil,
     processRunner: any ProcessRunning,
     executableCandidates: [URL] = GitRunner.defaultExecutableCandidates
   ) throws(WorktreeCloseExecutorError) {
     try self.init(
       repositoryDirectory: repositoryDirectory, worktree: worktree,
-      sessionOperations: sessionOperations, processRunner: processRunner,
+      sessionOperations: sessionOperations, orphanedServerProbe: orphanedServerProbe,
+      processRunner: processRunner,
       executableCandidates: executableCandidates,
       parentEnvironment: ProcessInfo.processInfo.environment,
       isExecutableFile: { FileManager.default.isExecutableFile(atPath: $0.path) },
@@ -249,6 +253,7 @@ public struct WorktreeCloseExecutor: Sendable {
     repositoryDirectory: URL,
     worktree: DetectedWorktree,
     sessionOperations: TmuxSessionOperations,
+    orphanedServerProbe: TmuxOrphanedServerProbe? = nil,
     processRunner: any ProcessRunning,
     executableCandidates: [URL],
     parentEnvironment: [String: String],
@@ -277,6 +282,7 @@ public struct WorktreeCloseExecutor: Sendable {
     self.unforcedRemoval = unforcedRemoval
     self.forcedRemoval = forcedRemoval
     self.sessionOperations = sessionOperations
+    self.orphanedServerProbe = orphanedServerProbe ?? TmuxOrphanedServerProbe(runner: processRunner)
     do {
       self.runner = try GitCloseWriteRunner(
         repositoryDirectory: repositoryDirectory, processRunner: processRunner,
@@ -413,11 +419,14 @@ public struct WorktreeCloseExecutor: Sendable {
   }
 
   /// `TmuxSessionOperations.kill` は「もう無かった」を成功へ丸めず、どちらを成功と見なすかを
-  /// Close の選択肢へ委ねている。**Close は `sessionNotFound` / `serverNotRunning` /
-  /// `serverSocketMissing` を成功とする**。選択肢2〜4 が求めているのは「この worktree の
+  /// Close の選択肢へ委ねている。**Close は `sessionNotFound` / `serverNotRunning` を
+  /// 成功とする**。選択肢2〜4 が求めているのは「この worktree の
   /// session がもう無いこと」であり、session 不在と server 停止はその結果を満たしている。
   /// socket 欠落は生存中の server でも起き、session 不在の証拠にはならない (Issue #492 で計測)。
-  /// Close で従来どおり成功とするのは既知の残存挙動であり、Issue #500 で扱う。
+  /// 一覧と終了のどちらで socket 欠落が出ても lsof で probe し、不在を確定できた場合だけ続ける
+  /// (一覧なら空の一覧として番号1の終了へ進む)。取り残された server が
+  /// ある場合と確かめられない場合は、Agent が動いたまま worktree を消さないよう失敗にする
+  /// (Issue #500、Director 決定3、2026-11-02)。
   /// session 不在や server 停止を失敗にすると、session が先に消えた worktree では
   /// 選択肢3・4 が二度と完了できず、
   /// 途中まで進んだ Close をやり直すこともできない —— 実行は巻き戻せないので、やり直しは
@@ -428,26 +437,50 @@ public struct WorktreeCloseExecutor: Sendable {
   /// rc=1 `error connecting to <path> (No such file or directory)`。後者は未起動だけでなく、
   /// 生存中の server の socket が消えた場合も含む (tmux 3.8、Issue #492 で計測)。
   ///
-  /// 上記の socket 欠落を除き、不在と確認できない失敗は畳まない。他の接続失敗も
+  /// 不在と確認できない失敗は畳まない。他の接続失敗も
   /// 分類できない失敗も「session が無い」証拠には
   /// ならず、agent プロセスが動いたまま worktree を消しにいくことになるためである。
   /// 一覧取得の失敗も同じ理由で停止する。§3.4 の Close は接尾辞付きもすべて終了する。
   /// 番号1は一覧取得直後に作られる場合もあるため、一覧に無くても従来どおり終了を試みる。
   private func terminateSession(_ step: WorktreeCloseStep) async -> WorktreeCloseStepFailure? {
     do {
-      let names = try await sessionOperations.list()
+      let names: [String]
+      do {
+        names = try await sessionOperations.list()
+      } catch .serverSocketMissing(let socketPath) {
+        if let failure = await failureUnlessServerAbsent(socketPath: socketPath, step: step) {
+          return failure
+        }
+        names = []
+      }
       let indices = Set(TmuxSessionName.indices(of: identity, in: names)).union([1]).sorted()
       for index in indices {
         guard let key = TerminalSessionKey(identity: identity, index: index) else { continue }
         do {
           try await sessionOperations.kill(session: TmuxSessionName(key: key))
-        } catch .sessionNotFound, .serverNotRunning, .serverSocketMissing {
+        } catch .sessionNotFound, .serverNotRunning {
           continue
+        } catch .serverSocketMissing(let socketPath) {
+          if let failure = await failureUnlessServerAbsent(socketPath: socketPath, step: step) {
+            return failure
+          }
         }
       }
       return nil
     } catch {
       return WorktreeCloseStepFailure(step: step, reason: .tmux(error))
+    }
+  }
+
+  private func failureUnlessServerAbsent(
+    socketPath: String, step: WorktreeCloseStep
+  ) async -> WorktreeCloseStepFailure? {
+    let result = await orphanedServerProbe.probe(socketPath: socketPath)
+    switch result {
+    case .absent: return nil
+    case .orphaned, .undetermined:
+      return WorktreeCloseStepFailure(
+        step: step, reason: .orphanedTmuxServer(socketPath: socketPath, result))
     }
   }
 

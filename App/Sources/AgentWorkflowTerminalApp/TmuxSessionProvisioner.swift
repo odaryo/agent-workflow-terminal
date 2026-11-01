@@ -24,18 +24,32 @@ struct TmuxSessionProvisioner: Sendable {
   private let operations: TmuxSessionOperations
   private let runner: TmuxRunner
   private let tmuxExecutable: URL
+  private let orphanedServerProbe: TmuxOrphanedServerProbe
 
-  init(runner: TmuxRunner, tmuxExecutable: URL) {
+  init(
+    runner: TmuxRunner, tmuxExecutable: URL,
+    orphanedServerProbe: TmuxOrphanedServerProbe = TmuxOrphanedServerProbe()
+  ) {
     self.operations = TmuxSessionOperations(runner: runner)
     self.runner = runner
     self.tmuxExecutable = tmuxExecutable
+    self.orphanedServerProbe = orphanedServerProbe
   }
 
-  func sessionNames() async throws(TmuxSessionOperationError) -> [String] {
+  /// 空配列は「session が無い」ことの確認である。取り残された server が居る場合は `[]` にせず投げる。
+  /// 呼び出し側が空の一覧でタブを刈り込まないため (Issue #500)。
+  func sessionNames() async throws(TmuxSessionProvisionerError) -> [String] {
     do {
       return try await operations.list()
-    } catch .serverNotRunning, .serverSocketMissing {
+    } catch .serverNotRunning {
       return []
+    } catch .serverSocketMissing(let socketPath) {
+      switch await orphanedServerProbe.probe(socketPath: socketPath) {
+      case .absent: return []
+      case let result: throw .orphanedServer(socketPath: socketPath, result)
+      }
+    } catch {
+      throw .operation(error)
     }
   }
 
@@ -43,11 +57,18 @@ struct TmuxSessionProvisioner: Sendable {
     try await operations.exists(session: TmuxSessionName(key: key))
   }
 
-  func terminate(_ key: TerminalSessionKey) async throws(TmuxSessionOperationError) {
+  func terminate(_ key: TerminalSessionKey) async throws(TmuxSessionProvisionerError) {
     do {
       try await operations.kill(session: TmuxSessionName(key: key))
-    } catch .sessionNotFound, .serverNotRunning, .serverSocketMissing {
+    } catch .sessionNotFound, .serverNotRunning {
       return
+    } catch .serverSocketMissing(let socketPath) {
+      switch await orphanedServerProbe.probe(socketPath: socketPath) {
+      case .absent: return
+      case let result: throw .orphanedServer(socketPath: socketPath, result)
+      }
+    } catch {
+      throw .operation(error)
     }
   }
 
@@ -55,29 +76,42 @@ struct TmuxSessionProvisioner: Sendable {
   func attachCommand(
     for key: TerminalSessionKey,
     workingDirectory: String
-  ) async -> Result<[String], TmuxSessionOperationError> {
+  ) async -> Result<[String], TmuxSessionProvisionerError> {
     let session = TmuxSessionName(key: key)
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
     } catch .sessionAlreadyExists {
       // 設計書 §3.3 の Resume。`exists` で先に分けないのは、`exists` と `create` の間に
       // 他のクライアントが同じ名前を作る窓があり、そこで返るこの値も Resume だからである。
-      // 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す (#491)。
-      do {
-        try await operations.ensureDetachOnDestroy(session: session)
-      } catch {
-        // session 消滅は attach 側で失敗が表示される。それ以外の設定失敗でもタブを開けなく
-        // する方が害が大きいため、ここでは attach を止めない。
-        NSLog(
-          "[app] session \(session.rawValue) の detach-on-destroy 設定に失敗: \(error)")
-      }
-    } catch .serverNotRunning, .serverSocketMissing {
+      await reapplyDetachOnDestroy(session)
+    } catch .serverNotRunning {
       return await attachCommandBootstrappingServer(
         session: session, workingDirectory: workingDirectory)
+    } catch .serverSocketMissing(let socketPath) {
+      // 生存中の server の socket だけが消えた場合に起こすと、同じパスに2つ目の server ができ、
+      // 古い server の session と Agent が辿れなくなる (Issue #500)。
+      switch await orphanedServerProbe.probe(socketPath: socketPath) {
+      case .absent:
+        return await attachCommandBootstrappingServer(
+          session: session, workingDirectory: workingDirectory)
+      case let result:
+        return .failure(.orphanedServer(socketPath: socketPath, result))
+      }
     } catch {
-      return .failure(error)
+      return .failure(.operation(error))
     }
     return .success(attachCommand(for: session))
+  }
+
+  /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す (#491)。
+  /// 失敗しても attach を止めない: session 消滅は attach 側で失敗が表示され、それ以外の設定失敗で
+  /// タブを開けなくする方が害が大きい。
+  private func reapplyDetachOnDestroy(_ session: TmuxSessionName) async {
+    do {
+      try await operations.ensureDetachOnDestroy(session: session)
+    } catch {
+      NSLog("[app] session \(session.rawValue) の detach-on-destroy 設定に失敗: \(error)")
+    }
   }
 
   /// `-A` を持たない `attach-session` にする。session が消えていた場合に、§4.2 / §4.4 の
@@ -94,8 +128,8 @@ struct TmuxSessionProvisioner: Sendable {
   }
 
   /// `create` は server を起こさないと決めているので (`TmuxSessionOperations.create` の doc)、
-  /// 起こす側をここに置く。socket 欠落も従来どおりこの経路へ通すが、生存中の server の
-  /// socket が消えた場合の二重 server は Issue #500 で扱う。
+  /// 起こす側をここに置く。socket 欠落はこの経路へ通す前に、取り残された server が居ないことを
+  /// 確認する (Issue #500)。
   ///
   /// - Important: **`tmux start-server` では代用できない。** tmux 3.4 は session を1つも持たない
   ///   server を即座に終了させるため、`start-server` は rc=0 を返しても server を残さない
@@ -103,16 +137,17 @@ struct TmuxSessionProvisioner: Sendable {
   private func attachCommandBootstrappingServer(
     session: TmuxSessionName,
     workingDirectory: String
-  ) async -> Result<[String], TmuxSessionOperationError> {
+  ) async -> Result<[String], TmuxSessionProvisionerError> {
     await startBootstrapSession()
-    let result: Result<[String], TmuxSessionOperationError>
+    let result: Result<[String], TmuxSessionProvisionerError>
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
       result = .success(attachCommand(for: session))
     } catch .sessionAlreadyExists {
+      await reapplyDetachOnDestroy(session)
       result = .success(attachCommand(for: session))
     } catch {
-      result = .failure(error)
+      result = .failure(.operation(error))
     }
     // 成否にかかわらず消す。本来の session ができていれば server は残り、できていなければ
     // server ごと落ちて起動前の状態へ戻る。
@@ -170,6 +205,48 @@ extension TmuxSessionOperationError {
       "tmux server が動いていないため、session を用意できません。"
     default:
       "tmux session を用意できません: \(self)"
+    }
+  }
+}
+
+/// - Important: `.orphanedServer` に `.absent` は載せない。
+enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
+  case operation(TmuxSessionOperationError)
+  case orphanedServer(socketPath: String, TmuxOrphanedServerProbeResult)
+
+  var terminalTabDescription: String {
+    switch self {
+    case .operation(let error): error.terminalTabDescription
+    case .orphanedServer(let socketPath, let result):
+      result.orphanedServerExplanation(socketPath: socketPath)
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .operation(let error): "\(error)"
+    case .orphanedServer(let socketPath, let result):
+      result.orphanedServerExplanation(socketPath: socketPath)
+    }
+  }
+}
+
+extension TmuxOrphanedServerProbeResult {
+  /// アプリ自身は `kill` を送らない。手順を示すだけに留める (Issue #500)。
+  func orphanedServerExplanation(socketPath: String) -> String {
+    switch self {
+    case .orphaned(let processIDs):
+      let pids = processIDs.map(String.init).joined(separator: ", ")
+      let kill = processIDs.map { "kill -USR1 \($0)" }.joined(separator: " / ")
+      return
+        "tmux の socket (\(socketPath)) が消えていますが、tmux server (pid \(pids)) はまだ動いています。"
+        + "ターミナルで `\(kill)` を実行すると socket が作り直されるので、その後にもう一度操作してください。"
+    case .undetermined(let reason):
+      return
+        "tmux の socket (\(socketPath)) が見つかりません。tmux server が動いているかを確かめられなかったため、"
+        + "新しい server は起動していません。(\(reason))"
+    case .absent:
+      return "tmux の socket (\(socketPath)) が見つかりません。"
     }
   }
 }

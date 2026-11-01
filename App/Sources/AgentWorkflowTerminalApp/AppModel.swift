@@ -335,8 +335,9 @@ final class AppModel: ObservableObject {
     do {
       names = try await sessions?.sessionNames() ?? []
     } catch {
+      // 空の一覧で並べ直すとタブが全部消える。取得できなかったときは今のタブを残す (Issue #500)。
       warning = "tmux の session の一覧を取得できないため、タブを復元できませんでした: \(error)"
-      names = []
+      return
     }
     guard
       worktrees.contains(where: {
@@ -433,6 +434,7 @@ final class AppModel: ObservableObject {
     case .unexpectedGitDirectoryOutput, .invalidGitDirectoryPath, .invalidCommonDirectoryPath:
       "git の出力を解釈できません"
     case .administrativeDirectoryNotFound: "管理ディレクトリを特定できません"
+    case .resolvedToAncestorRepository: "worktree の .git が見つからず、祖先の repository を指しています"
     }
   }
 

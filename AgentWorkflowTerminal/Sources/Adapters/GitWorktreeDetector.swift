@@ -223,6 +223,13 @@ public struct GitWorktreeDetector: Sendable {
   ///   入れない場合は必ず失敗するため、通した entry は git を走らせず admin 側で照合する。
   ///   symlink のリンク先まで対象を広げないため、存在と種別の確認には `lstat` を使う。
   ///   `git worktree prune` は書き込み操作であり設計書 §17.2 で Agent へ委譲済み。
+  /// - Important: prunable の entry を落とすのは、`GitWorktreeScanResult` の「黙って落とすと
+  ///   Inactive が自動 Active 化される」の例外として受け入れたものである (Issue #496)。
+  ///   `.git` を消しただけの**入れる**ディレクトリも、作業ツリーが残っていても消失扱いで落とす。
+  ///   通すのは、入れないディレクトリと、`lstat` が `EACCES` を返した (祖先の探索権限が無い)
+  ///   entry だけである。`ENOENT` 以外を一律に通すと、祖先が通常ファイルに置き換わった
+  ///   `ENOTDIR` まで到達不能として残る。未計測の仮説: TCC やサンドボックスで `lstat` が
+  ///   `EPERM` を返すと、実在する worktree が消失扱いになる。
   /// - bare: 作業ツリーが無い。`rev-parse` 自体は exit 0 で使える安定 ID を返すが (git 2.50.1
   ///   実測: `--git-dir` も `--git-common-dir` も bare ディレクトリ自身)、`worktreePath` が
   ///   指すのは git ディレクトリであって checkout ではないため、タブの cwd にも tmux session の

@@ -2,12 +2,14 @@ name: CI
 
 # Spikes/ は使い捨てコードであり CI 対象外 (docs/coding-guidelines.md §6)。
 # ビルド対象にも lint 対象にも含めず、Spikes/ だけの変更ではジョブを起動しない。
-# docs/ と *.md も、どのジョブも読まないので起動しない (Issue #473)。.claude/settings.json は
-# shell guard の検査対象なので外さない。
+# docs/ と *.md も、どのジョブも読まないので起動しない (Issue #473)。`**.md` はどの階層の .md にも
+# 一致するので、テストの Fixtures などジョブが読む場所に .md を置くなら、このパターンを狭めること。
+# .claude/settings.json は shell guard の検査対象なので外さない。
 #
 # scripts/wf-pr-merge.sh がこの2つのリストを scripts/ci_paths_ignored.py で読み、CI の起動しない
 # PR の待ちを省いている。判定器は1行の flow sequence で、push と pull_request が同じリストの
-# ときだけ読める。書式を変えると判定できなくなり、待ちが元に戻る (安全側)。
+# ときだけ読める。pull_request の run はマージコミット (PR head + main) の ci.yml で起動を決めるので、
+# wf-pr-merge.sh は PR head と main の両方の ci.yml で判定し、どちらかが読めなければ待ちを省かない。
 on:
   push:
     branches: [main]

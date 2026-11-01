@@ -11,7 +11,7 @@ usage() {
 
 scripts/tests/ci-paths-ignored/cases.tsv の workflow・変更ファイル一覧を組にして、
 ci_paths_ignored.py の終了コード (0/1/2) を検査する。
-実物の ci.yml と、単一 * の規則を壊した複製でも検査する。
+実物の ci.yml と、単一 * の規則・ドットで始まる要素の拒否を壊した複製でも検査する。
 
   -h, --help  このヘルプを表示
 EOF
@@ -61,8 +61,8 @@ expect_rc "$DETECTOR" 1 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/swi
 expect_rc "$DETECTOR" 0 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/spikes.txt" '実物 ci.yml: Spikes'
 printf '%s\n' 'docs/roadmap.md' 'CLAUDE.md' '.claude/agents/reviewer.md' >"$work_dir/docs.txt"
 printf '%s\n' 'docs/roadmap.md' '.claude/settings.json' >"$work_dir/settings.txt"
-expect_rc "$DETECTOR" 0 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/docs.txt" '実物 ci.yml: docs と md'
-expect_rc "$DETECTOR" 1 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/settings.txt" '実物 ci.yml: settings.json を含む'
+expect_rc "$DETECTOR" 2 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/docs.txt" '実物 ci.yml: .claude/ の md を含む'
+expect_rc "$DETECTOR" 2 "$SCRIPT_DIR/../.github/workflows/ci.yml" "$work_dir/settings.txt" '実物 ci.yml: settings.json を含む'
 
 # 構文エラーを変異の検出成功に数えず、正常に動く複製の規則の違いで失敗することを確かめる。
 python3 - "$DETECTOR" "$work_dir/mutant.py" <<'PY'
@@ -91,6 +91,34 @@ if [[ "$mutant_failures" -eq 0 ]] || grep -q 'Traceback\|SyntaxError' "$work_dir
   failures=$((failures + 1))
 else
   info "OK: 単一 * の変異を fixture $mutant_failures 件で検出しました"
+fi
+
+python3 - "$DETECTOR" "$work_dir/dot-mutant.py" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1]).read_text(encoding="utf-8")
+before = "if any(part.startswith('.') for path in paths for part in path.split('/')):"
+after = "if False:"
+if source.count(before) != 1 or after in source:
+    sys.exit("変異対象の規則が変わっています")
+mutant = source.replace(before, after)
+compile(mutant, sys.argv[2], "exec")
+Path(sys.argv[2]).write_text(mutant, encoding="utf-8")
+PY
+original_failures=$failures
+original_checked=$checked
+failures=0
+run_fixtures "$work_dir/dot-mutant.py" >"$work_dir/dot-mutant.log" 2>&1
+mutant_failures=$failures
+failures=$original_failures
+checked=$((original_checked + 1))
+if [[ "$mutant_failures" -eq 0 ]] || grep -q 'Traceback\|SyntaxError' "$work_dir/dot-mutant.log"; then
+  info "NG: ドットで始まる要素の拒否の変異を検出できないか、複製が異常終了しました"
+  cat "$work_dir/dot-mutant.log" >&2
+  failures=$((failures + 1))
+else
+  info "OK: ドットで始まる要素の拒否の変異を fixture $mutant_failures 件で検出しました"
 fi
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"

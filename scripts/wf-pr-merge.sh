@@ -85,26 +85,46 @@ if changed_paths=$(gh api --paginate "repos/$(nwo)/pulls/$pr_number/files" --jq 
   if paths_head_oid=$(gh pr view "$pr_number" --json headRefOid --jq .headRefOid) \
     && [[ -n "$paths_head_oid" && "$paths_head_oid" == "$pr_head_oid" ]]; then
     if command -v python3 >/dev/null 2>&1; then
-      ci_paths_rc=0
-      ci_paths_reason=$(
-        ci_workflow=$(mktemp) || exit 2
-        trap 'rm -f -- "$ci_workflow"' EXIT
-        if ! gh api "repos/$(nwo)/contents/.github/workflows/ci.yml?ref=$paths_head_oid" \
-          -H 'Accept: application/vnd.github.raw' >"$ci_workflow"; then
-          printf '%s\n' "head=$paths_head_oid の ci.yml の取得に失敗しました"
-          exit 2
+      if paths_main_oid=$(gh api "repos/$(nwo)/git/ref/heads/main" --jq .object.sha) \
+        && [[ -n "$paths_main_oid" ]]; then
+        # pull_request は head と main のマージコミットの ci.yml を使うため、head だけでは断定しない。
+        ci_paths_ignored=1
+        for paths_ref in head main; do
+          if [[ "$paths_ref" == "head" ]]; then
+            paths_oid="$paths_head_oid"
+          else
+            paths_oid="$paths_main_oid"
+          fi
+          ci_paths_rc=0
+          ci_paths_reason=$(
+            ci_workflow=$(mktemp) || exit 2
+            trap 'rm -f -- "$ci_workflow"' EXIT
+            if ! gh api "repos/$(nwo)/contents/.github/workflows/ci.yml?ref=$paths_oid" \
+              -H 'Accept: application/vnd.github.raw' >"$ci_workflow"; then
+              printf '%s\n' "ci.yml の取得に失敗しました"
+              exit 2
+            fi
+            printf '%s\n' "$changed_paths" \
+              | python3 "$SCRIPT_DIR/ci_paths_ignored.py" --workflow "$ci_workflow" 2>&1
+          ) || ci_paths_rc=$?
+          case "$ci_paths_rc" in
+            0) info "CI paths-ignore 判定 ($paths_ref=$paths_oid): exit 0、全変更パスが一致します" ;;
+            1)
+              ci_paths_ignored=0
+              info "CI paths-ignore 判定 ($paths_ref=$paths_oid): exit 1、一致しない変更があります。従来どおり CI を確認します"
+              ;;
+            *)
+              ci_paths_ignored=0
+              info "CI paths-ignore 判定 ($paths_ref=$paths_oid): exit ${ci_paths_rc}、判定できません。従来どおり CI を確認します: $ci_paths_reason"
+              ;;
+          esac
+        done
+        if [[ "$ci_paths_ignored" -eq 1 ]]; then
+          info "head と main の両方で全変更パスが CI の paths-ignore に一致します。CI は起動しません"
         fi
-        printf '%s\n' "$changed_paths" \
-          | python3 "$SCRIPT_DIR/ci_paths_ignored.py" --workflow "$ci_workflow" 2>&1
-      ) || ci_paths_rc=$?
-      case "$ci_paths_rc" in
-        0)
-          ci_paths_ignored=1
-          info "全変更パスが CI の paths-ignore に一致します。CI は起動しません (head=$paths_head_oid)"
-          ;;
-        1) info "CI の paths-ignore に一致しない変更があります。従来どおり CI を確認します" ;;
-        *) info "CI 起動の判定ができません。従来どおり CI を確認します: $ci_paths_reason" ;;
-      esac
+      else
+        info "main の先端の取得に失敗したため CI 起動の判定ができません。従来どおり CI を確認します"
+      fi
     else
       info "python3 が無いため CI 起動の判定ができません。従来どおり CI を確認します"
     fi
@@ -196,9 +216,15 @@ verify_checks
 
 repo_nwo=$(nwo)
 commit_title="${pr_title} (#${pr_number})"
+merge_args=(-f merge_method=squash -f commit_title="$commit_title")
+merge_sha_option=""
+if [[ "$ci_paths_ignored" -eq 1 ]]; then
+  merge_args+=(-f sha="$paths_head_oid")
+  merge_sha_option=" -f sha=\"$paths_head_oid\""
+fi
 
 if [[ "$dry_run" -eq 1 ]]; then
-  info "[dry-run] gh api -X PUT repos/$repo_nwo/pulls/$pr_number/merge -f merge_method=squash -f commit_title=\"$commit_title\""
+  info "[dry-run] gh api -X PUT repos/$repo_nwo/pulls/$pr_number/merge -f merge_method=squash -f commit_title=\"$commit_title\"$merge_sha_option"
   exit 0
 fi
 
@@ -210,8 +236,7 @@ if [[ "$checks_grace_skipped" -eq 1 ]]; then
 fi
 
 merge_sha=$(gh api -X PUT "repos/$repo_nwo/pulls/$pr_number/merge" \
-  -f merge_method=squash \
-  -f commit_title="$commit_title" \
+  "${merge_args[@]}" \
   --jq '.sha') || die "マージに失敗しました"
 
 info "マージしました (sha=$merge_sha)"

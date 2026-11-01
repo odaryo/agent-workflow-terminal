@@ -1,9 +1,10 @@
 0	workflows/standard.yml	files/docs.txt
-0	workflows/standard.yml	files/md.txt
+2	workflows/standard.yml	files/md.txt
 0	workflows/standard.yml	files/spikes.txt
 0	workflows/standard.yml	files/mixed.txt
 1	workflows/standard.yml	files/swift.txt
-1	workflows/standard.yml	files/settings.txt
+2	workflows/standard.yml	files/settings.txt
+2	workflows/standard.yml	files/dot-component.txt
 1	workflows/standard.yml	files/directory.txt
 1	workflows/standard.yml	files/mdx.txt
 1	workflows/standard.yml	files/backup.txt
@@ -35,5 +36,5 @@
 2	workflows/unicode.yml	files/unicode.txt
 1	workflows/single-nested.yml	files/single-nested.txt
 0	workflows/single-direct.yml	files/single-direct.txt
-0	workflows/single-empty.yml	files/single-empty.txt
+2	workflows/single-empty.yml	files/single-empty.txt
 1	workflows/literal-dot.yml	files/literal-dot.txt

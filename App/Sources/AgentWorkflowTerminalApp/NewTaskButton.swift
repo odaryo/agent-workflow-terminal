@@ -1,4 +1,5 @@
 import SwiftUI
+import TerminalCore
 
 @MainActor
 struct NewTaskButton: View {
@@ -6,7 +7,7 @@ struct NewTaskButton: View {
   let action: () -> Void
 
   var body: some View {
-    // Why not `NewTaskMenuItem` + `.labelStyle(.iconOnly)`: 実測で AX の title / description が
+    // Why not `Label` + `.labelStyle(.iconOnly)`: 実測で AX の title / description が
     // 空になり (#407 の UI 確認)、当たり判定もアイコンの 10x10pt しか無かった。
     Button(action: action) {
       Image(systemName: "plus")
@@ -14,37 +15,25 @@ struct NewTaskButton: View {
         .contentShape(.rect)
     }
     .buttonStyle(.borderless)
-    .accessibilityLabel(NewTaskMenuItem.title)
+    .accessibilityLabel("新しいタブ (Project Root)")
     .disabled(isDisabled)
-    .help(NewTaskMenuItem.help(isDisabled: isDisabled))
-  }
-}
-
-@MainActor
-struct NewTaskMenuItem: View {
-  let isDisabled: Bool
-  let action: () -> Void
-
-  static let title = "新しいタスク…"
-
-  static func help(isDisabled: Bool) -> String {
-    isDisabled
-      ? "bare repository には Project Root の端末が無いため使えません。"
-      : "Project Root の端末へ移ります。そこで Agent を起動して worktree を作らせると、新しいタブとして現れます。"
-  }
-
-  var body: some View {
-    Button(Self.title, systemImage: "plus", action: action)
-      .disabled(isDisabled)
-      .help(Self.help(isDisabled: isDisabled))
+    .help(
+      isDisabled
+        ? "bare repository には Project Root の端末が無いため使えません。"
+        : "Project Root のディレクトリで新しいタブを開きます。Agent は起動しません。")
   }
 }
 
 extension ProjectView {
-  func startNewTask() {
-    guard model.projectRoot != nil else { return }
-    model.startNewTask()
-    // 同じタブを選び直す場合は selectedIdentity の onChange が発火しない。
-    keyboardFocus.requestFocus()
+  func openNewProjectRootTab() {
+    guard let identity = model.projectRoot?.identity else { return }
+    openNewTab(in: identity)
+  }
+
+  func openNewTab(in identity: WorktreeIdentity) {
+    Task {
+      await model.openNewTab(in: identity)
+      keyboardFocus.requestFocus()
+    }
   }
 }

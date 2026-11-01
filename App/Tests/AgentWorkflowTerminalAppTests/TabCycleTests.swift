@@ -5,10 +5,13 @@ import Testing
 
 @Suite("タブの巡回")
 struct TabCycleTests {
-  private let first = WorktreeIdentity(rawValue: "/repo/.git")
-  private let second = WorktreeIdentity(rawValue: "/repo/.git/worktrees/second")
-  private let third = WorktreeIdentity(rawValue: "/repo/.git/worktrees/third")
-  private let missing = WorktreeIdentity(rawValue: "/repo/.git/worktrees/missing")
+  private let first = WorktreeIdentity(rawValue: "/repo/.git").map(TerminalSessionKey.primary)
+  private let second = WorktreeIdentity(rawValue: "/repo/.git/worktrees/second").map(
+    TerminalSessionKey.primary)
+  private let third = WorktreeIdentity(rawValue: "/repo/.git/worktrees/third").map(
+    TerminalSessionKey.primary)
+  private let missing = WorktreeIdentity(rawValue: "/repo/.git/worktrees/missing").map(
+    TerminalSessionKey.primary)
 
   @Test("前後の隣接タブへ移動する", arguments: [true, false])
   func adjacent(forward: Bool) throws {

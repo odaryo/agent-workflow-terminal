@@ -2,8 +2,8 @@ import TerminalCore
 
 enum TabCycle {
   static func adjacent(
-    in order: [WorktreeIdentity], from current: WorktreeIdentity?, forward: Bool
-  ) -> WorktreeIdentity? {
+    in order: [TerminalSessionKey], from current: TerminalSessionKey?, forward: Bool
+  ) -> TerminalSessionKey? {
     guard let current, let index = order.firstIndex(of: current) else {
       return forward ? order.first : order.last
     }

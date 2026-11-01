@@ -13,14 +13,13 @@ extension AppModel {
     let selectableWorktrees = tabbedWorktrees.filter {
       $0.activation == .active && $0.detected.isReachable
     }
-    let order = [projectRoot?.identity].compactMap { $0 } + selectableWorktrees.map(\.identity)
-    guard let next = TabCycle.adjacent(in: order, from: selectedIdentity, forward: forward) else {
+    let order = tabKeys.filter { key in
+      key.identity == projectRoot?.identity
+        || selectableWorktrees.contains { $0.identity == key.identity }
+    }
+    guard let next = TabCycle.adjacent(in: order, from: selectedTab, forward: forward) else {
       return
     }
-    if next == projectRoot?.identity {
-      selectProjectRoot()
-    } else if let worktree = selectableWorktrees.first(where: { $0.identity == next }) {
-      select(worktree)
-    }
+    select(next)
   }
 }

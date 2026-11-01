@@ -24,6 +24,7 @@ struct ExternalFileOpeningTests {
       "../worktree-other/file.md", "nonexist/../linkdir/x.md", "existing.md/../linkdir/x.md",
       "dangling-link.md/../linkdir/x.md", "linkdir/x.md", "./existing.md",
       "a//existing.md", "/etc/hosts", "", "existing.md/", "dangling-link.md", "loop.md",
+      "sibling-link.md",
     ])
   func resolve(path: String) throws {
     let manager = FileManager.default
@@ -55,6 +56,10 @@ struct ExternalFileOpeningTests {
       atPath: root.appending(path: "dangling-link.md").path, withDestinationPath: "missing.md")
     try manager.createSymbolicLink(
       atPath: root.appending(path: "loop.md").path, withDestinationPath: "loop.md")
+    // 字面の判定を通り、realpath 後の境界の比較だけが拒否する入力 (root と前方一致する兄弟)。
+    try manager.createSymbolicLink(
+      atPath: root.appending(path: "sibling-link.md").path,
+      withDestinationPath: "../worktree-other/file.md")
 
     switch path {
     case "existing.md", "inside-link.md":

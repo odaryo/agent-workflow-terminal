@@ -6,7 +6,7 @@ import SwiftUI
 @MainActor
 struct ToolbarContextMenu: NSViewRepresentable {
   enum Item {
-    case action(title: String, isEnabled: Bool, perform: @MainActor () -> Void)
+    case action(title: String, isEnabled: Bool, perform: @MainActor @Sendable () -> Void)
     case separator
   }
 
@@ -93,9 +93,9 @@ struct ToolbarContextMenu: NSViewRepresentable {
 
   @MainActor
   private final class ActionTarget: NSObject {
-    let perform: @MainActor () -> Void
+    let perform: @MainActor @Sendable () -> Void
 
-    init(perform: @escaping @MainActor () -> Void) {
+    init(perform: @escaping @MainActor @Sendable () -> Void) {
       self.perform = perform
       super.init()
     }

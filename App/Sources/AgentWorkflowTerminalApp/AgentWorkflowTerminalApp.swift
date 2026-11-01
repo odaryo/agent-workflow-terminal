@@ -81,6 +81,7 @@ struct ProjectView: View {
         Divider()
       }
       WorktreeClosePanelHost(closing: model.closing)
+      TerminalTabClosePanelHost(closing: model.tabClosing) { model.confirmCloseTab() }
 
       if let message = model.message ?? model.emptyStateMessage {
         ContentUnavailableView(
@@ -164,7 +165,10 @@ struct ProjectView: View {
           .id(key)
           .overlay {
             ToolbarContextMenu(items: [
-              .action(title: "新規タブ", isEnabled: true) { openNewTab(in: key.identity) }
+              .action(title: "新規タブ", isEnabled: true) { openNewTab(in: key.identity) },
+              .action(title: "タブを閉じる", isEnabled: model.canCloseTab(key)) {
+                model.requestCloseTab(key)
+              },
             ])
           }
           if key == model.tabLayout.tabs(in: key.identity).last, !model.tabbedWorktrees.isEmpty {
@@ -180,7 +184,9 @@ struct ProjectView: View {
             select: { model.select(key) },
             setActivation: { model.setActivation($0, of: worktree.identity) },
             requestClose: { model.requestClose(of: worktree.identity) },
-            openNewTab: { openNewTab(in: key.identity) }
+            openNewTab: { openNewTab(in: key.identity) },
+            canCloseTab: model.canCloseTab(key),
+            closeTab: { model.requestCloseTab(key) }
           )
           .id(key)
         }
@@ -259,15 +265,16 @@ private struct WorktreeTab: View {
   let setActivation: (WorktreeActivation) -> Void
   let requestClose: () -> Void
   let openNewTab: () -> Void
+  let canCloseTab: Bool
+  let closeTab: () -> Void
   @State private var representativeState: WorktreeRepresentativeState?
 
   var body: some View {
-    // 到達不能な worktree にはメニュー自体を付けない。設計書 §3.2 が Active 化を
-    // 認めていない対象で、空のメニューを開かせないため。
     if worktree.detected.isReachable {
       tab.overlay {
         ToolbarContextMenu(items: [
           .action(title: "新規タブ", isEnabled: true) { openNewTab() },
+          .action(title: "タブを閉じる", isEnabled: canCloseTab) { closeTab() },
           .separator,
           .action(title: "Active にする", isEnabled: worktree.activation != .active) {
             setActivation(.active)
@@ -278,7 +285,11 @@ private struct WorktreeTab: View {
         ])
       }
     } else {
-      tab
+      tab.overlay {
+        ToolbarContextMenu(items: [
+          .action(title: "タブを閉じる", isEnabled: canCloseTab) { closeTab() }
+        ])
+      }
     }
   }
 

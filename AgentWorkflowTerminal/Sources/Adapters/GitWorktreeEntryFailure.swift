@@ -24,10 +24,10 @@ public struct GitWorktreeEntryFailure: Sendable, Equatable {
     /// `not a git repository: <管理ディレクトリ>`、`.git` ファイルの破損が `invalid gitfile format`、
     /// `.git` ファイルの消失が `not a git repository (or any of the parent directories): .git` で、
     /// いずれも exit 128。`worktree list` はこのどれにも `prunable` を付けない (網羅ではない)。
-    /// main worktree でない entry の `--show-toplevel` が失敗した場合もここへ来る。linked worktree
-    /// には必ず作業ツリーがあるので、その失敗は「確かめられなかった」であって不在の証拠ではない。
     case gitDirectory(GitRunnerError)
-    /// `rev-parse` の出力が2行でなかった。パス自体に改行が含まれる場合もここへ来る。
+    /// `rev-parse` の出力が main では2行、main でない entry では4行 (`describe`) でなかった。
+    /// パス自体に改行が含まれる場合と、`--is-bare-repository` が `true` / `false` でない場合も
+    /// ここへ来る。
     case unexpectedGitDirectoryOutput(output: String)
     /// 安定 ID にする1行目が絶対パスでなかった。
     case invalidGitDirectoryPath(gitDirectory: String)
@@ -42,39 +42,41 @@ public struct GitWorktreeEntryFailure: Sendable, Equatable {
     /// `rev-parse` は祖先へ遡って exit 0 で祖先の git ディレクトリを返す (Issue #502)。検出すると
     /// 偽の Project Root や安定 ID の重複になり、別 repository の中なら `.absent` で黙って消える。
     ///
-    /// 判定は2つで、`describe` はこの順に確かめる。
+    /// 判定は main でない entry にだけ、同じ1回の `rev-parse` に `--is-bare-repository` と
+    /// `--show-prefix` を足して、この順に行う (`describe`)。どれにも当たらなければ、common dir の
+    /// 照合 (別 Project なら `.absent`) へ進む。
     /// 1. git ディレクトリが common dir そのもので、その common dir がこの Project のものである。
     ///    linked worktree の git ディレクトリは `<common>/worktrees/<名前>` であって common dir
-    ///    にはならない。Project の common dir に絞るのは、別 repository に置き換わった entry も
-    ///    置き換わった先の main として git ディレクトリと common dir が等しくなり、ここに当たって
-    ///    しまうためである (toplevel は entry 自身なので 2 も素通りし、`.absent` になる)。遡った先が bare
-    ///    (`proj/feat` → `proj/.git` の `gitdir: ./.bare`) や main の作業ツリーの場合、`.git` が
-    ///    `<common>` への symlink の場合 (同レビューの m1) がここに当たる。lock 前の計測では、bare
-    ///    配置で `id=<R>/proj/.bare path=<R>/proj/feat root=true`、main の中で Project Root と ID が
-    ///    重複した。
-    /// 2. 別のプロセスで撃つ `rev-parse --show-toplevel` の1行目が、entry のパスとバイト単位で
-    ///    一致しない。遡った先が linked worktree か別 repository の作業ツリーだと、git ディレクトリは
-    ///    common dir にならないので 1 では拾えない。git 2.50.1 実測 (Issue #502 のレビュー):
+    ///    にはならない。遡った先が bare (`proj/feat` → `proj/.git` の `gitdir: ./.bare`) や main の
+    ///    作業ツリーの場合、`.git` が `<common>` への symlink の場合 (同レビューの m1) がここに
+    ///    当たる。lock 前の計測では、bare 配置で `id=<R>/proj/.bare path=<R>/proj/feat root=true`、
+    ///    main の中で Project Root と ID が重複した。Project の common dir に絞るのは、別
+    ///    repository に置き換わった entry も、置き換わった先の main として git ディレクトリと
+    ///    common dir が等しくなるためである (それは 2 と 3 も素通りして `.absent` になる)。
+    /// 2. `--is-bare-repository` が `true`。linked worktree が bare になることは無いので、別の bare
+    ///    repository の中 (`other.git/w`) へ遡ったことになる。これは git ディレクトリと common dir
+    ///    が等しく common dir が別 Project で、prefix も空なので、置き換わった entry と同じ形になる。
+    /// 3. `--show-prefix` が空でない。entry のディレクトリが作業ツリーの根でなく、祖先の作業ツリーの
+    ///    中にいる。
     ///
-    ///    | entry | toplevel | 一致 |
-    ///    | --- | --- | --- |
-    ///    | 別 repository の中の `/other/w` | `/other` | しない (祖先へ遡った) |
-    ///    | linked の中の `/feat/.worktrees/y` | `/feat` | しない (祖先へ遡った) |
-    ///    | 別 repository に置き換わった `/rep` | `/rep` | する (`.absent` のまま) |
-    ///    | `/main`、`/feat`、NFC の `/café`、親が symlink の linked | 同じ | する |
+    /// git 2.50.1 実測 (Issue #502 の再レビューと実装時の計測):
     ///
-    ///    置き換わった `/rep` は一致するので、別 repository への置き換え (`.absent`) とは区別できる。
+    /// | 場合 | `--is-bare-repository` | `--show-prefix` |
+    /// | --- | --- | --- |
+    /// | 祖先へ遡った (`.worktrees/y`、別 repository の中の `w`、main の中の `.worktrees/x`) | `false` | 空でない |
+    /// | 正常な linked (`feat`、linked 側の `core.worktree`、`worktree move`、大小違い、NFC 記録) | `false` | 空 |
+    /// | 別 repository に置き換わった `rep` | `false` | 空 |
+    /// | 遡った先が bare (`proj/z`、`other.git/w`) | `true` | exit 0 で空 |
     ///
-    /// `--show-toplevel` を `--git-dir --git-common-dir` と同じ実行に混ぜないのは、遡った先が bare
-    /// だと git が `fatal: this operation must be run in a work tree` で exit 128 になり、2行も
-    /// 失敗に巻き込まれて 1 の判定ができなくなるためである (git 2.50.1 実測)。代わりに git の
-    /// 起動が linked worktree 1件につき1回増える。
+    /// **パスは比べない。** `worktree list` のパスは gitdir ファイルに記録された打った表記で、
+    /// `--show-toplevel` などが返すディスク上の表記とずれる。APFS は大小を区別しないので大小を
+    /// 変えて打てばずれ、`core.precomposeunicode=true` の git は NFC で記録するが `FileManager` が
+    /// 作るディレクトリは NFD である。linked 側の `core.worktree` では別のディレクトリになる。
+    /// 比べると正常な linked worktree が恒久的に失敗になる (同レビューの Critical C2)。
     ///
-    /// main の entry には `--show-toplevel` を撃たない。main では `worktree list` のパスと
-    /// toplevel が一致しない配置 (submodule の main: `sup/.git/modules/s` → `<R>/sup/s`、
-    /// `core.worktree`: `gd.git` → `<R>/wt`) や、`--show-toplevel` が上と同じ fatal になる配置
-    /// (`--separate-git-dir` で main の作業ツリーが消えた) があり (同レビューの計測、Issue #376 の
-    /// 領域)、Project Root の検出ごと壊れる。
+    /// main の entry には足さない。main には `worktree list` のパスと作業ツリーがずれる配置
+    /// (submodule、`core.worktree`、`--separate-git-dir`。Issue #376 の領域) があり、そこで2つの
+    /// 値がどう出るかは測っていない。
     ///
     /// 不在にせず失敗にするのは、lock が「消さないで」という意思表示だからである。観測失敗として
     /// 前回の状態を残し、黙って消失させない。

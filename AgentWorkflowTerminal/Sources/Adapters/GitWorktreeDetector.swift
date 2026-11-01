@@ -74,9 +74,10 @@ public struct GitWorktreeDetector: Sendable {
     "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir",
   ]
 
-  /// main worktree でない entry にだけ、`gitDirectoryArguments` とは別のプロセスで撃つ。分ける
-  /// 理由と main に撃たない理由は `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository`。
-  private static let toplevelArguments = ["rev-parse", "--path-format=absolute", "--show-toplevel"]
+  /// main worktree でない entry にだけ使う。main に足さない理由は
+  /// `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository`。
+  private static let linkedWorktreeArguments =
+    gitDirectoryArguments + ["--is-bare-repository", "--show-prefix"]
 
   /// linked worktree から引いても main worktree から引いても同じ値が返る (git 2.50.1 実測) ため、
   /// Project ディレクトリがどの worktree にあっても同じ基準になる。
@@ -262,10 +263,10 @@ public struct GitWorktreeDetector: Sendable {
   ///     worktree の `.git` が消えても入れるディレクトリなら、`rev-parse` は祖先へ遡って exit 0 で
   ///     祖先の repository を返す (Issue #502)。そのまま通すと偽の Project Root や ID の重複になり、
   ///     祖先が別 repository なら上の `.absent` に当たって黙って消えるため、common dir の照合より
-  ///     **先に**、git ディレクトリが common dir そのものでないことと toplevel が entry 自身で
-  ///     あることを確かめ、`GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository` で返す。
-  ///     toplevel を確かめられなければ `gitDirectory` で返す。main worktree かどうかを2行の一致では
-  ///     決められないので、`worktree list` の順序で渡す。
+  ///     **先に**、同じ `rev-parse` に足した `--is-bare-repository` と `--show-prefix` で確かめ、
+  ///     `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository` で返す (判定の順はそちら)。
+  ///     パスは比べない。main worktree かどうかを2行の一致では決められないので、`worktree list`
+  ///     の順序で渡す。
   private func describe(
     _ entry: GitWorktreeEntry,
     isMainWorktree: Bool,
@@ -287,7 +288,9 @@ public struct GitWorktreeDetector: Sendable {
       // initializer が internal なのは、書き込み subcommand をモジュール外から
       // 注入させないためである (§17.2)。
       stdout = try await runner.run(
-        GitReadCommand(arguments: Self.gitDirectoryArguments), timeout: entryTimeout
+        GitReadCommand(
+          arguments: isMainWorktree ? Self.gitDirectoryArguments : Self.linkedWorktreeArguments),
+        timeout: entryTimeout
       ).stdout
     } catch {
       if case .commandFailed = error, !isWorktreeReachable(entry.path) {
@@ -296,8 +299,8 @@ public struct GitWorktreeDetector: Sendable {
       return .failed(entry.path, .gitDirectory(error))
     }
 
-    let paths = stdout.split(separator: "\n")
-    guard paths.count == 2 else {
+    let paths = Self.outputLines(stdout, isMainWorktree: isMainWorktree)
+    guard paths.count == (isMainWorktree ? 2 : 4) else {
       return .failed(entry.path, .unexpectedGitDirectoryOutput(output: stdout))
     }
     guard let identity = WorktreeIdentity(rawValue: String(paths[0])) else {
@@ -309,9 +312,9 @@ public struct GitWorktreeDetector: Sendable {
       return .failed(entry.path, .invalidCommonDirectoryPath(commonDirectory: String(paths[1])))
     }
     if !isMainWorktree,
-      let failure = await ancestorResolution(
-        of: entry, identity: identity, commonDirectory: commonDirectory,
-        projectCommonDirectory: projectCommonDirectory, runner: runner)
+      let failure = Self.ancestorResolution(
+        paths, output: stdout, identity: identity, commonDirectory: commonDirectory,
+        projectCommonDirectory: projectCommonDirectory)
     {
       return .failed(entry.path, failure)
     }
@@ -327,29 +330,31 @@ public struct GitWorktreeDetector: Sendable {
       ))
   }
 
-  /// main でない entry にだけ撃つ。判定の順と、toplevel を別のプロセスにする理由は
-  /// `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository`。
-  private func ancestorResolution(
-    of entry: GitWorktreeEntry,
+  /// main の2行は `split` で分ける (空の行を捨てる)。main でない entry の4行目 (`--show-prefix`)
+  /// は作業ツリーの根で空行になるので (git 2.50.1 実測: 3行目以降が `false\n\n`)、空の要素を保ち、
+  /// 末尾の改行1つだけを落として分ける。末尾が改行でない出力は行数の検査で弾く。
+  private static func outputLines(_ stdout: String, isMainWorktree: Bool) -> [Substring] {
+    if isMainWorktree { return stdout.split(separator: "\n") }
+    guard stdout.hasSuffix("\n") else { return [] }
+    return stdout.dropLast().split(separator: "\n", omittingEmptySubsequences: false)
+  }
+
+  /// 判定の順と計測は `GitWorktreeEntryFailure.Reason.resolvedToAncestorRepository`。
+  private static func ancestorResolution(
+    _ lines: [Substring],
+    output: String,
     identity: WorktreeIdentity,
     commonDirectory: WorktreeIdentity,
-    projectCommonDirectory: WorktreeIdentity,
-    runner: GitRunner
-  ) async -> GitWorktreeEntryFailure.Reason? {
-    guard identity != commonDirectory || commonDirectory != projectCommonDirectory else {
+    projectCommonDirectory: WorktreeIdentity
+  ) -> GitWorktreeEntryFailure.Reason? {
+    if identity == commonDirectory && commonDirectory == projectCommonDirectory {
       return .resolvedToAncestorRepository
     }
-    let stdout: String
-    do {
-      stdout = try await runner.run(
-        GitReadCommand(arguments: Self.toplevelArguments), timeout: entryTimeout
-      ).stdout
-    } catch {
-      return .gitDirectory(error)
+    switch lines[2] {
+    case "true": return .resolvedToAncestorRepository
+    case "false": return lines[3].isEmpty ? nil : .resolvedToAncestorRepository
+    default: return .unexpectedGitDirectoryOutput(output: output)
     }
-    // `String` の `==` は正準等価で比べるので、NFC と NFD の別表記を一致と誤る。
-    let toplevel = stdout.utf8.prefix { $0 != UInt8(ascii: "\n") }
-    return toplevel.elementsEqual(entry.path.utf8) ? nil : .resolvedToAncestorRepository
   }
 
   private func describeUnreachable(

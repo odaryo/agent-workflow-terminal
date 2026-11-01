@@ -208,6 +208,27 @@ struct GitWorktreeDetectorPrunableTests {
     }
   }
 
+  @Test("別の bare repository の中で lock した worktree の .git が消えたら、消失にせず祖先への解決を失敗として返す")
+  func missingGitFileInLockedWorktreeInsideOtherBareRepositoryIsReportedAsAncestorResolution()
+    async throws
+  {
+    try await withGitRepository { repository in
+      let other = repository.root.appending(path: "other.git")
+      let worktree = other.appending(path: "w")
+      try await repository.git(["init", "-q", "--bare", "-b", "main", other.path])
+      try await repository.git(["worktree", "add", "-q", "-b", "w", worktree.path])
+      try await repository.git(["worktree", "lock", worktree.path])
+      try FileManager.default.removeItem(at: worktree.appending(path: ".git"))
+
+      let result = try await repository.detector().scan()
+
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.failures.map(\.worktreePath) == [worktree.path])
+      let failure = try #require(result.failures.first)
+      #expect(failure.reason == .resolvedToAncestorRepository)
+    }
+  }
+
   // root では探索権限の制限が効かず、この経路を再現できない。
   @Test("親に入れない unlocked worktree は admin 側の安定 ID で到達不能として検出する")
   func unsearchableParentOfUnlockedWorktreeIsDetectedAsUnreachable() async throws {

@@ -16,6 +16,18 @@ public struct TerminalTabLayout: Sendable, Equatable {
     return indices.compactMap { TerminalSessionKey(identity: identity, index: $0) }
   }
 
+  public mutating func restore(from sessionNames: [String], identities: [WorktreeIdentity]) {
+    for identity in identities {
+      let indices = TmuxSessionName.indices(of: identity, in: sessionNames)
+      // タブ = session なので、実在しない primary は補わない (設計書 §3.5)。
+      if indices.isEmpty || indices == [1] {
+        indicesByIdentity.removeValue(forKey: identity)
+      } else {
+        indicesByIdentity[identity] = indices
+      }
+    }
+  }
+
   public mutating func addTab(
     in identity: WorktreeIdentity,
     existingSessionNames: [String]

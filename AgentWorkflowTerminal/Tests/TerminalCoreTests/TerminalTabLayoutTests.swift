@@ -268,6 +268,148 @@ struct TerminalTabLayoutTests {
         == [.primary(worktree), worktreeExtra, .primary(project), projectExtra])
   }
 
+  @Test("baseと連番のsessionからタブを復元する (設計書 §3.5)")
+  func restoresPrimaryAndAdditionalTabs() throws {
+    let directory = try identity("a")
+    let second = try key(directory, index: 2)
+    let third = try key(directory, index: 3)
+    let names = [
+      TmuxSessionName(identity: directory).rawValue,
+      TmuxSessionName(key: second).rawValue,
+      TmuxSessionName(key: third).rawValue,
+    ]
+    var layout = TerminalTabLayout()
+
+    layout.restore(from: names, identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [.primary(directory), second, third])
+  }
+
+  @Test("baseが無いsession列の復元ではprimaryや欠番を補わない (設計書 §3.5)")
+  func restoresOnlyExistingSessionTabs() throws {
+    let directory = try identity("a")
+    let second = try key(directory, index: 2)
+    let fifth = try key(directory, index: 5)
+    let names = [TmuxSessionName(key: second).rawValue, TmuxSessionName(key: fifth).rawValue]
+    var layout = TerminalTabLayout()
+
+    layout.restore(from: names, identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [second, fifth])
+  }
+
+  @Test("該当sessionが無ければ追加済みのタブを既定に戻す (設計書 §3.5)")
+  func missingSessionsRestoreDefaultLayout() throws {
+    let directory = try identity("a")
+    let foreign = try identity("b")
+    let names = [TmuxSessionName(identity: foreign).rawValue, "shell", "unrelated-2"]
+    var layout = TerminalTabLayout()
+    #expect(
+      layout.addTab(in: directory, existingSessionNames: []) == (try key(directory, index: 2)))
+
+    layout.restore(from: names, identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [.primary(directory)])
+    #expect(layout == TerminalTabLayout())
+  }
+
+  @Test("baseだけを復元したlayoutは既定と等しい (設計書 §3.5)")
+  func restoringPrimaryEqualsDefaultLayout() throws {
+    let directory = try identity("a")
+    var layout = TerminalTabLayout()
+
+    layout.restore(from: [TmuxSessionName(identity: directory).rawValue], identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [.primary(directory)])
+    #expect(layout == TerminalTabLayout())
+  }
+
+  @Test("複数identityを復元するとdirectoriesの順にタブ群が並ぶ (設計書 §3.5)")
+  func restoresEachIdentityInDirectoryOrder() throws {
+    let first = try identity("a")
+    let second = try identity("b")
+    let firstExtra = try key(first, index: 3)
+    let secondExtra = try key(second, index: 2)
+    let names = [
+      TmuxSessionName(key: secondExtra).rawValue,
+      TmuxSessionName(identity: first).rawValue,
+      TmuxSessionName(key: firstExtra).rawValue,
+    ]
+    var layout = TerminalTabLayout()
+
+    layout.restore(from: names, identities: [first, second])
+
+    #expect(layout.tabs(in: first) == [.primary(first), firstExtra])
+    #expect(layout.tabs(in: second) == [secondExtra])
+    #expect(
+      layout.tabs(directories: [first, second]) == [.primary(first), firstExtra, secondExtra])
+  }
+
+  @Test("baseだけの復元は追加済みのタブを置き換える (設計書 §3.5)")
+  func restoringPrimaryReplacesAddedTabs() throws {
+    let directory = try identity("a")
+    var layout = TerminalTabLayout()
+    #expect(
+      layout.addTab(in: directory, existingSessionNames: []) == (try key(directory, index: 2)))
+
+    layout.restore(from: [TmuxSessionName(identity: directory).rawValue], identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [.primary(directory)])
+    #expect(layout == TerminalTabLayout())
+  }
+
+  @Test("復元対象に含まれないidentityの追加済みタブは残る (設計書 §3.5)")
+  func restorationPreservesUnlistedIdentity() throws {
+    let first = try identity("a")
+    let second = try identity("b")
+    let firstExtra = try key(first, index: 3)
+    let secondExtra = try key(second, index: 2)
+    let names = [
+      TmuxSessionName(key: firstExtra).rawValue,
+      TmuxSessionName(identity: second).rawValue,
+    ]
+    var layout = TerminalTabLayout()
+    #expect(layout.addTab(in: second, existingSessionNames: []) == secondExtra)
+    let secondTabsBefore = layout.tabs(in: second)
+
+    layout.restore(from: names, identities: [first])
+
+    #expect(layout.tabs(in: first) == [firstExtra])
+    #expect(layout.tabs(in: second) == secondTabsBefore)
+    #expect(layout.tabs(in: second) == [.primary(second), secondExtra])
+  }
+
+  @Test("復元後の追加タブは復元した最大indexの次になる (設計書 §3.5)")
+  func additionAfterRestorationUsesRestoredMaximum() throws {
+    let directory = try identity("a")
+    let second = try key(directory, index: 2)
+    let fifth = try key(directory, index: 5)
+    let sixth = try key(directory, index: 6)
+    let names = [TmuxSessionName(key: second).rawValue, TmuxSessionName(key: fifth).rawValue]
+    var layout = TerminalTabLayout()
+    layout.restore(from: names, identities: [directory])
+
+    #expect(layout.addTab(in: directory, existingSessionNames: []) == sixth)
+    #expect(layout.tabs(in: directory) == [second, fifth, sixth])
+  }
+
+  @Test("session名の入力順にかかわらずindexの昇順で復元する (設計書 §3.5)")
+  func restorationSortsSessionIndices() throws {
+    let directory = try identity("a")
+    let second = try key(directory, index: 2)
+    let third = try key(directory, index: 3)
+    let names = [
+      TmuxSessionName(key: third).rawValue,
+      TmuxSessionName(identity: directory).rawValue,
+      TmuxSessionName(key: second).rawValue,
+    ]
+    var layout = TerminalTabLayout()
+
+    layout.restore(from: names, identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [.primary(directory), second, third])
+  }
+
   @Test("layoutのコピーに追加しても元の値は変わらない")
   func copiesHaveIndependentState() throws {
     let directory = try identity("a")
@@ -292,5 +434,18 @@ struct TerminalTabLayoutTests {
     #expect(first.addTab(in: directory, existingSessionNames: []) == extra)
     #expect(second.addTab(in: directory, existingSessionNames: []) == extra)
     #expect(first == second)
+  }
+
+  @Test("復元は既存のタブと併合せず、読んだ列で置き換える")
+  func restoreReplacesExistingTabsWithReadIndices() throws {
+    let directory = try identity("a")
+    var layout = TerminalTabLayout()
+    _ = layout.addTab(in: directory, existingSessionNames: [])
+    _ = layout.addTab(in: directory, existingSessionNames: [])
+    let fifth = try key(directory, index: 5)
+
+    layout.restore(from: [TmuxSessionName(key: fifth).rawValue], identities: [directory])
+
+    #expect(layout.tabs(in: directory) == [fifth])
   }
 }

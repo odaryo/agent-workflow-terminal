@@ -22,8 +22,7 @@ struct AgentWorkflowTerminalApp: App {
     // 複製できる形にして壊れた状態で開けるようにはしない (Issue #238 / #372)。
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
-        // 内側の frame の最小幅は window に効かなかったため、Window 直下にだけ置く (#430 計測)。
-        // ただし Drawer を開いて値が上がっても、ドラッグの下限は 480 のまま (#477、未解決)。
+        // 内側の frame は window に効かず (#430)、ここでも下限は 480 のまま (#477、未解決)。
         .frame(minWidth: minimumWindowWidth, minHeight: 320)
         .onPreferenceChange(ProjectMinimumWindowWidthKey.self) { [width = $minimumWindowWidth] in
           width.wrappedValue = $0

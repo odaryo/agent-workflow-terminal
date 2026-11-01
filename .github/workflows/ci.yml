@@ -30,8 +30,9 @@ jobs:
   build-and-test:
     name: Build & Test (SwiftPM, unit + integration)
     runs-on: macos-15
-    # 段ごとの上限は 600 + 300 (単体) + 600 + 300 (統合) = 1800s。CI 実測 (run 34245198762) の
-    # 固定費は setup+checkout+toolchain 5s / brew 3s / build 44s、wrapper の停止処理は 17s。
+    # 段ごとの上限は 600 + 300 (単体) + 600 + 300 (統合) = 1800s。CI 実測 (run 41304065113) の
+    # 固定費は setup+checkout+toolchain 約 10s / brew 14s / build 69s、wrapper の停止処理は 17s
+    # (run 34245198762)。
     # 固定費を 420s、停止処理を 4 本分 240s まで見積もっても 2460s = 41 分で、45 分に届かない。
     # 4 本ともハングした回でも、どれも exit 124 とスタックを書き終えてから job が終わる。
     timeout-minutes: 45

@@ -76,7 +76,7 @@ swift build --triple arm64-apple-ios17.0-simulator \
   --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 ```
 
-CI の `Build (iOS Simulator)` ジョブも同じコマンドを実行し、arm64 iOS 17 simulator triple と
+CI の `Static checks & iOS build` ジョブの `Build (iOS Simulator)` 段も同じコマンドを実行し、arm64 iOS 17 simulator triple と
 iOS Simulator SDK を使って、テストターゲットを除く全ターゲットがコンパイルできることを検証します。
 テストターゲット、
 実機向け triple のコンパイル、simulator・実機での実行時動作は検証範囲外です。

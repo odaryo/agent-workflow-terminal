@@ -154,7 +154,11 @@ struct ProjectView: View {
         ProjectRootTab(selected: model.selectedIdentity == projectRoot.identity) {
           model.selectProjectRoot()
         }
-        .contextMenu { NewTaskMenuItem(isDisabled: false, action: startNewTask) }
+        .overlay {
+          ToolbarContextMenu(items: [
+            .action(title: NewTaskMenuItem.title, isEnabled: true, perform: startNewTask)
+          ])
+        }
         if !model.tabbedWorktrees.isEmpty {
           Divider().frame(height: 22).padding(.horizontal, 2)
         }
@@ -283,17 +287,22 @@ private struct WorktreeTab: View {
   @State private var representativeState: WorktreeRepresentativeState?
 
   var body: some View {
-    // 到達不能な worktree には `contextMenu` 自体を付けない。設計書 §3.2 が Active 化を
+    // 到達不能な worktree にはメニュー自体を付けない。設計書 §3.2 が Active 化を
     // 認めていない対象で、空のメニューを開かせないため。
     if worktree.detected.isReachable {
-      tab.contextMenu {
-        NewTaskMenuItem(isDisabled: isNewTaskDisabled, action: startNewTask)
-        Divider()
-        Button("Active にする") { setActivation(.active) }
-          .disabled(worktree.activation == .active)
-        // Inactive 化は Close の選択肢1からだけ行う。§3.4 の拒否 (detached HEAD・作業途中) は
-        // 選択肢1にも掛かり、直接 Inactive にする項目はその抜け道になる。
-        Button("Close…", action: requestClose)
+      tab.overlay {
+        ToolbarContextMenu(items: [
+          .action(
+            title: NewTaskMenuItem.title, isEnabled: !isNewTaskDisabled
+          ) { startNewTask() },
+          .separator,
+          .action(title: "Active にする", isEnabled: worktree.activation != .active) {
+            setActivation(.active)
+          },
+          // Inactive 化は Close の選択肢1からだけ行う。§3.4 の拒否 (detached HEAD・作業途中) は
+          // 選択肢1にも掛かり、直接 Inactive にする項目はその抜け道になる。
+          .action(title: "Close…", isEnabled: true) { requestClose() },
+        ])
       }
     } else {
       tab

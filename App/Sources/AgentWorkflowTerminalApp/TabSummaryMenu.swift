@@ -28,8 +28,9 @@ struct TabSummaryMenu: View {
       + model.tabKeys.flatMap { key -> [ToolbarContextMenu.Item] in
         let summary = summaries[key]
         let presentation: AgentStatePresentation? = summary == nil ? .unobserved("観測なし") : nil
+        let title = model.sessionTitle(key) + (summary == nil ? " (観測なし)" : "")
         let heading = entry(
-          title: model.sessionTitle(key), presentation: presentation, key: key,
+          title: title, presentation: presentation, key: key,
           indentationLevel: 0, isChecked: model.selectedTab == key)
         return [heading] + (summary?.rows.map { rowItem($0, key: key) } ?? [])
       }
@@ -38,14 +39,16 @@ struct TabSummaryMenu: View {
   private func rowItem(_ row: OverviewRow, key: TerminalSessionKey) -> ToolbarContextMenu.Item {
     switch row {
     case .pane(let pane):
-      var title = paneShortName(
+      let presentation = AgentStatePresentation(
+        state: pane.display.state, category: pane.display.category)
+      let name = paneShortName(
         paneID: pane.paneID, isMain: pane.isMain, location: pane.detail.location)
+      var title = "\(presentation.label)  \(name)"
       if let purpose = pane.detail.purpose, !purpose.isEmpty { title += "  \(purpose)" }
       if pane.detail.isTaskCompleted { title += " ✓完了" }
       return entry(
         title: title,
-        presentation: AgentStatePresentation(
-          state: pane.display.state, category: pane.display.category),
+        presentation: presentation,
         key: key, indentationLevel: 1)
     case .noAgentPane:
       return entry(title: "Agent pane なし", presentation: nil, key: key, indentationLevel: 1)
@@ -60,7 +63,7 @@ struct TabSummaryMenu: View {
       ToolbarContextMenu.Entry(
         title: title,
         symbol: presentation.map { (name: $0.symbol, color: NSColor($0.color)) },
-        accessibilityLabel: presentation.map { "\($0.label) \(title)" } ?? title,
+        accessibilityLabel: title,
         indentationLevel: indentationLevel, isChecked: isChecked,
         perform: {
           model.select(key)

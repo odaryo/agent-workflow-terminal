@@ -8,6 +8,7 @@ import TerminalCore
 struct AgentWorkflowTerminalApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var projects: ProjectsModel
+  @State private var minimumWindowWidth: CGFloat = 480
 
   init() {
     _projects = StateObject(wrappedValue: ProjectsModel(dependencies: AppDependencies.make()))
@@ -21,6 +22,11 @@ struct AgentWorkflowTerminalApp: App {
     // 複製できる形にして壊れた状態で開けるようにはしない (Issue #238 / #372)。
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
+        // 内側の frame の最小幅は window に効かなかったため、Window 直下にだけ置く (#430 計測)。
+        .frame(minWidth: minimumWindowWidth, minHeight: 320)
+        .onPreferenceChange(ProjectMinimumWindowWidthKey.self) { [width = $minimumWindowWidth] in
+          width.wrappedValue = $0
+        }
     }
     .defaultSize(width: 900, height: 560)
     .commands {
@@ -122,6 +128,7 @@ struct ProjectView: View {
         }
       }
     }
+    .modifier(ProjectWindowWidthPreference(model: model))
     .onAppear {
       var restored = ViewerArrangementPreferences.restoredLayout()
       if let content = model.viewerDrawerLayout.content { restored.open(content) }

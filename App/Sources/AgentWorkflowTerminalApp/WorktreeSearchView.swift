@@ -43,6 +43,11 @@ struct WorktreeSearchBar: View {
           }
           scopePicker
         }
+        VStack(alignment: .leading, spacing: 4) {
+          targetPicker
+          regularExpressionToggle
+          scopePicker
+        }
       }
       .frame(maxWidth: .infinity, alignment: .leading)
       .font(.caption)

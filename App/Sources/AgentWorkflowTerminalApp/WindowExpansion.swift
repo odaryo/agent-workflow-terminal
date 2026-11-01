@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
 
-struct WindowMinimumSize: NSViewRepresentable {
+// contentMinSize は SwiftUI に上書きされたため設定せず、拡幅だけを行う (#430 計測)。
+struct WindowExpansion: NSViewRepresentable {
   let size: NSSize
 
   nonisolated static func expandedWidth(
@@ -10,17 +11,17 @@ struct WindowMinimumSize: NSViewRepresentable {
     max(current, min(minimum, visible))
   }
 
-  func makeNSView(context: Context) -> MinimumSizeView {
-    MinimumSizeView(size: size)
+  func makeNSView(context: Context) -> ExpansionView {
+    ExpansionView(size: size)
   }
 
-  func updateNSView(_ view: MinimumSizeView, context: Context) {
+  func updateNSView(_ view: ExpansionView, context: Context) {
     view.minimumSize = size
     view.scheduleUpdate()
   }
 
   @MainActor
-  final class MinimumSizeView: NSView {
+  final class ExpansionView: NSView {
     var minimumSize: NSSize
 
     init(size: NSSize) {
@@ -38,17 +39,17 @@ struct WindowMinimumSize: NSViewRepresentable {
 
     func scheduleUpdate() {
       DispatchQueue.main.async { [weak self] in
-        MainActor.assumeIsolated { self?.applyMinimumSize() }
+        MainActor.assumeIsolated { self?.expandIfNeeded() }
       }
     }
 
-    private func applyMinimumSize() {
+    private func expandIfNeeded() {
       guard let window else { return }
       if let visibleFrame = window.screen?.visibleFrame {
         var frame = window.frame
         let minimumFrame = window.frameRect(
           forContentRect: NSRect(origin: .zero, size: minimumSize))
-        let width = WindowMinimumSize.expandedWidth(
+        let width = WindowExpansion.expandedWidth(
           current: frame.width, minimum: minimumFrame.width, visible: visibleFrame.width)
         if width > frame.width {
           frame.size.width = width
@@ -58,19 +59,34 @@ struct WindowMinimumSize: NSViewRepresentable {
           window.setFrame(frame, display: true)
         }
       }
-      // SwiftUI の内側の frame(minWidth:) は実測で window の縮小を止めなかった (#430)。
-      // レイアウトの最小幅に頼らず、AppKit のリサイズ制約へ直接反映する。
-      window.contentMinSize = minimumSize
     }
   }
 }
 
-struct ProjectWindowMinimumSize: View {
+struct ProjectWindowExpansion: View {
   @ObservedObject var model: AppModel
 
   var body: some View {
-    WindowMinimumSize(
+    WindowExpansion(
       size: NSSize(
         width: ViewerDrawerMetrics.minimumWindowWidth(for: model.viewerDrawerLayout), height: 320))
+  }
+}
+
+struct ProjectMinimumWindowWidthKey: PreferenceKey {
+  static let defaultValue: CGFloat = 480
+
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+    value = nextValue()
+  }
+}
+
+struct ProjectWindowWidthPreference: ViewModifier {
+  @ObservedObject var model: AppModel
+
+  func body(content: Content) -> some View {
+    content.preference(
+      key: ProjectMinimumWindowWidthKey.self,
+      value: ViewerDrawerMetrics.minimumWindowWidth(for: model.viewerDrawerLayout))
   }
 }

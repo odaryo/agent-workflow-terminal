@@ -18,9 +18,9 @@ struct ProjectsWindowContent: View {
     }
     .background {
       if let model = projects.selectedModel {
-        ProjectWindowMinimumSize(model: model)
+        ProjectWindowExpansion(model: model)
       } else {
-        WindowMinimumSize(size: NSSize(width: 480, height: 320))
+        WindowExpansion(size: NSSize(width: 480, height: 320))
       }
     }
     .toolbar {

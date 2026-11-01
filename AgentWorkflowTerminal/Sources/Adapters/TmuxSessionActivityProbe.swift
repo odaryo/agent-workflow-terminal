@@ -21,14 +21,17 @@ public struct TmuxSessionActivityProbe: Sendable {
     do {
       // pane_current_command は前面のプロセスグループの先頭名なので、スクリプトや sh -c を
       // shell だけと見誤る (tmux 3.8、#455 のレビュー)。
+      // 末尾の : が無いと、別 session の同名 window に target が解決され得る。
       let paneResult = try await tmuxRunner.run(
         arguments: [
-          "list-panes", "-s", "-t", "=\(name.rawValue)", "-F", "#{pane_pid} #{pane_dead}",
+          "list-panes", "-s", "-t", "=\(name.rawValue):", "-F", "#{pane_pid} #{pane_dead}",
         ])
       guard let panes = Self.parsePanes(paneResult.stdout) else { return .undetermined }
       // session を殺すかの判断に古い表を使わないため、生存観測用のキャッシュは共有しない。
+      // macOS の comm は argv[0] で偽れるため、ここだけ実行ファイル名の ucomm を使う。
+      // Agent 検出は argv[0] に依存し得るので、共有キャッシュ側の comm は変えない。
       let processResult = try await processRunner.run(
-        executableURL: processExecutableURL, arguments: ["-Ao", "pid=,ppid=,comm="],
+        executableURL: processExecutableURL, arguments: ["-Ao", "pid=,ppid=,ucomm="],
         environment: ["LC_ALL": "C"], timeout: .seconds(10))
       guard processResult.exitCode == 0,
         let snapshot = Self.parseProcessTable(processResult.stdout)

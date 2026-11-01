@@ -37,7 +37,7 @@ struct TmuxSessionActivityProbeTests {
   func handlesDeadPanePID(paneOutput: String, expected: TerminalSessionActivity) async throws {
     let key = try makeKey()
     let spy = ActivityProbeProcessSpy(
-      key: key, paneOutput: paneOutput, processTableOutput: "100 1 /bin/zsh\n")
+      key: key, paneOutput: paneOutput, processTableOutput: "100 1 zsh\n")
     let probe = try makeProbe(spy: spy)
 
     #expect(await probe.activity(of: key) == expected)
@@ -91,11 +91,11 @@ private actor ActivityProbeProcessSpy: ProcessRunning {
       if failure == .processTableNonzero {
         return ProcessRunResult(exitCode: 1, stdout: "", stderr: "ps failed")
       }
-      #expect(arguments == ["-Ao", "pid=,ppid=,comm="])
+      #expect(arguments == ["-Ao", "pid=,ppid=,ucomm="])
       #expect(environment["LC_ALL"] == "C")
-      let child = processReads > 1 ? "101 100 /bin/sleep\n" : ""
+      let child = processReads > 1 ? "101 100 sleep\n" : ""
       return ProcessRunResult(
-        exitCode: 0, stdout: processTableOutput ?? ("100 1 /bin/sh\n" + child), stderr: "")
+        exitCode: 0, stdout: processTableOutput ?? ("100 1 sh\n" + child), stderr: "")
     }
     if failure == .paneListLaunch {
       throw .launchFailed(executableURL: executableURL, message: "tmux unavailable")
@@ -103,9 +103,18 @@ private actor ActivityProbeProcessSpy: ProcessRunning {
     if failure == .paneListNonzero || failure == .sessionMissing {
       return ProcessRunResult(
         exitCode: 1, stdout: "",
-        stderr: failure == .sessionMissing ? "can't find session: missing\n" : "list-panes failed")
+        stderr: failure == .sessionMissing
+          ? "can't find session: \(TmuxSessionName(key: key).rawValue)\n" : "list-panes failed")
     }
     #expect(arguments.contains("list-panes"))
+    #expect(arguments.contains("-s"))
+    if let targetIndex = arguments.firstIndex(of: "-t"),
+      arguments.indices.contains(targetIndex + 1)
+    {
+      #expect(arguments[targetIndex + 1] == "=\(TmuxSessionName(key: key).rawValue):")
+    } else {
+      Issue.record("list-panes に session の target が無い")
+    }
     if let paneOutput {
       return ProcessRunResult(exitCode: 0, stdout: paneOutput, stderr: "")
     }

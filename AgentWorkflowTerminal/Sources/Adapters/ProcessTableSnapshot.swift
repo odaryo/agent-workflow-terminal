@@ -1,7 +1,7 @@
 import Foundation
 import TerminalCore
 
-/// `ps -Ao pid=,ppid=,comm=` の1行。`name` は `comm` の最後のパス要素で、空白を含み得る。
+/// `ps` の PID・PPID・comm または ucomm の1行。`name` は最後のパス要素で、空白を含み得る。
 struct ProcessTableRow: Sendable, Equatable {
   let pid: Int32
   let parentPID: Int32
@@ -23,6 +23,7 @@ struct ProcessTableSnapshot: Sendable {
   }
 
   func sessionActivity(of panes: [(pid: Int32, isDead: Bool)]) -> TerminalSessionActivity {
+    // 二重 fork で木から離れたプロセスは対象外とする (kill-session でも終了しない)。
     var activity = TerminalSessionActivity.shellOnly
     for pane in panes where !pane.isDead {
       guard let root = rowsByPID[pane.pid] else {
@@ -32,6 +33,7 @@ struct ProcessTableSnapshot: Sendable {
       let name = root.name.hasPrefix("-") ? root.name.dropFirst() : root.name[...]
       switch name {
       case "sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu":
+        // 子を持たない shell builtin の処理は §3.1 の「shell 以外」に含めず、shellOnly とする。
         // 子の名前を見て shell を除くとスクリプトを見落とすため、確認が余分に出る向きを選ぶ。
         if !(childrenByParentPID[root.pid] ?? []).isEmpty { return .running }
       default:

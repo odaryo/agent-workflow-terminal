@@ -204,6 +204,13 @@ selftest() {
   y=$(echo "$geom" | awk '{print $2 + int($4 / 2)}')
   info "行 'probe line two' を ($x, $y) でクリックします"
   app_click "$x" "$y"
+  # クリック直後の1回の探索では、AX への反映が間に合わないことがある (#430 の実測: Diff を上下に
+  # 並べたとき、直後の find は外れ、続けて取った texts には「選択中」が出ていた)。期限付きで待つ。
+  local tries=0
+  until app_find "選択中" >/dev/null 2>&1 || [ "$tries" -ge 10 ]; do
+    sleep 0.5
+    tries=$((tries + 1))
+  done
   if app_find "選択中" >/dev/null; then
     info "PASS: 行選択が効いています"
   else

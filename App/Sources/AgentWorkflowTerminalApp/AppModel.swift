@@ -118,7 +118,9 @@ final class AppModel: ObservableObject {
   }
   @Published var selectedIdentity: WorktreeIdentity?
   @Published var openedIdentities: Set<WorktreeIdentity> = []
-  @Published var viewerDrawerLayout = ViewerDrawerLayout.closed
+  @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
+    didSet { saveViewerArrangements(replacing: oldValue) }
+  }
   @Published private(set) var message: String?
   /// `message` と分ける。あちらはコンテンツ全体を `ContentUnavailableView` へ差し替えるため、
   /// 端末を出したまま伝えるべき失敗 (Active/Inactive の保存など) をあちらへ載せると、

@@ -265,7 +265,7 @@ private struct WorktreeTab: View {
     if worktree.detected.isReachable {
       tab.overlay {
         ToolbarContextMenu(items: [
-          .action(title: "新規タブ", isEnabled: true, perform: openNewTab),
+          .action(title: "新規タブ", isEnabled: true) { openNewTab() },
           .separator,
           .action(title: "Active にする", isEnabled: worktree.activation != .active) {
             setActivation(.active)

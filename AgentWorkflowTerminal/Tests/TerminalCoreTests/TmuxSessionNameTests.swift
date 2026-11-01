@@ -234,6 +234,16 @@ struct TmuxSessionNameTests {
     #expect(TmuxSessionName.indices(of: identity, in: []) == [])
   }
 
+  // 正しい名前と混ぜると、不正な名前を受け入れても結果の集合が変わらない場合がある。
+  @Test("不正な番号の名前だけなら1つも拾わない", arguments: ["-1", "-0", "-02", "-09", "-10000", "-2x", "2", "--2"])
+  func indicesRejectMalformedSuffixAlone(suffix: String) throws {
+    let identity = try #require(WorktreeIdentity(rawValue: Self.taskIdentityPath))
+    let base = TmuxSessionName(identity: identity).rawValue
+
+    #expect(TmuxSessionName.indices(of: identity, in: [base + suffix]) == [])
+    #expect(TmuxSessionName.nextIndex(of: identity, in: [base + suffix]) == 2)
+  }
+
   @Test(
     "次の番号は欠番を詰めず最大値に1を足し上限で止まる",
     arguments: [

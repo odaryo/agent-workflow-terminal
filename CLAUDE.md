@@ -164,14 +164,17 @@ compact された。費用の 67% はこのコンテキストを毎回読み直�
 
 **When to skip the pipeline**: docs, config, and few-line mechanical changes — the spec+review overhead exceeds the value; the Director or a single subagent handles them directly. Anything that parses external output, touches state models, or crosses a module boundary goes through the full loop. **UI wiring in `App/` is reviewed by running it, not by the reviewer**: the layer is not unit-testable and measurement-based adversarial review has little to measure there, so the `ui-verifier` runs a manual-run check, the Director attaches its result (screenshot in the PR), and only the `TerminalCore` / `Adapters` side of the change goes to the reviewer. **Drive that run with `scripts/verify-app-ui.sh`** (`build` / `launch` / `find` / `click-text` / `expect`, and `selftest` to check the harness itself) — it launches the bundle `scripts/build-app.sh` produced, locates elements through Accessibility instead of guessed coordinates, and closes the two traps that made Issue #230 a false alarm: a click on a non-active window is eaten by activation, and System Events clicks never fire SwiftUI's `onTapGesture` even though they do actuate Buttons.
 
-**macOS 27 (Darwin 27.0) ではハーネスの要素探索が動かない (#414、未解決)。** `selftest` は自前のプローブで
-失敗し、`texts` は空、`find` / `expect` は exit 1 になる。直るまでは、ハーネスからは `build` / `launch` /
-`click <x> <y>` / `type` / `quit` だけを使い、要素の探索と読み取りは osascript (System Events) で AX を直接
-当てる。座標は AX から読んだ位置を使う。**SwiftUI の `accessibilityLabel` は `AXAttributedDescription` にしか
-出ない** — System Events の `title of` は `missing value`、`description of` は役割名 (`button`) を返すので、
-ラベルの有無は `AXUIElementCopyAttributeValue` で属性を直接読んで判定する (#407 の確認、2026-10-31)。
-sheet の button の文言は `description` に入っている。タブの選択状態は、タブを切り取ったスクリーンショットの
-塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
+**ハーネスの探索は AX の4種の文言を見る (#414、2026-11-01)。** `find` / `click-text` / `expect` / `texts` は
+`scripts/ui-ax.swift` で AX の木を辿り、AXTitle / AXValue / AXDescription / AXAttributedDescription のどれかに一致する
+要素を探す (`--exact` / `--role` で絞れる。AXPress は `swift scripts/ui-ax.swift AgentWorkflowTerminalApp press ...`)。
+**SwiftUI の `accessibilityLabel` は `AXAttributedDescription` にしか出ない** — System Events の `title of` は
+`missing value`、`description of` は役割名 (`button`) を返すので、osascript では読めない (#407)。以前この段にあった
+「macOS 27 ではハーネスの要素探索が動かない」は誤りだった。原因は、UI の変更で selftest が**順番で**押していた
+button がずれ、「開く」のつもりで「閉じる」を押していたことである (計測は #414)。要素は順番ではなく文言と role で指す。
+**実 HID のクリックは、`AXFrontmost` が true でも、画面上でアプリを覆っている別のアプリ (ユーザーの端末) へ届きうる**
+(#414 の確認で起きかけた)。`ui-click.swift` はクリックの直前にその座標の要素の pid を確かめ、違えばクリックしない。
+UI 確認は、アプリのウィンドウが画面上で見えていて、ユーザーの PC 操作とぶつからない時間に回す。
+タブの選択状態は、タブを切り取ったスクリーンショットの塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
 
 **UI 層を計測するときの作法** (#278 の実測による)。
 

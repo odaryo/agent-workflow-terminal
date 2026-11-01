@@ -17,11 +17,25 @@ defaults:
   run:
     shell: bash
 
+# macOS runner の同時実行数はアカウント全体で 5 で、並行する PR と main の push がそれを取り合う。
+# ジョブを 8 つに分けていた頃は、run が1本でも 3 ジョブが空き待ちになり、重なった回は最初の
+# ジョブが始まるまでに 84 秒待った (実測 2026-11-01、Issue #472)。ジョブを増やすと待ちが
+# そのまま総時間に乗るので、検査を足すときは既存のジョブへ段として足す。
+#
+# 空き待ちが起きたときに一番長いジョブが後回しにならないよう、クリティカルパスの
+# build-and-test を先頭に置く。
 jobs:
+  # 単体テストと、実 tmux / git / ripgrep を起動する統合テスト。同じパッケージを2つのジョブで
+  # ビルドしていた (各 77〜96 秒) のを1回にまとめている。
   build-and-test:
-    name: Build & Test (SwiftPM)
+    name: Build & Test (SwiftPM, unit + integration)
     runs-on: macos-15
-    timeout-minutes: 20
+    # 段ごとの上限は 600 + 300 (単体) + 600 + 300 (統合) = 1800s。CI 実測 (run 41304065113) の
+    # 固定費は setup+checkout+toolchain 約 10s / brew 14s / build 69s、wrapper の停止処理は 17s
+    # (run 34245198762)。
+    # 固定費を 420s、停止処理を 4 本分 240s まで見積もっても 2460s = 41 分で、45 分に届かない。
+    # 4 本ともハングした回でも、どれも exit 124 とスタックを書き終えてから job が終わる。
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: AgentWorkflowTerminal
@@ -34,6 +48,7 @@ jobs:
           swift --version
 
       - name: Build
+        id: build
         run: swift build --build-tests
 
       # 経過時間とプロセス全体の CPU を測る AdaptersSerialTimingTests は、同一プロセス内で
@@ -42,6 +57,9 @@ jobs:
       # run-swift-test.sh を挟むのは、job の timeout-minutes ではハングを cancel でしか
       # 止められず、ログも成果物も残らないため (実測: run 34231972322 は 19 分無言のまま
       # cancel され、どのテストで止まったか特定できなかった)。
+      #
+      # 単体テストは tmux / ripgrep を導入する前に走らせる。統合テスト用のフラグ無しで実 CLI に
+      # 触れてしまうテストを、CLI の無い環境で落とすため (ジョブを分けていた頃と同じ前提)。
       - name: Test
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
@@ -49,73 +67,42 @@ jobs:
             --timeout 600 \
             -- swift test --skip AdaptersSerialTimingTests
 
+      # 以降の段は、前の段が落ちても build が通っていれば走らせる。ジョブを分けていた頃は
+      # 単体テストの失敗と統合テストの結果を別々に得られており、それを失わないため。
       - name: Test (serial, timing sensitive)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/build-and-test-serial.log" \
             --timeout 300 \
             -- swift test --no-parallel --filter AdaptersSerialTimingTests
 
-      # 成否にかかわらず保存する。条件付きにすると、書き間違えたときに一番必要な回のログが
-      # 消える (762 件中 1 件だけ落ちた回を 2 度取り逃している: Issue #272)。
-      - name: Upload test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: test-logs-build-and-test
-          path: ${{ runner.temp }}/test-logs/
-          # ビルド段階で落ちるとログが1件も無い。ここで二重に失敗させても情報は増えない。
-          if-no-files-found: warn
-
-  # 実 tmux / git / ripgrep を起動する統合テスト。既定の swift test では `.enabled(if:)` で
-  # 無効になっており、この job だけが AWT_*_INTEGRATION を渡す。tmux と ripgrep は runner
-  # イメージに無い (実測 2026-09-08: macos-15-arm64 の README にどちらも記載が無い) ため
-  # 導入に数分かかる。既存の Build & Test を遅くしないよう別 job にし、PR ごとに必ず走らせる。
-  integration-test:
-    name: Integration Test (real CLIs)
-    runs-on: macos-15
-    timeout-minutes: 30
-    defaults:
-      run:
-        working-directory: AgentWorkflowTerminal
-    env:
-      AWT_TMUX_INTEGRATION: "1"
-      AWT_GIT_INTEGRATION: "1"
-      AWT_RIPGREP_INTEGRATION: "1"
-      # 12 suite / 99 テスト分を1回で走らせるための filter。skip を静かに見逃さないよう、
-      # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
-      AWT_INTEGRATION_FILTER: >-
-        TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          swift --version
-
+      # tmux と ripgrep は runner イメージに無い (実測 2026-09-08: macos-15-arm64 の README に
+      # どちらも記載が無い)。導入は 13〜19 秒 (実測 2026-11-01)。
       - name: Install tmux and ripgrep
+        id: install-clis
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: brew install tmux ripgrep
 
       # 版数は固定せず runner の既定を使い、ログに残す。サポート下限版数が未決 (Issue #16) の
-      # 段階で pin すると、外界のドリフトを検出するというこの job の目的自体が消える。
+      # 段階で pin すると、外界のドリフトを検出するというこの段の目的自体が消える。
       - name: Show external CLI versions
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
         run: |
           tmux -V
           git --version
           rg --version
 
-      - name: Build
-        run: swift build --build-tests
-
-      # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは既存 job と
+      # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは単体テストと
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
-      # 上限 600s + 次ステップの 300s = 900s。CI 実測 (run 34245198762) の固定費は
-      # setup+checkout+toolchain 5s / brew 3s / build 44s、wrapper の停止処理は 17s。
-      # 固定費を 420s、停止処理を 2 本分 120s まで見積もっても 1440s = 24 分で、
-      # job の timeout-minutes: 30 に届かない。2 本ともハングした回でも、両方が
-      # exit 124 とスタックを書き終えてから job が終わる。
+      # 統合テストは既定の swift test では `.enabled(if:)` で無効になっており、フラグはこの段と
+      # 次の段にだけ渡す。
       - name: Test (integration enabled)
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        env:
+          AWT_TMUX_INTEGRATION: "1"
+          AWT_GIT_INTEGRATION: "1"
+          AWT_RIPGREP_INTEGRATION: "1"
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-full.log" \
@@ -124,7 +111,17 @@ jobs:
 
       # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
       # これらの suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
+      # filter は 12 suite / 99 テスト分を1回で走らせるためのもの。skip を静かに見逃さないよう、
+      # 実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       - name: Test (integration suites only)
+        id: integration-only
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        env:
+          AWT_TMUX_INTEGRATION: "1"
+          AWT_GIT_INTEGRATION: "1"
+          AWT_RIPGREP_INTEGRATION: "1"
+          AWT_INTEGRATION_FILTER: >-
+            TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
@@ -132,6 +129,7 @@ jobs:
             -- swift test --filter "$AWT_INTEGRATION_FILTER"
 
       - name: Verify integration suites actually ran
+        if: ${{ !cancelled() && steps.integration-only.outcome != 'skipped' }}
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
@@ -145,34 +143,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: "$GITHUB_WORKSPACE/scripts/check-integration-leftovers.sh"
 
+      # 成否にかかわらず保存する。条件付きにすると、書き間違えたときに一番必要な回のログが
+      # 消える (762 件中 1 件だけ落ちた回を 2 度取り逃している: Issue #272)。
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-integration
+          name: test-logs-build-and-test
           path: ${{ runner.temp }}/test-logs/
+          # ビルド段階で落ちるとログが1件も無い。ここで二重に失敗させても情報は増えない。
           if-no-files-found: warn
-
-  build-ios:
-    name: Build (iOS Simulator)
-    runs-on: macos-15
-    timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: AgentWorkflowTerminal
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          swift --version
-
-      - name: Build
-        run: |
-          swift build \
-            --triple arm64-apple-ios17.0-simulator \
-            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
   build-app:
     name: Build (macOS App)
@@ -203,84 +183,30 @@ jobs:
         working-directory: App
         run: swift test
 
-  # session 名が正しいかは 2 段に分かれる。**規則** (安定 ID → 名前) が Swift の TmuxSessionName と
-  # 一致することと、**規則へ渡す安定 ID の取り方** (worktree → 管理ディレクトリ) が git と一致する
-  # こと。どちらがずれても wf-worktree-remove.sh は残骸を見落とすか別の session を指す (Issue #343)。
-  # 前者は静的な一覧で、後者は実際に組み立てた git リポジトリ群で検査する。
-  #
-  # Build & Test から分けているのは、落ちたときに「どちらの実装が壊れたか」ではなく
-  # 「両者がずれた」ことだけを示す job にしたいため。TerminalCore しかビルドしない。
-  session-name-parity:
-    name: Session name parity (bash vs Swift/git)
+  # 互いに独立した短い検査をまとめたジョブ。各段は `!cancelled()` で走らせ、1つが落ちても
+  # 残りの段の結果を得る (ジョブを分けていた頃と同じく、全部の結果を1回の run で見るため)。
+  # どれかの段が落ちればジョブは失敗する。
+  checks:
+    name: Static checks & iOS build
     runs-on: macos-15
-    timeout-minutes: 15
+    # SwiftLint / shellcheck が runner イメージから外れると brew で導入するため (数分)、
+    # 段の合計 (実測 2 分前後) より大きく取る。
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
       - name: Show toolchain
         run: |
+          xcodebuild -version
           swift --version
           python3 --version
           git --version
-
-      - name: Cross-check the naming rule
-        run: scripts/check-session-name-parity.sh
-
-      - name: Cross-check the stable ID (worktree admin dir)
-        run: scripts/check-worktree-admin-dir.sh
-
-  # PreToolUse (Bash) フックの判定本体を fixture で検査する。フックは Claude Code の設定から
-  # 呼ばれるだけでリポジトリのビルドには関与しないため、壊れても他の job は緑のまま通る
-  # (Issue #314)。
-  #
-  # runner は他の job と同じ macOS にする。フックが実運用で動くのは開発者の macOS なので、
-  # 同じ python3 / bash で fixture を回さないと、環境差が CI をすり抜ける。
-  shell-guard:
-    name: Shell guard (tmux kill)
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      # shellcheck はランナーイメージに同梱されていればそれを使い、外れた場合だけ導入する
-      # (SwiftLint の job と同じ方針)。
-      - name: Install shellcheck if missing
-        run: |
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            brew install shellcheck
-          fi
-
-      - name: Show tool versions
-        run: |
           bash --version | head -1
-          python3 --version
-          shellcheck --version | sed -n '2p'
-
-      # SC1091 は lib.sh を source する既存スクリプトが一律に出す info で、
-      # 静的解析からは追跡できないパスを指す (各スクリプト先頭の注釈のとおり)。
-      - name: ShellCheck
-        run: shellcheck -e SC1091 scripts/*.sh
-
-      # 判定本体に構文エラーがあると python3 自身が exit 1 を返し、フックは block しない
-      # (= 素通り) 側へ落ちる。コンパイルだけは必ず通っていることを別段で確かめる。
-      - name: Compile the guard
-        run: |
-          python3 -m py_compile scripts/guard_bash_tmux.py
-          python3 -m py_compile scripts/tests/tmux-kill-guard/make-perf-command.py
-
-      - name: Guard fixtures
-        run: scripts/check-tmux-kill-guard.sh
-
-  format:
-    name: swift-format
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
 
       # swift-format は Swift 6 toolchain 同梱のため追加インストール不要
       # (docs/coding-guidelines.md §7)。
-      - name: Lint formatting
+      - name: swift-format
+        if: ${{ !cancelled() }}
         run: |
           swift format lint \
             --configuration .swift-format \
@@ -292,18 +218,70 @@ jobs:
             App/Tests \
             App/Package.swift
 
-  # SwiftLint はランナーイメージに同梱されていればそれを使い、
-  # 同梱が外れた場合だけ brew で導入する (数分かかる)。
-  lint:
-    name: SwiftLint
-    runs-on: macos-15
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Lint
+      # SwiftLint はランナーイメージに同梱されていればそれを使い、
+      # 同梱が外れた場合だけ brew で導入する (数分かかる)。
+      - name: SwiftLint
+        if: ${{ !cancelled() }}
         run: |
           if ! command -v swiftlint >/dev/null 2>&1; then
             brew install swiftlint
           fi
           swiftlint lint --config .swiftlint.yml --strict
+
+      # 以下の shell guard の段は、PreToolUse (Bash) フックの判定本体を fixture で検査する。
+      # フックは Claude Code の設定から呼ばれるだけでリポジトリのビルドには関与しないため、
+      # 壊れても他の段は緑のまま通る (Issue #314)。
+      #
+      # runner は macOS にする。フックが実運用で動くのは開発者の macOS なので、
+      # 同じ python3 / bash で fixture を回さないと、環境差が CI をすり抜ける。
+      #
+      # shellcheck はランナーイメージに同梱されていればそれを使い、外れた場合だけ導入する
+      # (SwiftLint の段と同じ方針)。
+      - name: Install shellcheck if missing
+        if: ${{ !cancelled() }}
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            brew install shellcheck
+          fi
+          shellcheck --version | sed -n '2p'
+
+      # SC1091 は lib.sh を source する既存スクリプトが一律に出す info で、
+      # 静的解析からは追跡できないパスを指す (各スクリプト先頭の注釈のとおり)。
+      - name: ShellCheck
+        if: ${{ !cancelled() }}
+        run: shellcheck -e SC1091 scripts/*.sh
+
+      # 判定本体に構文エラーがあると python3 自身が exit 1 を返し、フックは block しない
+      # (= 素通り) 側へ落ちる。コンパイルだけは必ず通っていることを別段で確かめる。
+      - name: Shell guard - compile
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m py_compile scripts/guard_bash_tmux.py
+          python3 -m py_compile scripts/tests/tmux-kill-guard/make-perf-command.py
+
+      - name: Shell guard - fixtures
+        if: ${{ !cancelled() }}
+        run: scripts/check-tmux-kill-guard.sh
+
+      # session 名が正しいかは 2 段に分かれる。**規則** (安定 ID → 名前) が Swift の TmuxSessionName と
+      # 一致することと、**規則へ渡す安定 ID の取り方** (worktree → 管理ディレクトリ) が git と一致する
+      # こと。どちらがずれても wf-worktree-remove.sh は残骸を見落とすか別の session を指す (Issue #343)。
+      # 前者は静的な一覧で、後者は実際に組み立てた git リポジトリ群で検査する。
+      #
+      # Build & Test に入れないのは、落ちたときに「どちらの実装が壊れたか」ではなく
+      # 「両者がずれた」ことだけを示す段にしたいため。TerminalCore しかビルドしない。
+      - name: Session name parity - naming rule (bash vs Swift)
+        if: ${{ !cancelled() }}
+        run: scripts/check-session-name-parity.sh
+
+      - name: Session name parity - stable ID (worktree admin dir)
+        if: ${{ !cancelled() }}
+        run: scripts/check-worktree-admin-dir.sh
+
+      - name: Build (iOS Simulator)
+        if: ${{ !cancelled() }}
+        working-directory: AgentWorkflowTerminal
+        run: |
+          swift build \
+            --triple arm64-apple-ios17.0-simulator \
+            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"

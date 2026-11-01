@@ -196,7 +196,6 @@ public struct WorktreeCloseOutcome: Sendable, Equatable {
 public struct WorktreeCloseExecutor: Sendable {
   private let identity: WorktreeIdentity
   private let worktreePath: String
-  private let session: TmuxSessionName
   private let sessionOperations: TmuxSessionOperations
   private let runner: GitCloseWriteRunner
   /// `worktree remove` の失敗後に登録を読み直すためだけに持つ。`GitCloseWriteRunner` と別なのは、
@@ -277,7 +276,6 @@ public struct WorktreeCloseExecutor: Sendable {
     self.worktreePath = worktree.worktreePath
     self.unforcedRemoval = unforcedRemoval
     self.forcedRemoval = forcedRemoval
-    self.session = TmuxSessionName(identity: worktree.identity)
     self.sessionOperations = sessionOperations
     do {
       self.runner = try GitCloseWriteRunner(
@@ -428,11 +426,20 @@ public struct WorktreeCloseExecutor: Sendable {
   ///
   /// これ以外は畳まない。通信できない server も分類できない失敗も「session が無い」証拠には
   /// ならず、agent プロセスが動いたまま worktree を消しにいくことになるためである。
+  /// 一覧取得の失敗も同じ理由で停止する。§3.4 の Close は接尾辞付きもすべて終了する。
+  /// 番号1は一覧取得直後に作られる場合もあるため、一覧に無くても従来どおり終了を試みる。
   private func terminateSession(_ step: WorktreeCloseStep) async -> WorktreeCloseStepFailure? {
     do {
-      try await sessionOperations.kill(session: session)
-      return nil
-    } catch .sessionNotFound, .serverNotRunning {
+      let names = try await sessionOperations.list()
+      let indices = Set(TmuxSessionName.indices(of: identity, in: names)).union([1]).sorted()
+      for index in indices {
+        guard let key = TerminalSessionKey(identity: identity, index: index) else { continue }
+        do {
+          try await sessionOperations.kill(session: TmuxSessionName(key: key))
+        } catch .sessionNotFound, .serverNotRunning {
+          continue
+        }
+      }
       return nil
     } catch {
       return WorktreeCloseStepFailure(step: step, reason: .tmux(error))

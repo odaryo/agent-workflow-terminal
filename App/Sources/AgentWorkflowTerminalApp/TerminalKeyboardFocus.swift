@@ -51,19 +51,15 @@ final class TerminalKeyboardFocus: ObservableObject {
     }
   }
 
-  /// - Note: Drawer が全画面のときは端末が画面に出ていない。取り返すと見えない端末へ
-  ///   打鍵が入るので、そのときだけ要求しない。
-  func tabSelectionChanged(drawerLayout: ViewerDrawerLayout) {
-    guard drawerLayout.presentation != .fullscreen else { return }
+  func tabSelectionChanged() {
     requestFocus()
   }
 
   /// Drawer の遷移のうち、キーボードの行き先が消えるものだけを拾う。開く・内容を置き換える・
-  /// 表示方法を変えるといった遷移で常に取り返すと、Drawer 内で入力中のフォーカスを奪う。
+  /// 並びを変えるといった遷移で常に取り返すと、Drawer 内で入力中のフォーカスを奪う。
   func drawerLayoutChanged(from old: ViewerDrawerLayout, to new: ViewerDrawerLayout) {
     let closed = old.isOpen && !new.isOpen
-    let terminalReappeared = old.presentation == .fullscreen && new.presentation != .fullscreen
-    guard closed || terminalReappeared else { return }
+    guard closed else { return }
     requestFocus()
   }
 }

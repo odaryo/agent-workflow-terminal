@@ -7,6 +7,7 @@ import Foundation
 ///   同じ安定 ID から常に同じ名前が出ることが、再起動後の Resume (§3.3) の前提であるため。
 ///   ユーザー自身の session と名前空間を共有する (§4.1) 中での衝突回避は、この規則
 ///   そのものが担う。
+///   番号の接尾辞はタブを区別する導出の一部 (§3.5) であり、衝突回避のための連番ではない。
 /// - Important: 生成名に `.` と `:` は現れない。tmux 3.4 の実測では session 名の `.` と `:` は
 ///   どちらも `_` へ置換されて格納されるため `a.b` と `a:b` が同一名へ衝突し、さらに
 ///   `has-session -t "=a.b"` は `.` を window 指定と解釈するため完全一致でも引けない。
@@ -21,7 +22,41 @@ public struct TmuxSessionName: Sendable, Hashable {
   public let rawValue: String
 
   public init(identity: WorktreeIdentity) {
-    self.rawValue = "awt-\(Self.slug(for: identity))-\(Self.hash8(of: identity))"
+    self.init(key: .primary(identity))
+  }
+
+  public init(key: TerminalSessionKey) {
+    let base = "awt-\(Self.slug(for: key.identity))-\(Self.hash8(of: key.identity))"
+    self.rawValue = key.index == 1 ? base : "\(base)-\(key.index)"
+  }
+
+  public static func indices(of identity: WorktreeIdentity, in sessionNames: [String]) -> [Int] {
+    let base = Array(Self(identity: identity).rawValue.utf8)
+    var indices: Set<Int> = []
+    for name in sessionNames {
+      // 正準等価で別の名前を拾わないよう、任意の外部入力とは UTF-8 バイト列で比べる。
+      let bytes = name.utf8
+      guard bytes.starts(with: base) else { continue }
+      let suffix = bytes.dropFirst(base.count)
+      if suffix.isEmpty {
+        indices.insert(1)
+        continue
+      }
+      guard suffix.first == UInt8(ascii: "-") else { continue }
+      let digits = suffix.dropFirst()
+      guard (1...4).contains(digits.count), digits.first != UInt8(ascii: "0"),
+        digits.allSatisfy({ (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) })
+      else { continue }
+      let index = digits.reduce(0) { $0 * 10 + Int($1 - UInt8(ascii: "0")) }
+      guard index >= 2 else { continue }
+      indices.insert(index)
+    }
+    return indices.sorted()
+  }
+
+  public static func nextIndex(of identity: WorktreeIdentity, in sessionNames: [String]) -> Int? {
+    let maximum = indices(of: identity, in: sessionNames).last ?? 1
+    return maximum < 9999 ? maximum + 1 : nil
   }
 
   /// 識別は hash が担い、slug は人が `list-sessions` を読むためだけのものなので、

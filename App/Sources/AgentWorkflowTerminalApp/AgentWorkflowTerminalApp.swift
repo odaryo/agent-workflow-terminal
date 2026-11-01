@@ -8,6 +8,7 @@ import TerminalCore
 struct AgentWorkflowTerminalApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
   @StateObject private var projects: ProjectsModel
+  @State private var minimumWindowWidth: CGFloat = 480
 
   init() {
     _projects = StateObject(wrappedValue: ProjectsModel(dependencies: AppDependencies.make()))
@@ -22,7 +23,11 @@ struct AgentWorkflowTerminalApp: App {
     Window("Agent Workflow Terminal", id: "main") {
       ProjectsWindowContent(projects: projects)
         .modifier(HiddenWindowTitle())
-        .frame(minWidth: 480, minHeight: 320)
+        // 内側の frame は window に効かず (#430)、ここでも下限は 480 のまま (#477、未解決)。
+        .frame(minWidth: minimumWindowWidth, minHeight: 320)
+        .onPreferenceChange(ProjectMinimumWindowWidthKey.self) { [width = $minimumWindowWidth] in
+          width.wrappedValue = $0
+        }
     }
     .defaultSize(width: 900, height: 560)
     .commands {
@@ -105,11 +110,17 @@ struct ProjectView: View {
         }
       }
     }
+    .modifier(ProjectWindowWidthPreference(model: model))
+    .onAppear {
+      var restored = ViewerArrangementPreferences.restoredLayout()
+      if let content = model.viewerDrawerLayout.content { restored.open(content) }
+      model.viewerDrawerLayout = restored
+    }
     .onReceive(model.paneObservations.$terminalFocusRequest.dropFirst()) { _ in
       keyboardFocus.requestFocus()
     }
     .onChange(of: model.selectedIdentity) { _, _ in
-      keyboardFocus.tabSelectionChanged(drawerLayout: model.viewerDrawerLayout)
+      keyboardFocus.tabSelectionChanged()
     }
     .onChange(of: model.viewerDrawerLayout) { old, new in
       keyboardFocus.drawerLayoutChanged(from: old, to: new)
@@ -157,44 +168,6 @@ struct ProjectView: View {
       }
     }
     .padding(6)
-  }
-}
-
-private struct ViewerDrawerToolbar: View {
-  @Binding var layout: ViewerDrawerLayout
-
-  var body: some View {
-    HStack(spacing: 4) {
-      Menu("Viewer", systemImage: "sidebar.right") {
-        ForEach(ViewerContent.allCases, id: \.self) { content in
-          Button(content.toolbarTitle) { layout.open(content) }
-        }
-      }
-      .menuStyle(.borderlessButton)
-
-      if layout.isOpen {
-        Menu("表示方法", systemImage: "rectangle.on.rectangle") {
-          Button("並べて表示") { layout.setPresentation(.inline) }
-          Button("オーバーレイ") { layout.setPresentation(.overlay) }
-          Button("フルスクリーン") { layout.setPresentation(.fullscreen) }
-        }
-        .menuStyle(.borderlessButton)
-
-        Button("Viewer を閉じる", systemImage: "xmark") { layout.close() }
-          .labelStyle(.iconOnly)
-          .buttonStyle(.borderless)
-      }
-    }
-  }
-}
-
-private extension ViewerContent {
-  var toolbarTitle: String {
-    switch self {
-    case .code: "Code"
-    case .diff: "Diff"
-    case .evidence: "Evidence"
-    }
   }
 }
 

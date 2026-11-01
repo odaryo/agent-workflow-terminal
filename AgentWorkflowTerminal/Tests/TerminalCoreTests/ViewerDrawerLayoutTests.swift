@@ -3,19 +3,21 @@ import Testing
 
 @Suite("Viewer Drawer のレイアウト (設計書 §6.1)")
 struct ViewerDrawerLayoutTests {
-  @Test("既定値は閉じている")
+  @Test("既定値は閉じていて Code は左右、Diff は上下、Evidence は並びなし")
   func defaultIsClosed() {
     let layout = ViewerDrawerLayout()
     #expect(layout == .closed)
     #expect(!layout.isOpen)
     #expect(layout.content == nil)
-    #expect(layout.presentation == nil)
+    #expect(layout.arrangements == .defaults)
+    #expect(layout.arrangement(for: .code) == .sideBySide)
+    #expect(layout.arrangement(for: .diff) == .stacked)
+    #expect(layout.arrangement(for: .evidence) == nil)
   }
 
   @Test("開いて閉じると閉状態へ戻る", arguments: ViewerContent.allCases)
   func opensAndCloses(content: ViewerContent) {
     var layout = ViewerDrawerLayout()
-
     layout.open(content)
     #expect(layout.isOpen)
     #expect(layout.content == content)
@@ -24,139 +26,107 @@ struct ViewerDrawerLayoutTests {
     #expect(layout == .closed)
     #expect(!layout.isOpen)
     #expect(layout.content == nil)
-    #expect(layout.presentation == nil)
   }
 
-  @Test("別の内容を開くと置換され表示方法は保たれる", arguments: ViewerDrawerPresentation.allCases)
-  func replacesContentKeepingPresentation(presentation: ViewerDrawerPresentation) {
+  @Test(
+    "別の内容を開くと置き換わる",
+    arguments: ViewerContent.allCases, ViewerContent.allCases)
+  func replacesContent(original: ViewerContent, replacement: ViewerContent) {
     var layout = ViewerDrawerLayout()
-    layout.open(.code)
-    layout.setPresentation(presentation)
-
-    layout.open(.diff)
-    #expect(layout.content == .diff)
-    #expect(layout.presentation == presentation)
+    layout.open(original)
+    layout.open(replacement)
     #expect(layout.isOpen)
-
-    layout.open(.evidence)
-    #expect(layout.content == .evidence)
-    #expect(layout.presentation == presentation)
+    #expect(layout.content == replacement)
   }
 
-  @Test("同じ内容を開く要求は何もしない", arguments: ViewerDrawerPresentation.allCases)
-  func ignoresDuplicateContent(presentation: ViewerDrawerPresentation) {
-    var layout = ViewerDrawerLayout()
-    layout.open(.code)
-    layout.setPresentation(presentation)
+  @Test("同じ内容を開く要求は並びを含め何も変えない", arguments: ViewerContent.allCases)
+  func ignoresDuplicateContent(content: ViewerContent) {
+    var layout = ViewerDrawerLayout(arrangements: .init(code: .stacked, diff: .sideBySide))
+    layout.open(content)
     let original = layout
-
-    layout.open(.code)
-
+    layout.open(content)
     #expect(layout == original)
   }
 
-  @Test("表示方法は開状態だけで変更できる", arguments: ViewerDrawerPresentation.allCases)
-  func changesPresentationOnlyWhileOpen(presentation: ViewerDrawerPresentation) {
+  @Test("変更した並びは閉じて開いても保たれる", arguments: ViewerContent.allCases)
+  func retainsArrangementsAfterClosing(content: ViewerContent) {
     var layout = ViewerDrawerLayout()
-    layout.setPresentation(presentation)
-    #expect(layout == .closed)
-
-    layout.open(.code)
-    layout.setPresentation(presentation)
-    #expect(layout.presentation == presentation)
-    #expect(layout.content == .code)
-  }
-
-  @Test("初回は inline で開く")
-  func initiallyOpensInline() {
-    var layout = ViewerDrawerLayout()
-
-    layout.open(.code)
-
-    #expect(layout.presentation == .inline)
-  }
-
-  @Test("overlay で閉じると次回も overlay で開く")
-  func retainsOverlayAfterClosing() {
-    var layout = ViewerDrawerLayout()
-    layout.open(.code)
-    layout.setPresentation(.overlay)
+    layout.open(content)
+    layout.setArrangement(.stacked, for: .code)
+    layout.setArrangement(.sideBySide, for: .diff)
+    let saved = ViewerContentArrangements(code: .stacked, diff: .sideBySide)
 
     layout.close()
     #expect(!layout.isOpen)
     #expect(layout.content == nil)
-    #expect(layout.presentation == nil)
-    #expect(layout != .closed)
-    layout.open(.diff)
-
-    #expect(layout.content == .diff)
-    #expect(layout.presentation == .overlay)
+    #expect(layout.arrangements == saved)
+    layout.open(content)
+    #expect(layout.isOpen)
+    #expect(layout.content == content)
+    #expect(layout.arrangements == saved)
+    #expect(layout.arrangement(for: .code) == .stacked)
+    #expect(layout.arrangement(for: .diff) == .sideBySide)
   }
 
-  @Test("閉状態での操作は overlay 履歴を含め何も変えない", arguments: [false, true])
-  func ignoresOperationsWhileClosed(retainsOverlay: Bool) {
+  @Test("Code と Diff の並びは独立し、内容を切り替えても保たれる")
+  func retainsIndependentArrangementsAcrossContentChanges() {
     var layout = ViewerDrawerLayout()
-    if retainsOverlay {
-      layout.open(.code)
-      layout.setPresentation(.overlay)
-      layout.close()
-    }
-    let original = layout
+    layout.open(.code)
+    layout.setArrangement(.stacked, for: .code)
+    #expect(layout.arrangement(for: .code) == .stacked)
+    #expect(layout.arrangement(for: .diff) == .stacked)
+    #expect(layout.content == .code)
 
-    layout.close()
-    layout.setPresentation(.fullscreen)
+    layout.open(.diff)
+    layout.setArrangement(.sideBySide, for: .diff)
+    #expect(layout.arrangement(for: .code) == .stacked)
+    #expect(layout.arrangement(for: .diff) == .sideBySide)
+    #expect(layout.content == .diff)
 
-    #expect(layout == original)
-    layout.open(.evidence)
-    #expect(layout.presentation == (retainsOverlay ? .overlay : .inline))
+    layout.open(.code)
+    #expect(layout.isOpen)
+    #expect(layout.content == .code)
+    #expect(layout.arrangement(for: .code) == .stacked)
+    #expect(layout.arrangement(for: .diff) == .sideBySide)
+    #expect(layout.arrangements == .init(code: .stacked, diff: .sideBySide))
   }
 
   @Test(
-    "fullscreen・inline で閉じると次回は inline で開く",
-    arguments: [
-      ViewerDrawerPresentation.fullscreen, .inline,
-    ])
-  func reopensInline(presentation: ViewerDrawerPresentation) {
-    var layout = ViewerDrawerLayout()
-    layout.open(.code)
-    layout.setPresentation(presentation)
-
-    layout.close()
-    layout.open(.diff)
-
-    #expect(layout.presentation == .inline)
+    "Evidence の並び変更は開閉状態に関わらず何も変えない",
+    arguments: [nil, ViewerContent.code, .diff, .evidence],
+    ViewerContentArrangement.allCases)
+  func ignoresEvidenceArrangement(content: ViewerContent?, arrangement: ViewerContentArrangement) {
+    var layout = ViewerDrawerLayout(arrangements: .init(code: .stacked, diff: .sideBySide))
+    if let content { layout.open(content) }
+    let original = layout
+    layout.setArrangement(arrangement, for: .evidence)
+    #expect(layout == original)
+    #expect(layout.arrangement(for: .evidence) == nil)
   }
 
-  @Test("overlay 保持後に inline で閉じると次回は inline で開く")
-  func resetsRetainedOverlayAfterClosingInline() {
+  @Test("閉じている間にも Code と Diff の並びを変更できる")
+  func changesArrangementsWhileClosed() {
     var layout = ViewerDrawerLayout()
-    layout.open(.code)
-    layout.setPresentation(.overlay)
-    layout.close()
-    layout.open(.code)
-    layout.setPresentation(.inline)
-
-    layout.close()
-    layout.open(.diff)
-
-    #expect(layout.presentation == .inline)
+    layout.setArrangement(.stacked, for: .code)
+    layout.setArrangement(.sideBySide, for: .diff)
+    #expect(!layout.isOpen)
+    #expect(layout.content == nil)
+    #expect(layout.arrangements == .init(code: .stacked, diff: .sideBySide))
+    #expect(layout.arrangement(for: .code) == .stacked)
+    #expect(layout.arrangement(for: .diff) == .sideBySide)
   }
 
-  @Test("開状態では閉状態の overlay 保持履歴を等価性に含めない", arguments: ViewerDrawerPresentation.allCases)
-  func ignoresRetainedOverlayHistoryWhileOpen(presentation: ViewerDrawerPresentation) {
-    var initialLayout = ViewerDrawerLayout()
-    initialLayout.open(.code)
-    initialLayout.setPresentation(presentation)
-
-    var reopenedLayout = ViewerDrawerLayout()
-    reopenedLayout.open(.code)
-    reopenedLayout.setPresentation(.overlay)
-    reopenedLayout.close()
-    reopenedLayout.open(.code)
-    reopenedLayout.setPresentation(presentation)
-
-    #expect(initialLayout == reopenedLayout)
-    #expect(initialLayout.hashValue == reopenedLayout.hashValue)
-    #expect(Set([initialLayout, reopenedLayout]).count == 1)
+  @Test(
+    "保存した並びを復元して閉じた状態で始まる",
+    arguments: ViewerContentArrangement.allCases, ViewerContentArrangement.allCases)
+  func restoresArrangements(code: ViewerContentArrangement, diff: ViewerContentArrangement) {
+    let saved = ViewerContentArrangements(code: code, diff: diff)
+    let layout = ViewerDrawerLayout(arrangements: saved)
+    #expect(!layout.isOpen)
+    #expect(layout.content == nil)
+    #expect(layout.arrangements == saved)
+    #expect(layout.arrangement(for: .code) == code)
+    #expect(layout.arrangement(for: .diff) == diff)
+    #expect(layout.arrangement(for: .evidence) == nil)
   }
 }

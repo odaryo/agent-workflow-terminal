@@ -2,54 +2,57 @@ import Adapters
 import SwiftUI
 import TerminalCore
 
+enum CodeContentMetrics {
+  static let fileListMinimumWidth: CGFloat = 180
+  static let contentMinimumWidth: CGFloat = 240
+  static let sideBySideMinimumWidth = fileListMinimumWidth + contentMinimumWidth + 1
+}
+
 /// Viewer Drawer の `.code` ペイン (設計書 §7.1〜§7.3)。
 /// 表示するパスは列挙で得た木からしか作らない。ユーザー入力や外の世界から来たパスを
 /// `FileContentReader` へ渡すと、§8.1 が確定させた「常に現在の worktree 内だけ」を破れる
 /// (`FileContentReader` は worktree root を知らない)。
 struct CodeViewerPane: View {
+  let arrangement: ViewerContentArrangement
   @StateObject private var model: FileBrowserModel
   @StateObject private var searchModel: WorktreeSearchModel
   @StateObject private var history: CodeHistoryModel
   @Environment(\.colorScheme) private var colorScheme
 
-  init(worktreeRoot: URL) {
+  init(worktreeRoot: URL, arrangement: ViewerContentArrangement) {
+    self.arrangement = arrangement
     _model = StateObject(wrappedValue: FileBrowserModel(worktreeRoot: worktreeRoot))
     _searchModel = StateObject(wrappedValue: WorktreeSearchModel(worktreeRoot: worktreeRoot))
     _history = StateObject(wrappedValue: CodeHistoryModel(worktreeRoot: worktreeRoot))
   }
 
   var body: some View {
-    HSplitView {
-      FileBrowserList(model: model, searchModel: searchModel)
-        .frame(minWidth: 180, idealWidth: 240)
-      CodeViewerContent(model: model, history: history)
-        .frame(minWidth: 240, maxWidth: .infinity)
-    }
-    .task {
-      model.prefersDarkTheme = colorScheme == .dark
-      history.prefersDarkTheme = colorScheme == .dark
-      // タブの活性化 = このペインが階層に現れた時。ここで列挙と Git 状態を取り直す。
-      model.loadRoot()
-    }
-    .task(id: model.selection) {
-      // git へ渡すパスは列挙・検索で得た worktree root からの相対パス (`id`)。
-      history.reset(relativePath: model.selection?.id)
-      model.resetSelectionState()
-      await model.loadContent()
-      await watchSelectedFile()
-    }
-    .onChange(of: colorScheme) { _, scheme in
-      model.prefersDarkTheme = scheme == .dark
-      history.appearanceDidChange(isDark: scheme == .dark)
-      Task { await model.loadContent() }
-    }
-    .task {
-      await watchGitIndex()
-    }
-    .onDisappear {
-      // タブを切り替えるとペインが階層から外れる。走っている git をそこで止める。
-      history.cancelAll()
-    }
+    contentLayout
+      .task {
+        model.prefersDarkTheme = colorScheme == .dark
+        history.prefersDarkTheme = colorScheme == .dark
+        // タブの活性化 = このペインが階層に現れた時。ここで列挙と Git 状態を取り直す。
+        model.loadRoot()
+      }
+      .task(id: model.selection) {
+        // git へ渡すパスは列挙・検索で得た worktree root からの相対パス (`id`)。
+        history.reset(relativePath: model.selection?.id)
+        model.resetSelectionState()
+        await model.loadContent()
+        await watchSelectedFile()
+      }
+      .onChange(of: colorScheme) { _, scheme in
+        model.prefersDarkTheme = scheme == .dark
+        history.appearanceDidChange(isDark: scheme == .dark)
+        Task { await model.loadContent() }
+      }
+      .task {
+        await watchGitIndex()
+      }
+      .onDisappear {
+        // タブを切り替えるとペインが階層から外れる。走っている git をそこで止める。
+        history.cancelAll()
+      }
   }
 
   /// Drawer を閉じるとこのビューが階層から外れ、`task` ごと監視が止まる。
@@ -74,6 +77,26 @@ struct CodeViewerPane: View {
     for await _ in FileChangeWatcher(path: indexURL).events() {
       model.refreshGitState()
       history.gitIndexDidChange(isExpandable: isExpandable)
+    }
+  }
+
+  @ViewBuilder
+  private var contentLayout: some View {
+    switch arrangement {
+    case .sideBySide:
+      HSplitView {
+        FileBrowserList(model: model, searchModel: searchModel)
+          .frame(minWidth: CodeContentMetrics.fileListMinimumWidth, idealWidth: 240)
+        CodeViewerContent(model: model, history: history)
+          .frame(minWidth: CodeContentMetrics.contentMinimumWidth, maxWidth: .infinity)
+      }
+    case .stacked:
+      VSplitView {
+        FileBrowserList(model: model, searchModel: searchModel)
+          .frame(minHeight: 80, idealHeight: 180, maxHeight: .infinity)
+        CodeViewerContent(model: model, history: history)
+          .frame(minHeight: 80, maxHeight: .infinity)
+      }
     }
   }
 

@@ -77,8 +77,10 @@ struct ProjectSessionCleanupTests {
       "/repo/.gitworktrees/alpha",
       "/repo/.git/worktreesalpha",
       "/repo/.git/modules/sub",
+      "/repo/.git/worktrees/wt/modules/sub",
       "/repo",
       "/repo/.git/worktrees",
+      "/repo/.git/worktrees/",
     ]
   )
   func identitiesOfOtherProjectsAreExcluded(foreign: String) throws {
@@ -255,4 +257,61 @@ struct ProjectSessionCleanupTests {
 
     #expect(result.isEmpty)
   }
+
+  @Test("接尾辞付き session を候補順・番号順に重複なく返す (設計書 §3.5)")
+  func numberedSessionsFollowCandidateThenIndexOrder() throws {
+    let root = try sessionName(Self.commonDirectory).rawValue
+    let alpha = try sessionName(Self.alpha).rawValue
+    let beta = try sessionName(Self.beta).rawValue
+    let gamma = try sessionName(Self.gamma).rawValue
+    let names = [
+      gamma + "-3", alpha + "-9999", beta + "-5", root + "-3", alpha + "-2",
+      beta, root, beta + "-2", root + "-2", beta + "-2",
+    ]
+
+    let result = ProjectSessionCleanup.sessions(
+      projectCommonDirectory: try identity(Self.commonDirectory),
+      saved: try saved(projectRoot: Self.commonDirectory, tasks: [Self.beta, Self.alpha]),
+      observed: [try identity(Self.alpha), try identity(Self.gamma), try identity(Self.beta)],
+      existingSessionNames: names)
+
+    #expect(
+      result.map(\.rawValue) == [
+        root, root + "-2", root + "-3", beta, beta + "-2", beta + "-5",
+        alpha + "-2", alpha + "-9999", gamma + "-3",
+      ])
+  }
+
+  @Test(
+    "候補の外の identity の接尾辞付き session は返さない",
+    arguments: [
+      "/elsewhere/.git", "/elsewhere/.git/worktrees/alpha",
+      "/repo/.gitx/worktrees/alpha", "/repo/.git/worktrees/wt/modules/sub",
+      "/repo/.git/worktrees/", "/repo/.git/worktrees",
+    ])
+  func numberedSessionsOutsideProjectAreExcluded(foreign: String) throws {
+    let root = try sessionName(Self.commonDirectory).rawValue
+    let other = try sessionName(foreign).rawValue
+
+    let result = ProjectSessionCleanup.sessions(
+      projectCommonDirectory: try identity(Self.commonDirectory),
+      saved: try saved(projectRoot: foreign, tasks: [foreign]),
+      observed: [try identity(foreign)],
+      existingSessionNames: [other + "-2", root + "-2", other + "-9999"])
+
+    #expect(result.map(\.rawValue) == [root + "-2"])
+  }
+
+  @Test("同じ Project 内でも保存・観測に無い task の接尾辞付き session は返さない")
+  func numberedSessionsWithoutCandidateAreExcluded() throws {
+    let root = try sessionName(Self.commonDirectory).rawValue
+    let alpha = try sessionName(Self.alpha).rawValue
+
+    let result = ProjectSessionCleanup.sessions(
+      projectCommonDirectory: try identity(Self.commonDirectory), saved: nil, observed: [],
+      existingSessionNames: [alpha + "-2", root + "-2"])
+
+    #expect(result.map(\.rawValue) == [root + "-2"])
+  }
+
 }

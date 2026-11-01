@@ -6,6 +6,8 @@ import Testing
 @Suite("Foundation.Process 実行層")
 struct ProcessRunnerTests {
   private let runner = FoundationProcessRunner()
+  // 時間を主張しないテストの期限は安全弁であり、CI の負荷で1秒では期限切れになったため (#466)。
+  private let timeout: Duration = .seconds(30)
 
   @Test("非ゼロ終了をエラーへ変換せず stdout と stderr を返す")
   func returnsNonzeroExitAsResult() async throws {
@@ -13,7 +15,7 @@ struct ProcessRunnerTests {
       executableURL: URL(fileURLWithPath: "/bin/sh"),
       arguments: ["-c", "printf output; printf error >&2; exit 7"],
       environment: [:],
-      timeout: .seconds(1)
+      timeout: timeout
     )
 
     #expect(result == ProcessRunResult(exitCode: 7, stdout: "output", stderr: "error"))
@@ -25,7 +27,7 @@ struct ProcessRunnerTests {
       executableURL: URL(fileURLWithPath: "/usr/bin/env"),
       arguments: [],
       environment: ["AWT_PROCESS_TEST": "only-value"],
-      timeout: .seconds(1)
+      timeout: timeout
     )
 
     #expect(result.stdout == "AWT_PROCESS_TEST=only-value\n")
@@ -37,7 +39,7 @@ struct ProcessRunnerTests {
       executableURL: URL(fileURLWithPath: "/bin/sh"),
       arguments: ["-c", "printf '\\377'"],
       environment: [:],
-      timeout: .seconds(1)
+      timeout: timeout
     )
 
     #expect(result.stdout == "\u{FFFD}")
@@ -52,7 +54,7 @@ struct ProcessRunnerTests {
         executableURL: executableURL,
         arguments: [],
         environment: [:],
-        timeout: .seconds(1)
+        timeout: timeout
       )
       Issue.record("存在しない実行ファイルが起動した")
     } catch {

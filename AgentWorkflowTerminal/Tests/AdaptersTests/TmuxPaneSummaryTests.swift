@@ -188,9 +188,11 @@ struct PaneAgentProcessTests {
     processTable: String, expected: PaneAgentProcess
   ) async throws {
     let spy = ObservationProcessSpy(processTableOutput: processTable)
+    // 実時間の TTL では負荷により ps が2回起動し得るため、時計を進めない (#463)。
     let source = TmuxAgentSignalSource(
       processTable: ProcessTableSnapshotCache(
-        processRunner: spy, executableURL: URL(fileURLWithPath: "/ps")),
+        processRunner: spy, executableURL: URL(fileURLWithPath: "/ps"),
+        timeSource: ManualTimeSource()),
       screenBatcher: TmuxPaneScreenBatcher(
         runner: try makeTmuxRunner(socketName: "agent-process", processRunner: spy)))
     let pane = makePaneSnapshot(id: "%1", pid: 100)

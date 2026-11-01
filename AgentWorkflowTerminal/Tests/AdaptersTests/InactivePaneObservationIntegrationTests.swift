@@ -29,9 +29,12 @@ private let isInactiveObservationIntegrationEnabled =
   .enabled(if: isInactiveObservationIntegrationEnabled)
 )
 struct InactivePaneObservationIntegrationTests {
-  /// `paneListInterval` の2倍より長く回す。1周期しか回さないと「まだ来ていない」と
-  /// 「呼ばれない」を区別できない。
-  private static let observationDuration = Duration.seconds(5)
+  private static let paneListInterval = Duration.seconds(2)
+  /// 固定の観測窓では CI の負荷で陽性対照に届かないため、Active の capture を待つ。
+  /// 無期限に待つと観測の退行でテストが終了しないため、待機には上限を設ける。
+  private static let activeCaptureTimeout = Duration.seconds(30)
+  /// 陽性対照の直後に止めると、同じ周期や次の周期で Inactive を観測する不具合を見逃す。
+  private static let observationDurationAfterCapture = paneListInterval * 2
 
   @Test("capture-pane の対象になるのは Active worktree の pane だけ")
   func neverInvokesTmuxForInactiveWorktrees() async throws {
@@ -70,7 +73,10 @@ struct InactivePaneObservationIntegrationTests {
       let observed = inventory.taskWorktrees.filter {
         inventory.observesPaneStates(of: $0.identity)
       }
-      await Self.observe(observed, runner: shimRunner)
+      let activeSession = TmuxSessionName(identity: active.identity).rawValue
+      let activePaneID = try #require(panesBySession[activeSession]?.first)
+      try await Self.observe(
+        observed, runner: shimRunner, shim: shim, activePaneID: activePaneID)
       #expect(observed.map(\.identity) == [active.identity])
       return (log: try shim.lines(), panesBySession: panesBySession)
     }
@@ -125,15 +131,15 @@ struct InactivePaneObservationIntegrationTests {
     return panesBySession
   }
 
-  /// アプリと同じ配線で観測を回し、`observationDuration` の後に止める。
   private static func observe(
-    _ worktrees: [TaskWorktree], runner: TmuxRunner
-  ) async {
+    _ worktrees: [TaskWorktree], runner: TmuxRunner,
+    shim: TmuxArgumentLog, activePaneID: String
+  ) async throws {
     let feed = WorktreePaneAgentStateFeed(
       adapters: [ClaudeCodeAdapter(), CodexAdapter()],
       fallback: ProcessDetectionFallbackAdapter(processNames: ["claude", "codex"]),
       intervals: AgentObservationIntervals(signals: .seconds(2), liveness: .seconds(5)),
-      paneListInterval: .seconds(2)
+      paneListInterval: paneListInterval
     )
     let paneSource = TmuxWorktreePaneSource(runner: runner)
     let signals = TmuxAgentSignalSource(
@@ -143,9 +149,20 @@ struct InactivePaneObservationIntegrationTests {
         for await _ in feed.states(of: worktree.identity, panes: paneSource, signals: signals) {}
       }
     }
-    try? await Task.sleep(for: observationDuration)
-    for subscription in subscriptions {
-      subscription.cancel()
+    defer {
+      for subscription in subscriptions {
+        subscription.cancel()
+      }
+    }
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: activeCaptureTimeout)
+    while clock.now < deadline {
+      let log = try shim.lines()
+      if log.contains(where: { $0.contains("capture-pane") && $0.contains(activePaneID) }) {
+        try await Task.sleep(for: observationDurationAfterCapture)
+        return
+      }
+      try await clock.sleep(until: min(deadline, clock.now.advanced(by: .milliseconds(100))))
     }
   }
 }

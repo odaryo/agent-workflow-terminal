@@ -20,6 +20,7 @@ struct TmuxSessionProvisioner: Sendable {
   /// 8桁の16進でないこの名前は、どの worktree からも導出されない。`create` の doc が言う
   /// 前方一致事故を避けるため、kill は `-t '=<名前>'` の完全一致で撃つ。
   private static let bootstrapSessionName = "awt-bootstrap-server-do-not-use"
+  private static let bootstrapGate = TmuxBootstrapGate()
 
   private let operations: TmuxSessionOperations
   private let runner: TmuxRunner
@@ -134,10 +135,22 @@ struct TmuxSessionProvisioner: Sendable {
   /// - Important: **`tmux start-server` では代用できない。** tmux 3.4 は session を1つも持たない
   ///   server を即座に終了させるため、`start-server` は rc=0 を返しても server を残さない
   ///   (Issue #235 で実測)。session を1つ作ることが、server を残す唯一の手段である。
+  /// - Note: Issue #512 の tmux 3.8 実測: A/B が同名 bootstrap を共有し、A の create が失敗して
+  ///   後始末すると server が終わる。B の probe が後なら `no server running` になり、probe だけ
+  ///   先に通った場合は後続の new-session が限定環境の `LC_ALL=C` を持つ server を起こす。
+  ///   Project ごとのインスタンスでは防げないため、後始末までプロセス共通で直列化する。
+  ///   別プロセス (2つ目のアプリ) との競合は対象外。
   private func attachCommandBootstrappingServer(
     session: TmuxSessionName,
     workingDirectory: String
   ) async -> Result<[String], TmuxSessionProvisionerError> {
+    guard await Self.bootstrapGate.acquire() else {
+      return .failure(.operation(.tmux(.process(.cancelled))))
+    }
+    if Task.isCancelled {
+      await Self.bootstrapGate.release()
+      return .failure(.operation(.tmux(.process(.cancelled))))
+    }
     await startBootstrapSession()
     let result: Result<[String], TmuxSessionProvisionerError>
     do {
@@ -151,8 +164,12 @@ struct TmuxSessionProvisioner: Sendable {
     }
     // 成否にかかわらず消す。本来の session ができていれば server は残り、できていなければ
     // server ごと落ちて起動前の状態へ戻る。
-    _ = try? await runner.run(
-      arguments: ["kill-session", "-t", "=\(Self.bootstrapSessionName)"])
+    // 呼び出し元のキャンセルを継承すると、runner が起動前に抜けて bootstrap を残してしまう。
+    await Task { [runner] in
+      _ = try? await runner.run(
+        arguments: ["kill-session", "-t", "=\(Self.bootstrapSessionName)"])
+    }.value
+    await Self.bootstrapGate.release()
     return result
   }
 
@@ -185,6 +202,43 @@ struct TmuxSessionProvisioner: Sendable {
       environment: environment,
       timeout: TmuxRunner.defaultTimeout
     )
+  }
+}
+
+/// actor の再入を許すだけでは、外部プロセスを await する間の bootstrap 共有を防げない。
+private actor TmuxBootstrapGate {
+  private var occupied = false
+  private var waiters: [(id: UUID, continuation: CheckedContinuation<Bool, Never>)] = []
+
+  func acquire() async -> Bool {
+    let id = UUID()
+    return await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        if Task.isCancelled {
+          continuation.resume(returning: false)
+        } else if occupied {
+          waiters.append((id, continuation))
+        } else {
+          occupied = true
+          continuation.resume(returning: true)
+        }
+      }
+    } onCancel: {
+      Task { await self.cancel(id) }
+    }
+  }
+
+  func release() {
+    if waiters.isEmpty {
+      occupied = false
+    } else {
+      waiters.removeFirst().continuation.resume(returning: true)
+    }
+  }
+
+  private func cancel(_ id: UUID) {
+    guard let index = waiters.firstIndex(where: { $0.id == id }) else { return }
+    waiters.remove(at: index).continuation.resume(returning: false)
   }
 }
 

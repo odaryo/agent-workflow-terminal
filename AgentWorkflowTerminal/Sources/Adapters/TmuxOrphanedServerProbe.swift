@@ -95,8 +95,8 @@ public struct TmuxOrphanedServerProbe: Sendable {
   }
 
   /// macOS 27 の `/usr/sbin/lsof`、tmux 3.8、LC_ALL=C で計測 (Issue #500・#512、2026-11-02)。
-  /// 非 ASCII は `\xe6…`、タブは `\t`、`\` は `\\`、制御文字は `^` + (バイト + 0x40)、
-  /// ESC は `^[`、DEL は `\x7f` になる。リテラルの `^` はそのまま出るため、不一致から
+  /// 非 ASCII は `\xe6…`、`\` は `\\`、0x08・0x09・0x0A・0x0C・0x0D は `\b` `\t` `\n` `\f` `\r`、
+  /// それ以外の制御文字は `^` + (バイト + 0x40) (ESC は `^[`)、DEL は `\x7f` になる。リテラルの `^` はそのまま出るため、不一致から
   /// 不在と言える印字可能 ASCII に含める (D1)。tmux の stderr は生のバイトなので、
   /// 変換される文字を含むパスでは server が生きていても完全一致しない。
   private func absenceUnlessEscaped(_ socketPath: String) -> TmuxOrphanedServerProbeResult {
@@ -108,6 +108,8 @@ public struct TmuxOrphanedServerProbe: Sendable {
 
   /// `^A` や `\t` は元のバイト列が一意に決まらず、完全一致でも別の server の行かもしれない。
   /// 逆変換せず、生きた socket が無い場合の orphaned 判定を留保する (Issue #512 D2)。
+  /// `^@` と `^H` `^I` `^J` `^L` `^M` は制御文字からは生まれないが、安全側に倒して区別しない。
+  /// 0xFF の `^?` は、APFS がそのバイトを含む名前を拒むので含めない (#512 のレビューの計測)。
   private static func hasAmbiguousLsofRepresentation(_ path: String) -> Bool {
     let bytes = path.utf8
     return bytes.contains(UInt8(ascii: "\\"))

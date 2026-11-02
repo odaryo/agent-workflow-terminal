@@ -116,7 +116,7 @@ public enum PaneNotification: Sendable, Hashable {
 ///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
 ///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
 ///   飲み込むため。
-/// - Important: 他の session に同時に見えている pane は、基準で `lastKnown` を上書きしない (#494)。
+/// - Important: 記憶のある pane は、猶予から戻った確認待ちでなければ基準で `lastKnown` を上書きしない (#494、#517)。
 ///   完了表示の記憶だけでは状態を知ったことにならないため、状態の記憶がない pane の判断待ちは基準で
 ///   個別に鳴らさず、「判断待ちが N 件」1件にまとめる。猶予から戻った pane は状態を観測するまで数えず、
 ///   戻って最初の観測は基準でも遷移として扱い、判断待ちの続きか plain `Unknown` なら数える (#508)。
@@ -390,7 +390,7 @@ public struct PaneNotificationPlanner: Sendable {
     return memory.isAttentionAnnounced ? kind : nil
   }
 
-  /// 印を外した pane は、続く遷移の判定で通知する (別の種類の判断待ちはそこで個別に鳴る)。
+  /// 印を外した pane は、同じ観測のこの後の遷移の判定で通知する (別の種類の判断待ちはそこで個別に鳴る)。
   private mutating func resumeSummary(
     _ memory: inout PaneMemory, observing pane: PaneAgentState,
     at instant: ContinuousClock.Instant

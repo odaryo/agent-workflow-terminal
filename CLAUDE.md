@@ -315,9 +315,11 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
      server を指さないこと (空・`default` (大文字小文字を問わない)・`/` を含むものを拒否。guard と同じ
      規則)、各 tty がその server の `list-panes` にあること、スクリプトの祖先 (pid 1 まで) の端末で
      ないこと、`/dev/<tty>` が存在することを確かめ、1 つでも外れれば何も止めずに exit 2 で終わる。
-     通れば tty の上のプロセスの pgid を全部列挙して各 pgid へ SIGTERM を送り、0.5 秒待って残る pgid へ
-     SIGKILL を送り、**その tty の上にプロセスが無いこと**を確かめる (残れば一覧を出して exit 1)。
-     呼ぶ tmux は `list-panes` だけである。`--dry-run` で、確かめた結果と止める予定の pgid だけを見られる。
+     通れば tty の上のプロセスを数えて pid・pgid・開始時刻 (`lstart`) を記録し、記録した pgid へ SIGTERM
+     を送る。0.5 秒待ち、記録したもののうち同じ開始時刻でまだ生きているものの pgid へだけ SIGKILL を
+     送り、**記録したプロセスがすべて消えたこと**を確かめる (残れば一覧を出して exit 1)。tty の上に
+     記録に無いプロセスがいれば、止めずに「記録に無いプロセス」として一覧で出す (exit 0)。呼ぶ tmux は
+     `list-panes` だけである。`--dry-run` で、確かめた結果と止める予定の pgid だけを見られる。
   3. `kill-session` で session を消す。pane のプロセスが全部止まると pane が閉じ、最後の session なら
      server も終わるので、ここで `no server running` や `can't find session` が返ることがある。
 
@@ -326,14 +328,19 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   と `fish` が `ttys015`) ので、自分の tty と比べるだけではユーザーの端末を渡されても通してしまう。
   pane が消えた後の tty の名前はすぐに再利用される (レビューアの計測: 7 つの隔離 server が続けて
   `ttys006` を受け取った。#540 の実機確認でも、消した session の `ttys006` を次の session が受け取った)。
-  拒否の各形と、正しく渡せば止まることは、CI の `build-and-test` ジョブの `Stop tty processes - checks`
+  **止めている途中にも再利用される**: TERM の後の待ちの間に pane が閉じると、別の server の新しい pane が
+  同じ tty を受け取る。待ちの後に tty の上を数え直していた版は、その新しい持ち主を SIGKILL した
+  (レビューアが再現し、再計測でも、A を止めている 0.2 秒後に立てた C が `ttys006` を受け取って
+  SIGKILL された)。そのため KILL と最後の確認は、最初に数えたプロセスに限っている。
+  拒否の各形と、正しく渡せば止まること、止めている途中の再利用で新しい持ち主を止めないこと
+  (`AWT_STOP_TTY_GRACE_SECONDS` で待ちを延ばして起こす) は、CI の `build-and-test` ジョブの `Stop tty processes - checks`
   (`scripts/check-stop-tty-processes.sh`) が隔離 server を立てて検査する。祖先の端末の拒否は、CI の
   runner では祖先が端末を持たないので、pane の中の shell からその pane 自身の tty を渡して検査する。
 
   この手順が効くことを実測したのは、pane のコマンドとして exec した形 (相対パス) と、pane の対話
   bash (`/bin/bash --norc --noprofile -i`) / 対話 zsh (`/bin/zsh -f -i`) から `send-keys` で起動した形の
-  3 つである (macOS 27 / bash 3.2.57 / zsh 5.9 / tmux 3.8。`-L` と持ち主の確認を足した後の使い方で
-  確かめ直したのは対話 bash の形で、止める部分は 3 つとも同じである)。`ps -t` は `ttys006` / `s006` /
+  3 つである (macOS 27 / bash 3.2.57 / zsh 5.9 / tmux 3.8)。`-L` と持ち主の確認、最初に数えたものに
+  限る止め方を足した後のスクリプトで確かめ直したのは、対話 bash の形だけである。`ps -t` は `ttys006` / `s006` /
   `/dev/ttys006` のどの綴りでも効いたが、`pgrep -t` は同じ綴りで何も返さなかった。
 
   偽エージェントで HUP を trap するなら、handler は必ず `exit` する。受け流す必要があるときは、

@@ -15,8 +15,10 @@ scripts/stop-tty-processes.sh (計測用の pane の後始末、Issue #540) を�
   -L が無い / -L default・DEFAULT / socket 名に '/' を含む / server が無い /
   tty がその server の pane に無い / 存在しない tty / 祖先の tty (pane の中から自分の tty を渡す)
 
-加えて --dry-run が何も止めないことと、正しく渡せば pane の tty の上のプロセスが止まることを
-確かめる。隔離 server は `-L awt-stoptty-*` で立て、最後に session を名前で消して socket を消す
+加えて --dry-run が何も止めないこと、正しく渡せば pane の tty の上のプロセスが止まること、
+止めている途中に tty が別の server の pane に再利用されても、その新しい持ち主を止めずに一覧で
+出すことを確かめる (AWT_STOP_TTY_GRACE_SECONDS で TERM と KILL の間を延ばして再利用を起こす。
+同じ tty を受け取れなかったときは「飛ばした」と出す)。隔離 server は `-L awt-stoptty-*` で立て、最後に session を名前で消して socket を消す
 (scripts/check-integration-leftovers.sh が残りを検出する)。tmux が要る。
 
   -h, --help  このヘルプを表示
@@ -37,6 +39,8 @@ STOP="$SCRIPT_DIR/stop-tty-processes.sh"
 SOCK="awt-stoptty-$$"
 SOCK2="awt-stoptty-other-$$"
 SOCK_NONE="awt-stoptty-none-$$"
+SOCK_REUSE_A="awt-stoptty-reuse-a-$$"
+SOCK_REUSE_C="awt-stoptty-reuse-c-$$"
 socket_dir="${TMUX_TMPDIR:-/private/tmp}/tmux-$(id -u)"
 work_dir=$(mktemp -d)
 
@@ -45,8 +49,8 @@ T2() { env -u TMUX tmux -L "$SOCK2" "$@"; }
 
 cleanup() {
   local sock name
-  for sock in "$SOCK" "$SOCK2"; do
-    for name in target inpane other; do
+  for sock in "$SOCK" "$SOCK2" "$SOCK_REUSE_A" "$SOCK_REUSE_C"; do
+    for name in target inpane other a c; do
       env -u TMUX tmux -L "$sock" kill-session -t "=$name" >/dev/null 2>&1 || true
     done
     # server が止まったと確かめられたときだけ socket を消す (統合テストと同じ設計)。
@@ -64,6 +68,7 @@ trap 'cleanup; [[ $finished -eq 1 ]] || exit 1' EXIT
 
 failures=0
 checked=0
+skipped=0
 
 ng() {
   info "NG: $*"
@@ -126,6 +131,8 @@ expect_refused "存在しない tty" -L "$SOCK" "$missing_tty"
 expect_refused "tty の名前ではありません" -L "$SOCK" "??"
 expect_refused "tty を 1 つ以上" -L "$SOCK"
 expect_refused "" -L
+AWT_STOP_TTY_GRACE_SECONDS=11 expect_refused "AWT_STOP_TTY_GRACE_SECONDS" -L "$SOCK" "$target_tty"
+AWT_STOP_TTY_GRACE_SECONDS=abc expect_refused "AWT_STOP_TTY_GRACE_SECONDS" -L "$SOCK" "$target_tty"
 
 # 祖先の tty。pane の中で動く shell から、その pane 自身の tty を渡す。tty はその server の pane に
 # あり存在もするので、拒否されるなら祖先の判定による。CI の runner では Bash の祖先が端末を
@@ -180,7 +187,41 @@ else
   info "$stop_out"
 fi
 
+# 止めている途中に tty が再利用される形 (#540 のレビュー M-B)。A の pane を止める TERM の後の
+# 待ちの間に A の pane が閉じて tty が空き、別の server C の新しい pane が同じ tty を受け取る。
+# 待ちの後に数え直すと C を SIGKILL する。最初に数えたものだけを撃つなら C は生き残り、
+# 「記録に無いプロセス」として一覧に出る。
+info "--- 止めている途中に tty が再利用される"
+checked=$((checked + 1))
+env -u TMUX tmux -L "$SOCK_REUSE_A" -f /dev/null new-session -d -s a -x 80 -y 24 "sleep 600"
+reuse_a_tty=$(pane_tty_of "$SOCK_REUSE_A" a)
+reuse_a_pid=$(env -u TMUX tmux -L "$SOCK_REUSE_A" list-panes -t '=a' -F '#{pane_pid}')
+reuse_out="$work_dir/reuse.out"
+AWT_STOP_TTY_GRACE_SECONDS=3 "$STOP" -L "$SOCK_REUSE_A" "$reuse_a_tty" >"$reuse_out" 2>&1 &
+reuse_stop=$!
+for _ in $(seq 1 30); do
+  alive "$reuse_a_pid" || break
+  sleep 0.1
+done
+env -u TMUX tmux -L "$SOCK_REUSE_C" -f /dev/null new-session -d -s c -x 80 -y 24 "sleep 600"
+reuse_c_tty=$(pane_tty_of "$SOCK_REUSE_C" c)
+reuse_c_pid=$(env -u TMUX tmux -L "$SOCK_REUSE_C" list-panes -t '=c' -F '#{pane_pid}')
+reuse_rc=0
+wait "$reuse_stop" || reuse_rc=$?
+if [[ "$reuse_c_tty" != "$reuse_a_tty" ]]; then
+  info "SKIP (飛ばした): C が A と同じ tty を受け取らなかった (A: $reuse_a_tty / C: $reuse_c_tty)"
+  skipped=$((skipped + 1))
+elif [[ "$reuse_rc" -eq 0 ]] && alive "$reuse_c_pid" &&
+  grep -q "記録に無いプロセス" "$reuse_out" && grep -q "^$reuse_c_pid " "$reuse_out" &&
+  ! grep -q -- "-$reuse_c_pid\$" "$reuse_out"; then
+  info "OK (exit 0・C (${reuse_c_pid}、$reuse_c_tty) は生きていて、記録に無いプロセスとして出た): 再利用"
+else
+  ng "tty を再利用した C の扱いが期待と異なる (exit ${reuse_rc}・C: $(alive "$reuse_c_pid" && echo 生存 || echo 停止))"
+  info "$(cat "$reuse_out")"
+fi
+
 finished=1
 info ""
+[[ "$skipped" -eq 0 ]] || info "飛ばした検査が $skipped 件あります"
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"

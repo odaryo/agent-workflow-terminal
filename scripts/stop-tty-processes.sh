@@ -10,11 +10,13 @@ usage() {
 使い方: stop-tty-processes.sh [--dry-run] -L <socket名> <tty>...
 
 計測用の pane の後始末 (Issue #540)。指定した tty の上のプロセスを pgid ごとに止め、
-その tty の上にプロセスが 1 つも残っていないことを確かめる。
+最初に数えたプロセスがすべて止まったことを確かめる。
 
-  1. tty の上のプロセスの pgid を全部列挙し、各 pgid へ SIGTERM を送る
-  2. 0.5 秒待ち、まだ tty の上に残っている pgid へ SIGKILL を送る
-  3. tty の上にプロセスが無いことを確かめる。残っていれば一覧を出して exit 1
+  1. tty の上のプロセスを数え、pid・pgid・開始時刻を記録する。記録した pgid へ SIGTERM を送る
+  2. 0.5 秒待ち、記録したプロセスのうち同じ開始時刻でまだ生きているものの pgid へ SIGKILL を送る
+  3. 記録したプロセスがすべて消えたことを確かめる。残っていれば一覧を出して exit 1
+  4. tty の上に記録に無いプロセスがいれば、止めずに一覧で出す (exit 0)。待ちの間に pane が
+     閉じると、別の server の新しい pane が同じ tty を受け取りうるため、数え直して撃たない
 
 止める前に次をすべて確かめ、1 つでも満たさなければ何も止めずに exit 2 で終わる。
 
@@ -30,6 +32,9 @@ usage() {
   -L <socket名>  pane を作った隔離 server の socket 名 (必須)
   --dry-run      確かめた後、止める予定の pgid とプロセスを出すだけで何も止めない
   -h, --help     このヘルプを表示
+
+環境変数 AWT_STOP_TTY_GRACE_SECONDS で 2 の待ち (既定 0.5、0〜10 秒) を変えられる。検査で
+tty の再利用を起こすための口で、ふだんは使わない。
 EOF
 }
 
@@ -140,6 +145,12 @@ if [[ "$socket_ok" -eq 1 && "${#names[@]}" -ge 1 ]]; then
   fi
 fi
 
+# TERM と KILL の間の待ち。検査で tty の再利用を起こすためだけに延ばせる。
+grace="${AWT_STOP_TTY_GRACE_SECONDS:-0.5}"
+if [[ ! "$grace" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! awk -v g="$grace" 'BEGIN { exit !(g <= 10) }'; then
+  refuse "AWT_STOP_TTY_GRACE_SECONDS は 0〜10 の秒数にしてください: '$grace'"
+fi
+
 if [[ "${#reasons[@]}" -gt 0 ]]; then
   info "何も止めません:"
   for reason in "${reasons[@]}"; do
@@ -148,45 +159,82 @@ if [[ "${#reasons[@]}" -gt 0 ]]; then
   exit 2
 fi
 
-# pid pgid tty の一覧から、指定した tty の上の行だけを出す。
+# 指定した tty の上のプロセスを `pid pgid tty 開始時刻 args` の形で出す。開始時刻 (lstart) は
+# 5 語を `_` でつないで 1 語にする。
 # `ps -t` でも絞れるが (実測 macOS 27: ttys006 / s006 / /dev/ttys006 のどれも効いた)、
 # `pgrep -t` は同じ綴りで何も返さなかったので、ps の全体を自分で絞る形に揃える。
 on_ttys() {
-  ps -A -o pid=,pgid=,tty=,args= | awk -v list="${names[*]}" -v self=$$ '
+  LC_ALL=C ps -A -o pid=,pgid=,tty=,lstart=,args= | awk -v list="${names[*]}" -v self=$$ '
     BEGIN { n = split(list, a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
-    $1 != self && ($3 in want) { print }'
+    $1 != self && ($3 in want) {
+      start = $4 "_" $5 "_" $6 "_" $7 "_" $8
+      rest = $0
+      for (i = 1; i <= 8; i++) sub(/^[ \t]*[^ \t]+/, "", rest)
+      sub(/^[ \t]+/, "", rest)
+      print $1, $2, $3, start, rest
+    }'
 }
 
-pgids_on_ttys() {
-  on_ttys | awk '{print $2}' | sort -un
+# 止める対象は、最初に数えたプロセスに固定する。TERM の後の待ちの間に pane が閉じて tty が
+# 空くと、別の server の新しい pane が同じ tty を受け取る (実測: 隔離 server A を止めている
+# 0.2 秒後に立てた C が ttys006 を受け取り、数え直していた版は C を SIGKILL した、#540)。
+recorded=$(on_ttys)
+
+# 記録したプロセスのうち、同じ pid で開始時刻も同じものだけを、生きているとみなす。開始時刻を
+# 見るのは、pid が再利用されて別のプロセスになっていても撃たないため。
+# 出力は `pid 記録した pgid 今の pgid`。
+recorded_alive() {
+  local pid pgid tty start rest now_pgid now_start
+  while read -r pid pgid tty start rest; do
+    [[ -n "$pid" ]] || continue
+    read -r now_pgid now_start <<<"$(LC_ALL=C ps -o pgid=,lstart= -p "$pid" 2>/dev/null |
+      awk '{print $1, $2 "_" $3 "_" $4 "_" $5 "_" $6}')"
+    if [[ -n "$now_pgid" && "$now_start" == "$start" ]]; then
+      echo "$pid $pgid $now_pgid"
+    fi
+  done <<<"$recorded"
 }
 
 if [[ "$dry_run" -eq 1 ]]; then
-  info "--dry-run: 確かめた結果は問題ありません。止める予定の pgid: $(pgids_on_ttys | tr '\n' ' ')"
-  info "tty の上のプロセス (pid pgid tty args):"
-  info "$(on_ttys)"
+  info "--dry-run: 確かめた結果は問題ありません。止める予定の pgid: $(awk '{print $2}' <<<"$recorded" | sort -un | tr '\n' ' ')"
+  info "tty の上のプロセス (pid pgid tty 開始時刻 args):"
+  info "$recorded"
   exit 0
 fi
 
-signal_pgids() {
-  local sig="$1" pgid
-  for pgid in $(pgids_on_ttys); do
-    info "kill -$sig -- -$pgid"
-    kill "-$sig" -- "-$pgid" 2>/dev/null || true
-  done
-}
+while read -r pgid; do
+  [[ -n "$pgid" ]] || continue
+  info "kill -TERM -- -$pgid"
+  kill -TERM -- "-$pgid" 2>/dev/null || true
+done < <(awk 'NF {print $2}' <<<"$recorded" | sort -un)
+sleep "$grace"
 
-signal_pgids TERM
-sleep 0.5
-if [[ -n "$(on_ttys)" ]]; then
-  signal_pgids KILL
+alive=$(recorded_alive)
+if [[ -n "$alive" ]]; then
+  # pgid へ送るのは、記録した pgid にまだ属しているときだけ。別の group へ移ったものは、その
+  # pid だけを撃つ (元の pgid は、group が空になれば別の group に再利用されうる)。
+  while read -r target; do
+    [[ -n "$target" ]] || continue
+    info "kill -KILL -- $target"
+    kill -KILL -- "$target" 2>/dev/null || true
+  done < <(awk '$2 == $3 {print "-" $2} $2 != $3 {print $1}' <<<"$alive" | sort -u)
   sleep 0.2
 fi
 
-left=$(on_ttys)
+left=$(recorded_alive)
 if [[ -n "$left" ]]; then
-  info "tty の上にまだプロセスが残っています (pid pgid tty args):"
+  info "最初に数えたプロセスがまだ残っています (pid 記録した pgid 今の pgid):"
   info "$left"
   exit 1
 fi
-info "tty の上にプロセスはありません: ${names[*]}"
+info "最初に数えたプロセスはすべて止まりました: ${names[*]}"
+
+# 確認の後に tty の上にいるものは、記録に無い別物として扱い、止めない。pane の子が後から
+# 生まれた場合もここに出る。
+others=$(on_ttys | awk -v rec="$(awk '{print $1 ":" $4}' <<<"$recorded" | tr '\n' ' ')" '
+  BEGIN { n = split(rec, a, " "); for (i = 1; i <= n; i++) seen[a[i]] = 1 }
+  !(($1 ":" $4) in seen) { print }')
+if [[ -n "$others" ]]; then
+  info "記録に無いプロセスが tty の上にいます (tty が再利用された可能性)。止めていません (pid pgid tty 開始時刻 args):"
+  info "$others"
+fi

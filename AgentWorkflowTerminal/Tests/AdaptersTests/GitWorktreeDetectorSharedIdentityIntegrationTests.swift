@@ -105,6 +105,28 @@ struct GitWorktreeDetectorSharedIdentityTests {
     }
   }
 
+  // 相対パスの gitdir は `..` を含むので、標準化で sy の symlink が解決され、admin の sy が feat の
+  // パスに一致する。辿る順で sy が先に返ると本物は0件になる (#515 の Director の計測)。安全側に倒れて
+  // 本物の feat も失敗になることを固定する。
+  @Test("useRelativePaths で symlink の sy が feat と同じパスに並ぶ組は、本物の feat も含め全件を失敗にする")
+  func relativeSymlinkGroupIsEntirelyReportedAsFailure() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["config", "worktree.useRelativePaths", "true"])
+      let genuine = try await addWorktree("feat", in: repository)
+      let symlink = try await addLockedWorktree("sy", in: repository)
+      try FileManager.default.removeItem(at: symlink)
+      try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: genuine)
+
+      let result = try await repository.detector().scan()
+
+      let gitDirectory = repository.mainWorktree.appending(path: ".git/worktrees/feat").path
+      let reason = GitWorktreeEntryFailure.Reason.sharedIdentity(gitDirectory: gitDirectory)
+      #expect(result.detected.map(\.worktreePath) == [repository.mainWorktree.path])
+      #expect(result.failures.map(\.worktreePath) == [genuine.path, genuine.path])
+      #expect(result.failures.map(\.reason) == [reason, reason])
+    }
+  }
+
   private func addWorktree(_ name: String, in repository: GitTestRepository) async throws -> URL {
     let worktree = repository.root.appending(path: name)
     try await repository.git(["worktree", "add", "-q", "-b", name, worktree.path])

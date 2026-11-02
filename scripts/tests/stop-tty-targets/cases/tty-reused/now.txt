@@ -1,0 +1,4 @@
+    1     1 ??       Sun Oct 25 08:42:47 2026     /sbin/launchd
+82000 82000 ttys006  Mon Nov  2 22:48:30 2026     sleep 600
+82010 82010 ttys007  Mon Nov  2 22:48:31 2026     sleep 600
+ 9000  8990 ??       Mon Nov  2 22:50:00 2026     /bin/bash scripts/stop-tty-processes.sh -L awt-x ttys006

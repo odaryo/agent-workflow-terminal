@@ -1,0 +1,5 @@
+recorded 80842 80842 ttys006 Mon_Nov_2_22:47:27_2026 bash p-term-spin.sh
+recorded 80850 80842 ttys006 Mon_Nov_2_22:47:28_2026 sleep 0.2
+recorded 90000 90000 ttys007 Mon_Nov_2_22:47:40_2026 -bash
+target -90000
+alive 90000 90000 90000

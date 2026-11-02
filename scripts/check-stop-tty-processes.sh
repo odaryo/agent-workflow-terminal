@@ -18,7 +18,9 @@ scripts/stop-tty-processes.sh (計測用の pane の後始末、Issue #540) を�
 加えて --dry-run が何も止めないこと、正しく渡せば pane の tty の上のプロセスが止まること、
 止めている途中に tty が別の server の pane に再利用されても、その新しい持ち主を止めずに一覧で
 出すことを確かめる (AWT_STOP_TTY_GRACE_SECONDS で TERM と KILL の間を延ばして再利用を起こす。
-同じ tty を受け取れなかったときは「飛ばした」と出す)。隔離 server は `-L awt-stoptty-*` で立て、最後に session を名前で消して socket を消す
+同じ tty を受け取れなかったときは「飛ばした」と出す)。TERM の trap の中で子を fork して終わる
+偽エージェントでは、その子を記録した pgid に残るものとして撃たずに一覧に出し、exit 1 で終わる
+ことを確かめる (子は検査の最後に止める)。隔離 server は `-L awt-stoptty-*` で立て、最後に session を名前で消して socket を消す
 (scripts/check-integration-leftovers.sh が残りを検出する)。tmux が要る。
 
   -h, --help  このヘルプを表示
@@ -41,16 +43,29 @@ SOCK2="awt-stoptty-other-$$"
 SOCK_NONE="awt-stoptty-none-$$"
 SOCK_REUSE_A="awt-stoptty-reuse-a-$$"
 SOCK_REUSE_C="awt-stoptty-reuse-c-$$"
+SOCK_FORK="awt-stoptty-fork-$$"
 socket_dir="${TMUX_TMPDIR:-/private/tmp}/tmux-$(id -u)"
 work_dir=$(mktemp -d)
 
 T() { env -u TMUX tmux -L "$SOCK" "$@"; }
 T2() { env -u TMUX tmux -L "$SOCK2" "$@"; }
 
+# TERM の後に fork した子 (下の検査で作る) が残っていれば止める。止めるのは、pgid が pane の
+# pid で、args がこの検査の作った偽エージェントのものに限る。子は TERM も HUP も受け流すので KILL。
+stop_forked_children() {
+  local pid
+  [[ -n "$fork_pgid" ]] || return 0
+  for pid in $(ps -A -o pid=,pgid=,args= |
+    awk -v g="$fork_pgid" -v f="$fork_agent" '$2 == g && index($0, f) { print $1 }'); do
+    kill -KILL "$pid" 2>/dev/null || true
+  done
+}
+
 cleanup() {
   local sock name
-  for sock in "$SOCK" "$SOCK2" "$SOCK_REUSE_A" "$SOCK_REUSE_C"; do
-    for name in target inpane other a c; do
+  stop_forked_children
+  for sock in "$SOCK" "$SOCK2" "$SOCK_REUSE_A" "$SOCK_REUSE_C" "$SOCK_FORK"; do
+    for name in target inpane other a c fork; do
       env -u TMUX tmux -L "$sock" kill-session -t "=$name" >/dev/null 2>&1 || true
     done
     # server が止まったと確かめられたときだけ socket を消す (統合テストと同じ設計)。
@@ -61,10 +76,19 @@ cleanup() {
   rm -rf "$work_dir"
 }
 
-# bash 3.2 (macOS の /bin/bash) は、EXIT の trap があると set -u の unbound variable で exit 0 を
-# 返す (実測)。最後まで走ったかどうかを印で持ち、途中で止まったら失敗にする。
-finished=0
-trap 'cleanup; [[ $finished -eq 1 ]] || exit 1' EXIT
+fork_pgid=""
+fork_agent="$work_dir/fork-agent.sh"
+
+# bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
+__awt_on_exit() {
+  local rc=$?
+  cleanup
+  [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+  exit "$rc"
+}
+trap __awt_on_exit EXIT
 
 failures=0
 checked=0
@@ -220,8 +244,40 @@ else
   info "$(cat "$reuse_out")"
 fi
 
-finished=1
+# TERM の trap の中で子を fork して終わる偽エージェント (#573 の m5、レビューアの偽エージェントと
+# 同じ形)。子は記録の後に生まれ、pane が閉じると tty を失うので、tty の上だけを見ると見逃す。
+# 記録した pgid に残る記録外のプロセスとして一覧に出し、撃たずに exit 1 で終わることを確かめる。
+info "--- TERM の後に fork した子が記録した pgid に残る"
+checked=$((checked + 1))
+cat >"$fork_agent" <<'AGENT'
+trap '' HUP
+trap '( trap "" HUP TERM; while :; do read -r -t 1 x; done ) & exit 0' TERM
+while :; do sleep 0.2; done
+AGENT
+env -u TMUX tmux -L "$SOCK_FORK" -f /dev/null new-session -d -s fork -x 80 -y 24 \
+  "exec bash $(printf '%q' "$fork_agent")"
+fork_tty=$(pane_tty_of "$SOCK_FORK" fork)
+fork_pgid=$(env -u TMUX tmux -L "$SOCK_FORK" list-panes -t '=fork' -F '#{pane_pid}')
+fork_rc=0
+fork_out=$("$STOP" -L "$SOCK_FORK" "$fork_tty" 2>&1) || fork_rc=$?
+fork_children=$(ps -A -o pid=,pgid=,args= |
+  awk -v g="$fork_pgid" -v f="$fork_agent" '$2 == g && index($0, f) { print $1 }')
+fork_listed=1
+[[ -n "$fork_children" ]] || fork_listed=0
+for pid in $fork_children; do
+  grep -q "^$pid $fork_pgid " <<<"$fork_out" || fork_listed=0
+done
+if [[ "$fork_rc" -eq 1 && "$fork_listed" -eq 1 && "$fork_out" == *"記録した process group に"* ]] &&
+  ! grep -q -- "^kill -KILL" <<<"$fork_out"; then
+  info "OK (exit 1・子 ($(echo "$fork_children" | tr '\n' ' ')) は pgid $fork_pgid に残っていて一覧に出た): TERM の後の fork"
+else
+  ng "TERM の後に fork した子の扱いが期待と異なる (exit ${fork_rc}・pgid $fork_pgid の子: ${fork_children:-無し})"
+  info "$fork_out"
+fi
+stop_forked_children
+
 info ""
 [[ "$skipped" -eq 0 ]] || info "飛ばした検査が $skipped 件あります"
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"
+__awt_finished=1

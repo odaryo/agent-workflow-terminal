@@ -58,27 +58,32 @@ struct AppDependencies: Sendable {
     launchProject: LaunchProjectArgument, applicationSupport: URL?,
     applicationSupportWarning: String?
   ) -> Self {
+    let server: TmuxServer
+    switch TmuxServerEnvironment.resolve(environment: ProcessInfo.processInfo.environment) {
+    case .server(let resolved):
+      server = resolved
+      if case .socketName(let name) = server {
+        NSLog("[app] tmux server を隔離: -L %@", name)
+      }
+    case .invalid(let value):
+      return withoutTmux(
+        launchProject: launchProject, applicationSupport: applicationSupport,
+        applicationSupportWarning: applicationSupportWarning,
+        error: "AWT_TMUX_SOCKET_NAME が不正なため、この起動では tmux を使いません: \(value)")
+    }
     let executable = TmuxRunner.defaultExecutableCandidates.first {
       FileManager.default.isExecutableFile(atPath: $0.path)
     }
     guard let executable else {
-      return Self(
-        launchProject: launchProject,
-        tmuxExecutable: nil,
-        tmuxError: "tmux 実行ファイルが見つかりません。tmux をインストールしてください。",
-        paneStates: nil,
-        tmuxRunner: nil,
-        paneSource: nil,
-        signalSource: nil,
-        sessionActivityProbe: nil,
-        applicationSupportDirectory: applicationSupport,
-        applicationSupportWarning: applicationSupportWarning
-      )
+      return withoutTmux(
+        launchProject: launchProject, applicationSupport: applicationSupport,
+        applicationSupportWarning: applicationSupportWarning,
+        error: "tmux 実行ファイルが見つかりません。tmux をインストールしてください。")
     }
 
     do {
       let runner = try TmuxRunner(
-        server: .userDefault,
+        server: server,
         processRunner: FoundationProcessRunner(),
         executableCandidates: [executable]
       )
@@ -101,19 +106,29 @@ struct AppDependencies: Sendable {
         applicationSupportWarning: applicationSupportWarning
       )
     } catch {
-      return Self(
-        launchProject: launchProject,
-        tmuxExecutable: nil,
-        tmuxError: "tmux を利用できません: \(error)",
-        paneStates: nil,
-        tmuxRunner: nil,
-        paneSource: nil,
-        signalSource: nil,
-        sessionActivityProbe: nil,
-        applicationSupportDirectory: applicationSupport,
-        applicationSupportWarning: applicationSupportWarning
-      )
+      return withoutTmux(
+        launchProject: launchProject, applicationSupport: applicationSupport,
+        applicationSupportWarning: applicationSupportWarning,
+        error: "tmux を利用できません: \(error)")
     }
+  }
+
+  private static func withoutTmux(
+    launchProject: LaunchProjectArgument, applicationSupport: URL?,
+    applicationSupportWarning: String?, error: String
+  ) -> Self {
+    Self(
+      launchProject: launchProject,
+      tmuxExecutable: nil,
+      tmuxError: error,
+      paneStates: nil,
+      tmuxRunner: nil,
+      paneSource: nil,
+      signalSource: nil,
+      sessionActivityProbe: nil,
+      applicationSupportDirectory: applicationSupport,
+      applicationSupportWarning: applicationSupportWarning
+    )
   }
 
   /// 指定が無いことはエラーにしない。登録済みの Project を開く (Issue #372)。

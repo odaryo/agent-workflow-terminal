@@ -104,6 +104,9 @@ final class ProjectsModel: ObservableObject {
     if let applicationSupportWarning = dependencies.applicationSupportWarning {
       warning = [applicationSupportWarning, warning].compactMap { $0 }.joined(separator: "\n")
     }
+    if let tmuxError = dependencies.tmuxError {
+      warning = [tmuxError, warning].compactMap { $0 }.joined(separator: "\n")
+    }
     registry.reselect(selectable: isSelectable)
     didLoad = true
     save()

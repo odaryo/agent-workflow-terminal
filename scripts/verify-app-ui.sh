@@ -32,6 +32,8 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「Ag
 
 launch の Application Support は /private/tmp/awt-ui-verify/<$PWD の basename>/application-support。
 AWT_UI_APPLICATION_SUPPORT_DIR で上書きできる。同じ worktree の再起動でも保存内容を残す。
+launch の tmux socket 名は awt-ui-verify。AWT_UI_TMUX_SOCKET_NAME で上書きできる。
+session は env -u TMUX tmux -L <名前> list-sessions で観測する。
 
 検索対象: AXTitle / AXValue / AXDescription / AXAttributedDescription。
 texts の各文言は引用符付きで、改行などはエスケープして出す。
@@ -159,9 +161,12 @@ app_launch() {
   # (実測: worktree のバンドルを指したのにメイン作業ツリーのバンドルが前に出た)。
   # 測っているバンドルが自分のビルドであることは、ここで担保する。
   local application_support="${AWT_UI_APPLICATION_SUPPORT_DIR:-/private/tmp/awt-ui-verify/$(basename -- "$PWD")/application-support}"
+  local tmux_socket_name="${AWT_UI_TMUX_SOCKET_NAME:-awt-ui-verify}"
   mkdir -p "$application_support"
   info "Application Support: $application_support"
-  open -n -a "$PWD/$BUNDLE_REL" --env AWT_APPLICATION_SUPPORT_DIR="$application_support" --args --project "$project"
+  info "tmux server: env -u TMUX tmux -L $tmux_socket_name list-sessions で観測できます"
+  open -n -a "$PWD/$BUNDLE_REL" --env AWT_APPLICATION_SUPPORT_DIR="$application_support" \
+    --env AWT_TMUX_SOCKET_NAME="$tmux_socket_name" --args --project "$project"
   # プロセスの存在ではなくウィンドウの数で待つ。`count of windows` はプロセスさえあれば
   # 0 を返して成功するので、成否だけを見ると窓が無いまま先へ進む。
   local i windows

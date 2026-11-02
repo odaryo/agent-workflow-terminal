@@ -199,7 +199,17 @@ selftest() {
   [ -n "$main_worktree" ] || die "メイン作業ツリーを特定できませんでした"
   # trap から見えるようにグローバルへ置く。local だと関数を抜けた時点で参照できない。
   SELFTEST_PROBE="$main_worktree/verify-app-ui-probe.txt"
-  trap 'rm -f "${SELFTEST_PROBE:-}"; app_quit' EXIT
+  # bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+  # 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+  __awt_finished=0
+  __awt_on_exit() {
+    local rc=$?
+    rm -f "${SELFTEST_PROBE:-}"
+    app_quit
+    [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+    exit "$rc"
+  }
+  trap __awt_on_exit EXIT
   printf 'probe line one\nprobe line two\nprobe line three\n' >"$SELFTEST_PROBE"
   app_launch "$main_worktree"
   # ボタンの順番は UI の変更でずれたため、文言と role で対象を特定する (#414)。
@@ -229,6 +239,7 @@ selftest() {
     die "FAIL: 行を選択できませんでした"
   fi
   selftest_typing
+  __awt_finished=1
 }
 
 # type / focused / value がハーネスとして機能することだけを確かめる。**製品側の

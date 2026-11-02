@@ -63,7 +63,16 @@ host=$(sed -n 's/^host: //p' "$build_stamp")
   || die "xcframework は ref $built_ref からビルドされています。scripts/build-ghostty.sh を実行し直してください"
 
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghostty-publish.XXXXXX")
-trap 'rm -rf "$tmp_dir"' EXIT
+# bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
+__awt_on_exit() {
+  local rc=$?
+  rm -rf "$tmp_dir"
+  [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+  exit "$rc"
+}
+trap __awt_on_exit EXIT
 stage_dir="$tmp_dir/stage"
 mkdir -p "$stage_dir/macos" "$stage_dir/zig-out/share"
 cp -R "$ghostty_dir/macos/GhosttyKit.xcframework" "$stage_dir/macos/"
@@ -110,6 +119,7 @@ if [[ "$dry_run" -eq 1 ]]; then
   info "[dry-run] gh release view $release_tag"
   info "[dry-run] 未作成の場合: gh release create $release_tag --title \"$release_title\" --notes <notes> --latest=false"
   info "[dry-run] gh release upload $release_tag $asset --clobber"
+  __awt_finished=1
   exit 0
 fi
 
@@ -118,3 +128,4 @@ if ! gh release view "$release_tag" >/dev/null 2>&1; then
 fi
 gh release upload "$release_tag" "$tarball" --clobber
 info "publish しました: $release_tag"
+__awt_finished=1

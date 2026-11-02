@@ -284,6 +284,14 @@ jobs:
         timeout-minutes: 5
         run: shellcheck -e SC1091 scripts/*.sh
 
+      # bash 3.2 は変数名の直後のマルチバイト文字を名前の一部として読み、set -u の下で止まる。
+      # EXIT の trap と重なると exit 0 になり、壊れた検査が緑に見える (Issue #572)。
+      # ShellCheck はこの形を指摘しないので、別段で検出する。
+      - name: Shell scripts - multibyte after variable name
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: scripts/check-var-multibyte.sh
+
       # 判定本体に構文エラーがあると python3 自身が exit 1 を返し、フックは block しない
       # (= 素通り) 側へ落ちる。コンパイルだけは必ず通っていることを別段で確かめる。
       - name: Shell guard - compile

@@ -74,7 +74,7 @@ IFS=$'\t' read -r pr_state pr_is_draft pr_base pr_mergeable pr_title pr_head pr_
 
 [[ "$pr_state" == "OPEN" ]] || die "PR #$pr_number は OPEN ではありません (state=$pr_state)"
 [[ "$pr_is_draft" == "false" ]] || die "PR #$pr_number は draft です"
-[[ "$pr_base" == "main" ]] || die "PR #$pr_number の base が main ではありません (base=$pr_base、stacked PR はベース変更後にマージする運用)"
+[[ "$pr_base" == "main" ]] || die "PR #$pr_number の base が main ではありません (base=${pr_base}、stacked PR はベース変更後にマージする運用)"
 [[ "$pr_mergeable" != "CONFLICTING" ]] || die "PR #$pr_number はコンフリクトしています (mergeable=CONFLICTING)"
 # wf-pr-create.sh を通らず作られた PR もここで捕捉する (Issue #43)。
 require_conventional_title "$pr_title" "PR #$pr_number のタイトル (scripts/wf-pr-edit.sh $pr_number -t で修正可)"
@@ -99,14 +99,30 @@ if changed_paths=$(gh api --paginate "repos/$(nwo)/pulls/$pr_number/files" --jq 
           ci_paths_rc=0
           ci_paths_reason=$(
             ci_workflow=$(mktemp) || exit 2
-            trap 'rm -f -- "$ci_workflow"' EXIT
+            # bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を
+            # 返す (docs/coding-guidelines.md §7)。$( ) の中では 3.2.57 で 1 になったが (実測)、
+            # ここの 0 は「CI は起動しない」の意味で待ちを省く側へ倒れるので、その挙動に頼らず
+            # 最後まで走った印が無ければ非 0 にする。
+            __awt_finished=0
+            # shellcheck disable=SC2329 # 下の trap から呼ぶ。$( ) の中の trap は ShellCheck が追跡しない
+            __awt_on_exit() {
+              local rc=$?
+              rm -f -- "$ci_workflow"
+              [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+              exit "$rc"
+            }
+            trap __awt_on_exit EXIT
             if ! gh api "repos/$(nwo)/contents/.github/workflows/ci.yml?ref=$paths_oid" \
               -H 'Accept: application/vnd.github.raw' >"$ci_workflow"; then
               printf '%s\n' "ci.yml の取得に失敗しました"
               exit 2
             fi
+            detector_rc=0
             printf '%s\n' "$changed_paths" \
-              | python3 "$SCRIPT_DIR/ci_paths_ignored.py" --workflow "$ci_workflow" 2>&1
+              | python3 "$SCRIPT_DIR/ci_paths_ignored.py" --workflow "$ci_workflow" 2>&1 \
+              || detector_rc=$?
+            __awt_finished=1
+            exit "$detector_rc"
           ) || ci_paths_rc=$?
           case "$ci_paths_rc" in
             0) info "CI paths-ignore 判定 ($paths_ref=$paths_oid): exit 0、全変更パスが一致します" ;;

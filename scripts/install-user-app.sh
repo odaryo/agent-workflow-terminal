@@ -72,8 +72,12 @@ cleanup() {
     rm -rf -- "$stage_dir" || status=1
   fi
   rm -rf -- "$tmp_dir" || status=1
+  [[ $__awt_finished -eq 1 || $status -ne 0 ]] || status=1
   exit "$status"
 }
+# bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -111,3 +115,4 @@ info "インストール先: $app"
 info "SHA: $source_commit"
 printf -v read_command 'plutil -extract AWTSourceCommit raw %q' "$app/Contents/Info.plist"
 info "読み出し方: $read_command"
+__awt_finished=1

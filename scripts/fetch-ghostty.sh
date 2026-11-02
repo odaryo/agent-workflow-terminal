@@ -39,7 +39,16 @@ ghostty_ref="$(<"$root_dir/App/ghostty-ref")"
 asset="GhosttyKit-${ghostty_ref}-macos-arm64.tar.gz"
 release_tag="ghostty-kit-${ghostty_ref}"
 tmp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ghostty-fetch.XXXXXX")
-trap 'rm -rf "$tmp_dir"' EXIT
+# bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
+__awt_on_exit() {
+  local rc=$?
+  rm -rf "$tmp_dir"
+  [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+  exit "$rc"
+}
+trap __awt_on_exit EXIT
 
 if ! gh release download "$release_tag" \
   --pattern "$asset" \
@@ -73,3 +82,4 @@ mv "$extract_dir" "$ghostty_dir"
 
 info "取得した GhosttyKit の manifest:"
 cat "$ghostty_dir/GHOSTTY-MANIFEST.txt" >&2
+__awt_finished=1

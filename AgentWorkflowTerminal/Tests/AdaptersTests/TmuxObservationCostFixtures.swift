@@ -51,6 +51,7 @@ actor ObservationProcessSpy: ProcessRunning {
   private var oversized: Set<PaneID>
   private let listPanesOutput: String
   private var processTableOutput: String
+  private var processTableFailure: ProcessRunResult?
   private var listPanesFailure: ProcessRunResult?
 
   init(
@@ -77,6 +78,9 @@ actor ObservationProcessSpy: ProcessRunning {
 
   func setProcessTableOutput(_ output: String) { processTableOutput = output }
 
+  /// 非 `nil` の間、`ps` はこの結果を返す (起動は数える)。
+  func setProcessTableFailure(_ failure: ProcessRunResult?) { processTableFailure = failure }
+
   func setVanishingAfterCapture(_ panes: Set<PaneID>) { vanishingAfterCapture = panes }
 
   func setOversized(_ panes: Set<PaneID>) { oversized = panes }
@@ -94,6 +98,7 @@ actor ObservationProcessSpy: ProcessRunning {
     invocations.append(arguments)
     if executableURL.lastPathComponent == "ps" {
       kinds.append(.ps)
+      if let processTableFailure { return processTableFailure }
       return ProcessRunResult(exitCode: 0, stdout: processTableOutput, stderr: "")
     }
     if arguments.contains("capture-pane") {

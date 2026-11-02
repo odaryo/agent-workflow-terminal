@@ -45,6 +45,22 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   /// pane ごとに、直近の `liveness` が `ps` を読めたときの前景。画面の履歴とは別に持ち、
   /// Agent が居なくなっても消さない (消すと、次に起動した Agent を古い `ps` で確かめてしまう)。
   private var livenessForegrounds: [PaneID: PaneForeground] = [:]
+  /// pane ごとに、今の画面の基準を作ったときの Agent の pid の印 (Issue #550、設計書 §12.4.2)。
+  /// `liveness` の持ち主の記録は前景が変わらない起動し直し (`claude …; claude …`) を次の
+  /// `liveness` まで見落とすので、採取の側でも基準とプロセスを結び付ける。
+  private var screenBaselines: [PaneID: ScreenBaseline] = [:]
+  private var nextScreenBaselineGeneration: UInt64 = 0
+  /// 印に使う名前。`liveness` の結果によらず覚える — 名前は呼び出し側が与えるもので、
+  /// `ps` の成否とは関係ない。
+  private var knownAgentProcessNames: Set<String> = []
+
+  private struct ScreenBaseline {
+    /// `ps` を待つ間に基準が作り直されていないかを見分ける。
+    let generation: UInt64
+    /// `nil` は印を付けるときに `ps` を読めなかった。
+    var agentProcessIDs: [Int32]?
+    var isQuiet = false
+  }
 
   private struct PaneForeground: Equatable {
     let processID: Int32
@@ -117,9 +133,13 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let screen = styledScreen.map { StyledScreenText(capturedWithEscapeSequences: $0).plainText }
     let capturedAt = monotonicObservationInstant(
       for: pane.id, capturedAt: captured.snapshot.capturedAt)
-    let secondsSinceScreenChange = screen.flatMap {
-      screenChangeTracker.observe(
-        screen: $0, paneID: pane.id, at: capturedAt, minimumChangedLines: minimumChangedLines)
+    let secondsSinceScreenChange: TimeInterval?
+    if let screen {
+      secondsSinceScreenChange = await observeScreenChange(
+        screen, of: pane, at: capturedAt, screenCapturedAt: captured.snapshot.capturedAt,
+        minimumChangedLines: minimumChangedLines)
+    } else {
+      secondsSinceScreenChange = nil
     }
     return AgentSignals(
       paneTitle: title, screenText: screen, styledScreenText: styledScreen,
@@ -133,6 +153,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   ) async -> AgentLiveness {
     discardExpiredScreenHistory()
     forgottenAt.removeValue(forKey: pane.id)
+    knownAgentProcessNames.formUnion(matchingProcessNames)
     guard !pane.isDead else {
       forgetPane(pane.id)
       return .absent
@@ -213,9 +234,73 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   public func forget(_ pane: PaneSnapshot) async {
     discardExpiredScreenHistory()
     // 移動元の後始末で即座に消すと、同じプロセスでも移動直後の Working を見落とす。
-    // 引き継ぎ猶予の間は履歴を残す (Issue #537 / #546、設計書 §12.4.2)。
+    // 引き継ぎ猶予の間は履歴を残す (Issue #537 / #546、設計書 §12.4.2)。ちょうど猶予の時刻に
+    // 戻った pane は引き継ぐ。通知の引き継ぎの猶予 (`PaneNotificationPlanner.isWithinHandoffGrace`)
+    // は、ちょうど 10 秒を外と扱う。守るものが違うので、揃えない。
     forgottenAt[pane.id] = screenBatcher.timeSource.now
     await screenBatcher.forget(pane.id)
+  }
+
+  /// 印を確かめるのは、静かな状態から変わった採取 (ターンの始まり) だけにする。毎回確かめると
+  /// `ps` の頻度が採取の周期と同じになり、生存確認と状態観測を分けた理由 (`ps` のコスト) に
+  /// 反する (設計書 §12.4.2)。
+  ///
+  /// - Note: 次の2つは閉じない。Agent が画面を変え続けている最中に起動し直した場合と、
+  ///   画面の捕捉から `ps` の読み込みまでの間 (数 ms) に起動し直した場合。
+  private func observeScreenChange(
+    _ screen: String, of pane: PaneSnapshot, at observedAt: ContinuousClock.Instant,
+    screenCapturedAt: ContinuousClock.Instant, minimumChangedLines: Int
+  ) async -> TimeInterval? {
+    let seconds = screenChangeTracker.observe(
+      screen: screen, paneID: pane.id, at: observedAt, minimumChangedLines: minimumChangedLines)
+    guard let seconds else {
+      let generation = beginScreenBaseline(of: pane.id)
+      let processIDs = await agentProcessIDs(of: pane, capturedNoEarlierThan: screenCapturedAt)
+      if screenBaselines[pane.id]?.generation == generation {
+        screenBaselines[pane.id]?.agentProcessIDs = processIDs
+      }
+      return nil
+    }
+    guard seconds == 0, let baseline = screenBaselines[pane.id], baseline.isQuiet else {
+      screenBaselines[pane.id]?.isQuiet = seconds > 0
+      return seconds
+    }
+    let processIDs = await agentProcessIDs(of: pane, capturedNoEarlierThan: screenCapturedAt)
+    // 待つ前の写しと比べない。基準の印を付ける `ps` がまだ戻っていなければ、写しは `nil` のまま。
+    guard let current = screenBaselines[pane.id], current.generation == baseline.generation
+    else { return seconds }
+    // 読めなかったときは捨てない。捨てると、`ps` が失敗している間のターンの始まりが
+    // すべて Unknown に落ちる。
+    guard let processIDs, processIDs != current.agentProcessIDs else {
+      screenBaselines[pane.id]?.isQuiet = false
+      return seconds
+    }
+    forgetScreen(of: pane.id)
+    let rebasedAt = monotonicObservationInstant(for: pane.id, capturedAt: observedAt)
+    _ = screenChangeTracker.observe(
+      screen: screen, paneID: pane.id, at: rebasedAt, minimumChangedLines: minimumChangedLines)
+    _ = beginScreenBaseline(of: pane.id)
+    screenBaselines[pane.id]?.agentProcessIDs = processIDs
+    return nil
+  }
+
+  private func beginScreenBaseline(of pane: PaneID) -> UInt64 {
+    nextScreenBaselineGeneration &+= 1
+    screenBaselines[pane] = ScreenBaseline(generation: nextScreenBaselineGeneration)
+    return nextScreenBaselineGeneration
+  }
+
+  private func agentProcessIDs(
+    of pane: PaneSnapshot, capturedNoEarlierThan lowerBound: ContinuousClock.Instant
+  ) async -> [Int32]? {
+    // 名前が無ければ木の中身によらず空なので、`ps` を読まない。
+    guard !knownAgentProcessNames.isEmpty else { return [] }
+    // dead pane の `pane_pid` は再利用されて無関係な木を指し得る。
+    guard !pane.isDead,
+      let snapshot = await processTable.snapshot(capturedNoEarlierThan: lowerBound)
+    else { return nil }
+    return snapshot.nearestProcessIDs(named: knownAgentProcessNames, inTreeOf: pane.processID)
+      .sorted()
   }
 
   private func discardExpiredScreenHistory() {
@@ -235,6 +320,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     screenChangeTracker.forget(paneID: pane)
     lastScreenObservedAt.removeValue(forKey: pane)
     screenOwnerProcessIDs.removeValue(forKey: pane)
+    screenBaselines.removeValue(forKey: pane)
     forgottenAt.removeValue(forKey: pane)
   }
 

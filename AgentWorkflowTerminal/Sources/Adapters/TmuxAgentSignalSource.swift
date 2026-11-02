@@ -137,15 +137,23 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
       forgetPane(pane.id)
       return .absent
     }
-    // 前景が変わった直後に TTL 内の `ps` を使うと、それが Agent の起動前に読んだものなら
-    // 再選択が fallback に固定され、入れ替わった前の Agent を alive と読んで前の画面と比べて
-    // しまう (Issue #549)。初めての pane では下限を付けない — 起動直後に pane の数だけ `ps` が走る。
+    // 初めての pane や前景が変わった pane で TTL 内の `ps` を使うと、それが Agent の起動前に
+    // 読んだものなら fallback に固定される (Issue #549 / #553)。下限は pane を返した `list-panes`
+    // を読み終えた時刻にする — 呼ばれた時刻にすると、同じ一覧の pane ごとに `ps` が走る。
+    // 前景が前回の `ps` と同じなら下限を付けない。付けると、pane 一覧を読み直した snapshot で
+    // 呼ばれるたびに `ps` が走る。時刻を持たない snapshot は、初めての pane に下限を付けない
+    // (起動直後に pane の数だけ `ps` が走る)。
     let foreground = PaneForeground(pane)
-    let previousForeground = livenessForegrounds[pane.id]
+    let lowerBound: ContinuousClock.Instant?
+    if let previousForeground = livenessForegrounds[pane.id] {
+      lowerBound =
+        previousForeground == foreground ? nil : pane.listedAt ?? screenBatcher.timeSource.now
+    } else {
+      lowerBound = pane.listedAt
+    }
     let snapshot: ProcessTableSnapshot?
-    if let previousForeground, previousForeground != foreground {
-      snapshot = await processTable.snapshot(
-        capturedNoEarlierThan: screenBatcher.timeSource.now)
+    if let lowerBound {
+      snapshot = await processTable.snapshot(capturedNoEarlierThan: lowerBound)
     } else {
       snapshot = await processTable.snapshot()
     }

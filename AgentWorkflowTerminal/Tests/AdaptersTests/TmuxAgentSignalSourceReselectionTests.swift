@@ -77,9 +77,65 @@ struct TmuxAgentSignalSourceReselectionTests {
     #expect(await spy.count(of: .ps) == 1)
   }
 
-  private func pane(command: String) -> PaneSnapshot {
+  @Test("s5: 初めての pane でも listedAt より前に読み始めた ps は使わない")
+  func firstLivenessRejectsProcessTableOlderThanListedAt() async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n80 1 /bin/zsh\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let start = clock.now
+    let other = pane(id: "%8", processID: 80, command: "zsh")
+    #expect(await source.liveness(for: other, matchingProcessNames: ["claude"]) == .absent)
+    #expect(await spy.count(of: .ps) == 1)
+
+    await spy.setProcessTableOutput("70 1 /bin/zsh\n71 70 claude\n80 1 /bin/zsh\n")
+    clock.advance(by: .seconds(1))
+    let created = pane(command: "claude", listedAt: start.advanced(by: .milliseconds(500)))
+
+    #expect(await source.liveness(for: created, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await spy.count(of: .ps) == 2)
+  }
+
+  @Test("s6: 同じ listedAt の初めての pane が続いても ps は1回で足りる")
+  func panesFromOneListingShareOneProcessTable() async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n80 1 /bin/zsh\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let start = clock.now
+    let other = pane(id: "%8", processID: 80, command: "zsh")
+    _ = await source.liveness(for: other, matchingProcessNames: ["claude"])
+
+    await spy.setProcessTableOutput(
+      "70 1 /bin/zsh\n71 70 claude\n80 1 /bin/zsh\n90 1 /bin/zsh\n91 90 claude\n")
+    clock.advance(by: .seconds(1))
+    let listedAt = start.advanced(by: .milliseconds(500))
+    let first = pane(command: "claude", listedAt: listedAt)
+    let second = pane(id: "%9", processID: 90, command: "claude", listedAt: listedAt)
+
+    #expect(await source.liveness(for: first, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await source.liveness(for: second, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await spy.count(of: .ps) == 2)
+  }
+
+  @Test("s7: listedAt が最初の ps より古い定常の観測では TTL 内の ps を使う")
+  func steadyObservationWithOldListedAtReusesProcessTable() async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n71 70 claude\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let steady = pane(command: "claude", listedAt: clock.now.advanced(by: .milliseconds(-500)))
+    #expect(await source.liveness(for: steady, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await spy.count(of: .ps) == 1)
+    clock.advance(by: .seconds(1))
+
+    #expect(await source.liveness(for: steady, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await spy.count(of: .ps) == 1)
+  }
+
+  private func pane(
+    id: String = "%7", processID: Int32 = 70, command: String,
+    listedAt: ContinuousClock.Instant? = nil
+  ) -> PaneSnapshot {
     PaneSnapshot(
-      id: PaneID(rawValue: "%7"), processID: 70, tty: "", currentCommand: command,
-      currentPath: "", title: "", termination: nil)
+      id: PaneID(rawValue: id), processID: processID, tty: "", currentCommand: command,
+      currentPath: "", title: "", termination: nil, listedAt: listedAt)
   }
 }

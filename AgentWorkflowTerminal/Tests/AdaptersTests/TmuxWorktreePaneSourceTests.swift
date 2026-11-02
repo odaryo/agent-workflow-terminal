@@ -118,6 +118,59 @@ struct TmuxWorktreePaneSourceTests {
     #expect(identifiers == (0..<5).map { PaneID(rawValue: "%2\($0)") })
   }
 
+  @Test("s3: list-panes を読み終えた時刻を snapshot の listedAt に入れる (設計書 §12.4.2)")
+  func stampsSnapshotsWithListedAt() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/feature"))
+    let output = try fixture(session: TmuxSessionName(identity: worktree).rawValue)
+    let spy = WorktreePaneProcessSpy(result: .init(exitCode: 0, stdout: output, stderr: ""))
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy, clock: clock)
+    let listedAt = clock.now
+
+    let panes = try await source.panes(of: worktree)
+    let readings = try await source.summaryReadings(of: worktree)
+
+    #expect(panes.map(\.listedAt) == [listedAt])
+    #expect(readings.map(\.pane.listedAt) == [listedAt])
+  }
+
+  @Test("s4: TTL の内側で返したキャッシュの snapshot は最初に読んだ時刻のままにする")
+  func cachedSnapshotsKeepFirstListedAt() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/feature"))
+    let output = try fixture(session: TmuxSessionName(identity: worktree).rawValue)
+    let spy = WorktreePaneProcessSpy(result: .init(exitCode: 0, stdout: output, stderr: ""))
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy, clock: clock)
+    let listedAt = clock.now
+    _ = try await source.panes(of: worktree)
+
+    clock.advance(by: .milliseconds(500))
+    let cached = try await source.panes(of: worktree)
+
+    #expect(await spy.invocations.count == 1)
+    #expect(cached.map(\.listedAt) == [listedAt])
+  }
+
+  @Test("s8: listedAt は list-panes を読み終えた時刻にし、TTL は読み始めた時刻から数える")
+  func listedAtIsReadCompletionTime() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/feature"))
+    let output = try fixture(session: TmuxSessionName(identity: worktree).rawValue)
+    let clock = ManualTimeSource()
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 0, stdout: output, stderr: ""),
+      duringRun: { clock.advance(by: .milliseconds(300)) })
+    let source = try makeSource(spy, clock: clock)
+    let startedAt = clock.now
+
+    let panes = try await source.panes(of: worktree)
+
+    #expect(panes.map(\.listedAt) == [startedAt.advanced(by: .milliseconds(300))])
+    // 読み終えてから 1s 経っていないが、読み始めてからは TTL (1s) を過ぎている。
+    clock.advance(by: .milliseconds(800))
+    _ = try await source.panes(of: worktree)
+    #expect(await spy.invocations.count == 2)
+  }
+
   @Test("番号ごとに、その番号の session の pane だけを返す (設計書 §12.2)")
   func selectsPanesBySessionKey() async throws {
     let sessions = try SessionsOfTwoWorktrees()
@@ -204,6 +257,17 @@ struct TmuxWorktreePaneSourceTests {
       runner: try makeTmuxRunner(socketName: "pane-source-test", processRunner: spy))
   }
 
+  private func makeSource(
+    _ spy: WorktreePaneProcessSpy, clock: ManualTimeSource
+  ) throws -> TmuxWorktreePaneSource {
+    let runner = try makeTmuxRunner(socketName: "pane-source-test", processRunner: spy)
+    return TmuxWorktreePaneSource(
+      runner: runner,
+      paneList: TmuxAllSessionPaneListCache(
+        runner: runner, timeToLive: TmuxAllSessionPaneListCache.defaultTimeToLive,
+        timeSource: clock))
+  }
+
   /// `formatWithSummary` で採った fixture の先頭行 (pane `%0`) の session 名と pane ID だけを
   /// 差し替える。`\037` 区切りの1行で、session 名は行内に1度、pane ID は行頭にだけ現れる。
   private func fixture(session: String, paneID: String = "%11") throws -> String {
@@ -242,9 +306,12 @@ private struct SessionsOfTwoWorktrees {
 private actor WorktreePaneProcessSpy: ProcessRunning {
   private(set) var invocations: [[String]] = []
   private let result: ProcessRunResult
+  /// `list-panes` の実行中に時計を進める。読み始めと読み終えの時刻を分けるため。
+  private let duringRun: @Sendable () -> Void
 
-  init(result: ProcessRunResult) {
+  init(result: ProcessRunResult, duringRun: @escaping @Sendable () -> Void = {}) {
     self.result = result
+    self.duringRun = duringRun
   }
 
   func run(
@@ -252,6 +319,7 @@ private actor WorktreePaneProcessSpy: ProcessRunning {
     timeout: Duration, outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     invocations.append(arguments)
+    duringRun()
     return result
   }
 }

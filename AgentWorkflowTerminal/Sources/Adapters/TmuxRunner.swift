@@ -46,7 +46,7 @@ public enum TmuxRunnerError: Error, Sendable, Equatable {
 /// アプリ本体は `userDefault` を使う。ユーザーが素の端末から `tmux attach -t <session>` で
 /// 同じ session へ入れること、つまりアプリが観測する実体とユーザーが自分の端末で見る実体が
 /// 一致することが製品の前提であるため (設計書 §4.1)。`socketName` は隔離 server を使う
-/// テストとスパイクのためにあり、こちらを選ぶとユーザー側は毎回 `-L` を要求される。
+/// テストとスパイクと、開発中の UI 確認の起動 (§4.1、#535) のためにあり、こちらを選ぶとユーザー側は毎回 `-L` を要求される。
 ///
 /// - Important: `TMUX_TMPDIR` は **`-L` の有無にかかわらず** socket の親を決める。tmux 3.4 の
 ///   `make_label` に `-L` による分岐は無く、親は `TMUX_SOCK` (`"$TMUX_TMPDIR:" _PATH_TMP`) を

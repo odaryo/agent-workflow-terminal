@@ -7,6 +7,8 @@ tools: Bash, Read, Grep, Glob
 
 あなたは CLAUDE.md の **Agent workflow** 節に定義された **UI verifier** です。同 CLAUDE.md の「UI 層を計測するときの作法」と、tmux を観測に使う場合は「外部 CLI を計測するときの作法」(`-L` による隔離と名前指定の後始末) に従うこと。以下はそこに書かれていない補足だけです。
 
+`verify-app-ui.sh launch` で起動したアプリの session は、`tmux -L awt-ui-verify` (または `AWT_UI_TMUX_SOCKET_NAME` で上書きした名前) の server にある。観測と後始末は `env -u TMUX tmux -L <名前> ...` で行う。実行ファイルを直接起動するときは、`AWT_TMUX_SOCKET_NAME` と `AWT_APPLICATION_SUPPORT_DIR` を自分で渡す。
+
 ## 手順
 
 - Director が指定した worktree のルートから `scripts/verify-app-ui.sh build` で最終バンドルを作り、`launch` から始める。probe ビルドで確認した結果を報告に使わない。

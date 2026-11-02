@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 public enum TmuxOrphanedServerProbeResult: Sendable, Equatable {
@@ -14,7 +15,8 @@ public struct TmuxOrphanedServerProbe: Sendable {
   private let timeout: Duration
   private let socketExists: @Sendable (String) -> Bool
 
-  /// `socketExists` の既定は、`lstat` が成功し `S_IFSOCK` であること。
+  /// `socketExists` は生きている socket が在るかを返す。既定は symlink を辿らず、
+  /// socket ファイルであり接続できることを要求する。古いファイルだけでは生存を示せないため。
   public init(
     runner: any ProcessRunning,
     executable: URL = URL(fileURLWithPath: "/usr/sbin/lsof"),
@@ -44,10 +46,14 @@ public struct TmuxOrphanedServerProbe: Sendable {
       if result.exitCode == 0 {
         let processIDs = LsofUnixSocketList.processIDs(listening: socketPath, in: result.stdout)
         if !processIDs.isEmpty {
-          // socket が在れば tmux は既存の server に繋ぐので、2つ目の server はできない。一覧の失敗
+          // 生きた socket が在れば tmux は既存の server に繋ぐので、2つ目の server はできない。一覧の失敗
           // から probe までの間に起きた健全な server も lsof には一致として出るため、これを
           // 取り残されたと誤らない (Issue #500 のレビューの計測)。
-          return socketExists(socketPath) ? .absent : .orphaned(processIDs: processIDs)
+          if socketExists(socketPath) { return .absent }
+          if Self.hasAmbiguousLsofRepresentation(socketPath) {
+            return .undetermined("socket path contains ambiguous lsof representations")
+          }
+          return .orphaned(processIDs: processIDs)
         }
         return absenceUnlessEscaped(socketPath)
       }
@@ -63,23 +69,52 @@ public struct TmuxOrphanedServerProbe: Sendable {
     }
   }
 
-  /// symlink を辿らない `lstat` で見る (Issue #500 の決定)。
+  /// 取り残された server の socket は unlink 済みなので、パスへの接続に応えるのは
+  /// そのパスで生きている server だけ。lstat だけでは、別の server が残した古い socket を
+  /// 生存と誤る (Issue #512 D3)。接続後はデータを送らず、すぐ閉じる。
   private static func isSocket(_ path: String) -> Bool {
     var status = stat()
-    guard lstat(path, &status) == 0 else { return false }
-    return status.st_mode & S_IFMT == S_IFSOCK
+    guard lstat(path, &status) == 0, status.st_mode & S_IFMT == S_IFSOCK else { return false }
+
+    var address = sockaddr_un()
+    address.sun_family = sa_family_t(AF_UNIX)
+    address.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+    let bytes = Array(path.utf8)
+    guard bytes.count <= MemoryLayout.size(ofValue: address.sun_path) else { return false }
+    withUnsafeMutableBytes(of: &address.sun_path) { buffer in
+      for (index, byte) in bytes.enumerated() { buffer[index] = byte }
+    }
+    let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { return false }
+    defer { Darwin.close(descriptor) }
+    return withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
+      }
+    }
   }
 
-  /// lsof (revision 4.91) の `n` 行は socket のパスをバイトのまま出すとは限らない (Issue #500 の
-  /// レビューの計測、tmux 3.8)。非 ASCII は `LC_ALL=C` で `\xe6…` に、タブと `\` は locale によらず
-  /// `\t` / `\\` になり、制御文字は `^A` になってリテラルの `^A` と区別できない。tmux の stderr は
-  /// 生のバイトなので、こうしたパスでは server が生きていても完全一致しない。逆変換して照合しないのは、
-  /// `^A` のように元のバイト列が一意に決まらない表記があるため。一致が無いことを不在と言えるのは、
-  /// lsof がそのまま出すと分かっている文字だけのパスに限る。
+  /// macOS 27 の `/usr/sbin/lsof`、tmux 3.8、LC_ALL=C で計測 (Issue #500・#512、2026-11-02)。
+  /// 非 ASCII は `\xe6…`、`\` は `\\`、0x08・0x09・0x0A・0x0C・0x0D は `\b` `\t` `\n` `\f` `\r`、
+  /// それ以外の制御文字は `^` + (バイト + 0x40) (ESC は `^[`)、DEL は `\x7f` になる。リテラルの `^` はそのまま出るため、不一致から
+  /// 不在と言える印字可能 ASCII に含める (D1)。tmux の stderr は生のバイトなので、
+  /// 変換される文字を含むパスでは server が生きていても完全一致しない。
   private func absenceUnlessEscaped(_ socketPath: String) -> TmuxOrphanedServerProbeResult {
     let mayBeEscaped = socketPath.utf8.contains { byte in
-      byte < 0x20 || byte > 0x7E || byte == UInt8(ascii: "\\") || byte == UInt8(ascii: "^")
+      byte < 0x20 || byte > 0x7E || byte == UInt8(ascii: "\\")
     }
     return mayBeEscaped ? .undetermined("socket path contains characters lsof escapes") : .absent
+  }
+
+  /// `^A` や `\t` は元のバイト列が一意に決まらず、完全一致でも別の server の行かもしれない。
+  /// 逆変換せず、生きた socket が無い場合の orphaned 判定を留保する (Issue #512 D2)。
+  /// `^@` と `^H` `^I` `^J` `^L` `^M` は制御文字からは生まれないが、安全側に倒して区別しない。
+  /// 0xFF の `^?` は、APFS がそのバイトを含む名前を拒むので含めない (#512 のレビューの計測)。
+  private static func hasAmbiguousLsofRepresentation(_ path: String) -> Bool {
+    let bytes = path.utf8
+    return bytes.contains(UInt8(ascii: "\\"))
+      || zip(bytes, bytes.dropFirst()).contains { previous, current in
+        previous == UInt8(ascii: "^") && (0x40...0x5F).contains(current)
+      }
   }
 }

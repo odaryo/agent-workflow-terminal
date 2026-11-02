@@ -80,6 +80,26 @@ struct TmuxAgentScreenOwnershipTests {
     #expect(second.secondsSinceScreenChange == 2)
   }
 
+  @Test("§12.4.2 記録した子の Agent が終わっても残る Agent の画面履歴を保つ")
+  func exitedChildAgentKeepsRemainingAgentScreenHistory() async throws {
+    let spy = SignalProcessTableSpy()
+    await spy.setProcessTableOutput("70 1 /bin/sh\n71 70 claude\n72 71 codex\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["codex"]) == .alive)
+    let first = try await source.signals(for: pane, minimumChangedLines: 1)
+    await spy.setProcessTableOutput("70 1 /bin/sh\n71 70 claude\n")
+    clock.advance(by: .seconds(3))
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["codex"]) == .absent)
+    let second = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(first.secondsSinceScreenChange == nil)
+    let secondsSinceScreenChange = try #require(second.secondsSinceScreenChange)
+    #expect(secondsSinceScreenChange == 3)
+  }
+
   @Test("§12.4.2 別の種類の Agent に入れ替われば画面履歴を捨てる")
   func replacedAgentKindForgetsScreenHistory() async throws {
     let spy = SignalProcessTableSpy()

@@ -128,10 +128,13 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
       names.isDisjoint(with: matchingProcessNames)
       ? AgentLiveness.absent : .alive
     // 記録のない名前の集合の absent は、別の種類の Agent 名で引いただけなので消さない。
-    // 消すと移動直後の Working を見落とすが、記録があればその Agent は居なくなっているため
-    // 履歴を引き継がない (Issue #537 / #546、設計書 §12.4.2)。
+    // 消すと移動直後の Working を見落とす。記録した Agent が居なくなっても、同じ pane に
+    // 記録の残る Agent (claude の子の codex が終わった場合の claude) がいれば画面は
+    // そちらのものなので、記録が尽きたときだけ履歴を捨てる (Issue #537 / #546、設計書 §12.4.2)。
     guard liveness == .alive else {
-      if screenOwnerProcessIDs[pane.id]?[matchingProcessNames] != nil {
+      if screenOwnerProcessIDs[pane.id]?.removeValue(forKey: matchingProcessNames) != nil,
+        screenOwnerProcessIDs[pane.id]?.isEmpty ?? true
+      {
         forgetScreen(of: pane.id)
       }
       return liveness

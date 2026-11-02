@@ -107,6 +107,14 @@ jobs:
           git --version
           rg --version
 
+      # 計測用の pane の後始末 (scripts/stop-tty-processes.sh、Issue #540) が、tty の持ち主を確かめずに
+      # 止めないことを、隔離 server を立てて検査する。tmux が要るのでこのジョブに置く (checks ジョブには
+      # tmux が無い)。後始末の残りは、後の Check for leftover servers and sockets が検出する。
+      - name: Stop tty processes - checks
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        timeout-minutes: 5
+        run: "$GITHUB_WORKSPACE/scripts/check-stop-tty-processes.sh"
+
       # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは単体テストと
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
       # 統合テストは既定の swift test では `.enabled(if:)` で無効になっており、フラグはこの段と

@@ -311,17 +311,29 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   (`ppid 1 / pgid == pid / tty ??`) 空回りを続ける。それでも `ps -p <pane_pid>` は空になるので、
   pane_pid で確かめると失敗に気づけない (レビューアの指摘を再計測で確認)。後始末は次の順に進める。
   1. 起動した直後に `list-panes -a -F '#{pane_pid} #{pane_tty}'` で pane の tty を控える。
-  2. 止める直前に、同じ `-L` の server の `list-panes` にその tty がまだあることを確かめる
-     (pane が消えた後の tty の名前は、別の端末に再利用されうる)。
-  3. `scripts/stop-tty-processes.sh <tty>...` を実行する。tty の上のプロセスの pgid を全部列挙して
-     各 pgid へ SIGTERM を送り、0.5 秒待って残る pgid へ SIGKILL を送り、**その tty の上にプロセスが
-     無いこと**を確かめる (残れば一覧を出して exit 1)。tmux は呼ばない。
-  4. `kill-session` で session を消す。pane のプロセスが全部止まると pane が閉じ、最後の session なら
-     server も終わるので、ここで `no server running` が返ることがある。
+  2. `scripts/stop-tty-processes.sh -L <socket名> <tty>...` を実行する。止める前に、socket 名が既定
+     server を指さないこと (空・`default` (大文字小文字を問わない)・`/` を含むものを拒否。guard と同じ
+     規則)、各 tty がその server の `list-panes` にあること、スクリプトの祖先 (pid 1 まで) の端末で
+     ないこと、`/dev/<tty>` が存在することを確かめ、1 つでも外れれば何も止めずに exit 2 で終わる。
+     通れば tty の上のプロセスの pgid を全部列挙して各 pgid へ SIGTERM を送り、0.5 秒待って残る pgid へ
+     SIGKILL を送り、**その tty の上にプロセスが無いこと**を確かめる (残れば一覧を出して exit 1)。
+     呼ぶ tmux は `list-panes` だけである。`--dry-run` で、確かめた結果と止める予定の pgid だけを見られる。
+  3. `kill-session` で session を消す。pane のプロセスが全部止まると pane が閉じ、最後の session なら
+     server も終わるので、ここで `no server running` や `can't find session` が返ることがある。
+
+  確かめる項目は、手作業の確認に頼らないためにスクリプトの中に置いている。Bash ツールから呼ぶと
+  スクリプト自身の tty は `??` だが、祖先の Claude Code とユーザーの shell は端末を持つ (実測: `claude`
+  と `fish` が `ttys015`) ので、自分の tty と比べるだけではユーザーの端末を渡されても通してしまう。
+  pane が消えた後の tty の名前はすぐに再利用される (レビューアの計測: 7 つの隔離 server が続けて
+  `ttys006` を受け取った。#540 の実機確認でも、消した session の `ttys006` を次の session が受け取った)。
+  拒否の各形と、正しく渡せば止まることは、CI の `build-and-test` ジョブの `Stop tty processes - checks`
+  (`scripts/check-stop-tty-processes.sh`) が隔離 server を立てて検査する。祖先の端末の拒否は、CI の
+  runner では祖先が端末を持たないので、pane の中の shell からその pane 自身の tty を渡して検査する。
 
   この手順が効くことを実測したのは、pane のコマンドとして exec した形 (相対パス) と、pane の対話
   bash (`/bin/bash --norc --noprofile -i`) / 対話 zsh (`/bin/zsh -f -i`) から `send-keys` で起動した形の
-  3 つである (macOS 27 / bash 3.2.57 / zsh 5.9 / tmux 3.8)。`ps -t` は `ttys006` / `s006` /
+  3 つである (macOS 27 / bash 3.2.57 / zsh 5.9 / tmux 3.8。`-L` と持ち主の確認を足した後の使い方で
+  確かめ直したのは対話 bash の形で、止める部分は 3 つとも同じである)。`ps -t` は `ttys006` / `s006` /
   `/dev/ttys006` のどの綴りでも効いたが、`pgrep -t` は同じ綴りで何も返さなかった。
 
   偽エージェントで HUP を trap するなら、handler は必ず `exit` する。受け流す必要があるときは、
@@ -334,7 +346,9 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   以降のもので、`read -r -t 1 x || [ $? -gt 128 ] || exit` は最初の時間切れで終わる。
   **後始末の確認に「偽バイナリのパスで `pgrep -f` して 0 件」も「`ps -p <pane_pid>` が空」も使わない**
   — 前者は相対パスで起動すると args に絶対パスが現れず空振りし (レビューアが実際にこれで孤児を
-  見逃した)、後者は対話 shell から起動した子を見ていない。
+  見逃した)、後者は対話 shell から起動した子を見ていない。**setsid で端末から離れた子は tty の上に
+  無いので、`stop-tty-processes.sh` では止まらない** (レビューアの計測: Python の孤児が 92〜97% CPU で
+  残った)。偽エージェントが setsid する子を作るなら、その pid を自分で控えて止めること。
 - **残った孤児はフックで知らせる。止めはしない** (`.claude/settings.json` の `PostToolUse` と
   `PostToolUseFailure` / matcher `Bash` → `scripts/warn_orphan_processes.py`、Issue #540)。Bash の
   呼び出しが終わるたびに — 成功なら `PostToolUse`、失敗 (exit 0 以外) なら `PostToolUseFailure` が
@@ -358,7 +372,11 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   超えた・`python3` が無い、のいずれでも何も出ない (guard と同じ種類の穴。構文エラーは exit 1 になって
   警告が黙って消えるので、CI の `checks` ジョブが `Orphan warning - compile` で `py_compile` する)。
   隔離 server が生きている間は、session を消した pane のプロセスの親がまだ server なので候補に
-  ならない (上の項の実測)。tty を失って `%cpu` が 50 未満の孤児も候補にならない。`nohup` の孤児は、
+  ならない (上の項の実測)。tty を失って `%cpu` が 50 未満の孤児も候補にならない。setsid した
+  Python (`…/Python.app/Contents/MacOS/Python`) の孤児は、高 CPU でも種類 B の `.app/` の除外に当たる
+  ので候補にならない (レビューアの計測で 92〜97% CPU のまま警告されなかった)。逆に、ユーザーの正当な
+  常駐 (端末多重化ソフトの server や `codex app-server daemon` など) は、CPU が 50% を超えると種類 B の
+  候補になりうる (レビューアの計測では、その時点の誤検出は 0 件だった)。`nohup` の孤児は、
   試した形 (pane の対話 bash で `nohup sleep 300 &` → `kill-session`) では tty が `??` になり、CPU が
   0.0 なので候補に入らなかった。高 CPU で動き続ける `nohup` の孤児なら種類 B に入りうる (警告だけ
   なので許容する)。subagent の Bash で渡る `session_id` が親と子のどちらのものかは未確認なので、

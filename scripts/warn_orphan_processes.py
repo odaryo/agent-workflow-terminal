@@ -194,8 +194,9 @@ def build_context(candidates, scratchpad_dir, uid):
         "このフックはプロセスを止めない。nohup などの正当な孤児もここに現れうる。",
         "自分が作ったと確かめられたものだけを止める。ほかのセッションやユーザーのプロセスには触らない。"
         "確かめられないものは止めずに、pid と args をユーザーに報告する。",
-        "止め方: pgid ごとに kill -TERM -- -<pid> を送り、0.5 秒待って残っていれば "
-        "kill -KILL -- -<pid> を送り、最後に ps -p <pid> が空なことを確かめる。",
+        "止め方: 警告に出た pid (= pgid) について、kill -TERM -- -<pid> を送り、0.5 秒待って残って"
+        "いれば kill -KILL -- -<pid> を送り、最後にその pid の ps -p <pid> が空なことを確かめる "
+        "(tmux の pane の後始末なら scripts/stop-tty-processes.sh を使う)。",
         legend + "相対パスで起動したものには印が付かないので、印が無いことは自分のものでない証拠に"
         "ならない。印があることも自分が作った証拠にはならない。",
         "",

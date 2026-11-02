@@ -38,6 +38,11 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   /// それより短い間の起動し直しは次の `liveness` (約 6 秒以内) が pid の並びの違いで捕まえる。
   /// 絞らないと、出力が途切れ途切れに出る間は変化のたびに `ps` を読み、`ps` が約 2 倍になる
   /// (`bursty` の 40 秒で 7 → 14 回)。
+  ///
+  /// 比べるのは「最後の静かな採取の時点の経過」であって、変化の採取までの静かな時間ではない。
+  /// 実際に静かだった時間は最大で採取の周期だけ長くなり、製品の周期 (2 秒、
+  /// `AgentObservationIntervals.signals`) では実効のしきい値が 5〜7 秒になる。計測では、約 6.3 秒
+  /// 静かだったのに最後の静かな採取の経過が 4.32 秒だったため確かめなかった (Issue #566)。
   static let restartCheckMinimumQuietSeconds: TimeInterval = 5
 
   private let processTable: ProcessTableSnapshotCache
@@ -263,9 +268,11 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   /// (`ps` のコスト) に反する (設計書 §12.4.2)。
   ///
   /// - Note: 次の3つは閉じない。Agent が画面を変え続けている最中に起動し直した場合、
-  ///   静かな時間が `restartCheckMinimumQuietSeconds` に届かないうちに起動し直した場合
-  ///   (どちらも次の `liveness` が捕まえる)、画面の捕捉から `ps` の読み込みまでの間 (数 ms) に
-  ///   起動し直した場合。
+  ///   最後の静かな採取の経過が `restartCheckMinimumQuietSeconds` に届かないうちに起動し直した
+  ///   場合 (どちらも次の `liveness` が捕まえる)、画面の捕捉から `ps` の読み込みまでの間 (数 ms) に
+  ///   起動し直した場合。2つ目の窓は、実際に静かだった時間では最大で採取の周期だけ広く、製品の
+  ///   周期 (2 秒) では 5〜7 秒静かでも確かめないことがある (計測: 約 6.3 秒静かでも、最後の
+  ///   静かな採取が 4.32 秒で確かめなかった。Issue #566)。
   private func observeScreenChange(
     _ screen: String, of pane: PaneSnapshot, at observedAt: ContinuousClock.Instant,
     screenCapturedAt: ContinuousClock.Instant, minimumChangedLines: Int

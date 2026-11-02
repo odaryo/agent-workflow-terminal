@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     didSet { paneObservations.observe(inventory, tabs: tabKeys) }
   }
   var newlyAddedTabs: Set<TerminalSessionKey> = []
+  var restoredTabs: Set<TerminalSessionKey> = []
 
   @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
     didSet { saveViewerArrangements(replacing: oldValue) }
@@ -107,6 +108,7 @@ final class AppModel: ObservableObject {
       return
     }
     newlyAddedTabs.insert(key)
+    restoredTabs.remove(key)
     select(key)
   }
 
@@ -119,12 +121,15 @@ final class AppModel: ObservableObject {
   }
 
   func removeTab(_ key: TerminalSessionKey) {
+    newlyAddedTabs.remove(key)
+    restoredTabs.remove(key)
     openedTabs.remove(key)
     tabLayout.removeTab(key)
   }
 
   func removeTabs(in identity: WorktreeIdentity) {
     newlyAddedTabs = newlyAddedTabs.filter { $0.identity != identity }
+    restoredTabs = restoredTabs.filter { $0.identity != identity }
     for key in tabLayout.tabs(in: identity) { tabLayout.removeTab(key) }
   }
   /// 通常の Task Tab に並べる worktree (設計書 §3.2)。
@@ -199,7 +204,7 @@ final class AppModel: ObservableObject {
           detected: scan.detected,
           saved: saved,
           unobserved: scan.failures.map(\.worktreePath)
-        ), sessionNames: sessionNames)
+        ), sessionNames: sessionNames, hasSavedInventory: saved != nil)
       report(scanFailures: scan.failures)
     }
 
@@ -283,7 +288,9 @@ final class AppModel: ObservableObject {
     }
   }
 
-  private func applyInitial(_ result: WorktreeScanResult, sessionNames: [String]?) {
+  func applyInitial(
+    _ result: WorktreeScanResult, sessionNames: [String]?, hasSavedInventory: Bool
+  ) {
     projectRoot = result.inventory.projectRoot
     worktrees = result.inventory.taskWorktrees
     if let sessionNames {
@@ -291,6 +298,8 @@ final class AppModel: ObservableObject {
         from: sessionNames,
         identities: [projectRoot?.identity].compactMap { $0 } + worktrees.map(\.identity))
     }
+    // 選択後では端末の .task が印より先に走り、確認なしで session を作り得る。
+    restoredTabs = hasSavedInventory ? Set(tabKeys) : []
     didCompleteInitialScan = true
     if projectRoot != nil {
       selectProjectRoot()
@@ -323,6 +332,7 @@ final class AppModel: ObservableObject {
       tabClosing.cancel()
       close(identity)
     } else {
+      restoredTabs = restoredTabs.filter { $0.identity != identity }
       Task { await restoreTabsOnActivation(of: identity) }
     }
     save()

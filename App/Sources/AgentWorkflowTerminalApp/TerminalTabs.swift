@@ -17,6 +17,7 @@ struct TerminalTabs: View {
             worktree: worktree,
             sessions: model.sessions,
             shouldOpen: { await model.shouldOpenTab(key) },
+            approveCreation: { model.approveSessionCreation(key) },
             didPrepare: { model.didPrepareTab(key) },
             didExit: { await model.handleTabExit(key) },
             focusRequest: keyboardFocus.focusRequest(isTabSelected: model.selectedTab == key)
@@ -40,7 +41,8 @@ private struct TerminalTabContent: View {
   let key: TerminalSessionKey
   let worktree: DetectedWorktree
   let sessions: TmuxSessionProvisioner?
-  let shouldOpen: @MainActor () async -> Bool
+  let shouldOpen: @MainActor () async -> TerminalTabOpening
+  let approveCreation: @MainActor () -> Void
   let didPrepare: @MainActor () -> Void
   let didExit: @MainActor () async -> Void
   let focusRequest: TerminalFocusRequest?
@@ -62,6 +64,24 @@ private struct TerminalTabContent: View {
           ProgressView("tmux session を用意しています")
         case .ready(let command):
           terminal(command: command, generation: attempt)
+        case .missing:
+          ContentUnavailableView {
+            Label("前回の tmux session が見つかりません", systemImage: "bolt.horizontal.circle")
+          } description: {
+            Text(
+              """
+              このタブの session は、アプリを止めていた間に終了したか、確かめられませんでした。\
+              中で動いていた Agent は戻りません。\
+              新しい session を作るには、下のボタンを押してください。
+              """
+            )
+          } actions: {
+            Button("新しい session を作る") {
+              approveCreation()
+              attempt += 1
+              preparation = .preparing
+            }
+          }
         case .failed(let reason):
           ContentUnavailableView {
             Label("tmux session を用意できません", systemImage: "exclamationmark.triangle")
@@ -81,7 +101,17 @@ private struct TerminalTabContent: View {
     // surface を作り替えることになる。世代が上がるのは、再試行か再 attach を押したときだけ。
     .task(id: TerminalSessionAttempt(key: key, attempt: attempt)) {
       guard let sessions, case .preparing = preparation else { return }
-      guard await shouldOpen(), !Task.isCancelled else { return }
+      let opening = await shouldOpen()
+      guard !Task.isCancelled else { return }
+      switch opening {
+      case .open:
+        break
+      case .offerCreate:
+        preparation = .missing
+        return
+      case .close:
+        return
+      }
       let result = await sessions.attachCommand(
         for: key, workingDirectory: worktree.worktreePath)
       // Why not 書いてしまう: cancel 後のこの task はもう古い世代のものであり、その結果で
@@ -181,6 +211,7 @@ private struct TerminalSessionAttempt: Equatable {
 
 private enum TerminalSessionPreparation {
   case preparing
+  case missing
   /// surface へ渡す attach の argv。
   case ready([String])
   case failed(String)

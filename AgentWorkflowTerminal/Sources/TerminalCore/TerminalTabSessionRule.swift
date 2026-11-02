@@ -7,6 +7,7 @@ public enum TerminalTabSessionRule {
   public enum OnOpen: Sendable, Equatable {
     case attachOrCreate
     case closeTab
+    case offerCreate
   }
 
   public static func afterExit(sessionExists: Bool?, tabsInDirectory: Int) -> AfterExit {
@@ -15,14 +16,22 @@ public enum TerminalTabSessionRule {
     return .closeTab
   }
 
+  /// 設計書 §3.3「起動時の復元でsessionが消えていたタブ」に従う。
+  /// 存在を確かめられない nil でも黙って作成せず、明示操作後の attachCommand に server の probe を委ねる。
   public static func onOpen(
     sessionExists: Bool?,
     tabsInDirectory: Int,
-    isNewlyAdded: Bool
+    isNewlyAdded: Bool,
+    isRestored: Bool
   ) -> OnOpen {
     // 新しく足したタブは session がまだ無いのが正常なので、閉じずに作成へ進める。
     guard !isNewlyAdded else { return .attachOrCreate }
-    return afterExit(sessionExists: sessionExists, tabsInDirectory: tabsInDirectory) == .closeTab
-      ? .closeTab : .attachOrCreate
+    if afterExit(sessionExists: sessionExists, tabsInDirectory: tabsInDirectory) == .closeTab {
+      return .closeTab
+    }
+    if isRestored, sessionExists != true {
+      return .offerCreate
+    }
+    return .attachOrCreate
   }
 }

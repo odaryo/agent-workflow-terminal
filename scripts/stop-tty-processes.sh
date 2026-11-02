@@ -14,9 +14,16 @@ usage() {
 
   1. tty の上のプロセスを数え、pid・pgid・開始時刻を記録する。記録した pgid へ SIGTERM を送る
   2. 0.5 秒待ち、記録したプロセスのうち同じ開始時刻でまだ生きているものの pgid へ SIGKILL を送る
+     (別の group へ移ったものは、その pid だけへ送る)
   3. 記録したプロセスがすべて消えたことを確かめる。残っていれば一覧を出して exit 1
-  4. tty の上に記録に無いプロセスがいれば、止めずに一覧で出す (exit 0)。待ちの間に pane が
-     閉じると、別の server の新しい pane が同じ tty を受け取りうるため、数え直して撃たない
+  4. 記録した pgid に記録に無いプロセスがいれば、止めずに一覧で出して exit 1。TERM の後に
+     fork した子 (tty を失っていることがある) でありうるが、group が空になった後に番号が
+     再利用された可能性を除外できないため、撃たない。自分が作ったと確かめてから止める
+  5. tty の上に記録に無いプロセスがいれば、止めずに一覧で出す (それだけなら exit 0)。待ちの
+     間に pane が閉じると、別の server の新しい pane が同じ tty を受け取りうるため、数え直して
+     撃たない
+
+宛先の判定は scripts/stop_tty_targets.py が行う (python3 が要る)。
 
 止める前に次をすべて確かめ、1 つでも満たさなければ何も止めずに exit 2 で終わる。
 
@@ -145,6 +152,14 @@ if [[ "$socket_ok" -eq 1 && "${#names[@]}" -ge 1 ]]; then
   fi
 fi
 
+# 宛先の判定 (stop_tty_targets.py) は python3 で動く。
+TARGETS="$SCRIPT_DIR/stop_tty_targets.py"
+if ! command -v python3 >/dev/null 2>&1; then
+  refuse "python3 が見つからないので、止める宛先を判定できません"
+elif [[ ! -x "$TARGETS" ]]; then
+  refuse "宛先の判定のスクリプトが実行可能ではありません: $TARGETS"
+fi
+
 # TERM と KILL の間の待ち。検査で tty の再利用を起こすためだけに延ばせる。
 grace="${AWT_STOP_TTY_GRACE_SECONDS:-0.5}"
 if [[ ! "$grace" =~ ^[0-9]+(\.[0-9]+)?$ ]] || ! awk -v g="$grace" 'BEGIN { exit !(g <= 10) }'; then
@@ -159,82 +174,94 @@ if [[ "${#reasons[@]}" -gt 0 ]]; then
   exit 2
 fi
 
-# 指定した tty の上のプロセスを `pid pgid tty 開始時刻 args` の形で出す。開始時刻 (lstart) は
-# 5 語を `_` でつないで 1 語にする。
-# `ps -t` でも絞れるが (実測 macOS 27: ttys006 / s006 / /dev/ttys006 のどれも効いた)、
-# `pgrep -t` は同じ綴りで何も返さなかったので、ps の全体を自分で絞る形に揃える。
-on_ttys() {
-  LC_ALL=C ps -A -o pid=,pgid=,tty=,lstart=,args= | awk -v list="${names[*]}" -v self=$$ '
-    BEGIN { n = split(list, a, " "); for (i = 1; i <= n; i++) want[a[i]] = 1 }
-    $1 != self && ($3 in want) {
-      start = $4 "_" $5 "_" $6 "_" $7 "_" $8
-      rest = $0
-      for (i = 1; i <= 8; i++) sub(/^[ \t]*[^ \t]+/, "", rest)
-      sub(/^[ \t]+/, "", rest)
-      print $1, $2, $3, start, rest
-    }'
+# tty で絞るのは stop_tty_targets.py の側。`ps -t` でも絞れるが (実測 macOS 27: ttys006 / s006 /
+# /dev/ttys006 のどれも効いた)、`pgrep -t` は同じ綴りで何も返さなかったので、ps の全体を取る。
+# 全体を取るのは、tty を失った子を pgid で探すためでもある (#573)。
+snapshot() {
+  LC_ALL=C ps -A -o pid=,pgid=,tty=,lstart=,args=
+}
+
+# 宛先の判定は stop_tty_targets.py に置く。pid の再利用や group の移動は実プロセスでは起こせない
+# ので、判定は scripts/check-stop-tty-targets.sh が ps の fixture で検査する (Issue #573)。ps を
+# 差し替える口をこのスクリプトに作らないため、判定にだけ断面を文字列で渡す。
+judge() {
+  "$TARGETS" --self $$ --recorded <(printf '%s\n' "$recorded_snapshot") \
+    --now <(printf '%s\n' "$1") "${names[@]}"
+}
+
+# judge の出力から、$1 の種類の行を、種類の語を外して出す。
+section() {
+  awk -v kind="$1" '$1 == kind { sub(/^[^ ]+ /, ""); print }' <<<"$2"
 }
 
 # 止める対象は、最初に数えたプロセスに固定する。TERM の後の待ちの間に pane が閉じて tty が
 # 空くと、別の server の新しい pane が同じ tty を受け取る (実測: 隔離 server A を止めている
 # 0.2 秒後に立てた C が ttys006 を受け取り、数え直していた版は C を SIGKILL した、#540)。
-recorded=$(on_ttys)
-
-# 記録したプロセスのうち、同じ pid で開始時刻も同じものだけを、生きているとみなす。開始時刻を
-# 見るのは、pid が再利用されて別のプロセスになっていても撃たないため。
-# 出力は `pid 記録した pgid 今の pgid`。
-recorded_alive() {
-  local pid pgid tty start rest now_pgid now_start
-  while read -r pid pgid tty start rest; do
-    [[ -n "$pid" ]] || continue
-    read -r now_pgid now_start <<<"$(LC_ALL=C ps -o pgid=,lstart= -p "$pid" 2>/dev/null |
-      awk '{print $1, $2 "_" $3 "_" $4 "_" $5 "_" $6}')"
-    if [[ -n "$now_pgid" && "$now_start" == "$start" ]]; then
-      echo "$pid $pgid $now_pgid"
-    fi
-  done <<<"$recorded"
-}
+recorded_snapshot=$(snapshot)
+if ! plan=$(judge "$recorded_snapshot"); then
+  info "ps の出力を判定できないので、何も止めません"
+  exit 2
+fi
+recorded=$(section recorded "$plan")
 
 if [[ "$dry_run" -eq 1 ]]; then
-  info "--dry-run: 確かめた結果は問題ありません。止める予定の pgid: $(awk '{print $2}' <<<"$recorded" | sort -un | tr '\n' ' ')"
+  info "--dry-run: 確かめた結果は問題ありません。止める予定の pgid: $(section target "$plan" | sed 's/^-//' | tr '\n' ' ')"
   info "tty の上のプロセス (pid pgid tty 開始時刻 args):"
   info "$recorded"
   exit 0
 fi
 
-while read -r pgid; do
-  [[ -n "$pgid" ]] || continue
-  info "kill -TERM -- -$pgid"
-  kill -TERM -- "-$pgid" 2>/dev/null || true
-done < <(awk 'NF {print $2}' <<<"$recorded" | sort -un)
+while read -r target; do
+  [[ -n "$target" ]] || continue
+  info "kill -TERM -- $target"
+  kill -TERM -- "$target" 2>/dev/null || true
+done <<<"$(section target "$plan")"
 sleep "$grace"
 
-alive=$(recorded_alive)
-if [[ -n "$alive" ]]; then
-  # pgid へ送るのは、記録した pgid にまだ属しているときだけ。別の group へ移ったものは、その
-  # pid だけを撃つ (元の pgid は、group が空になれば別の group に再利用されうる)。
+if ! plan=$(judge "$(snapshot)"); then
+  info "ps の出力を判定できないので、SIGKILL を送らずに終わります。止まったかどうかは確かめていません"
+  exit 1
+fi
+kill_targets=$(section target "$plan")
+if [[ -n "$kill_targets" ]]; then
   while read -r target; do
     [[ -n "$target" ]] || continue
     info "kill -KILL -- $target"
     kill -KILL -- "$target" 2>/dev/null || true
-  done < <(awk '$2 == $3 {print "-" $2} $2 != $3 {print $1}' <<<"$alive" | sort -u)
+  done <<<"$kill_targets"
   sleep 0.2
 fi
 
-left=$(recorded_alive)
+if ! plan=$(judge "$(snapshot)"); then
+  info "ps の出力を判定できないので、止まったかどうかを確かめられません"
+  exit 1
+fi
+status=0
+left=$(section alive "$plan")
 if [[ -n "$left" ]]; then
   info "最初に数えたプロセスがまだ残っています (pid 記録した pgid 今の pgid):"
   info "$left"
-  exit 1
+  status=1
+else
+  info "最初に数えたプロセスはすべて止まりました: ${names[*]}"
 fi
-info "最初に数えたプロセスはすべて止まりました: ${names[*]}"
 
-# 確認の後に tty の上にいるものは、記録に無い別物として扱い、止めない。pane の子が後から
-# 生まれた場合もここに出る。
-others=$(on_ttys | awk -v rec="$(awk '{print $1 ":" $4}' <<<"$recorded" | tr '\n' ' ')" '
-  BEGIN { n = split(rec, a, " "); for (i = 1; i <= n; i++) seen[a[i]] = 1 }
-  !(($1 ":" $4) in seen) { print }')
+# 記録した pgid に、記録に無いプロセスがいる。TERM の trap の中で fork した子は記録の後に
+# 生まれ、pane が閉じると tty を失うので、tty の上だけを見ていると見逃す (#573 の m5)。
+# 撃たないのは、group が空になった後に同じ番号が別の group に再利用された可能性を、ここからは
+# 除外できないため。
+group_strays=$(section group "$plan")
+if [[ -n "$group_strays" ]]; then
+  info "記録した process group に、記録の後に生まれたプロセスが残っています (TERM の後に fork した子の可能性)。止めていません。自分が作ったと確かめてから、kill -TERM -- -<pgid> を送り、0.5 秒待って残っていれば kill -KILL -- -<pgid> を送って止めてください (TERM を受け流す子がいる)。最後に ps で、その pgid のプロセスが無いことを確かめてください (pid pgid tty 開始時刻 args):"
+  info "$group_strays"
+  status=1
+fi
+
+# 確認の後に tty の上にいるもので、記録した pgid にいないものは、記録に無い別物として扱い、
+# 止めない。pane の子が後から別の group で生まれた場合もここに出る。
+others=$(section tty "$plan")
 if [[ -n "$others" ]]; then
   info "記録に無いプロセスが tty の上にいます (tty が再利用された可能性)。止めていません (pid pgid tty 開始時刻 args):"
   info "$others"
 fi
+exit "$status"

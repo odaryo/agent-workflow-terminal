@@ -320,6 +320,16 @@ jobs:
         timeout-minutes: 5
         run: scripts/check-orphan-warning.sh
 
+      # 計測用の pane の後始末 (scripts/stop-tty-processes.sh) が SIGKILL を送る宛先の判定 (Issue #573)。
+      # pid の再利用や group の移動は実プロセスでは起こせないので、ps の fixture で固定する。tmux は
+      # 要らないのでこのジョブに置く。構文エラーがあると後始末が何も止められなくなるので、コンパイルも確かめる。
+      - name: Stop tty targets - fixtures
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: |
+          python3 -m py_compile scripts/stop_tty_targets.py
+          scripts/check-stop-tty-targets.sh
+
       # wf-pr-merge.sh は、この判定器が「CI は起動しない」と返した PR の待ちを省く。誤って
       # そう返すと CI 未検証のままマージされるため、判定の向きを fixture と変異で固定する。
       - name: CI paths-ignore detector - fixtures

@@ -317,9 +317,12 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
      ないこと、`/dev/<tty>` が存在することを確かめ、1 つでも外れれば何も止めずに exit 2 で終わる。
      通れば tty の上のプロセスを数えて pid・pgid・開始時刻 (`lstart`) を記録し、記録した pgid へ SIGTERM
      を送る。0.5 秒待ち、記録したもののうち同じ開始時刻でまだ生きているものの pgid へだけ SIGKILL を
-     送り、**記録したプロセスがすべて消えたこと**を確かめる (残れば一覧を出して exit 1)。tty の上に
-     記録に無いプロセスがいれば、止めずに「記録に無いプロセス」として一覧で出す (exit 0)。呼ぶ tmux は
-     `list-panes` だけである。`--dry-run` で、確かめた結果と止める予定の pgid だけを見られる。
+     送り、**記録したプロセスがすべて消えたこと**を確かめる (残れば一覧を出して exit 1)。**記録した
+     pgid に記録に無いプロセスがいれば、止めずに一覧で出して exit 1** で終わる (TERM の trap の中で
+     fork した子は記録の後に生まれ、pane が閉じると tty を失うので、tty の上だけを見ると見逃す。
+     撃たないのは、group が空になった後に番号が再利用された可能性を除外できないため。自分が作ったと
+     確かめてから止める)。tty の上に記録に無いプロセスがいれば、止めずに「記録に無いプロセス」として
+     一覧で出す (それだけなら exit 0)。呼ぶ tmux は `list-panes` だけである。`--dry-run` で、確かめた結果と止める予定の pgid だけを見られる。
   3. `kill-session` で session を消す。pane のプロセスが全部止まると pane が閉じ、最後の session なら
      server も終わるので、ここで `no server running` や `can't find session` が返ることがある。
 
@@ -334,7 +337,11 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   SIGKILL された)。そのため KILL と最後の確認は、最初に数えたプロセスに限っている。
   拒否の各形と、正しく渡せば止まること、止めている途中の再利用で新しい持ち主を止めないこと
   (`AWT_STOP_TTY_GRACE_SECONDS` で待ちを延ばして起こす) は、CI の `build-and-test` ジョブの `Stop tty processes - checks`
-  (`scripts/check-stop-tty-processes.sh`) が隔離 server を立てて検査する。祖先の端末の拒否は、CI の
+  (`scripts/check-stop-tty-processes.sh`) が隔離 server を立てて検査する。宛先の判定 (同じ pid でも
+  開始時刻が違えば撃たない・別の group へ移ったものはその pid だけを撃つ、など) は
+  `scripts/stop_tty_targets.py` に切り出してあり、pid の再利用や group の移動は実プロセスでは
+  起こせないので、CI の `checks` ジョブの `Stop tty targets - fixtures`
+  (`scripts/check-stop-tty-targets.sh`) が ps の fixture で検査する (Issue #573)。祖先の端末の拒否は、CI の
   runner では祖先が端末を持たないので、pane の中の shell からその pane 自身の tty を渡して検査する。
 
   この手順が効くことを実測したのは、pane のコマンドとして exec した形 (相対パス) と、pane の対話
@@ -381,7 +388,9 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   隔離 server が生きている間は、session を消した pane のプロセスの親がまだ server なので候補に
   ならない (上の項の実測)。tty を失って `%cpu` が 50 未満の孤児も候補にならない。setsid した
   Python (`…/Python.app/Contents/MacOS/Python`) の孤児は、高 CPU でも種類 B の `.app/` の除外に当たる
-  ので候補にならない (レビューアの計測で 92〜97% CPU のまま警告されなかった)。逆に、ユーザーの正当な
+  ので候補にならない (レビューアの計測で 92〜97% CPU のまま警告されなかった)。**pgid ≠ pid の孤児は
+  フックに出ない** (種類 A・B とも pgid == pid が条件)。TERM の trap の中で fork した子はこの形で残る
+  (#573 の計測: `81012 1 80842 ?? 98.5`) ので、`stop-tty-processes.sh` の exit 1 の一覧で見つける。逆に、ユーザーの正当な
   常駐 (端末多重化ソフトの server や `codex app-server daemon` など) は、CPU が 50% を超えると種類 B の
   候補になりうる (レビューアの計測では、その時点の誤検出は 0 件だった)。`nohup` の孤児は、
   試した形 (pane の対話 bash で `nohup sleep 300 &` → `kill-session`) では tty が `??` になり、CPU が

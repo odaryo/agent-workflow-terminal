@@ -1,0 +1,3 @@
+rc=0
+self=9000
+ttys=ttys006 ttys007

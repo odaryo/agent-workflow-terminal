@@ -85,6 +85,18 @@ public struct GitWorktreeEntryFailure: Sendable, Equatable {
     ///
     /// 不在にせず失敗にするのは、lock が「消さないで」という意思表示だからである。観測失敗として
     /// 前回の状態を残し、黙って消失させない。
+    /// 別 repository へ遡って `.absent` になる形は、git-config(1) が「most likely a misconfiguration」と
+    /// 呼ぶ `core.worktree` の上でだけ起き、塞ぐには common dir が違う entry を置き換わった entry と
+    /// 区別する別の手掛かりが要るため、Issue #515 では扱わない。
     case resolvedToAncestorRepository
+    /// git 2.50.1 の実測では、entry を別 worktree のコピーや symlink に置き換えたり、
+    /// `.git` を別 worktree の admin へ向けたりすると、同じ安定 ID が返る (Issue #515)。
+    /// これらは `.git` が残るため lock しなくても `prunable` が付かない。
+    /// `core.worktree` が別の場所を指す linked worktree へ遡った場合も、prefix は空で ID が重複する。
+    /// この場合は `.git` を消すため、`prunable` を抑止するには lock が要る。
+    /// 下流は同じ ID の最初の1件を採り、別のパスに結び付くと入力の行き先を誤るため、推測で
+    /// どれか1件を採らない。admin の `gitdir` と照合して本物をちょうど1件に特定できなければ
+    /// 組の全件を失敗にする。`gitDirectory` は重複した安定 ID の生の値。
+    case sharedIdentity(gitDirectory: String)
   }
 }

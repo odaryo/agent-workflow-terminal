@@ -102,8 +102,13 @@ struct TmuxOrphanedServerProbeTests {
   }
 
   @Test(
-    "キャレットの後ろが小文字のパスは、完全一致する行があれば orphaned",
-    arguments: ["/private/tmp/tmux-501/awt-a^b", "/private/tmp/tmux-501/awt-a^ab"])
+    "曖昧なキャレット表記の範囲外のパスは、完全一致する行があれば orphaned",
+    arguments: [
+      "/private/tmp/tmux-501/awt-a^b",
+      "/private/tmp/tmux-501/awt-a^ab",
+      "/private/tmp/tmux-501/awt-a^`b",
+      "/private/tmp/tmux-501/awt-a^?b",
+    ])
   func findsServerForEscapedPathWhenLineMatches(socketPath: String) async {
     let runner = OrphanedServerRunnerStub(
       result: stubSuccess(
@@ -183,6 +188,27 @@ struct TmuxOrphanedServerProbeTests {
     defer { socket.close() }
 
     #expect(await probeWithListeningLine(on: socket.path) == .absent)
+  }
+
+  @Test("lsof に一致があっても、104 バイトのパスで socket が listen していれば absent")
+  func reportsAbsenceWhenListeningSocketPathIsExactlyCapacity() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+    // bind 用ヘルパーは 104 バイト未満に制限するため、短いパスに bind して ./ で参照を延ばす。
+    // ./ は 2 バイトなので、短いパスも偶数バイトに揃える。
+    let name = directory.path("s").utf8.count.isMultiple(of: 2) ? "s" : "ss"
+    let shortPath = directory.path(name)
+    try #require(shortPath.utf8.count < 104)
+    let socket = try BoundUnixSocket(path: shortPath, listening: true)
+    defer { socket.close() }
+    let padding = String(repeating: "./", count: (104 - shortPath.utf8.count) / 2)
+    let longPath = directory.url.path + "/" + padding + name
+    try #require(longPath.utf8.count == 104)
+    var status = stat()
+    try #require(lstat(longPath, &status) == 0)
+    try #require(status.st_mode & S_IFMT == S_IFSOCK)
+
+    #expect(await probeWithListeningLine(on: longPath) == .absent)
   }
 
   @Test("lsof に一致があっても、socket のパスが 104 バイトを超えれば orphaned")
@@ -269,13 +295,12 @@ actor OrphanedServerRunnerStub: ProcessRunning {
 struct LsofEscapedPathCase: Sendable, CustomTestStringConvertible {
   let label: String
   let socketPath: String
-  let lsofName: String?
+  let lsofName: String
 
   var testDescription: String { label }
 
   var unmatchedLsofOutput: String {
     let other = "p20378\nf6\nn/private/tmp/tmux-501/default\n"
-    guard let lsofName else { return other }
     return other + "p54148\nf6\nn\(lsofName)\n"
   }
 }
@@ -302,6 +327,8 @@ let lsofEscapedPathCases = [
 ]
 
 let ambiguousLsofPaths = [
+  "/private/tmp/tmux-501/awt-a^@b",
+  "/private/tmp/tmux-501/awt-a^_b",
   "/private/tmp/tmux-501/awt-a^Ab",
   "/private/tmp/tmux-501/awt-a^[b",
   #"/private/tmp/tmux-501/awt-a\tb"#,

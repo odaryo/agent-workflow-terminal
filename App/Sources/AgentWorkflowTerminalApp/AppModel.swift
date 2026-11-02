@@ -445,6 +445,7 @@ final class AppModel: ObservableObject {
       "git の出力を解釈できません"
     case .administrativeDirectoryNotFound: "管理ディレクトリを特定できません"
     case .resolvedToAncestorRepository: "worktree の .git が見つからず、祖先の repository を指しています"
+    case .sharedIdentity: "別の worktree と同じ git ディレクトリを指しています (コピーや symlink で置き換わった可能性があります)"
     }
   }
 

@@ -5,7 +5,8 @@ import Testing
 
 @testable import AgentWorkflowTerminalApp
 
-@Suite("bootstrap のプロセス内直列化 (Issue #512)")
+/// gate はプロセス全体で共有されるので、並行させると1秒の probe の間に他方が gate を待って落ちる (Issue #544)。
+@Suite("bootstrap のプロセス内直列化 (Issue #512)", .serialized)
 struct TmuxSessionBootstrapTests {
   @Test("別 Project の create が失敗しても、bootstrap 後の probe から後始末まで入り交じらない")
   func serializesAcrossProvisioners() async throws {

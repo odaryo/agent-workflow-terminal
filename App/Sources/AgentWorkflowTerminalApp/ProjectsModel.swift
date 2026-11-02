@@ -86,7 +86,7 @@ final class ProjectsModel: ObservableObject {
       } catch {
         warning = "登録済みの Project の一覧を読めませんでした。この起動では保存しません: \(error)"
       }
-    } else {
+    } else if dependencies.applicationSupportWarning == nil {
       warning = "Application Support を利用できないため、この起動では Project の一覧を保存しません。"
     }
 
@@ -101,6 +101,9 @@ final class ProjectsModel: ObservableObject {
     case .directory(let directory): await register(directory: directory)
     }
 
+    if let applicationSupportWarning = dependencies.applicationSupportWarning {
+      warning = [applicationSupportWarning, warning].compactMap { $0 }.joined(separator: "\n")
+    }
     registry.reselect(selectable: isSelectable)
     didLoad = true
     save()

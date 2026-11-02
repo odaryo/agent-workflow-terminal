@@ -19,18 +19,45 @@ struct AppDependencies: Sendable {
   /// `ps` のスナップショットを pane 状態の観測と共有する (§12.7 の現在の Agent プロセス)。
   let signalSource: TmuxAgentSignalSource?
   let sessionActivityProbe: TmuxSessionActivityProbe?
-  /// `~/Library/Application Support` に当たるディレクトリ。引けなかった場合は `nil` で、
-  /// その起動では Active/Inactive を保存できない。
+  /// `nil` の起動では Project の一覧と worktree の状態を保存できない。
   let applicationSupportDirectory: URL?
+  let applicationSupportWarning: String?
 
   static func make() -> Self {
     let launchProject = resolveLaunchProject()
-    let applicationSupport = try? FileManager.default.url(
+    let standardApplicationSupport = try? FileManager.default.url(
       for: .applicationSupportDirectory,
       in: .userDomainMask,
       appropriateFor: nil,
       create: false
     )
+    let applicationSupport: URL?
+    let applicationSupportWarning: String?
+    switch ApplicationSupportLocation.resolve(
+      environment: ProcessInfo.processInfo.environment, standard: standardApplicationSupport)
+    {
+    case .standard(let url):
+      applicationSupport = url
+      applicationSupportWarning = nil
+    case .overridden(let url):
+      applicationSupport = url
+      applicationSupportWarning = nil
+      NSLog("[app] Application Support を上書き: %@", url.path)
+    case .invalid(let value):
+      applicationSupport = nil
+      applicationSupportWarning =
+        "AWT_APPLICATION_SUPPORT_DIR が絶対パスではないため、"
+        + "この起動では Project の一覧と worktree の状態を保存しません: \(value)"
+    }
+    return make(
+      launchProject: launchProject, applicationSupport: applicationSupport,
+      applicationSupportWarning: applicationSupportWarning)
+  }
+
+  private static func make(
+    launchProject: LaunchProjectArgument, applicationSupport: URL?,
+    applicationSupportWarning: String?
+  ) -> Self {
     let executable = TmuxRunner.defaultExecutableCandidates.first {
       FileManager.default.isExecutableFile(atPath: $0.path)
     }
@@ -44,7 +71,8 @@ struct AppDependencies: Sendable {
         paneSource: nil,
         signalSource: nil,
         sessionActivityProbe: nil,
-        applicationSupportDirectory: applicationSupport
+        applicationSupportDirectory: applicationSupport,
+        applicationSupportWarning: applicationSupportWarning
       )
     }
 
@@ -69,7 +97,8 @@ struct AppDependencies: Sendable {
         signalSource: signalSource,
         sessionActivityProbe: TmuxSessionActivityProbe(
           tmuxRunner: runner, processRunner: FoundationProcessRunner()),
-        applicationSupportDirectory: applicationSupport
+        applicationSupportDirectory: applicationSupport,
+        applicationSupportWarning: applicationSupportWarning
       )
     } catch {
       return Self(
@@ -81,7 +110,8 @@ struct AppDependencies: Sendable {
         paneSource: nil,
         signalSource: nil,
         sessionActivityProbe: nil,
-        applicationSupportDirectory: applicationSupport
+        applicationSupportDirectory: applicationSupport,
+        applicationSupportWarning: applicationSupportWarning
       )
     }
   }

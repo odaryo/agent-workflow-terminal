@@ -50,7 +50,7 @@ actor ObservationProcessSpy: ProcessRunning {
   /// このいずれかを含むグループは `outputLimitExceeded` にする。
   private var oversized: Set<PaneID>
   private let listPanesOutput: String
-  private let processTableOutput: String
+  private var processTableOutput: String
   private var listPanesFailure: ProcessRunResult?
 
   init(
@@ -74,6 +74,8 @@ actor ObservationProcessSpy: ProcessRunning {
   }
 
   func setMissing(_ panes: Set<PaneID>) { missing = panes }
+
+  func setProcessTableOutput(_ output: String) { processTableOutput = output }
 
   func setVanishingAfterCapture(_ panes: Set<PaneID>) { vanishingAfterCapture = panes }
 

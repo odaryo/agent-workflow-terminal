@@ -12,15 +12,14 @@ struct OverviewScene: Scene {
 
   var body: some Scene {
     Window("Overview", id: "overview") {
-      OverviewView(projects: projects, navigator: projects.navigator)
+      OverviewWindowContent(projects: projects)
         .frame(minWidth: 420, minHeight: 240)
-
     }
     .defaultSize(width: 640, height: 480)
     .commands {
       TabCyclingCommands(projects: projects)
       CommandGroup(after: .toolbar) {
-        OverviewMenuItem()
+        OverviewMenuItem(navigator: projects.navigator)
       }
     }
   }
@@ -28,17 +27,49 @@ struct OverviewScene: Scene {
 
 /// `openWindow` は View の environment からしか取れないので、メニュー項目を View にする。
 private struct OverviewMenuItem: View {
+  let navigator: AppNavigator
   @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     // 端末 (`GhosttySurfaceView`) は `performKeyEquivalent` を持たないので、⌘ 付きの打鍵は
     // 端末より先にメニューへ届く (§5.4)。
-    Button("Overview を表示") { openWindow(id: "overview") }
-      .keyboardShortcut("o", modifiers: [.command, .shift])
+    Button("Overview を表示") {
+      switch OverviewPresentation.current() {
+      case .window: openWindow(id: "overview")
+      case .sidebar: navigator.toggleOverviewSidebar(openWindow: openWindow)
+      }
+    }
+    .keyboardShortcut("o", modifiers: [.command, .shift])
   }
 }
 
-private struct OverviewView: View {
+/// サイドバー表示では Overview のウィンドウを出さない (§13)。
+///
+/// Why not `defaultLaunchBehavior(.suppressed)`: macOS 15 の API で、deployment target の 14 では
+/// 使えず、scene の修飾子なので条件付きにもできない。起動時に SwiftUI がこの scene を開くことが
+/// ある (main d3f897a でユーザーが観測。state restoration は無効にしているので原因は未計測) ため、
+/// 開いてしまったウィンドウを表示形態を見て閉じる。設定でサイドバーへ切り替えた時にも同じ経路で閉じる。
+private struct OverviewWindowContent: View {
+  @ObservedObject var projects: ProjectsModel
+  @AppStorage(OverviewPresentation.key) private var presentation = OverviewPresentation.default
+    .rawValue
+  @Environment(\.dismissWindow) private var dismissWindow
+
+  var body: some View {
+    Group {
+      if OverviewPresentation(storedValue: presentation) == .window {
+        OverviewView(projects: projects, navigator: projects.navigator)
+      }
+    }
+    .onChange(of: presentation, initial: true) {
+      if OverviewPresentation(storedValue: presentation) == .sidebar {
+        dismissWindow(id: "overview")
+      }
+    }
+  }
+}
+
+struct OverviewView: View {
   @ObservedObject var projects: ProjectsModel
   @ObservedObject var navigator: AppNavigator
   @Environment(\.openWindow) private var openWindow

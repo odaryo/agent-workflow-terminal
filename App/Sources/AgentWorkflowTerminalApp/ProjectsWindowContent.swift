@@ -7,22 +7,41 @@ import TerminalCore
 struct ProjectsWindowContent: View {
   @ObservedObject var projects: ProjectsModel
   @Environment(\.openWindow) private var openWindow
+  @AppStorage(OverviewPresentation.key) private var presentation = OverviewPresentation.default
+    .rawValue
+  @AppStorage(OverviewSidebarPreferences.isOpenKey) private var isSidebarOpen =
+    OverviewSidebarPreferences.defaultIsOpen
+  @AppStorage(OverviewSidebarPreferences.widthKey) private var sidebarWidth =
+    OverviewSidebarPreferences.defaultWidth
 
+  private var isSidebarVisible: Bool {
+    OverviewPresentation(storedValue: presentation) == .sidebar && isSidebarOpen
+  }
+
+  private var sidebarOccupiedWidth: CGFloat {
+    OverviewSidebarPreferences.occupiedWidth(isVisible: isSidebarVisible, width: sidebarWidth)
+  }
+
+  // Why not `.id(Project)` の内側: サイドバーを `ProjectView` の `.id` の内側や前後の分岐に置くと、
+  // Project を切り替えるたびに作り直されてスクロール位置を失う。`.id` の外側で、`if` は HStack の
+  // 先頭に固定し、開閉で右側の VStack (= 端末) の位置が変わって作り直されないようにする。
+  //
+  // サイドバーの開閉と幅の変更は、端末の領域を変えるので tmux の window の大きさを変える (§13)。
   var body: some View {
-    VStack(spacing: 0) {
-      if let warning = projects.warning {
-        WarningBar(text: warning) { projects.dismissWarning() }
-        Divider()
+    HStack(spacing: 0) {
+      if isSidebarVisible {
+        sidebar
       }
-      content
+      mainColumn
     }
     .background {
       if let model = projects.selectedModel {
-        ProjectWindowExpansion(model: model)
+        ProjectWindowExpansion(model: model, extraWidth: sidebarOccupiedWidth)
       } else {
-        WindowExpansion(size: NSSize(width: 480, height: 320))
+        WindowExpansion(size: NSSize(width: 480 + sidebarOccupiedWidth, height: 320))
       }
     }
+    .background { MainWindowCapture(navigator: projects.navigator) }
     .toolbar {
       ToolbarItem(placement: .navigation) {
         ProjectMenu(projects: projects)
@@ -48,6 +67,31 @@ struct ProjectsWindowContent: View {
     .onAppear { projects.navigator.openWindow = openWindow }
   }
 
+  private var mainColumn: some View {
+    VStack(spacing: 0) {
+      if let warning = projects.warning {
+        WarningBar(text: warning) { projects.dismissWarning() }
+        Divider()
+      }
+      content
+    }
+  }
+
+  private var sidebar: some View {
+    HStack(spacing: 0) {
+      OverviewView(projects: projects, navigator: projects.navigator)
+        .frame(width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)))
+      DrawerResizeHandle(
+        width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)),
+        growsRightward: true,
+        accessibilityLabel: "Overview の幅",
+        onWidthChange: { sidebarWidth = OverviewSidebarPreferences.clamped(Double($0)) },
+        onDragEnd: { sidebarWidth = OverviewSidebarPreferences.clamped(Double($0)) }
+      )
+      .frame(width: CGFloat(OverviewSidebarPreferences.handleWidth))
+    }
+  }
+
   @ViewBuilder private var content: some View {
     if !projects.didLoad {
       ProgressView("登録済みの Project を読み込んでいます")
@@ -71,6 +115,33 @@ struct ProjectsWindowContent: View {
       ContentUnavailableView(
         "選択できる Project がありません", systemImage: "exclamationmark.triangle",
         description: Text("登録済みの Project にはどれも到達できません。ツールバーのメニューから理由を確認してください。"))
+    }
+  }
+}
+
+/// `NSWindow` を `AppNavigator` に渡す。SwiftUI にはメイン window が開いているかを問い合わせる
+/// 手段が無い。
+private struct MainWindowCapture: NSViewRepresentable {
+  let navigator: AppNavigator
+
+  func makeNSView(context: Context) -> CaptureView { CaptureView() }
+
+  func updateNSView(_ view: CaptureView, context: Context) {
+    view.navigator = navigator
+    view.capture()
+  }
+
+  @MainActor
+  final class CaptureView: NSView {
+    weak var navigator: AppNavigator?
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      capture()
+    }
+
+    func capture() {
+      if let window { navigator?.mainWindow = window }
     }
   }
 }

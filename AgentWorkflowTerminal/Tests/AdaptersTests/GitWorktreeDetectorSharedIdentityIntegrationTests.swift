@@ -105,9 +105,8 @@ struct GitWorktreeDetectorSharedIdentityTests {
     }
   }
 
-  // 相対パスの gitdir は `..` を含むので、標準化で sy の symlink が解決され、admin の sy が feat の
-  // パスに一致する。辿る順で sy が先に返ると本物は0件になる (#515 の Director の計測)。安全側に倒れて
-  // 本物の feat も失敗になることを固定する。
+  // git は相対パスの gitdir を実パスで解決し、sy の entry も feat と同じパスで並べる。同じパスの
+  // 2件はパスでは区別できないので、組の全件を失敗にする (Issue #531)。
   @Test("useRelativePaths で symlink の sy が feat と同じパスに並ぶ組は、本物の feat も含め全件を失敗にする")
   func relativeSymlinkGroupIsEntirelyReportedAsFailure() async throws {
     try await withGitRepository { repository in

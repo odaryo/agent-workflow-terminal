@@ -1,10 +1,12 @@
 import TerminalCore
 
 extension GitWorktreeDetector {
+  /// `describeUnreachable` と同じ finder を使い、注入した finder と判定がずれないようにする (Issue #531)。
   static func resolveSharedIdentities(
     detected: [DetectedWorktree],
     failures: [GitWorktreeEntryFailure],
-    commonDirectory: WorktreeIdentity
+    commonDirectory: WorktreeIdentity,
+    findAdministrativeDirectory: @Sendable (String, WorktreeIdentity) -> WorktreeIdentity?
   ) -> GitWorktreeScanResult {
     let groups = Dictionary(
       grouping: detected.indices.filter { !detected[$0].isProjectRoot },
@@ -13,8 +15,8 @@ extension GitWorktreeDetector {
     var rejected: Set<Int> = []
     for (identity, indices) in groups where indices.count > 1 {
       let genuine = indices.filter {
-        administrativeDirectory(
-          worktreePath: detected[$0].worktreePath, commonDirectory: commonDirectory
+        findAdministrativeDirectory(
+          detected[$0].worktreePath, commonDirectory
         ) == identity
       }
       if genuine.count == 1, let retained = genuine.first {

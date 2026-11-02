@@ -211,7 +211,8 @@ public struct GitWorktreeDetector: Sendable {
       }
     }
     return Self.resolveSharedIdentities(
-      detected: detected, failures: failures, commonDirectory: commonDirectory)
+      detected: detected, failures: failures, commonDirectory: commonDirectory,
+      findAdministrativeDirectory: findAdministrativeDirectory)
   }
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。

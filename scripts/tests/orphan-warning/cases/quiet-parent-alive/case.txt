@@ -1,0 +1,3 @@
+# 実測 (macOS 27.0.1 / bash 3.2.57 / zsh 5.9 / tmux 3.8、#540 ラウンド 2 の取り直し)。
+# kill-session の前の 12 行。pane のプロセスと対話 shell の子は親が生きているので候補にしない。
+expect=

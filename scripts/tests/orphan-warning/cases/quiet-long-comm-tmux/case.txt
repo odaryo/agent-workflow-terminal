@@ -1,0 +1,4 @@
+# 合成: 実測の行から 1 か所だけ変えたもの。
+# quiet-tmux-server-ppid1 の行の tty を ttys008 に、comm を長い絶対パスに変えた (comm は別ファイル
+# なので 2 ファイルで 1 か所ずつ)。comm の basename の条件だけで除かれることを固定する (種類 A)。
+expect=

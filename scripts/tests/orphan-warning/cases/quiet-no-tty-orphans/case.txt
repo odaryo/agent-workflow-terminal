@@ -1,0 +1,5 @@
+# 実測 (macOS 27.0.1 / bash 3.2.57 / zsh 5.9 / tmux 3.8、#540 ラウンド 2 の取り直し)。
+# tty が ?? で CPU が 0.0 の孤児 3 つ。pane の対話 bash の `nohup sleep 300 &` (kill-session の前は
+# ttys027 にいた)、Bash ツールの `(sleep 300 &)` (pgid は起動した shell のまま)、fork + setsid した
+# Python (args が Python.app/ を含む)。どれも候補にしない。
+expect=

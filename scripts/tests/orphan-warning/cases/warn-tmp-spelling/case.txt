@@ -1,0 +1,5 @@
+# 合成: 実測の行から 1 か所だけ変えたもの。
+# warn-a-orphan-absolute の行の /private/tmp/ を /tmp/ に変えた (/tmp/... の綴りで起動した形)。
+# scratchpad_dir が /private/tmp/... で渡っても印が付くことを固定する。
+expect=78858
+marked=78858

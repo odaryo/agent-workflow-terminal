@@ -1,0 +1,8 @@
+78856     1 78856   501  98.4 ttys006  /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/bin/claude /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/p.sh
+78858     1 78858   501  99.7 ttys008  /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/bin/claude /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/p.sh
+78860     1 78860   501  99.6 ttys011  bin/claude ./p.sh
+78871     1 78871   501  99.6 ??       bin/claude ./p.sh
+78873     1 78873   501  97.9 ??       bin/claude ./p.sh
+78875     1 78875   501   0.0 ??       sleep 300
+78877     1 78846   501   0.0 ??       sleep 300
+78879     1 78879   501   0.0 ??       /opt/homebrew/Cellar/python@3.15/3.15.0_1/Frameworks/Python.framework/Versions/3.15/Resources/Python.app/Contents/MacOS/Python -c import os\012if os.fork() == 0:\012    os.setsid(); import time; time.sleep(300)\012

@@ -124,7 +124,7 @@ Implementation tasks use a three-role pipeline, validated end-to-end on the tmux
 - **Fallback implementers** (`.claude/agents/implementer.md` Opus / `.claude/agents/implementer-app.md` Sonnet): used only when Codex cannot be (CLI missing, auth or quota failure). Same rules — edits only, no commit or push; follow-ups go back to the same agent via `SendMessage`. `implementer-app` touches `App/` only and does not run UI checks (下記「実装役への渡し方」).
 - **Gate runner** (`.claude/agents/gate-runner.md`, Sonnet): runs the exact GREEN commands the Director lists, in the worktree the Director names, and reports each command's exit code and the raw tail of its output. It does not edit, commit, or diagnose. The Director judges GREEN from that raw output and does not re-run the commands itself.
 - **UI verifier** (`.claude/agents/ui-verifier.md`, Sonnet): Director が書いた UI 確認項目を最終バンドル上で `scripts/verify-app-ui.sh` により実行し、項目ごとの成否を生出力とスクリーンショットのパス付きで報告する。編集はしない。
-- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. A measurement that needs a process with a specific name (agent detection is name-based) can use a **symlink** to a signed system binary: on macOS a renamed *copy* of `/bin/sleep` is SIGKILLed (exit 137) before it runs, but a symlink under the wanted name runs (the signature is verified against the target) and `ps -o comm=` reports the symlink's own path, so name-based detection matches. A hardlink fails when `/bin` and the temp directory are on different filesystems. This needs no compiler and no CI dependency (実測 2026-09-09、#239). Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
+- **Reviewer** (an Opus subagent): adversarial diff review of each implementation commit. Must verify claims about external-CLI behavior by **measurement** (isolated resources — e.g. a dedicated `tmux -L` socket — cleaned up afterwards), not by reading code alone. A measurement that needs a process with a specific name (agent detection is name-based) can use a **symlink** to a signed system binary: on macOS a renamed *copy* of `/bin/sleep` is SIGKILLed (exit 137) before it runs, but a symlink under the wanted name runs (the signature is verified against the target) and `ps -o comm=` reports argv[0] — the symlink's path as it was invoked, not the target (a relative launch stays relative) — so name-based detection matches. A hardlink fails when `/bin` and the temp directory are on different filesystems. This needs no compiler and no CI dependency (実測 2026-09-09、#239). Critical findings block completion. Its definition lives in `.claude/agents/reviewer.md`.
 
 **The loop**
 1. Director writes an Issue-style spec: 背景 / 要求 / スコープ (files allowed to change) / 完了条件 (the exact GREEN commands) / "on ambiguity or contradiction, stop and ask". Treat a reported workaround as a spec defect and widen the scope explicitly in the next round rather than blaming the implementer. The spec must forbid committing and pushing, because the implementer does neither.
@@ -302,6 +302,94 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
   試した入力について「生成しなかった」ことしか測っていない。この差は次に読む人が「では escape は
   考えなくてよい」と判断できるかどうかを分ける。#286 では逆向きの実例も出た — spec が「保存段の escape は
   両版同一」と断じていたが、3.4 は保存段で `$` の前にも `\` を足す (実装者が検出、レビューアが独立再現)。
+- **偽エージェントを pane で動かした計測は、session を消す前に pane の tty の上のプロセスを止める (#540)。**
+  2026-11-02、#517 の計測で HUP を trap した偽エージェント (`bin/claude -> /bin/bash` の symlink で
+  動かした `p.sh`) が `kill-session` の後も 120 個残り、合計約 800% の CPU で空回りした。`kill-session`
+  が送る SIGHUP を受け流すと終わらず、端末が消えた後の `read -r -t 1` は待たずに戻るので1周約 3 ms で
+  回り続ける。**pane の対話 shell から `send-keys` で起動したものは、job control で自分の pgid を持つ。**
+  `kill -TERM -- -<pane_pid>` は shell にしか届かず、shell が消えると偽エージェントは tty を失って
+  (`ppid 1 / pgid == pid / tty ??`) 空回りを続ける。それでも `ps -p <pane_pid>` は空になるので、
+  pane_pid で確かめると失敗に気づけない (レビューアの指摘を再計測で確認)。後始末は次の順に進める。
+  1. 起動した直後に `list-panes -a -F '#{pane_pid} #{pane_tty}'` で pane の tty を控える。
+  2. `scripts/stop-tty-processes.sh -L <socket名> <tty>...` を実行する。止める前に、socket 名が既定
+     server を指さないこと (空・`default` (大文字小文字を問わない)・`/` を含むものを拒否。guard と同じ
+     規則)、各 tty がその server の `list-panes` にあること、スクリプトの祖先 (pid 1 まで) の端末で
+     ないこと、`/dev/<tty>` が存在することを確かめ、1 つでも外れれば何も止めずに exit 2 で終わる。
+     通れば tty の上のプロセスを数えて pid・pgid・開始時刻 (`lstart`) を記録し、記録した pgid へ SIGTERM
+     を送る。0.5 秒待ち、記録したもののうち同じ開始時刻でまだ生きているものの pgid へだけ SIGKILL を
+     送り、**記録したプロセスがすべて消えたこと**を確かめる (残れば一覧を出して exit 1)。tty の上に
+     記録に無いプロセスがいれば、止めずに「記録に無いプロセス」として一覧で出す (exit 0)。呼ぶ tmux は
+     `list-panes` だけである。`--dry-run` で、確かめた結果と止める予定の pgid だけを見られる。
+  3. `kill-session` で session を消す。pane のプロセスが全部止まると pane が閉じ、最後の session なら
+     server も終わるので、ここで `no server running` や `can't find session` が返ることがある。
+
+  確かめる項目は、手作業の確認に頼らないためにスクリプトの中に置いている。Bash ツールから呼ぶと
+  スクリプト自身の tty は `??` だが、祖先の Claude Code とユーザーの shell は端末を持つ (実測: `claude`
+  と `fish` が `ttys015`) ので、自分の tty と比べるだけではユーザーの端末を渡されても通してしまう。
+  pane が消えた後の tty の名前はすぐに再利用される (レビューアの計測: 7 つの隔離 server が続けて
+  `ttys006` を受け取った。#540 の実機確認でも、消した session の `ttys006` を次の session が受け取った)。
+  **止めている途中にも再利用される**: TERM の後の待ちの間に pane が閉じると、別の server の新しい pane が
+  同じ tty を受け取る。待ちの後に tty の上を数え直していた版は、その新しい持ち主を SIGKILL した
+  (レビューアが再現し、再計測でも、A を止めている 0.2 秒後に立てた C が `ttys006` を受け取って
+  SIGKILL された)。そのため KILL と最後の確認は、最初に数えたプロセスに限っている。
+  拒否の各形と、正しく渡せば止まること、止めている途中の再利用で新しい持ち主を止めないこと
+  (`AWT_STOP_TTY_GRACE_SECONDS` で待ちを延ばして起こす) は、CI の `build-and-test` ジョブの `Stop tty processes - checks`
+  (`scripts/check-stop-tty-processes.sh`) が隔離 server を立てて検査する。祖先の端末の拒否は、CI の
+  runner では祖先が端末を持たないので、pane の中の shell からその pane 自身の tty を渡して検査する。
+
+  この手順が効くことを実測したのは、pane のコマンドとして exec した形 (相対パス) と、pane の対話
+  bash (`/bin/bash --norc --noprofile -i`) / 対話 zsh (`/bin/zsh -f -i`) から `send-keys` で起動した形の
+  3 つである (macOS 27 / bash 3.2.57 / zsh 5.9 / tmux 3.8)。`-L` と持ち主の確認、最初に数えたものに
+  限る止め方を足した後のスクリプトで確かめ直したのは、対話 bash の形だけである。`ps -t` は `ttys006` / `s006` /
+  `/dev/ttys006` のどの綴りでも効いたが、`pgrep -t` は同じ綴りで何も返さなかった。
+
+  偽エージェントで HUP を trap するなら、handler は必ず `exit` する。受け流す必要があるときは、
+  ループの各周で `[ "$(ps -o ppid= -p $$ | tr -d ' ')" = 1 ] && exit` を確かめる — 端末が消えた後も
+  `: </dev/tty` は成功し、`$PPID` も起動時の値のまま変わらない。変わるのは `ps -o ppid=` だけである。
+  ただし隔離 server が別の session で生きている間は、親はまだ server なのでこの確認も効かない
+  (実測 #540: session を消した pane のプロセスが、親を server のまま 98% CPU で回っていた)。
+  **bash 3.2 (macOS の `/bin/bash`) では `read -t` の終了コードで端末の生死を判定できない** —
+  時間切れ・EOF・pty の消失のどれでも 1 を返す。`$? -gt 128` で時間切れを見分ける書き方は bash 4
+  以降のもので、`read -r -t 1 x || [ $? -gt 128 ] || exit` は最初の時間切れで終わる。
+  **後始末の確認に「偽バイナリのパスで `pgrep -f` して 0 件」も「`ps -p <pane_pid>` が空」も使わない**
+  — 前者は相対パスで起動すると args に絶対パスが現れず空振りし (レビューアが実際にこれで孤児を
+  見逃した)、後者は対話 shell から起動した子を見ていない。**setsid で端末から離れた子は tty の上に
+  無いので、`stop-tty-processes.sh` では止まらない** (レビューアの計測: Python の孤児が 92〜97% CPU で
+  残った)。偽エージェントが setsid する子を作るなら、その pid を自分で控えて止めること。
+- **残った孤児はフックで知らせる。止めはしない** (`.claude/settings.json` の `PostToolUse` と
+  `PostToolUseFailure` / matcher `Bash` → `scripts/warn_orphan_processes.py`、Issue #540)。Bash の
+  呼び出しが終わるたびに — 成功なら `PostToolUse`、失敗 (exit 0 以外) なら `PostToolUseFailure` が
+  発火する (公式 hooks ドキュメント。後始末の確認の `ps -p` は対象が無いと exit 1 になるので両方に
+  登録している) — `ps` を取り、次の 2 種類の候補の件数・合計 `%cpu`・止めるコマンド・pid と args を
+  文脈へ返す。
+  - 種類 A: 親が 1 / tty が `??` でない / pgid == pid / comm が `tmux` でない (exec した偽エージェントが
+    server ごと消えた後の形)。
+  - 種類 B: 親が 1 / tty が `??` / pgid == pid / 自分の uid / `%cpu` 50 以上 / comm が `tmux` でない /
+    args が `.app/` を含まず `/System/`・`/usr/libexec/`・`/usr/sbin/`・`/Library/` で始まらない
+    (対話 shell から起動した偽エージェントが tty を失った形。正当な常駐の可能性もある)。
+
+  args にこのセッションの scratchpad を含むものには `[scratchpad]` の印が付くが、印は補助であって
+  持ち主の証拠ではない。**止めるのは自分が作ったと確かめられたものだけで、ほかのセッションやユーザーの
+  プロセスには触らない** — `nohup` や、親が 1 になる隔離 tmux server、種類 B に当たる常駐のような
+  正当な孤児がありうるため、フックは自動で止めない。文脈は 8,000 字に収め、件数と止め方を先頭に置く
+  (Claude Code は `additionalContext` が 10,000 字を超えるとファイルへ逃がし、先頭 2,000 字しか見せない)。
+  PreToolUse の guard とは逆に **fail-open** で、壊れた hook JSON・`ps` の失敗・空の出力・想定外の例外の
+  いずれでも何も出さずに exit 0 で終わる。2 回の `ps` は合わせて 3.5 秒で打ち切る。**既知の穴**:
+  警告は次に Bash を呼んだときにしか出ない。判定スクリプトが無い・実行権が無い・timeout (5 秒) を
+  超えた・`python3` が無い、のいずれでも何も出ない (guard と同じ種類の穴。構文エラーは exit 1 になって
+  警告が黙って消えるので、CI の `checks` ジョブが `Orphan warning - compile` で `py_compile` する)。
+  隔離 server が生きている間は、session を消した pane のプロセスの親がまだ server なので候補に
+  ならない (上の項の実測)。tty を失って `%cpu` が 50 未満の孤児も候補にならない。setsid した
+  Python (`…/Python.app/Contents/MacOS/Python`) の孤児は、高 CPU でも種類 B の `.app/` の除外に当たる
+  ので候補にならない (レビューアの計測で 92〜97% CPU のまま警告されなかった)。逆に、ユーザーの正当な
+  常駐 (端末多重化ソフトの server や `codex app-server daemon` など) は、CPU が 50% を超えると種類 B の
+  候補になりうる (レビューアの計測では、その時点の誤検出は 0 件だった)。`nohup` の孤児は、
+  試した形 (pane の対話 bash で `nohup sleep 300 &` → `kill-session`) では tty が `??` になり、CPU が
+  0.0 なので候補に入らなかった。高 CPU で動き続ける `nohup` の孤児なら種類 B に入りうる (警告だけ
+  なので許容する)。subagent の Bash で渡る `session_id` が親と子のどちらのものかは未確認なので、
+  `session_id` では絞らない。`scratchpad_dir` の入力は Claude Code v2.1.257 以降にしか無く、それより
+  前は `/private/tmp/claude-<uid>/*/*/scratchpad/` の形で代用する。判定を変えたときは
+  `scripts/check-orphan-warning.sh` の fixture で確かめる (CI の `Orphan warning - fixtures`)。
 
 **Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the legacy `P3 バグ改修` milestone (the parking lot, not the current P3) and do **not** count against the current phase. Promote findings when measured impact blocks a phase's acceptance criteria; data loss and incorrect input routing require evaluation even if everyday use has not reproduced them. The current P3–P5 and their acceptance criteria live in `docs/roadmap.md`. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; the parking lot prevents these from making a phase unbounded.
 

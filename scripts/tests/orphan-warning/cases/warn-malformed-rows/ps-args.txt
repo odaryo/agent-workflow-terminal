@@ -1,0 +1,5 @@
+111111111111111111111111111111     1 111111111111111111111111111111   501  98.4 ttys006  /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/bin/claude /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/p.sh
+78858     1 78858   501    nan ttys008  /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/bin/claude /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/b88894b7-0d89-4dd2-9994-f4012300e1ae/scratchpad/m540/p.sh
+78860     1 78860   501  99.6 ttys011  bin/claude ./p.sh
+78871     1 78871   501    inf ??       bin/claude ./p.sh
+7_8873     1 78873   501  97.9 ??       bin/claude ./p.sh

@@ -107,6 +107,14 @@ jobs:
           git --version
           rg --version
 
+      # 計測用の pane の後始末 (scripts/stop-tty-processes.sh、Issue #540) が、tty の持ち主を確かめずに
+      # 止めないことを、隔離 server を立てて検査する。tmux が要るのでこのジョブに置く (checks ジョブには
+      # tmux が無い)。後始末の残りは、後の Check for leftover servers and sockets が検出する。
+      - name: Stop tty processes - checks
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        timeout-minutes: 5
+        run: "$GITHUB_WORKSPACE/scripts/check-stop-tty-processes.sh"
+
       # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは単体テストと
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
       # 統合テストは既定の swift test では `.enabled(if:)` で無効になっており、フラグはこの段と
@@ -289,6 +297,20 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 5
         run: scripts/check-tmux-kill-guard.sh
+
+      # 孤児の警告フック (Issue #540) は警告用なので fail-open だが、構文エラーは python3 が
+      # exit 1 で終わり、ツール呼び出しは止まらないまま警告だけが黙って消える。
+      - name: Orphan warning - compile
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: |
+          python3 -m py_compile scripts/warn_orphan_processes.py
+          python3 -m py_compile scripts/tests/orphan-warning/make-scale-case.py
+
+      - name: Orphan warning - fixtures
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: scripts/check-orphan-warning.sh
 
       # wf-pr-merge.sh は、この判定器が「CI は起動しない」と返した PR の待ちを省く。誤って
       # そう返すと CI 未検証のままマージされるため、判定の向きを fixture と変異で固定する。

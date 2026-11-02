@@ -240,6 +240,9 @@ extension AgentAdapter {
           if nextLivenessCheck.map({ now >= $0 }) ?? true {
             liveness = await source.liveness(for: pane, matchingProcessNames: processNames)
             nextLivenessCheck = now.advanced(by: intervals.liveness)
+            // 戻るまでに cancel されていたら採取も forget もしない。採取すると画面の変化の基準が
+            // 先に作られ、後継の task の最初の採取がそれと比べて Working になる (Issue #552)。
+            if Task.isCancelled { break }
           }
           let result: AgentObservationResult
           if liveness == .absent {

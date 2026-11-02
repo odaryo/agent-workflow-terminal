@@ -42,7 +42,7 @@ struct AgentStateFixture: Decodable {
       screenText: screen,
       styledScreenText: styledScreen,
       secondsSinceScreenChange: secondsSinceScreenChange,
-      observedAt: Date(timeIntervalSince1970: 2)
+      hasObservedScreenChange: true, observedAt: Date(timeIntervalSince1970: 2)
     )
   }
 

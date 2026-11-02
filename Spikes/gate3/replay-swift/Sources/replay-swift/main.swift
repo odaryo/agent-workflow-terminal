@@ -105,7 +105,9 @@ struct ScreenChange {
   /// 出力とみなす最小の変化行数。製品の `minimumChangedLines` と同じで、0 以下は 1 と同じ。
   let minimumChangedLines: Int
   /// 直前の**観測**画面と、最後に出力と認めた時刻。前者は毎回、後者は出力のときだけ更新する。
-  private var last: (screen: String, changedAt: Double)?
+  /// `hasObservedChange` は基準の後に出力を一度でも認めたか (製品の Issue #559 と同じ)。
+  /// 変化を認める前の `changedAt` は基準の時刻。
+  private var last: (screen: String, changedAt: Double, hasObservedChange: Bool)?
   init(minimumChangedLines: Int = 1) { self.minimumChangedLines = minimumChangedLines }
   /// 製品の `AgentScreenChangeTracker.changedLineCount` と同じく index 単位で数え、
   /// 短い側を空行で埋める。
@@ -118,14 +120,17 @@ struct ScreenChange {
       return count + (l == r ? 0 : 1)
     }
   }
-  mutating func observe(_ screen: String, at ts: Double) -> TimeInterval? {
+  mutating func observe(
+    _ screen: String, at ts: Double
+  ) -> (secondsSinceChange: TimeInterval, hasObservedChange: Bool)? {
     guard let prev = last else {
-      last = (screen, ts)
+      last = (screen, ts, false)
       return nil
     }
     let isOutput = Self.changedLineCount(prev.screen, screen) >= max(1, minimumChangedLines)
-    last = (screen, isOutput ? ts : prev.changedAt)
-    return isOutput ? 0 : ts - prev.changedAt
+    let hasObservedChange = isOutput || prev.hasObservedChange
+    last = (screen, isOutput ? ts : prev.changedAt, hasObservedChange)
+    return (isOutput ? 0 : ts - prev.changedAt, hasObservedChange)
   }
   mutating func forget() {
     last = nil
@@ -160,16 +165,18 @@ func replay(run: String, frames: [Frame]) -> [Observed] {
     }
     // 画面を取れなかったフレームで "" を入れると画面が変化したことになり、復帰直後が
     // working に化ける。実路は capture 失敗時に forget して nil を渡す。
-    var elapsed: TimeInterval?
+    var change: (secondsSinceChange: TimeInterval, hasObservedChange: Bool)?
     if let screen = f.screen {
-      elapsed = tracker.observe(screen, at: f.ts)
+      change = tracker.observe(screen, at: f.ts)
     } else {
       tracker.forget()
     }
+    // 製品 (`TmuxAgentSignalSource`) と同じく、比較対象が無ければ「未観測」を渡す。
     let signals = AgentSignals(
       paneTitle: f.title, screenText: f.screen,
       styledScreenText: ignoresStyling ? nil : f.screenEsc,
-      secondsSinceScreenChange: elapsed,
+      secondsSinceScreenChange: change?.secondsSinceChange,
+      hasObservedScreenChange: change?.hasObservedChange ?? false,
       observedAt: Date(timeIntervalSince1970: f.ts))
     switch ad.classify(signals: signals, liveness: liveness) {
     case .absent: out.append(Observed(ts: f.ts, category: .idle, state: .idle))

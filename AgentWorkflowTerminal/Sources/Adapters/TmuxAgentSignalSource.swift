@@ -33,6 +33,13 @@ public enum TmuxCapturePane {
 ///   観測 Task を作り直さないので、title が観測開始時刻で凍る。`CodexAdapter` は title の
 ///   spinner を画面判定より前に短絡するため、凍ると Working から抜けられなくなる。
 public actor TmuxAgentSignalSource: AgentSignalSource {
+  /// 静か → 変化 の採取で Agent の pid の印を確かめるのは、直前の静かな時間がこれ以上のときだけ
+  /// (Issue #560)。確かめたいのは「しばらく待っていた Agent が終わり、次の Agent が描いた」形で、
+  /// それより短い間の起動し直しは次の `liveness` (約 6 秒以内) が pid の並びの違いで捕まえる。
+  /// 絞らないと、出力が途切れ途切れに出る間は変化のたびに `ps` を読み、`ps` が約 2 倍になる
+  /// (`bursty` の 40 秒で 7 → 14 回)。
+  static let restartCheckMinimumQuietSeconds: TimeInterval = 5
+
   private let processTable: ProcessTableSnapshotCache
   private let screenBatcher: TmuxPaneScreenBatcher
   private var screenChangeTracker = AgentScreenChangeTracker()
@@ -57,9 +64,18 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   private struct ScreenBaseline {
     /// `ps` を待つ間に基準が作り直されていないかを見分ける。
     let generation: UInt64
-    /// `nil` は印を付けるときに `ps` を読めなかった。
-    var agentProcessIDs: [Int32]?
-    var isQuiet = false
+    var tag: ProcessTag = .loading
+    /// 直前の採取までの静かな時間。出力とみなす変化の採取で 0 に戻す。
+    var quietSeconds: TimeInterval = 0
+  }
+
+  private enum ProcessTag: Equatable {
+    /// 印を付ける `ps` がまだ戻っていない。比べると、同じ Agent でも印が無いことを理由に
+    /// 基準を捨ててしまう。
+    case loading
+    /// 印を付けるときに `ps` を読めなかった。
+    case unreadable
+    case processIDs([Int32])
   }
 
   private struct PaneForeground: Equatable {
@@ -242,12 +258,14 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     await screenBatcher.forget(pane.id)
   }
 
-  /// 印を確かめるのは、静かな状態から変わった採取 (ターンの始まり) だけにする。毎回確かめると
-  /// `ps` の頻度が採取の周期と同じになり、生存確認と状態観測を分けた理由 (`ps` のコスト) に
-  /// 反する (設計書 §12.4.2)。
+  /// 印を確かめるのは、しばらく静かだった状態から変わった採取 (ターンの始まり) だけにする。
+  /// 毎回確かめると `ps` の頻度が採取の周期と同じになり、生存確認と状態観測を分けた理由
+  /// (`ps` のコスト) に反する (設計書 §12.4.2)。
   ///
-  /// - Note: 次の2つは閉じない。Agent が画面を変え続けている最中に起動し直した場合と、
-  ///   画面の捕捉から `ps` の読み込みまでの間 (数 ms) に起動し直した場合。
+  /// - Note: 次の3つは閉じない。Agent が画面を変え続けている最中に起動し直した場合、
+  ///   静かな時間が `restartCheckMinimumQuietSeconds` に届かないうちに起動し直した場合
+  ///   (どちらも次の `liveness` が捕まえる)、画面の捕捉から `ps` の読み込みまでの間 (数 ms) に
+  ///   起動し直した場合。
   private func observeScreenChange(
     _ screen: String, of pane: PaneSnapshot, at observedAt: ContinuousClock.Instant,
     screenCapturedAt: ContinuousClock.Instant, minimumChangedLines: Int
@@ -258,31 +276,31 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
       let generation = beginScreenBaseline(of: pane.id)
       let processIDs = await agentProcessIDs(of: pane, capturedNoEarlierThan: screenCapturedAt)
       if screenBaselines[pane.id]?.generation == generation {
-        screenBaselines[pane.id]?.agentProcessIDs = processIDs
+        screenBaselines[pane.id]?.tag = processIDs.map(ProcessTag.processIDs) ?? .unreadable
       }
       return nil
     }
-    let seconds = observation.secondsSinceChange
-    guard seconds == 0, let baseline = screenBaselines[pane.id], baseline.isQuiet else {
-      screenBaselines[pane.id]?.isQuiet = seconds > 0
+    guard observation.isOutput else {
+      screenBaselines[pane.id]?.quietSeconds = observation.secondsSinceChange
       return observation
     }
+    guard let baseline = screenBaselines[pane.id] else { return observation }
+    screenBaselines[pane.id]?.quietSeconds = 0
+    guard baseline.quietSeconds >= Self.restartCheckMinimumQuietSeconds, baseline.tag != .loading
+    else { return observation }
     let processIDs = await agentProcessIDs(of: pane, capturedNoEarlierThan: screenCapturedAt)
-    // 待つ前の写しと比べない。基準の印を付ける `ps` がまだ戻っていなければ、写しは `nil` のまま。
+    // 待つ前の写しと比べない。待つ間に基準が作り直されていれば、それは今回の比較対象ではない。
     guard let current = screenBaselines[pane.id], current.generation == baseline.generation
     else { return observation }
     // 読めなかったときは捨てない。捨てると、`ps` が失敗している間のターンの始まりが
     // すべて Unknown に落ちる。
-    guard let processIDs, processIDs != current.agentProcessIDs else {
-      screenBaselines[pane.id]?.isQuiet = false
-      return observation
-    }
+    guard let processIDs, current.tag != .processIDs(processIDs) else { return observation }
     forgetScreen(of: pane.id)
     let rebasedAt = monotonicObservationInstant(for: pane.id, capturedAt: observedAt)
     _ = screenChangeTracker.observeChange(
       screen: screen, paneID: pane.id, at: rebasedAt, minimumChangedLines: minimumChangedLines)
     _ = beginScreenBaseline(of: pane.id)
-    screenBaselines[pane.id]?.agentProcessIDs = processIDs
+    screenBaselines[pane.id]?.tag = .processIDs(processIDs)
     return nil
   }
 

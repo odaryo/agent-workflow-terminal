@@ -9,7 +9,7 @@ struct AgentAdapterTests {
     paneTitle: "",
     screenText: "stale screen", styledScreenText: nil,
     secondsSinceScreenChange: 0,
-    observedAt: Date(timeIntervalSince1970: 1)
+    hasObservedScreenChange: true, observedAt: Date(timeIntervalSince1970: 1)
   )
 
   @Test("不在なら画面に関係なく状態を返さない")
@@ -303,7 +303,9 @@ struct AgentAdapterTests {
       screen: "a\nB", paneID: paneID, at: now.advanced(by: .milliseconds(300)))
     let unchanged = tracker.observeChange(
       screen: "a\nB", paneID: paneID, at: now.advanced(by: .milliseconds(800)))
-    #expect(changed == ScreenChangeObservation(secondsSinceChange: 0, hasObservedChange: true))
+    #expect(
+      changed
+        == ScreenChangeObservation(secondsSinceChange: 0, hasObservedChange: true, isOutput: true))
     #expect(unchanged == ScreenChangeObservation(secondsSinceChange: 0.5, hasObservedChange: true))
   }
 
@@ -421,7 +423,8 @@ private actor KnownThenFailingSignalSource: AgentSignalSource {
     hasReturnedSignals = true
     return AgentSignals(
       paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on", styledScreenText: nil,
-      secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
+      secondsSinceScreenChange: 2, hasObservedScreenChange: true,
+      observedAt: Date(timeIntervalSince1970: 1)
     )
   }
 
@@ -441,7 +444,8 @@ private actor ThresholdRecordingSignalSource: AgentSignalSource {
     recordedMinimumChangedLines.append(minimumChangedLines)
     return AgentSignals(
       paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on", styledScreenText: nil,
-      secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
+      secondsSinceScreenChange: 2, hasObservedScreenChange: true,
+      observedAt: Date(timeIntervalSince1970: 1)
     )
   }
 
@@ -476,7 +480,8 @@ private actor GatedLivenessSignalSource: AgentSignalSource {
     signalsCalls += 1
     return AgentSignals(
       paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on", styledScreenText: nil,
-      secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
+      secondsSinceScreenChange: 2, hasObservedScreenChange: true,
+      observedAt: Date(timeIntervalSince1970: 1)
     )
   }
 

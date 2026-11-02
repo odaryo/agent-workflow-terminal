@@ -34,7 +34,8 @@ struct ClaudeCodeAdapterTests {
     let result = ClaudeCodeAdapter().classify(
       signals: AgentSignals(
         paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
-        secondsSinceScreenChange: fixture.secondsSinceScreenChange, observedAt: .distantPast
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
       ), liveness: .alive)
     guard case .observation(let observation) = result else {
       Issue.record("absent")
@@ -52,7 +53,8 @@ struct ClaudeCodeAdapterTests {
       signals: AgentSignals(
         paneTitle: fixture.paneTitle, screenText: fixture.screen,
         styledScreenText: fixture.screen,
-        secondsSinceScreenChange: fixture.secondsSinceScreenChange, observedAt: .distantPast
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
       ), liveness: .alive)
     #expect(fixtureState(of: result) == "unknown")
   }
@@ -71,7 +73,7 @@ struct ClaudeCodeAdapterTests {
         screenText: mutate(fixture.screen),
         styledScreenText: fixture.styledScreen.map(mutate),
         secondsSinceScreenChange: 2,
-        observedAt: .distantPast
+        hasObservedScreenChange: true, observedAt: .distantPast
       )
       let result = ClaudeCodeAdapter().classify(signals: mutated, liveness: .alive)
       #expect(fixtureState(of: result) == "unknown", Comment(rawValue: prefix))
@@ -83,7 +85,7 @@ struct ClaudeCodeAdapterTests {
     let fixture = try #require(AgentStateFixture.load(prefix: "claude-2.1.259-completed").first)
     let signals = AgentSignals(
       paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
-      secondsSinceScreenChange: nil, observedAt: .distantPast
+      secondsSinceScreenChange: nil, hasObservedScreenChange: true, observedAt: .distantPast
     )
     let result = ClaudeCodeAdapter().classify(signals: signals, liveness: .alive)
     #expect(fixtureState(of: result) == "unknown")
@@ -96,7 +98,7 @@ struct ClaudeCodeAdapterTests {
     let result = ClaudeCodeAdapter().classify(
       signals: AgentSignals(
         paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
-        secondsSinceScreenChange: 0, observedAt: .distantPast
+        secondsSinceScreenChange: 0, hasObservedScreenChange: true, observedAt: .distantPast
       ),
       liveness: .alive
     )
@@ -114,7 +116,8 @@ struct ClaudeCodeAdapterTests {
         of: ClaudeCodeAdapter().classify(
           signals: AgentSignals(
             paneTitle: fixture.paneTitle, screenText: fixture.screen, styledScreenText: nil,
-            secondsSinceScreenChange: elapsed, observedAt: .distantPast
+            secondsSinceScreenChange: elapsed, hasObservedScreenChange: true,
+            observedAt: .distantPast
           ),
           liveness: .alive
         ))

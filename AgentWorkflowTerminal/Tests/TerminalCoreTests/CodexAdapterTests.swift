@@ -20,7 +20,7 @@ struct CodexAdapterTests {
   func titleAttention() {
     let signals = AgentSignals(
       paneTitle: "[ . ] Action Required | worktree", screenText: "stale", styledScreenText: nil,
-      secondsSinceScreenChange: nil, observedAt: .distantPast
+      secondsSinceScreenChange: nil, hasObservedScreenChange: true, observedAt: .distantPast
     )
     guard
       case .observation(let observation) = CodexAdapter().classify(

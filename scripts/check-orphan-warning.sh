@@ -59,11 +59,16 @@ CONTEXT_LIMIT=8000
 PREVIEW_CHARS=2000
 
 work_dir=$(mktemp -d)
-# bash 3.2 (macOS の /bin/bash) は、EXIT の trap があると set -u の unbound variable で
-# exit 0 を返す (実測。trap の中で $? を引き継いでも 0)。検査が壊れて途中で止まっても緑に
-# 見えてしまうので、最後まで走ったかどうかを印で持つ。
-finished=0
-trap 'rm -rf "$work_dir"; [[ $finished -eq 1 ]] || exit 1' EXIT
+# bash 3.2 は EXIT の trap があると、展開のエラーで止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
+__awt_on_exit() {
+  local rc=$?
+  rm -rf "$work_dir"
+  [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+  exit "$rc"
+}
+trap __awt_on_exit EXIT
 
 failures=0
 checked=0
@@ -462,7 +467,7 @@ for entry in data.get("hooks", {}).get(sys.argv[2], []):
   fi
 done
 
-finished=1
 info ""
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"
+__awt_finished=1

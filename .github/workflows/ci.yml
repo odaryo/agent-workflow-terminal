@@ -295,7 +295,9 @@ jobs:
       - name: Orphan warning - compile
         if: ${{ !cancelled() }}
         timeout-minutes: 5
-        run: python3 -m py_compile scripts/warn_orphan_processes.py
+        run: |
+          python3 -m py_compile scripts/warn_orphan_processes.py
+          python3 -m py_compile scripts/tests/orphan-warning/make-scale-case.py
 
       - name: Orphan warning - fixtures
         if: ${{ !cancelled() }}

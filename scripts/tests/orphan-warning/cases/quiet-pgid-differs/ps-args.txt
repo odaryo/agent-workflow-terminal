@@ -1,1 +1,1 @@
-42112     1 42110  99.0 ttys011  bin/claude ./p.sh
+78860     1 78858   501  99.6 ttys011  bin/claude ./p.sh

@@ -1,1 +1,1 @@
-42112 bin/claude
+78860 bin/claude

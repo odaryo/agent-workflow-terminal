@@ -1,0 +1,5 @@
+# 実測 (macOS 27.0.1 / bash 3.2.57 / zsh 5.9 / tmux 3.8、#540 ラウンド 2 の取り直し)。
+# pane の対話 bash (`/bin/bash --norc --noprofile -i`) から send-keys で起動した偽エージェント。
+# job control で自分の pgid を持ち、kill-session の後は tty を失って (??) 高 CPU で残る (種類 B)。
+expect=78871
+marked=

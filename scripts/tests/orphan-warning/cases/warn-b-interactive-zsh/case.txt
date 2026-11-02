@@ -1,0 +1,4 @@
+# 実測 (macOS 27.0.1 / bash 3.2.57 / zsh 5.9 / tmux 3.8、#540 ラウンド 2 の取り直し)。
+# pane の対話 zsh (`/bin/zsh -f -i`) から send-keys で起動した偽エージェント (種類 B)。
+expect=78873
+marked=

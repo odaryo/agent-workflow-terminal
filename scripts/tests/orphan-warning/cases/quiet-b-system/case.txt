@@ -1,0 +1,3 @@
+# 合成: 実測の行から 1 か所だけ変えたもの。
+# warn-b-interactive-bash の行の args を /System/ で始まる形に変えた。常駐の置き場なので除く。
+expect=

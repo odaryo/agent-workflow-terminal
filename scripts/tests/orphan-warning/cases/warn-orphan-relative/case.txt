@@ -1,4 +1,0 @@
-# 実測: 同じ偽エージェントを `-c <dir>` + `bin/claude ./p.sh` の相対パスで起動したもの。
-# args に絶対パスが現れないので scratchpad の印は付かない (それでも候補にはなる)。
-expect=42112
-marked=

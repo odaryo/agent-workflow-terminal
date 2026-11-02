@@ -37,7 +37,16 @@ FIXTURE="$HARNESS_DIR/stable-ids.txt"
 [[ -f "$FIXTURE" ]] || die "安定 ID の一覧がありません: $FIXTURE"
 
 work_dir=$(mktemp -d)
-trap 'rm -rf "$work_dir"' EXIT
+# bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
+__awt_on_exit() {
+  local rc=$?
+  rm -rf "$work_dir"
+  [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+  exit "$rc"
+}
+trap __awt_on_exit EXIT
 
 # 入力が痩せると突き合わせは黙って通る。ずれうる形が並んでいることを先に確かめる。
 info "--- 入力の形"
@@ -187,3 +196,4 @@ done
 info ""
 [[ "$failures" -eq 0 ]] || die "${#mutants[@]} 件中 $failures 件の変異を検出できませんでした"
 info "bash 実装と Swift 実装は一致し、${#mutants[@]} 件の変異はすべて検出できます"
+__awt_finished=1

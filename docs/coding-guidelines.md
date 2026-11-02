@@ -312,6 +312,18 @@ swiftlint lint --config .swiftlint.yml
 CI (`.github/workflows/ci.yml`) は swift-format lint と SwiftLint の両方を実行します。
 ローカルの SwiftLint 導入 (`brew install swiftlint`) は任意のままですが、CI では必須です。
 
+**シェルスクリプト (`scripts/*.sh`) は bash 3.2 で動く前提で書きます** (macOS の `/bin/bash` で、CI の
+runner の PATH 上の `bash` も 3.2.57。Issue #572)。bash 3.2 は EXIT の trap があると、`set -u` の未定義の
+変数の参照で止まっても exit 0 を返す (trap の中の `$?` も 0。`$( )` の中では 1 になったが、トップレベル・
+関数の中で張った trap・`( )` では 0 だった) ため、壊れた検査が緑に見えます。EXIT の
+trap を持つスクリプトでは、trap を張る前に `__awt_finished=0` とし、正常に終わる直前 (意図した `exit 0`
+の前を含む) に `__awt_finished=1` とし、trap の中で `$?` を取って後始末をした後、印が 1 でなく `$?` が 0 なら
+1 にして `exit` します (`scripts/check-ci-paths-ignored.sh` など)。印を立てる行の直前に、終了コードを
+決める素の `[[ … ]]` や `(( … ))` を置かないこと — bash 3.2 ではこの2つが偽でも `set -e` で止まらず、
+印が失敗を上書きします。また UTF-8 のロケールでは変数名の直後のマルチバイト文字も名前の一部として
+読まれるので、`$名前` の直後に ASCII 以外の文字を置かず `${名前}` と書きます (CI の
+`scripts/check-var-multibyte.sh` が検出する)。
+
 ---
 
 ## 8. コメントとコミット

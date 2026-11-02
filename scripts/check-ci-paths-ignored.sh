@@ -27,7 +27,16 @@ require_cmd python3
 FIXTURE_DIR="$SCRIPT_DIR/tests/ci-paths-ignored"
 DETECTOR="$SCRIPT_DIR/ci_paths_ignored.py"
 work_dir=$(mktemp -d)
-trap 'rm -rf "$work_dir"' EXIT
+# bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
+# 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
+__awt_finished=0
+__awt_on_exit() {
+  local rc=$?
+  rm -rf "$work_dir"
+  [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+  exit "$rc"
+}
+trap __awt_on_exit EXIT
 failures=0
 checked=0
 
@@ -125,3 +134,4 @@ fi
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"
+__awt_finished=1

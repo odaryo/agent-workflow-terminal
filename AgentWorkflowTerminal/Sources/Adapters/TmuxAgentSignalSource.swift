@@ -42,6 +42,21 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   private var lastScreenObservedAt: [PaneID: ContinuousClock.Instant] = [:]
   private var screenOwnerProcessIDs: [PaneID: [Set<String>: [Int32]]] = [:]
   private var forgottenAt: [PaneID: ContinuousClock.Instant] = [:]
+  /// pane ごとに、直近の `liveness` が `ps` を読めたときの前景。画面の履歴とは別に持ち、
+  /// Agent が居なくなっても消さない (消すと、次に起動した Agent を古い `ps` で確かめてしまう)。
+  private var livenessForegrounds: [PaneID: PaneForeground] = [:]
+
+  private struct PaneForeground: Equatable {
+    let processID: Int32
+    let currentCommand: String
+    let isDead: Bool
+
+    init(_ pane: PaneSnapshot) {
+      self.processID = pane.processID
+      self.currentCommand = pane.currentCommand
+      self.isDead = pane.isDead
+    }
+  }
 
   public init(
     tmuxRunner: TmuxRunner, processRunner: any ProcessRunning,
@@ -78,7 +93,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let title: String
     switch captured.screen {
     case .paneNotFound:
-      forgetScreen(of: pane.id)
+      forgetPane(pane.id)
       throw TmuxAgentSignalSourceError.paneNotFound(pane.id)
     case .captured(let text):
       // title はマーカーから来るので、画面が取れた pane には必ず付く。欠けているのは想定外の
@@ -119,10 +134,24 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     discardExpiredScreenHistory()
     forgottenAt.removeValue(forKey: pane.id)
     guard !pane.isDead else {
-      forgetScreen(of: pane.id)
+      forgetPane(pane.id)
       return .absent
     }
-    guard let snapshot = await processTable.snapshot() else { return .undetermined }
+    // 前景が変わった直後に TTL 内の `ps` を使うと、それが Agent の起動前に読んだものなら
+    // 再選択が fallback に固定され、入れ替わった前の Agent を alive と読んで前の画面と比べて
+    // しまう (Issue #549)。初めての pane では下限を付けない — 起動直後に pane の数だけ `ps` が走る。
+    let foreground = PaneForeground(pane)
+    let previousForeground = livenessForegrounds[pane.id]
+    let snapshot: ProcessTableSnapshot?
+    if let previousForeground, previousForeground != foreground {
+      snapshot = await processTable.snapshot(
+        capturedNoEarlierThan: screenBatcher.timeSource.now)
+    } else {
+      snapshot = await processTable.snapshot()
+    }
+    // 読めなかったときに記録を進めると、次の呼び出しが TTL 内の古い `ps` を使ってしまう。
+    guard let snapshot else { return .undetermined }
+    livenessForegrounds[pane.id] = foreground
     let names = snapshot.processTreeNames(of: pane.processID)
     let liveness =
       names.isDisjoint(with: matchingProcessNames)
@@ -185,8 +214,13 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let now = screenBatcher.timeSource.now
     for (pane, instant) in forgottenAt
     where now > instant.advanced(by: PaneNotificationPlanner.paneHandoffGrace) {
-      forgetScreen(of: pane)
+      forgetPane(pane)
     }
+  }
+
+  private func forgetPane(_ pane: PaneID) {
+    forgetScreen(of: pane)
+    livenessForegrounds.removeValue(forKey: pane)
   }
 
   private func forgetScreen(of pane: PaneID) {

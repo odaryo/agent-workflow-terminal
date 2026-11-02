@@ -125,33 +125,50 @@ actor ProcessTableSnapshotCache {
 
   /// `nil` は「読めなかった」。失敗はキャッシュしないので、次の呼び出しで再試行される。
   func snapshot() async -> ProcessTableSnapshot? {
-    if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
+    await snapshot(lowerBound: nil)
+  }
+
+  /// `lowerBound` より前に読み始めた `ps` は、TTL 内でも読み込み中でも使わない。
+  /// `lowerBound` は `timeSource` と同じ時計の時刻を渡す。
+  func snapshot(
+    capturedNoEarlierThan lowerBound: ContinuousClock.Instant
+  ) async
+    -> ProcessTableSnapshot?
+  {
+    await snapshot(lowerBound: lowerBound)
+  }
+
+  private func snapshot(lowerBound: ContinuousClock.Instant?) async -> ProcessTableSnapshot? {
+    if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive),
+      lowerBound.map({ latest.capturedAt >= $0 }) ?? true
+    {
       return latest.snapshot
     }
-    if let inFlight {
-      let value = await inFlight.task.value
-      if self.inFlight?.task == inFlight.task {
-        complete(value, capturedAt: inFlight.capturedAt)
+    let read: InFlightRead
+    if let inFlight, lowerBound.map({ inFlight.capturedAt >= $0 }) ?? true {
+      read = inFlight
+    } else {
+      // 下限より古い読み込みには合流しない。それは置き去りにして並行に走らせ、
+      // `inFlight` は新しい方へ向ける (後から来た呼び出しが古い方へ合流しないように)。
+      let capturedAt = timeSource.now
+      let task = Task { [processRunner, executableURL] in
+        await Self.read(processRunner: processRunner, executableURL: executableURL)
       }
-      return value
+      read = InFlightRead(task: task, capturedAt: capturedAt)
+      inFlight = read
     }
-    let capturedAt = timeSource.now
-    let task = Task { [processRunner, executableURL] in
-      await Self.read(processRunner: processRunner, executableURL: executableURL)
-    }
-    inFlight = InFlightRead(task: task, capturedAt: capturedAt)
-    let value = await task.value
-    if inFlight?.task == task { complete(value, capturedAt: capturedAt) }
+    let value = await read.task.value
+    complete(value, of: read)
     return value
   }
 
-  private func complete(
-    _ value: ProcessTableSnapshot?, capturedAt: ContinuousClock.Instant
-  ) {
-    inFlight = nil
+  private func complete(_ value: ProcessTableSnapshot?, of read: InFlightRead) {
+    if inFlight?.task == read.task { inFlight = nil }
     // 失敗はキャッシュしない。次の呼び出しで再試行できるようにする。
     guard let value else { return }
-    latest = (value, capturedAt)
+    // 読み込みは並行しうるので、後に終わった古い読み込みで新しい結果を上書きしない。
+    if let latest, latest.capturedAt > read.capturedAt { return }
+    latest = (value, read.capturedAt)
   }
 
   private static func read(

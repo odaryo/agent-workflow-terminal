@@ -112,6 +112,68 @@ struct ObservationSnapshotSharingTests {
     #expect(await spy.launches == 2)
   }
 
+  @Test("p1: TTL 内でも鮮度の下限より古い ps は取り直す")
+  func processTableRefreshesSnapshotBeforeLowerBound() async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n")
+    let clock = ManualTimeSource()
+    let cache = ProcessTableSnapshotCache(
+      processRunner: spy, executableURL: URL(fileURLWithPath: "/ps"), timeSource: clock)
+    let first = try #require(await cache.snapshot())
+    #expect(first.processTreeNames(of: 70) == ["zsh"])
+    #expect(await spy.count(of: .ps) == 1)
+
+    await spy.setProcessTableOutput("70 1 /bin/zsh\n71 70 claude\n")
+    clock.advance(by: .seconds(1))
+    let refreshed = try #require(await cache.snapshot(capturedNoEarlierThan: clock.now))
+
+    #expect(refreshed.processTreeNames(of: 70) == ["zsh", "claude"])
+    #expect(await spy.count(of: .ps) == 2)
+  }
+
+  @Test("p2: 下限以後に読んだ ps は TTL 内なら共有する", arguments: [0, 1])
+  func processTableReusesSnapshotAtOrAfterLowerBound(secondsBeforeCapture: Int) async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 claude\n")
+    let clock = ManualTimeSource()
+    let lowerBound = clock.now
+    clock.advance(by: .seconds(secondsBeforeCapture))
+    let cache = ProcessTableSnapshotCache(
+      processRunner: spy, executableURL: URL(fileURLWithPath: "/ps"), timeSource: clock)
+    _ = try #require(await cache.snapshot())
+    await spy.setProcessTableOutput("70 1 codex\n")
+    clock.advance(by: .seconds(1))
+
+    let reused = try #require(await cache.snapshot(capturedNoEarlierThan: lowerBound))
+
+    #expect(reused.processTreeNames(of: 70) == ["claude"])
+    #expect(await spy.count(of: .ps) == 1)
+  }
+
+  @Test("p3: 下限より古い in-flight を待たずに読み、遅れた古い結果で上書きしない")
+  func processTableKeepsNewerSnapshotWhenOlderReadFinishesLast() async throws {
+    let runner = FreshnessGateProcessRunner()
+    let clock = ManualTimeSource()
+    let cache = ProcessTableSnapshotCache(
+      processRunner: runner, executableURL: URL(fileURLWithPath: "/ps"), timeSource: clock)
+    async let oldRead = cache.snapshot()
+    let firstStarted = await runner.waitForLaunches(1)
+    #expect(firstStarted)
+    clock.advance(by: .seconds(1))
+    async let newRead = cache.snapshot(capturedNoEarlierThan: clock.now)
+    let secondStarted = await runner.waitForLaunches(2)
+    #expect(secondStarted)
+    // 古い要求に合流する実装でも、失敗を報告した後に待ち手を残さない。
+    if !secondStarted { await runner.releaseFirstRead() }
+    let newer = await newRead
+    #expect(newer?.processTreeNames(of: 70) == ["codex"])
+    await runner.releaseFirstRead()
+    let older = await oldRead
+    #expect(older?.processTreeNames(of: 70) == ["claude"])
+
+    let latest = try #require(await cache.snapshot())
+    #expect(latest.processTreeNames(of: 70) == ["codex"])
+    #expect(await runner.launches == 2)
+  }
+
   @Test("同時に来た pane 一覧の要求は1回の list-panes を共有する")
   func paneListCoalescesConcurrentRequests() async throws {
     let runner = GateProcessRunner(result: ProcessRunResult(exitCode: 0, stdout: "", stderr: ""))
@@ -154,5 +216,42 @@ private actor FailingProcessRunner: ProcessRunning {
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     launches += 1
     throw .cancelled
+  }
+}
+
+private actor FreshnessGateProcessRunner: ProcessRunning {
+  private(set) var launches = 0
+  private var firstRead: CheckedContinuation<Void, Never>?
+  private var isFirstReadReleased = false
+
+  func releaseFirstRead() {
+    isFirstReadReleased = true
+    firstRead?.resume()
+    firstRead = nil
+  }
+
+  func waitForLaunches(_ count: Int) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(30))
+    while launches < count {
+      guard clock.now < deadline else { return false }
+      do {
+        try await Task.sleep(for: .milliseconds(10))
+      } catch { return false }
+    }
+    return true
+  }
+
+  func run(
+    executableURL: URL, arguments: [String], environment: [String: String],
+    timeout: Duration, outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    launches += 1
+    let isFirstRead = launches == 1
+    if isFirstRead && !isFirstReadReleased {
+      await withCheckedContinuation { firstRead = $0 }
+    }
+    return ProcessRunResult(
+      exitCode: 0, stdout: isFirstRead ? "70 1 claude\n" : "70 1 codex\n", stderr: "")
   }
 }

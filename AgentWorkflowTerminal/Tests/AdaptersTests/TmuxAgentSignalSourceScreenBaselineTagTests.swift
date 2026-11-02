@@ -9,15 +9,63 @@ struct TmuxAgentScreenBaselineTagTests {
   private let paneID = PaneID(rawValue: "%7")
   private let claudeTable = "70 1 /bin/sh\n71 70 claude\n"
 
-  @Test("§12.4.2 shell を挟まずに起動し直した Agent の最初の画面の変化は比較対象を持たない")
+  @Test("§12.4.2 5秒以上静かだった後に、shell を挟まずに起動し直した Agent の最初の画面の変化は比較対象を持たない")
   func restartedAgentFirstScreenChangeHasNoBaseline() async throws {
-    let seconds = try await secondsSinceChangeAfterQuietPeriod(agentProcessIDAtChange: 72)
+    let seconds = try await secondsSinceChangeAfterQuietPeriod(
+      quietSeconds: 6, agentProcessIDAtChange: 72)
     #expect(seconds == nil)
+  }
+
+  @Test("§12.4.2 静かだった時間が5秒未満なら、変化の採取で ps を読まず、起動し直していても経過は 0")
+  func shortQuietPeriodDoesNotCheckProcessTag() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["A\n", "A\n", "B\n"]], processTableOutput: claudeTable)
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    clock.advance(by: .seconds(3))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+    clock.advance(by: .seconds(3))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 3)
+    await spy.setProcessTableOutput("70 1 /bin/sh\n72 70 claude\n")
+    let readsBeforeChange = await spy.count(of: .ps)
+    clock.advance(by: .seconds(3))
+    let changed = try await source.signals(for: pane, minimumChangedLines: 1)
+    let readsAfterChange = await spy.count(of: .ps)
+    #expect(changed.screenText == "B\n")
+    #expect(changed.secondsSinceScreenChange == 0)
+    #expect(changed.hasObservedScreenChange == true)
+    #expect(readsAfterChange == readsBeforeChange)
+  }
+
+  @Test("§12.4.2 TTL の中に起動し直す前の ps があっても、基準の印は捕捉より後の ps で付ける")
+  func baselineTagIgnoresProcessTableReadBeforeCapture() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["A\n", "A\n", "B\n"]], processTableOutput: claudeTable)
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    await spy.setProcessTableOutput("70 1 /bin/sh\n72 70 claude\n")
+    clock.advance(by: .seconds(1))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+    clock.advance(by: .seconds(6))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 6)
+    clock.advance(by: .seconds(3))
+    let changed = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(changed.screenText == "B\n")
+    #expect(changed.secondsSinceScreenChange == 0)
   }
 
   @Test("§12.4.2 同じ Agent のプロセスが静かな状態から変われば経過は 0")
   func sameAgentTurnStartIsZero() async throws {
-    let seconds = try await secondsSinceChangeAfterQuietPeriod(agentProcessIDAtChange: 71)
+    let seconds = try await secondsSinceChangeAfterQuietPeriod(
+      quietSeconds: 2, agentProcessIDAtChange: 71)
     #expect(seconds == 0)
   }
 
@@ -76,9 +124,9 @@ struct TmuxAgentScreenBaselineTagTests {
     #expect(
       try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
     await spy.setProcessTableFailure(nil)
-    clock.advance(by: .seconds(3))
+    clock.advance(by: .seconds(6))
     #expect(
-      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 3)
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 6)
     clock.advance(by: .seconds(3))
     let changed = try await source.signals(for: pane, minimumChangedLines: 1)
     #expect(changed.screenText == "B\n")
@@ -95,9 +143,9 @@ struct TmuxAgentScreenBaselineTagTests {
     #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
     #expect(
       try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
-    clock.advance(by: .seconds(2))
+    clock.advance(by: .seconds(6))
     #expect(
-      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 2)
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 6)
     await spy.setProcessTableFailure(
       ProcessRunResult(exitCode: 1, stdout: "", stderr: "ps: failed\n"))
     let readsBeforeChange = await spy.count(of: .ps)
@@ -132,11 +180,11 @@ struct TmuxAgentScreenBaselineTagTests {
     #expect(readsAfterBaseline == readsBeforeBaseline + 1)
   }
 
-  /// 基準 → 静か (2 秒) → 画面の変化、の順に採取する。変化の直前に Agent の pid を
+  /// 基準 → 静か (`quietSeconds` 秒) → 画面の変化、の順に採取する。変化の直前に Agent の pid を
   /// `agentProcessIDAtChange` へ差し替えるが、`liveness` は引かない (前景のコマンドが変わらず、
   /// 再選択が起きない形)。時計は変化の前に ps の TTL を越えて進める。
   private func secondsSinceChangeAfterQuietPeriod(
-    agentProcessIDAtChange: Int32
+    quietSeconds: Int, agentProcessIDAtChange: Int32
   ) async throws -> TimeInterval? {
     let spy = ObservationProcessSpy(
       screens: [paneID: ["A\n", "A\n", "B\n"]], processTableOutput: claudeTable)
@@ -146,9 +194,10 @@ struct TmuxAgentScreenBaselineTagTests {
     #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
     #expect(
       try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
-    clock.advance(by: .seconds(2))
+    clock.advance(by: .seconds(quietSeconds))
     #expect(
-      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 2)
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange
+        == TimeInterval(quietSeconds))
     await spy.setProcessTableOutput("70 1 /bin/sh\n\(agentProcessIDAtChange) 70 claude\n")
     clock.advance(by: .seconds(3))
     let changed = try await source.signals(for: pane, minimumChangedLines: 1)

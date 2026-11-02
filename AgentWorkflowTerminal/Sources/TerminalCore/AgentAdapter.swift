@@ -129,7 +129,7 @@ public struct AgentSignals: Sendable, Hashable, Codable {
 
   public init(
     paneTitle: String, screenText: String?, styledScreenText: String?,
-    secondsSinceScreenChange: TimeInterval?, hasObservedScreenChange: Bool = true,
+    secondsSinceScreenChange: TimeInterval?, hasObservedScreenChange: Bool,
     observedAt: Date
   ) {
     self.paneTitle = paneTitle
@@ -159,10 +159,14 @@ public struct ScreenChangeObservation: Sendable, Hashable {
   /// `hasObservedChange` が `false` なら基準を作ってからの秒数 (変化が無かった時間の下限)。
   public let secondsSinceChange: TimeInterval
   public let hasObservedChange: Bool
+  /// 今回の採取が出力とみなす変化だったか。`secondsSinceChange == 0` では代用できない
+  /// (同じバッチを読み直した静かな採取も経過が 0 になる)。
+  public let isOutput: Bool
 
-  public init(secondsSinceChange: TimeInterval, hasObservedChange: Bool) {
+  public init(secondsSinceChange: TimeInterval, hasObservedChange: Bool, isOutput: Bool = false) {
     self.secondsSinceChange = secondsSinceChange
     self.hasObservedChange = hasObservedChange
+    self.isOutput = isOutput
   }
 }
 
@@ -198,7 +202,7 @@ public struct AgentScreenChangeTracker: Sendable {
     let isOutput = Self.changedLineCount(previous.screen, screen) >= max(1, minimumChangedLines)
     guard !isOutput else {
       entries[paneID] = Entry(screen: screen, changedAt: observedAt, hasObservedChange: true)
-      return ScreenChangeObservation(secondsSinceChange: 0, hasObservedChange: true)
+      return ScreenChangeObservation(secondsSinceChange: 0, hasObservedChange: true, isOutput: true)
     }
     entries[paneID] = Entry(
       screen: screen, changedAt: previous.changedAt, hasObservedChange: previous.hasObservedChange)

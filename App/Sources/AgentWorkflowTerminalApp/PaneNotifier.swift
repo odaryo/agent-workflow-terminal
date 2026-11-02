@@ -148,10 +148,9 @@ final class PaneNotifier {
   /// pane まで。元の session に pane が無ければ、観測対象の他 session に一意に見つかる場合だけ
   /// 移動先を開く。それ以外は元のタブを、worktree も無ければ Overview を開き、終了を知らせる。
   ///
-  /// Issue #537: tmux 3.8 の計測では、移動後も元の観測が 1.4〜2.7 秒残り、jitter ありでは
-  /// 4/12 回で元の session の通知が出た。観測から新旧を区別できないため、元に残る場合は追跡しない。
-  /// 移動先の pane ID への select-window / select-pane が移動先を選択することは tmux で実測済み。
-  /// link-window 等による複数 session の候補からは推測で選ばない。
+  /// 元の session に pane が残っている間は追跡しない。移動の直後は元の観測が古いまま残り、
+  /// 観測からは新旧を区別できないため (Issue #537)。複数の session に見える候補 (link-window など)
+  /// からは、推測で選ばない。
   func open(_ target: NotificationTarget) async {
     guard let projects else { return }
     switch target {

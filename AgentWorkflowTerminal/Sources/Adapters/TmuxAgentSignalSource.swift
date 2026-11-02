@@ -133,17 +133,18 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let screen = styledScreen.map { StyledScreenText(capturedWithEscapeSequences: $0).plainText }
     let capturedAt = monotonicObservationInstant(
       for: pane.id, capturedAt: captured.snapshot.capturedAt)
-    let secondsSinceScreenChange: TimeInterval?
+    let screenChange: ScreenChangeObservation?
     if let screen {
-      secondsSinceScreenChange = await observeScreenChange(
+      screenChange = await observeScreenChange(
         screen, of: pane, at: capturedAt, screenCapturedAt: captured.snapshot.capturedAt,
         minimumChangedLines: minimumChangedLines)
     } else {
-      secondsSinceScreenChange = nil
+      screenChange = nil
     }
     return AgentSignals(
       paneTitle: title, screenText: screen, styledScreenText: styledScreen,
-      secondsSinceScreenChange: secondsSinceScreenChange,
+      secondsSinceScreenChange: screenChange?.secondsSinceChange,
+      hasObservedScreenChange: screenChange?.hasObservedChange ?? false,
       observedAt: captured.snapshot.observedAt
     )
   }
@@ -250,10 +251,10 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   private func observeScreenChange(
     _ screen: String, of pane: PaneSnapshot, at observedAt: ContinuousClock.Instant,
     screenCapturedAt: ContinuousClock.Instant, minimumChangedLines: Int
-  ) async -> TimeInterval? {
-    let seconds = screenChangeTracker.observe(
+  ) async -> ScreenChangeObservation? {
+    let observation = screenChangeTracker.observeChange(
       screen: screen, paneID: pane.id, at: observedAt, minimumChangedLines: minimumChangedLines)
-    guard let seconds else {
+    guard let observation else {
       let generation = beginScreenBaseline(of: pane.id)
       let processIDs = await agentProcessIDs(of: pane, capturedNoEarlierThan: screenCapturedAt)
       if screenBaselines[pane.id]?.generation == generation {
@@ -261,23 +262,24 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
       }
       return nil
     }
+    let seconds = observation.secondsSinceChange
     guard seconds == 0, let baseline = screenBaselines[pane.id], baseline.isQuiet else {
       screenBaselines[pane.id]?.isQuiet = seconds > 0
-      return seconds
+      return observation
     }
     let processIDs = await agentProcessIDs(of: pane, capturedNoEarlierThan: screenCapturedAt)
     // 待つ前の写しと比べない。基準の印を付ける `ps` がまだ戻っていなければ、写しは `nil` のまま。
     guard let current = screenBaselines[pane.id], current.generation == baseline.generation
-    else { return seconds }
+    else { return observation }
     // 読めなかったときは捨てない。捨てると、`ps` が失敗している間のターンの始まりが
     // すべて Unknown に落ちる。
     guard let processIDs, processIDs != current.agentProcessIDs else {
       screenBaselines[pane.id]?.isQuiet = false
-      return seconds
+      return observation
     }
     forgetScreen(of: pane.id)
     let rebasedAt = monotonicObservationInstant(for: pane.id, capturedAt: observedAt)
-    _ = screenChangeTracker.observe(
+    _ = screenChangeTracker.observeChange(
       screen: screen, paneID: pane.id, at: rebasedAt, minimumChangedLines: minimumChangedLines)
     _ = beginScreenBaseline(of: pane.id)
     screenBaselines[pane.id]?.agentProcessIDs = processIDs

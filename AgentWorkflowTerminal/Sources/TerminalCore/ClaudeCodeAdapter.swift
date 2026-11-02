@@ -37,10 +37,8 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       || inputBox == .placeholder
     let hasSubmittedPrompt =
       screen.range(of: #"(?m)^❯[  ]*\S"#, options: .regularExpression) != nil
-    if let elapsed = signals.secondsSinceScreenChange,
-      elapsed <= Self.activeScreenThresholdSeconds
-    {
-      return observation(.working, signals)
+    if let recentlyActive = recentScreenActivity(signals) {
+      return recentlyActive
     }
     guard signals.secondsSinceScreenChange != nil else {
       return unknown(signals, reason: .signalMissing)
@@ -61,6 +59,19 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return unknown(signals, reason: .screenAttributesUnavailable)
     }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  private func recentScreenActivity(_ signals: AgentSignals) -> AgentObservationResult? {
+    guard let elapsed = signals.secondsSinceScreenChange,
+      elapsed <= Self.activeScreenThresholdSeconds
+    else { return nil }
+    // 基準を作った直後の採取は、画面が変わっていなくても経過が小さい。変化を観測する前の
+    // 経過は「変化が無かった時間の下限」でしかなく、Working の根拠にしない。比較対象が
+    // まだ無いのと同じ扱いにする (Issue #559、設計書 §12.3)。
+    guard signals.hasObservedScreenChange else {
+      return unknown(signals, reason: .signalMissing)
+    }
+    return observation(.working, signals)
   }
 
   /// 入力欄の行を dim で分類する。

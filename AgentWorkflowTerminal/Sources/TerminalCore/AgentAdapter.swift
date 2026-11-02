@@ -118,18 +118,51 @@ public struct AgentSignals: Sendable, Hashable, Codable {
   public let styledScreenText: String?
   /// pane の `capture-pane` 画面が最後に変化してからの秒数。window 単位の
   /// `window_activity` は使わない (Spikes/gate3/README.md §3.3、§3.4)。
+  /// `hasObservedScreenChange` が `false` のときは画面の基準を作ってからの秒数で、
+  /// 「少なくともこれだけ変化が無かった」という下限でしかない (Issue #559)。
   public let secondsSinceScreenChange: TimeInterval?
+  /// 画面の基準を作ってから、出力とみなす変化を一度でも観測したか。`secondsSinceScreenChange`
+  /// が `nil` のときは意味を持たない。デコードでキーが無ければ `true` (このフィールドを
+  /// 足す前の値は、経過を最後の変化からの秒数として扱っていたため)。
+  public let hasObservedScreenChange: Bool
   public let observedAt: Date
 
   public init(
     paneTitle: String, screenText: String?, styledScreenText: String?,
-    secondsSinceScreenChange: TimeInterval?, observedAt: Date
+    secondsSinceScreenChange: TimeInterval?, hasObservedScreenChange: Bool = true,
+    observedAt: Date
   ) {
     self.paneTitle = paneTitle
     self.screenText = screenText
     self.styledScreenText = styledScreenText
     self.secondsSinceScreenChange = secondsSinceScreenChange
+    self.hasObservedScreenChange = hasObservedScreenChange
     self.observedAt = observedAt
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      paneTitle: try container.decode(String.self, forKey: .paneTitle),
+      screenText: try container.decodeIfPresent(String.self, forKey: .screenText),
+      styledScreenText: try container.decodeIfPresent(String.self, forKey: .styledScreenText),
+      secondsSinceScreenChange: try container.decodeIfPresent(
+        TimeInterval.self, forKey: .secondsSinceScreenChange),
+      hasObservedScreenChange: try container.decodeIfPresent(
+        Bool.self, forKey: .hasObservedScreenChange) ?? true,
+      observedAt: try container.decode(Date.self, forKey: .observedAt)
+    )
+  }
+}
+
+public struct ScreenChangeObservation: Sendable, Hashable {
+  /// `hasObservedChange` が `false` なら基準を作ってからの秒数 (変化が無かった時間の下限)。
+  public let secondsSinceChange: TimeInterval
+  public let hasObservedChange: Bool
+
+  public init(secondsSinceChange: TimeInterval, hasObservedChange: Bool) {
+    self.secondsSinceChange = secondsSinceChange
+    self.hasObservedChange = hasObservedChange
   }
 }
 
@@ -142,7 +175,9 @@ public struct AgentScreenChangeTracker: Sendable {
     /// 1行ずつの書き換えが積み上がっていずれ閾値を超え、静止した画面が出力に化ける。
     /// Spikes/gate3/README.md §13 の再採点もこの定義で取っている。
     let screen: String
+    /// 変化を一度も観測していなければ、基準を作った時刻。
     let changedAt: ContinuousClock.Instant
+    let hasObservedChange: Bool
   }
 
   private var entries: [PaneID: Entry] = [:]
@@ -152,19 +187,35 @@ public struct AgentScreenChangeTracker: Sendable {
   /// `minimumChangedLines` は出力とみなす最小の変化行数で、1 なら差が1文字でも出力。
   /// Agent ごとの値は `AgentAdapter.minimumChangedLinesForScreenActivity` が持つ。
   /// 0 以下は 1 と同じに扱う (どんな観測も変化になり、経過が常に 0 へ潰れるため)。
+  public mutating func observeChange(
+    screen: String, paneID: PaneID, at observedAt: ContinuousClock.Instant,
+    minimumChangedLines: Int = 1
+  ) -> ScreenChangeObservation? {
+    guard let previous = entries[paneID] else {
+      entries[paneID] = Entry(screen: screen, changedAt: observedAt, hasObservedChange: false)
+      return nil
+    }
+    let isOutput = Self.changedLineCount(previous.screen, screen) >= max(1, minimumChangedLines)
+    guard !isOutput else {
+      entries[paneID] = Entry(screen: screen, changedAt: observedAt, hasObservedChange: true)
+      return ScreenChangeObservation(secondsSinceChange: 0, hasObservedChange: true)
+    }
+    entries[paneID] = Entry(
+      screen: screen, changedAt: previous.changedAt, hasObservedChange: previous.hasObservedChange)
+    let elapsed = previous.changedAt.duration(to: observedAt).components
+    return ScreenChangeObservation(
+      secondsSinceChange: Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18,
+      hasObservedChange: previous.hasObservedChange)
+  }
+
+  /// 経過だけを返す。変化を観測する前の経過を「最近変化した」と読まないこと (Issue #559)。
   public mutating func observe(
     screen: String, paneID: PaneID, at observedAt: ContinuousClock.Instant,
     minimumChangedLines: Int = 1
   ) -> TimeInterval? {
-    guard let previous = entries[paneID] else {
-      entries[paneID] = Entry(screen: screen, changedAt: observedAt)
-      return nil
-    }
-    let isOutput = Self.changedLineCount(previous.screen, screen) >= max(1, minimumChangedLines)
-    entries[paneID] = Entry(screen: screen, changedAt: isOutput ? observedAt : previous.changedAt)
-    guard !isOutput else { return 0 }
-    let elapsed = previous.changedAt.duration(to: observedAt).components
-    return Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+    observeChange(
+      screen: screen, paneID: paneID, at: observedAt, minimumChangedLines: minimumChangedLines
+    )?.secondsSinceChange
   }
 
   /// index 単位で数え、行数が違えば短い側を空行で埋める。`capture-pane -p` は pane の高さぶんの

@@ -123,4 +123,43 @@ struct ClaudeCodeAdapterTests {
     #expect(classify(elapsed: 1.000_001) == "unknown")
     #expect(classify(elapsed: 1.5) == "unknown")
   }
+
+  @Test("基準から1秒以内でも、画面の変化を観測していなければ Working にせず signalMissing (Issue #559)")
+  func recentBaselineWithoutObservedChangeIsSignalMissing() throws {
+    let result = try classifyIdleScreen(elapsed: 0.3, hasObservedScreenChange: false)
+    guard case .observation(let observation) = result else {
+      Issue.record("absent")
+      return
+    }
+    #expect(observation.state == .unknown)
+    #expect(observation.unknownReason == .signalMissing)
+  }
+
+  @Test("画面の変化を観測した後は、1秒以内なら Working (Issue #559)")
+  func recentObservedChangeIsWorking() throws {
+    let result = try classifyIdleScreen(elapsed: 0.3, hasObservedScreenChange: true)
+    #expect(fixtureState(of: result) == "working")
+  }
+
+  @Test("変化を観測していなくても、しきい値を超えて静かなら起動バナーの空欄は Idle (Issue #559)")
+  func quietBaselineWithoutObservedChangeIsIdle() throws {
+    let result = try classifyIdleScreen(elapsed: 2.0, hasObservedScreenChange: false)
+    #expect(fixtureState(of: result) == "idle")
+  }
+
+  /// 起動バナーと空の入力欄がある画面 (`claude-2.1.259-idle`) を、経過と変化の観測の有無だけ
+  /// 差し替えて分類する。
+  private func classifyIdleScreen(
+    elapsed: TimeInterval, hasObservedScreenChange: Bool
+  ) throws -> AgentObservationResult {
+    let fixture = try #require(AgentStateFixture.load(prefix: "claude-2.1.259-idle").first)
+    return ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: fixture.screen,
+        styledScreenText: fixture.styledScreen, secondsSinceScreenChange: elapsed,
+        hasObservedScreenChange: hasObservedScreenChange, observedAt: .distantPast
+      ),
+      liveness: .alive
+    )
+  }
 }

@@ -294,6 +294,35 @@ struct AgentAdapterTests {
     #expect(await source.recordedMinimumChangedLines == [2])
   }
 
+  @Test(
+    "cancel された観測は、生存確認から戻った後に画面を採取せず、履歴も消さない",
+    arguments: [AgentLiveness.alive, .absent])
+  func cancelledObservationSkipsSignalsAfterLiveness(_ liveness: AgentLiveness) async throws {
+    let source = GatedLivenessSignalSource()
+    let pane = claudePane
+    let consumer = Task {
+      let stream = ClaudeCodeAdapter().observations(
+        of: pane, from: source,
+        intervals: AgentObservationIntervals(signals: .milliseconds(1), liveness: .seconds(1))
+      )
+      for await _ in stream {}
+    }
+    await source.waitUntilLivenessEntered()
+    consumer.cancel()
+    // consumer が抜けた時点で onTermination が走り、観測 task は cancel 済みになっている。
+    await consumer.value
+    await source.releaseLiveness(with: liveness)
+    // 今の実装なら解放の直後に呼ばれるので、呼ばれた時点で打ち切る。呼ばれない場合だけ上限まで待つ。
+    let deadline = ContinuousClock.now.advanced(by: .milliseconds(500))
+    while await source.signalsCalls + source.forgetCalls == 0, ContinuousClock.now < deadline {
+      try await Task.sleep(for: .milliseconds(5))
+    }
+    let signalsCalls = await source.signalsCalls
+    let forgetCalls = await source.forgetCalls
+    #expect(signalsCalls == 0)
+    #expect(forgetCalls == 0)
+  }
+
   @Test("画面活動のしきい値を宣言するのは Claude だけで、他の Adapter は既定の 1")
   func onlyClaudeRaisesScreenActivityThreshold() {
     #expect(ClaudeCodeAdapter().minimumChangedLinesForScreenActivity == 2)
@@ -361,5 +390,47 @@ private actor ThresholdRecordingSignalSource: AgentSignalSource {
     for pane: PaneSnapshot, matchingProcessNames: Set<String>
   ) async -> AgentLiveness {
     .alive
+  }
+}
+
+/// 生存確認を、テストが解放するまで止める。cancel が生存確認の最中に届く順序は、止めずには作れない。
+private actor GatedLivenessSignalSource: AgentSignalSource {
+  private(set) var signalsCalls = 0
+  private(set) var forgetCalls = 0
+  private var isLivenessEntered = false
+  private var enteredWaiter: CheckedContinuation<Void, Never>?
+  private var livenessWaiter: CheckedContinuation<AgentLiveness, Never>?
+
+  func waitUntilLivenessEntered() async {
+    guard !isLivenessEntered else { return }
+    await withCheckedContinuation { enteredWaiter = $0 }
+  }
+
+  func releaseLiveness(with liveness: AgentLiveness) {
+    livenessWaiter?.resume(returning: liveness)
+    livenessWaiter = nil
+  }
+
+  func signals(
+    for pane: PaneSnapshot, minimumChangedLines: Int
+  ) async throws -> AgentSignals {
+    signalsCalls += 1
+    return AgentSignals(
+      paneTitle: "", screenText: "Claude Code v test\n❯ \nmanual mode on", styledScreenText: nil,
+      secondsSinceScreenChange: 2, observedAt: Date(timeIntervalSince1970: 1)
+    )
+  }
+
+  func liveness(
+    for pane: PaneSnapshot, matchingProcessNames: Set<String>
+  ) async -> AgentLiveness {
+    isLivenessEntered = true
+    enteredWaiter?.resume()
+    enteredWaiter = nil
+    return await withCheckedContinuation { livenessWaiter = $0 }
+  }
+
+  func forget(_ pane: PaneSnapshot) async {
+    forgetCalls += 1
   }
 }

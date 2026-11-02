@@ -1,6 +1,7 @@
 import Foundation
 import TerminalCore
 import Testing
+import os
 
 @testable import Adapters
 
@@ -174,6 +175,52 @@ struct ObservationSnapshotSharingTests {
     #expect(await runner.launches == 2)
   }
 
+  @Test("p4: 下限とちょうど同じ時刻に読み始めた in-flight の ps には合流する")
+  func processTableJoinsInFlightReadStartedAtLowerBound() async throws {
+    let runner = GateProcessRunner(
+      result: ProcessRunResult(exitCode: 0, stdout: "70 1 claude\n", stderr: ""))
+    let clock = ManualTimeSource()
+    let cache = ProcessTableSnapshotCache(
+      processRunner: runner, executableURL: URL(fileURLWithPath: "/ps"),
+      timeToLive: .zero, timeSource: clock)
+    let startedAt = clock.now
+
+    async let first = cache.snapshot()
+    try await waitForLaunches(1, runner: runner)
+    async let second = cache.snapshot(capturedNoEarlierThan: startedAt)
+    try await waitForArrival()
+    await runner.release()
+    let names = await [first?.processTreeNames(of: 70), second?.processTreeNames(of: 70)]
+
+    #expect(await runner.launches == 1)
+    #expect(names == [["claude"], ["claude"]])
+  }
+
+  @Test("p6: 置き去りにした古い ps が後で終わっても、新しい in-flight への合流先は外れない")
+  func processTableKeepsNewerInFlightWhenOlderReadFinishes() async throws {
+    let runner = PerLaunchGateProcessRunner()
+    let clock = ManualTimeSource()
+    let cache = ProcessTableSnapshotCache(
+      processRunner: runner, executableURL: URL(fileURLWithPath: "/ps"), timeSource: clock)
+    async let oldRead = cache.snapshot()
+    #expect(await runner.waitForLaunches(1))
+    clock.advance(by: .seconds(1))
+    let lowerBound = clock.now
+    async let newRead = cache.snapshot(capturedNoEarlierThan: lowerBound)
+    #expect(await runner.waitForLaunches(2))
+    await runner.release(launch: 1)
+    _ = await oldRead
+
+    async let joined = cache.snapshot(capturedNoEarlierThan: lowerBound)
+    try await waitForArrival()
+    let launchesWhileNewerReadIsInFlight = await runner.launches
+    await runner.releaseAll()
+    let names = await [newRead?.processTreeNames(of: 70), joined?.processTreeNames(of: 70)]
+
+    #expect(launchesWhileNewerReadIsInFlight == 2)
+    #expect(names == [["agent2"], ["agent2"]])
+  }
+
   @Test("同時に来た pane 一覧の要求は1回の list-panes を共有する")
   func paneListCoalescesConcurrentRequests() async throws {
     let runner = GateProcessRunner(result: ProcessRunResult(exitCode: 0, stdout: "", stderr: ""))
@@ -181,15 +228,33 @@ struct ObservationSnapshotSharingTests {
       runner: try makeTmuxRunner(socketName: "share-test", processRunner: runner),
       timeToLive: .zero, timeSource: ManualTimeSource())
 
-    async let first: [TmuxPane] = cache.panes()
+    async let first = cache.listing()
     try await waitForLaunches(1, runner: runner)
     #expect(await runner.launches == 1)
-    async let second: [TmuxPane] = cache.panes()
+    async let second = cache.listing()
     try await waitForArrival()
     await runner.release()
-    _ = try await [first, second]
+    _ = try await (first, second)
 
     #expect(await runner.launches == 1)
+  }
+
+  @Test("y7: in-flight の pane 一覧に合流した呼び出しは、最初の呼び出しと同じ listedAt を受け取る")
+  func paneListWaitersShareListedAt() async throws {
+    let runner = GateProcessRunner(result: ProcessRunResult(exitCode: 0, stdout: "", stderr: ""))
+    let cache = TmuxAllSessionPaneListCache(
+      runner: try makeTmuxRunner(socketName: "share-test", processRunner: runner),
+      timeToLive: .zero, timeSource: TickingTimeSource())
+
+    async let first = cache.listing()
+    try await waitForLaunches(1, runner: runner)
+    async let second = cache.listing()
+    try await waitForArrival()
+    await runner.release()
+    let (firstListing, secondListing) = try await (first, second)
+
+    #expect(await runner.launches == 1)
+    #expect(firstListing.listedAt == secondListing.listedAt)
   }
 
   @Test("list-panes の失敗はキャッシュせず次の呼び出しで取り直す")
@@ -201,7 +266,7 @@ struct ObservationSnapshotSharingTests {
       timeToLive: .seconds(10), timeSource: ManualTimeSource())
 
     for _ in 0..<2 {
-      await #expect(throws: TmuxWorktreePaneSourceError.self) { try await cache.panes() }
+      await #expect(throws: TmuxWorktreePaneSourceError.self) { try await cache.listing() }
     }
     #expect(await spy.count(of: .listPanes) == 2)
   }
@@ -254,4 +319,65 @@ private actor FreshnessGateProcessRunner: ProcessRunning {
     return ProcessRunResult(
       exitCode: 0, stdout: isFirstRead ? "70 1 claude\n" : "70 1 codex\n", stderr: "")
   }
+}
+
+/// 起動ごとに個別に止め、番号を指定して返させる `ProcessRunning`。2つの読み込みを並行させたまま
+/// 古い方だけを終わらせないと、終わった古い読み込みが in-flight を外すかを主張できない。
+/// n 回目の起動は `70 1 agent<n>` の1行を返す。
+private actor PerLaunchGateProcessRunner: ProcessRunning {
+  private(set) var launches = 0
+  private var waiters: [Int: CheckedContinuation<Void, Never>] = [:]
+  private var released: Set<Int> = []
+  private var isAllReleased = false
+
+  func release(launch: Int) {
+    released.insert(launch)
+    waiters.removeValue(forKey: launch)?.resume()
+  }
+
+  /// 失敗した変異でも待ち手を残さないよう、後から来る起動も止めない。
+  func releaseAll() {
+    isAllReleased = true
+    for waiter in waiters.values { waiter.resume() }
+    waiters.removeAll()
+  }
+
+  func waitForLaunches(_ count: Int) async -> Bool {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(30))
+    while launches < count {
+      guard clock.now < deadline else { return false }
+      do {
+        try await Task.sleep(for: .milliseconds(10))
+      } catch { return false }
+    }
+    return true
+  }
+
+  func run(
+    executableURL: URL, arguments: [String], environment: [String: String],
+    timeout: Duration, outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    launches += 1
+    let launch = launches
+    if !isAllReleased && !released.contains(launch) {
+      await withCheckedContinuation { waiters[launch] = $0 }
+    }
+    return ProcessRunResult(exitCode: 0, stdout: "70 1 agent\(launch)\n", stderr: "")
+  }
+}
+
+/// `now` を読むたびに 1ms 進む `ContinuousTimeSource`。合流した待ち手がそれぞれ時刻を読むと、
+/// テストの側で時計を進める隙が無くても値がずれるようにする。
+private struct TickingTimeSource: ContinuousTimeSource {
+  private let instant = OSAllocatedUnfairLock(initialState: ContinuousClock().now)
+
+  var now: ContinuousClock.Instant {
+    instant.withLock {
+      $0 = $0.advanced(by: .milliseconds(1))
+      return $0
+    }
+  }
+
+  func sleep(until deadline: ContinuousClock.Instant) async throws {}
 }

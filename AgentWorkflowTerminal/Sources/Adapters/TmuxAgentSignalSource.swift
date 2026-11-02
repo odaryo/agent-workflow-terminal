@@ -40,7 +40,7 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   /// 並行呼び出しが逆順で再開すると戻り得るため、ここで単調にする (戻ると
   /// `secondsSinceScreenChange` が負になる)。
   private var lastScreenObservedAt: [PaneID: ContinuousClock.Instant] = [:]
-  private var screenOwnerProcessIDs: [PaneID: Int32] = [:]
+  private var screenOwnerProcessIDs: [PaneID: [Set<String>: [Int32]]] = [:]
   private var forgottenAt: [PaneID: ContinuousClock.Instant] = [:]
 
   public init(
@@ -127,19 +127,28 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let liveness =
       names.isDisjoint(with: matchingProcessNames)
       ? AgentLiveness.absent : .alive
-    // 別の種類の Agent 名で引くと、稼働中でも absent になる。ここで履歴を消すと
-    // 移動直後の Working を見落とす (Issue #537 / #546、設計書 §12.4.2)。
-    guard liveness == .alive else { return liveness }
-    let candidates = snapshot.nearestProcessIDs(
-      named: matchingProcessNames, inTreeOf: pane.processID)
-    guard candidates.count == 1, let processID = candidates.first else {
+    // 記録のない名前の集合の absent は、別の種類の Agent 名で引いただけなので消さない。
+    // 消すと移動直後の Working を見落とすが、記録があればその Agent は居なくなっているため
+    // 履歴を引き継がない (Issue #537 / #546、設計書 §12.4.2)。
+    guard liveness == .alive else {
+      if screenOwnerProcessIDs[pane.id]?[matchingProcessNames] != nil {
+        forgetScreen(of: pane.id)
+      }
+      return liveness
+    }
+    let candidates =
+      snapshot.nearestProcessIDs(
+        named: matchingProcessNames, inTreeOf: pane.processID
+      ).sorted()
+    guard !candidates.isEmpty else {
       forgetScreen(of: pane.id)
       return liveness
     }
-    if let previous = screenOwnerProcessIDs[pane.id], previous != processID {
+    if let previous = screenOwnerProcessIDs[pane.id]?[matchingProcessNames], previous != candidates
+    {
       forgetScreen(of: pane.id)
     }
-    screenOwnerProcessIDs[pane.id] = processID
+    screenOwnerProcessIDs[pane.id, default: [:]][matchingProcessNames] = candidates
     return liveness
   }
 

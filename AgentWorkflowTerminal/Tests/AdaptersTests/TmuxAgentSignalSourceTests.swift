@@ -219,8 +219,8 @@ struct TmuxAgentSignalSourceTests {
       fixtureState(ClaudeCodeAdapter().classify(signals: changed, liveness: .alive)) == "working")
   }
 
-  @Test("absent を観測した pane の画面履歴を解放する")
-  func absentForgetsScreen() async throws {
+  @Test("absent を観測しても画面履歴を保つ")
+  func absentKeepsScreenHistory() async throws {
     let spy = ObservationProcessSpy(
       screens: [paneID: ["screen\n"]], processTableOutput: "70 1 /bin/sh\n")
     let clock = ManualTimeSource()
@@ -231,7 +231,7 @@ struct TmuxAgentSignalSourceTests {
     #expect(await source.liveness(for: pane, matchingProcessNames: ["agent"]) == .absent)
     clock.advance(by: .seconds(2))
     #expect(
-      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 2)
   }
 
   @Test("消えた pane は握り潰さず paneNotFound として報告する")
@@ -370,7 +370,7 @@ struct TmuxAgentSignalSourceTests {
   }
 
   private func makeSource(
-    spy: ObservationProcessSpy, clock: ManualTimeSource
+    spy: some ProcessRunning, clock: ManualTimeSource
   ) throws -> TmuxAgentSignalSource {
     TmuxAgentSignalSource(
       processTable: ProcessTableSnapshotCache(
@@ -380,6 +380,94 @@ struct TmuxAgentSignalSourceTests {
         runner: try makeTmuxRunner(socketName: "signals-test", processRunner: spy),
         timeToLive: TmuxPaneScreenBatcher.defaultTimeToLive, timeSource: clock)
     )
+  }
+}
+
+extension TmuxAgentSignalSourceTests {
+  @Test("§12.4.2 別の種類の名前で absent を引いても同じプロセスの画面履歴を保つ")
+  func otherAgentAbsenceKeepsScreenHistory() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["screen\n"]], processTableOutput: "70 1 /bin/sh\n71 70 claude\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    _ = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["codex"]) == .absent)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    clock.advance(by: .seconds(2))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 2)
+  }
+
+  @Test(
+    "§12.4.2 プロセスが変わるか持ち主の候補が複数になれば画面履歴を捨てる",
+    arguments: ["70 1 /bin/sh\n72 70 claude\n", "70 1 /bin/sh\n71 70 claude\n72 70 claude\n"])
+  func changedOrAmbiguousProcessForgetsScreenHistory(processTable: String) async throws {
+    let spy = SignalProcessTableSpy()
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    _ = try await source.signals(for: pane, minimumChangedLines: 1)
+    clock.advance(by: .seconds(3))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 3)
+    await spy.setProcessTableOutput(processTable)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    clock.advance(by: .seconds(2))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+  }
+
+  @Test("§12.4.2 forget 後の画面履歴は10秒以内の復帰で引き継ぎ超過で捨てる", arguments: [9, 11])
+  func forgottenScreenHistoryExpiresAfterGrace(seconds: Int) async throws {
+    let spy = ObservationProcessSpy(screens: [paneID: ["screen\n"]])
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    _ = try await source.signals(for: pane, minimumChangedLines: 1)
+    await source.forget(pane)
+    clock.advance(by: .seconds(seconds))
+    let signals = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(signals.screenText == "screen\n")
+    #expect(signals.secondsSinceScreenChange == (seconds == 9 ? 9 : nil))
+  }
+
+  @Test("§12.4.2 dead な pane の画面履歴はすぐに捨てる")
+  func deadPaneForgetsScreenHistory() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["screen\n"]], processTableOutput: "70 1 /bin/sh\n71 70 claude\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = PaneSnapshot(
+      id: paneID, processID: 70, tty: "", currentCommand: "", currentPath: "", title: "",
+      termination: .exited(status: 0))
+    #expect(pane.isDead)
+    _ = try await source.signals(for: pane, minimumChangedLines: 1)
+    clock.advance(by: .seconds(2))
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .absent)
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+  }
+}
+
+private actor SignalProcessTableSpy: ProcessRunning {
+  private let observations = ObservationProcessSpy(screens: [PaneID(rawValue: "%7"): ["screen\n"]])
+  private var processTableOutput = "70 1 /bin/sh\n71 70 claude\n"
+
+  func setProcessTableOutput(_ output: String) { processTableOutput = output }
+
+  func run(
+    executableURL: URL, arguments: [String], environment: [String: String],
+    timeout: Duration, outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    if executableURL.lastPathComponent == "ps" {
+      return ProcessRunResult(exitCode: 0, stdout: processTableOutput, stderr: "")
+    }
+    return try await observations.run(
+      executableURL: executableURL, arguments: arguments, environment: environment,
+      timeout: timeout, outputLimit: outputLimit)
   }
 }
 

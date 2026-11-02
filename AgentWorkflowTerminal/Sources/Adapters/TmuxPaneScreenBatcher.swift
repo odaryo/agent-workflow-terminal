@@ -62,7 +62,7 @@ actor TmuxPaneScreenBatcher {
 
   private let runner: TmuxRunner
   private let timeToLive: Duration
-  private let timeSource: any ContinuousTimeSource
+  nonisolated let timeSource: any ContinuousTimeSource
   private var registered: [PaneID] = []
   private var latest: TmuxPaneScreenSnapshot?
   private var inFlight: InFlightBatch?

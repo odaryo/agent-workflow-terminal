@@ -40,6 +40,8 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   /// 並行呼び出しが逆順で再開すると戻り得るため、ここで単調にする (戻ると
   /// `secondsSinceScreenChange` が負になる)。
   private var lastScreenObservedAt: [PaneID: ContinuousClock.Instant] = [:]
+  private var screenOwnerProcessIDs: [PaneID: Int32] = [:]
+  private var forgottenAt: [PaneID: ContinuousClock.Instant] = [:]
 
   public init(
     tmuxRunner: TmuxRunner, processRunner: any ProcessRunning,
@@ -58,6 +60,8 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   public func signals(
     for pane: PaneSnapshot, minimumChangedLines: Int
   ) async throws -> AgentSignals {
+    discardExpiredScreenHistory()
+    forgottenAt.removeValue(forKey: pane.id)
     guard TmuxCapturePane.isWellFormed(pane.id) else {
       throw TmuxAgentSignalSourceError.capture(.invalidPaneID(pane.id))
     }
@@ -112,6 +116,8 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   public func liveness(
     for pane: PaneSnapshot, matchingProcessNames: Set<String>
   ) async -> AgentLiveness {
+    discardExpiredScreenHistory()
+    forgottenAt.removeValue(forKey: pane.id)
     guard !pane.isDead else {
       forgetScreen(of: pane.id)
       return .absent
@@ -121,7 +127,19 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
     let liveness =
       names.isDisjoint(with: matchingProcessNames)
       ? AgentLiveness.absent : .alive
-    if liveness == .absent { forgetScreen(of: pane.id) }
+    // 別の種類の Agent 名で引くと、稼働中でも absent になる。ここで履歴を消すと
+    // 移動直後の Working を見落とす (Issue #537 / #546、設計書 §12.4.2)。
+    guard liveness == .alive else { return liveness }
+    let candidates = snapshot.nearestProcessIDs(
+      named: matchingProcessNames, inTreeOf: pane.processID)
+    guard candidates.count == 1, let processID = candidates.first else {
+      forgetScreen(of: pane.id)
+      return liveness
+    }
+    if let previous = screenOwnerProcessIDs[pane.id], previous != processID {
+      forgetScreen(of: pane.id)
+    }
+    screenOwnerProcessIDs[pane.id] = processID
     return liveness
   }
 
@@ -144,13 +162,26 @@ public actor TmuxAgentSignalSource: AgentSignalSource {
   }
 
   public func forget(_ pane: PaneSnapshot) async {
-    forgetScreen(of: pane.id)
+    discardExpiredScreenHistory()
+    // 移動元の後始末で即座に消すと、同じプロセスでも移動直後の Working を見落とす。
+    // 引き継ぎ猶予の間は履歴を残す (Issue #537 / #546、設計書 §12.4.2)。
+    forgottenAt[pane.id] = screenBatcher.timeSource.now
     await screenBatcher.forget(pane.id)
+  }
+
+  private func discardExpiredScreenHistory() {
+    let now = screenBatcher.timeSource.now
+    for (pane, instant) in forgottenAt
+    where now > instant.advanced(by: PaneNotificationPlanner.paneHandoffGrace) {
+      forgetScreen(of: pane)
+    }
   }
 
   private func forgetScreen(of pane: PaneID) {
     screenChangeTracker.forget(paneID: pane)
     lastScreenObservedAt.removeValue(forKey: pane)
+    screenOwnerProcessIDs.removeValue(forKey: pane)
+    forgottenAt.removeValue(forKey: pane)
   }
 
   private func monotonicObservationInstant(

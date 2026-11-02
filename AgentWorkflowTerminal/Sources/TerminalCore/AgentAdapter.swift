@@ -160,10 +160,11 @@ public struct ScreenChangeObservation: Sendable, Hashable {
   public let secondsSinceChange: TimeInterval
   public let hasObservedChange: Bool
   /// 今回の採取が出力とみなす変化だったか。`secondsSinceChange == 0` では代用できない
-  /// (同じバッチを読み直した静かな採取も経過が 0 になる)。
+  /// (同じバッチを読み直した静かな採取も経過が 0 になる)。ただし今の `TmuxAgentSignalSource` では、
+  /// その採取の時点で静かな時間がすでに 0 なので、代用しても挙動は変わらない (等価変異。Issue #566)。
   public let isOutput: Bool
 
-  public init(secondsSinceChange: TimeInterval, hasObservedChange: Bool, isOutput: Bool = false) {
+  public init(secondsSinceChange: TimeInterval, hasObservedChange: Bool, isOutput: Bool) {
     self.secondsSinceChange = secondsSinceChange
     self.hasObservedChange = hasObservedChange
     self.isOutput = isOutput
@@ -209,7 +210,7 @@ public struct AgentScreenChangeTracker: Sendable {
     let elapsed = previous.changedAt.duration(to: observedAt).components
     return ScreenChangeObservation(
       secondsSinceChange: Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18,
-      hasObservedChange: previous.hasObservedChange)
+      hasObservedChange: previous.hasObservedChange, isOutput: false)
   }
 
   /// 経過だけを返す。変化を観測する前の経過を「最近変化した」と読まないこと (Issue #559)。

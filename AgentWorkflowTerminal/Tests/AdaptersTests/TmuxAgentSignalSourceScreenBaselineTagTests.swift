@@ -180,12 +180,89 @@ struct TmuxAgentScreenBaselineTagTests {
     #expect(readsAfterBaseline == readsBeforeBaseline + 1)
   }
 
-  /// 基準 → 静か (`quietSeconds` 秒) → 画面の変化、の順に採取する。変化の直前に Agent の pid を
-  /// `agentProcessIDAtChange` へ差し替えるが、`liveness` は引かない (前景のコマンドが変わらず、
-  /// 再選択が起きない形)。時計は変化の前に ps の TTL を越えて進める。
+  @Test(
+    "§12.4.2 最後の静かな採取の経過がちょうど5秒なら、変化の採取で ps を読んで印を確かめる (Issue #566)",
+    arguments: [(Int32(71), TimeInterval?(0)), (72, nil)])
+  func quietPeriodOfExactlyThresholdChecksProcessTag(
+    agentProcessIDAtChange: Int32, expectedSeconds: TimeInterval?
+  ) async throws {
+    let changed = try await observeChangeAfterQuietPeriod(
+      quietSeconds: 5, agentProcessIDAtChange: agentProcessIDAtChange)
+    #expect(changed.seconds == expectedSeconds)
+    #expect(changed.processTableReads == 1)
+  }
+
+  @Test("§12.4.2 変化の採取と同じバッチを読み直した静かな採取の後の変化では、ps を読み足さない (Issue #566)")
+  func rereadOfChangedBatchDoesNotCheckProcessTagAtNextChange() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["A\n", "A\n", "B\n", "C\n"]], processTableOutput: claudeTable)
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+    clock.advance(by: .seconds(6))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 6)
+    let readsBeforeChange = await spy.count(of: .ps)
+    clock.advance(by: .seconds(3))
+    let changed = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(changed.screenText == "B\n")
+    #expect(changed.secondsSinceScreenChange == 0)
+    #expect(await spy.count(of: .ps) == readsBeforeChange + 1)
+    let batchesBeforeReread = await spy.captureBatchCount
+    let reread = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(await spy.captureBatchCount == batchesBeforeReread)
+    #expect(reread.screenText == "B\n")
+    #expect(reread.secondsSinceScreenChange == 0)
+    #expect(reread.hasObservedScreenChange == true)
+    let readsBeforeNextChange = await spy.count(of: .ps)
+    clock.advance(by: .seconds(3))
+    let nextChanged = try await source.signals(for: pane, minimumChangedLines: 1)
+    #expect(nextChanged.screenText == "C\n")
+    #expect(nextChanged.secondsSinceScreenChange == 0)
+    #expect(await spy.count(of: .ps) == readsBeforeNextChange)
+  }
+
+  @Test("§12.4.2 5秒以上静かだった後に画面が変わり続けても、ps を読むのは最初の変化の1回だけ (Issue #566)")
+  func continuousChangesAfterLongQuietPeriodCheckProcessTagOnce() async throws {
+    let spy = ObservationProcessSpy(
+      screens: [paneID: ["A\n", "A\n", "B\n", "C\n", "D\n"]], processTableOutput: claudeTable)
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let pane = makePaneSnapshot(id: "%7", pid: 70)
+    #expect(await source.liveness(for: pane, matchingProcessNames: ["claude"]) == .alive)
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+    clock.advance(by: .seconds(6))
+    #expect(
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 6)
+    let readsBeforeChanges = await spy.count(of: .ps)
+    for screen in ["B\n", "C\n", "D\n"] {
+      clock.advance(by: .seconds(3))
+      let changed = try await source.signals(for: pane, minimumChangedLines: 1)
+      #expect(changed.screenText == screen)
+      #expect(changed.secondsSinceScreenChange == 0)
+    }
+    #expect(await spy.count(of: .ps) == readsBeforeChanges + 1)
+  }
+
   private func secondsSinceChangeAfterQuietPeriod(
     quietSeconds: Int, agentProcessIDAtChange: Int32
   ) async throws -> TimeInterval? {
+    try await observeChangeAfterQuietPeriod(
+      quietSeconds: quietSeconds, agentProcessIDAtChange: agentProcessIDAtChange
+    ).seconds
+  }
+
+  /// 基準 → 静か (`quietSeconds` 秒) → 画面の変化、の順に採取する。変化の直前に Agent の pid を
+  /// `agentProcessIDAtChange` へ差し替えるが、`liveness` は引かない (前景のコマンドが変わらず、
+  /// 再選択が起きない形)。時計は変化の前に ps の TTL を越えて進める。`processTableReads` は
+  /// 変化の採取の間に読んだ ps の回数。
+  private func observeChangeAfterQuietPeriod(
+    quietSeconds: Int, agentProcessIDAtChange: Int32
+  ) async throws -> (seconds: TimeInterval?, processTableReads: Int) {
     let spy = ObservationProcessSpy(
       screens: [paneID: ["A\n", "A\n", "B\n"]], processTableOutput: claudeTable)
     let clock = ManualTimeSource()
@@ -199,9 +276,10 @@ struct TmuxAgentScreenBaselineTagTests {
       try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange
         == TimeInterval(quietSeconds))
     await spy.setProcessTableOutput("70 1 /bin/sh\n\(agentProcessIDAtChange) 70 claude\n")
+    let readsBeforeChange = await spy.count(of: .ps)
     clock.advance(by: .seconds(3))
     let changed = try await source.signals(for: pane, minimumChangedLines: 1)
     #expect(changed.screenText == "B\n")
-    return changed.secondsSinceScreenChange
+    return (changed.secondsSinceScreenChange, await spy.count(of: .ps) - readsBeforeChange)
   }
 }

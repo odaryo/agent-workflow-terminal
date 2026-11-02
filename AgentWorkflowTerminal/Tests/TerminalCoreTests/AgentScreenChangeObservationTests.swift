@@ -72,4 +72,58 @@ struct AgentScreenChangeObservationTests {
     #expect(quietAfterChange?.isOutput == false)
     #expect(quietAfterChange?.secondsSinceChange == 0)
   }
+
+  @Test("基準から画面が変わらなければ、経過は基準からの秒数で、変化は未観測 (Issue #559)")
+  func screenTrackerReportsUnobservedChangeAfterBaseline() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    #expect(tracker.observeChange(screen: "a\nb", paneID: paneID, at: now) == nil)
+    let unchanged = tracker.observeChange(
+      screen: "a\nb", paneID: paneID, at: now.advanced(by: .milliseconds(300)))
+    #expect(
+      unchanged
+        == ScreenChangeObservation(
+          secondsSinceChange: 0.3, hasObservedChange: false, isOutput: false))
+  }
+
+  @Test("基準の後に画面が変われば、以後は変化を観測済みとして最後の変化からの経過を返す (Issue #559)")
+  func screenTrackerReportsObservedChangeAfterOutput() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    #expect(tracker.observeChange(screen: "a\nb", paneID: paneID, at: now) == nil)
+    let changed = tracker.observeChange(
+      screen: "a\nB", paneID: paneID, at: now.advanced(by: .milliseconds(300)))
+    let unchanged = tracker.observeChange(
+      screen: "a\nB", paneID: paneID, at: now.advanced(by: .milliseconds(800)))
+    #expect(
+      changed
+        == ScreenChangeObservation(secondsSinceChange: 0, hasObservedChange: true, isOutput: true))
+    #expect(
+      unchanged
+        == ScreenChangeObservation(
+          secondsSinceChange: 0.5, hasObservedChange: true, isOutput: false))
+  }
+
+  @Test("画面履歴を忘れた pane は、変化を未観測の基準から始め直す (Issue #559)")
+  func screenTrackerForgetResetsObservedChange() {
+    let paneID = PaneID(rawValue: "%1")
+    let now = ContinuousClock().now
+    var tracker = AgentScreenChangeTracker()
+    _ = tracker.observeChange(screen: "a\nb", paneID: paneID, at: now)
+    let changed = tracker.observeChange(
+      screen: "a\nB", paneID: paneID, at: now.advanced(by: .seconds(1)))
+    #expect(changed?.hasObservedChange == true)
+    tracker.forget(paneID: paneID)
+    let baseline = tracker.observeChange(
+      screen: "a\nB", paneID: paneID, at: now.advanced(by: .seconds(2)))
+    let unchanged = tracker.observeChange(
+      screen: "a\nB", paneID: paneID, at: now.advanced(by: .milliseconds(2_300)))
+    #expect(baseline == nil)
+    #expect(
+      unchanged
+        == ScreenChangeObservation(
+          secondsSinceChange: 0.3, hasObservedChange: false, isOutput: false))
+  }
 }

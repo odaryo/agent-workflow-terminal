@@ -145,8 +145,12 @@ final class PaneNotifier {
   // MARK: - 開く
 
   /// §11.2 の表のとおり対象 pane まで移る。Question overlay (§11.1) は未実装なので、Question も
-  /// pane まで。pane が既に無ければタブを、worktree も無ければ Overview を開き、通知元が
-  /// 終了していることを出す。
+  /// pane まで。元の session に pane が無ければ、観測対象の他 session に一意に見つかる場合だけ
+  /// 移動先を開く。それ以外は元のタブを、worktree も無ければ Overview を開き、終了を知らせる。
+  ///
+  /// 元の session に pane が残っている間は追跡しない。移動の直後は元の観測が古いまま残り、
+  /// 観測からは新旧を区別できないため (Issue #537)。複数の session に見える候補 (link-window など)
+  /// からは、推測で選ばない。
   func open(_ target: NotificationTarget) async {
     guard let projects else { return }
     switch target {
@@ -167,9 +171,15 @@ final class PaneNotifier {
       let paneExists =
         observed?.details[pane] != nil
         || observed?.paneStates?.contains { $0.id == pane } == true
-      if paneExists {
+      let destination =
+        paneExists
+        ? session
+        : Self.session(
+          containing: pane, in: model.paneObservations.observed, excluding: session,
+          inventory: model.inventory)
+      if let destination {
         if let failure = await navigator.reveal(
-          model, worktree: worktree, session: session, pane: pane, in: projects)
+          model, worktree: destination.identity, session: destination, pane: pane, in: projects)
         {
           projects.showWarning(failure)
         }
@@ -179,5 +189,22 @@ final class PaneNotifier {
         projects.showWarning(Self.goneNotice)
       }
     }
+  }
+
+  static func session(
+    containing pane: PaneID, in observed: [TerminalSessionKey: PaneObservationStore.Observed],
+    excluding source: TerminalSessionKey, inventory: WorktreeInventory
+  ) -> TerminalSessionKey? {
+    var destination: TerminalSessionKey?
+    for (session, observation) in observed
+    where session != source && inventory.observesPaneStates(of: session.identity) {
+      guard
+        observation.details[pane] != nil
+          || observation.paneStates?.contains(where: { $0.id == pane }) == true
+      else { continue }
+      guard destination == nil else { return nil }
+      destination = session
+    }
+    return destination
   }
 }

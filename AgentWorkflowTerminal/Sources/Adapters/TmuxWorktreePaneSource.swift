@@ -52,10 +52,6 @@ actor TmuxAllSessionPaneListCache {
     self.timeSource = timeSource
   }
 
-  func panes() async throws(TmuxWorktreePaneSourceError) -> [TmuxPane] {
-    try await listing().panes
-  }
-
   /// `listedAt` は、返す pane 一覧を**読み終えた**時刻。TTL 内のキャッシュや読み込み中の結果へ
   /// 合流したときも、その一覧の時刻を返す (呼ばれた時刻ではない)。
   ///

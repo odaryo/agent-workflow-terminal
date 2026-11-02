@@ -130,6 +130,84 @@ struct TmuxAgentSignalSourceReselectionTests {
     #expect(await spy.count(of: .ps) == 1)
   }
 
+  @Test("p8: listedAt を持たない初めての pane は TTL 内の ps を使う")
+  func firstLivenessWithoutListedAtReusesProcessTable() async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n80 1 /bin/zsh\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let other = pane(id: "%8", processID: 80, command: "zsh")
+    #expect(await source.liveness(for: other, matchingProcessNames: ["claude"]) == .absent)
+    #expect(await spy.count(of: .ps) == 1)
+    clock.advance(by: .seconds(1))
+
+    let first = pane(command: "zsh")
+    #expect(await source.liveness(for: first, matchingProcessNames: ["claude"]) == .absent)
+    #expect(await spy.count(of: .ps) == 1)
+  }
+
+  @Test(
+    "p11: 消えた pane と同じ ID がまた来たら、初めての pane として listedAt 以後の ps で確かめる",
+    arguments: PaneDisappearance.allCases)
+  func reappearedPaneIsTreatedAsFirstLiveness(disappearance: PaneDisappearance) async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n80 1 /bin/zsh\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let observed = pane(command: "zsh")
+    #expect(await source.liveness(for: observed, matchingProcessNames: ["claude"]) == .absent)
+
+    switch disappearance {
+    case .paneNotFound:
+      await spy.setMissing([observed.id])
+      await #expect(throws: TmuxAgentSignalSourceError.paneNotFound(observed.id)) {
+        try await source.signals(for: observed, minimumChangedLines: 1)
+      }
+      await spy.setMissing([])
+    case .dead:
+      let dead = PaneSnapshot(
+        id: observed.id, processID: observed.processID, tty: "", currentCommand: "zsh",
+        currentPath: "", title: "", termination: .exited(status: 0))
+      #expect(await source.liveness(for: dead, matchingProcessNames: ["claude"]) == .absent)
+    case .forgetExpired:
+      await source.forget(observed)
+      clock.advance(by: PaneNotificationPlanner.paneHandoffGrace + .seconds(1))
+      // 期限切れの後始末は、別の pane の呼び出しの入口で走る。
+      let other = pane(id: "%8", processID: 80, command: "zsh")
+      _ = await source.liveness(for: other, matchingProcessNames: ["claude"])
+    }
+    let launchesBeforeReappearance = await spy.count(of: .ps)
+    await spy.setProcessTableOutput("70 1 /bin/zsh\n71 70 claude\n80 1 /bin/zsh\n")
+    clock.advance(by: .seconds(1))
+    let reappeared = pane(command: "zsh", listedAt: clock.now.advanced(by: .milliseconds(-500)))
+
+    #expect(await source.liveness(for: reappeared, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await spy.count(of: .ps) == launchesBeforeReappearance + 1)
+  }
+
+  @Test("y5: 同じ listedAt の一覧で複数の pane の前景が同時に変わっても ps は1回で足りる")
+  func foregroundChangesFromOneListingShareOneProcessTable() async throws {
+    let spy = ObservationProcessSpy(processTableOutput: "70 1 /bin/zsh\n80 1 /bin/zsh\n")
+    let clock = ManualTimeSource()
+    let source = try makeSource(spy: spy, clock: clock)
+    let start = clock.now
+    _ = await source.liveness(for: pane(command: "zsh"), matchingProcessNames: ["claude"])
+    _ = await source.liveness(
+      for: pane(id: "%8", processID: 80, command: "zsh"), matchingProcessNames: ["claude"])
+    #expect(await spy.count(of: .ps) == 1)
+
+    await spy.setProcessTableOutput(
+      "70 1 /bin/bash\n71 70 claude\n80 1 /bin/bash\n81 80 claude\n")
+    clock.advance(by: .seconds(1))
+    let listedAt = start.advanced(by: .milliseconds(500))
+    let first = pane(command: "bash", listedAt: listedAt)
+    let second = pane(id: "%8", processID: 80, command: "bash", listedAt: listedAt)
+
+    #expect(await source.liveness(for: first, matchingProcessNames: ["claude"]) == .alive)
+    // 2つ目の呼び出しは1つ目より後に届く。呼ばれた時刻を下限にすると、ここで ps が走る。
+    clock.advance(by: .milliseconds(100))
+    #expect(await source.liveness(for: second, matchingProcessNames: ["claude"]) == .alive)
+    #expect(await spy.count(of: .ps) == 2)
+  }
+
   private func pane(
     id: String = "%7", processID: Int32 = 70, command: String,
     listedAt: ContinuousClock.Instant? = nil
@@ -138,4 +216,10 @@ struct TmuxAgentSignalSourceReselectionTests {
       id: PaneID(rawValue: id), processID: processID, tty: "", currentCommand: command,
       currentPath: "", title: "", termination: nil, listedAt: listedAt)
   }
+}
+
+enum PaneDisappearance: CaseIterable, Sendable {
+  case paneNotFound
+  case dead
+  case forgetExpired
 }

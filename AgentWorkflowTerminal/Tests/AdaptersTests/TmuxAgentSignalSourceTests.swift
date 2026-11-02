@@ -219,8 +219,8 @@ struct TmuxAgentSignalSourceTests {
       fixtureState(ClaudeCodeAdapter().classify(signals: changed, liveness: .alive)) == "working")
   }
 
-  @Test("absent を観測した pane の画面履歴を解放する")
-  func absentForgetsScreen() async throws {
+  @Test("absent を観測しても画面履歴を保つ")
+  func absentKeepsScreenHistory() async throws {
     let spy = ObservationProcessSpy(
       screens: [paneID: ["screen\n"]], processTableOutput: "70 1 /bin/sh\n")
     let clock = ManualTimeSource()
@@ -231,7 +231,7 @@ struct TmuxAgentSignalSourceTests {
     #expect(await source.liveness(for: pane, matchingProcessNames: ["agent"]) == .absent)
     clock.advance(by: .seconds(2))
     #expect(
-      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == nil)
+      try await source.signals(for: pane, minimumChangedLines: 1).secondsSinceScreenChange == 2)
   }
 
   @Test("消えた pane は握り潰さず paneNotFound として報告する")
@@ -367,19 +367,6 @@ struct TmuxAgentSignalSourceTests {
         for: makePaneSnapshot(id: "session", pid: 70), minimumChangedLines: 1)
     }
     #expect(await spy.invocations.isEmpty)
-  }
-
-  private func makeSource(
-    spy: ObservationProcessSpy, clock: ManualTimeSource
-  ) throws -> TmuxAgentSignalSource {
-    TmuxAgentSignalSource(
-      processTable: ProcessTableSnapshotCache(
-        processRunner: spy, executableURL: URL(fileURLWithPath: "/ps"),
-        timeToLive: ProcessTableSnapshotCache.defaultTimeToLive, timeSource: clock),
-      screenBatcher: TmuxPaneScreenBatcher(
-        runner: try makeTmuxRunner(socketName: "signals-test", processRunner: spy),
-        timeToLive: TmuxPaneScreenBatcher.defaultTimeToLive, timeSource: clock)
-    )
   }
 }
 

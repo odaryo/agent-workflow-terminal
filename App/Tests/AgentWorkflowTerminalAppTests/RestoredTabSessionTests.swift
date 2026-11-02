@@ -169,7 +169,7 @@ struct RestoredTabSessionTests {
       dependencies: AppDependencies(
         launchProject: .none, tmuxExecutable: executable, tmuxError: nil,
         paneStates: nil, tmuxRunner: runner, paneSource: nil, signalSource: nil,
-        sessionActivityProbe: nil, applicationSupportDirectory: nil),
+        sessionActivityProbe: nil, applicationSupportDirectory: nil, applicationSupportWarning: nil),
       notifier: nil)
     model.applyInitial(
       WorktreeScanResult(

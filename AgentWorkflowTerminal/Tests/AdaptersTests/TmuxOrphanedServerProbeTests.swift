@@ -101,9 +101,15 @@ struct TmuxOrphanedServerProbeTests {
       stubSuccess(stdout: path.unmatchedLsofOutput), socketPath: path.socketPath)
   }
 
-  @Test("lsof がそのまま出さない文字を含むパスでも、完全一致する行があれば orphaned")
-  func findsServerForEscapedPathWhenLineMatches() async {
-    let socketPath = "/private/tmp/tmux-501/awt-a^b"
+  @Test(
+    "曖昧なキャレット表記の範囲外のパスは、完全一致する行があれば orphaned",
+    arguments: [
+      "/private/tmp/tmux-501/awt-a^b",
+      "/private/tmp/tmux-501/awt-a^ab",
+      "/private/tmp/tmux-501/awt-a^`b",
+      "/private/tmp/tmux-501/awt-a^?b",
+    ])
+  func findsServerForEscapedPathWhenLineMatches(socketPath: String) async {
     let runner = OrphanedServerRunnerStub(
       result: stubSuccess(
         stdout: "p20378\nf6\nn/private/tmp/tmux-501/default\np54148\nf6\nn\(socketPath)\n"))
@@ -114,32 +120,111 @@ struct TmuxOrphanedServerProbeTests {
   }
 
   @Test(
-    "印字できる ASCII だけのパスは、exit 0 で一致する行が無ければ absent",
+    "曖昧な表記を含むパスに完全一致する行があっても、生きた socket が無ければ undetermined",
+    arguments: ambiguousLsofPaths)
+  func rejectsAmbiguousMatchingPath(socketPath: String) async {
+    let runner = OrphanedServerRunnerStub(
+      result: stubSuccess(stdout: "p54148\nf6\nn\(socketPath)\n"))
+    let actual = await TmuxOrphanedServerProbe(runner: runner, socketExists: socketIsMissing)
+      .probe(socketPath: socketPath)
+    guard case .undetermined(let reason) = actual else {
+      Issue.record("曖昧な表記のため undetermined を期待したが、\(actual) が返った")
+      return
+    }
+    #expect(!reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+  }
+
+  @Test(
+    "曖昧な表記を含むパスに完全一致する行があり、生きた socket が在れば absent",
+    arguments: ambiguousLsofPaths)
+  func reportsAbsenceForAmbiguousMatchingLiveSocket(socketPath: String) async {
+    let runner = OrphanedServerRunnerStub(
+      result: stubSuccess(stdout: "p54148\nf6\nn\(socketPath)\n"))
+    #expect(
+      await TmuxOrphanedServerProbe(runner: runner, socketExists: { _ in true })
+        .probe(socketPath: socketPath) == .absent)
+  }
+
+  @Test(
+    "印字できる ASCII だけのパスは、exit 0 の一致なしと exit 1 の空出力で absent",
     arguments: [
       "/private/tmp/tmux-501/awtm500",
       // 空白と ` (` は lsof と tmux の stderr で同じ表記になる (Issue #500 のレビューの計測)。
       "/private/tmp/tmux-501/awt a (1)",
       // 0x20 と 0x7E は印字できる ASCII の両端。
       "/private/tmp/tmux-501/ ~",
+      "/private/tmp/tmux-501/awt-a^b",
+      "/private/tmp/tmux-501/awt-a^Ab",
+    ],
+    [
+      ProcessRunResult(
+        exitCode: 0,
+        stdout: "p20378\nf6\nn/private/tmp/tmux-501/default\np123\nf6\nn->0x57eff5ebf5b56053\n",
+        stderr: ""),
+      ProcessRunResult(exitCode: 1, stdout: "", stderr: ""),
     ])
-  func reportsAbsenceForPrintableASCIIPath(socketPath: String) async {
-    let runner = OrphanedServerRunnerStub(
-      result: stubSuccess(
-        stdout: "p20378\nf6\nn/private/tmp/tmux-501/default\np123\nf6\nn->0x57eff5ebf5b56053\n"))
+  func reportsAbsenceForPrintableASCIIPath(socketPath: String, output: ProcessRunResult) async {
+    let runner = OrphanedServerRunnerStub(result: .success(output))
     #expect(await TmuxOrphanedServerProbe(runner: runner).probe(socketPath: socketPath) == .absent)
   }
 
-  // MARK: - socket が今あるか (lstat)
+  // MARK: - 生きている socket が今あるか
 
-  /// socket があれば tmux は既存の server に繋ぐので、lsof に一致があっても取り残されてはいない。
-  @Test("lsof に一致があっても、そのパスに socket が在れば absent")
-  func reportsAbsenceWhenSocketExists() async throws {
+  @Test("lsof に一致があり、bind だけで listen していない socket なら orphaned")
+  func reportsOrphanedWhenSocketIsNotListening() async throws {
     let directory = try SocketTestDirectory()
     defer { directory.remove() }
     let socket = try BoundUnixSocket(path: directory.path("s"))
     defer { socket.close() }
 
+    #expect(await probeWithListeningLine(on: socket.path) == .orphaned(processIDs: [4242]))
+  }
+
+  @Test("lsof に一致があっても、そのパスで socket が listen していれば absent")
+  func reportsAbsenceWhenSocketIsListening() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+    let socket = try BoundUnixSocket(path: directory.path("s"), listening: true)
+    defer { socket.close() }
+
     #expect(await probeWithListeningLine(on: socket.path) == .absent)
+  }
+
+  @Test("lsof に一致があっても、104 バイトのパスで socket が listen していれば absent")
+  func reportsAbsenceWhenListeningSocketPathIsExactlyCapacity() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+    // bind 用ヘルパーは 104 バイト未満に制限するため、短いパスに bind して ./ で参照を延ばす。
+    // ./ は 2 バイトなので、短いパスも偶数バイトに揃える。
+    let name = directory.path("s").utf8.count.isMultiple(of: 2) ? "s" : "ss"
+    let shortPath = directory.path(name)
+    try #require(shortPath.utf8.count < 104)
+    let socket = try BoundUnixSocket(path: shortPath, listening: true)
+    defer { socket.close() }
+    let padding = String(repeating: "./", count: (104 - shortPath.utf8.count) / 2)
+    let longPath = directory.url.path + "/" + padding + name
+    try #require(longPath.utf8.count == 104)
+    var status = stat()
+    try #require(lstat(longPath, &status) == 0)
+    try #require(status.st_mode & S_IFMT == S_IFSOCK)
+
+    #expect(await probeWithListeningLine(on: longPath) == .absent)
+  }
+
+  @Test("lsof に一致があっても、socket のパスが 104 バイトを超えれば orphaned")
+  func reportsOrphanedWhenSocketPathExceedsCapacity() async throws {
+    let directory = try SocketTestDirectory()
+    defer { directory.remove() }
+    let socket = try BoundUnixSocket(path: directory.path("s"), listening: true)
+    defer { socket.close() }
+    // 存在しないパスだと lstat だけで false になり、connect のパス長制限を検証できない。
+    let longPath = directory.url.path + "/" + String(repeating: "./", count: 53) + "s"
+    try #require(longPath.utf8.count > 104)
+    var status = stat()
+    try #require(lstat(longPath, &status) == 0)
+    try #require(status.st_mode & S_IFMT == S_IFSOCK)
+
+    #expect(await probeWithListeningLine(on: longPath) == .orphaned(processIDs: [4242]))
   }
 
   @Test("lsof に一致があり、そのパスに何も無ければ orphaned")
@@ -206,18 +291,16 @@ actor OrphanedServerRunnerStub: ProcessRunning {
 }
 
 /// `lsofName` は、そのパスの server を lsof (`LC_ALL=C`、revision 4.91) が `n` 行に出す表記。
-/// 非 ASCII・タブ・バックスラッシュ・制御文字は Issue #500 のレビューの計測による。`nil` は表記を
-/// 計測していないもの。
+/// 非 ASCII・タブ・バックスラッシュ・制御文字は Issue #500、ESC・DEL は Issue #512 の計測による。
 struct LsofEscapedPathCase: Sendable, CustomTestStringConvertible {
   let label: String
   let socketPath: String
-  let lsofName: String?
+  let lsofName: String
 
   var testDescription: String { label }
 
   var unmatchedLsofOutput: String {
     let other = "p20378\nf6\nn/private/tmp/tmux-501/default\n"
-    guard let lsofName else { return other }
     return other + "p54148\nf6\nn\(lsofName)\n"
   }
 }
@@ -236,9 +319,20 @@ let lsofEscapedPathCases = [
     label: "制御文字", socketPath: "/private/tmp/tmux-501/awt-a\u{01}b",
     lsofName: "/private/tmp/tmux-501/awt-a^Ab"),
   LsofEscapedPathCase(
-    label: "キャレット", socketPath: "/private/tmp/tmux-501/awt-a^b", lsofName: nil),
+    label: "ESC (0x1B)", socketPath: "/private/tmp/tmux-501/awt-a\u{1B}b",
+    lsofName: "/private/tmp/tmux-501/awt-a^[b"),
   LsofEscapedPathCase(
-    label: "DEL (0x7F)", socketPath: "/private/tmp/tmux-501/awt-a\u{7F}b", lsofName: nil),
+    label: "DEL (0x7F)", socketPath: "/private/tmp/tmux-501/awt-a\u{7F}b",
+    lsofName: #"/private/tmp/tmux-501/awt-a\x7fb"#),
+]
+
+let ambiguousLsofPaths = [
+  "/private/tmp/tmux-501/awt-a^@b",
+  "/private/tmp/tmux-501/awt-a^_b",
+  "/private/tmp/tmux-501/awt-a^Ab",
+  "/private/tmp/tmux-501/awt-a^[b",
+  #"/private/tmp/tmux-501/awt-a\tb"#,
+  #"/private/tmp/tmux-501/awt-a\x7fb"#,
 ]
 
 /// probe はパスに socket が在るかも見る。socket の欠落を前提にした検証が、実機に在るパス
@@ -265,12 +359,11 @@ struct BoundUnixSocketError: Error {
   let errno: Int32
 }
 
-/// bind しただけの AF_UNIX socket。lstat が `S_IFSOCK` を返すファイルを、tmux を使わずに作る。
 struct BoundUnixSocket {
   let path: String
   private let descriptor: Int32
 
-  init(path: String) throws {
+  init(path: String, listening: Bool = false) throws {
     var address = sockaddr_un()
     address.sun_family = sa_family_t(AF_UNIX)
     let bytes = Array(path.utf8)
@@ -292,6 +385,12 @@ struct BoundUnixSocket {
       let error = errno
       Darwin.close(descriptor)
       throw BoundUnixSocketError(operation: "bind", errno: error)
+    }
+    if listening, Darwin.listen(descriptor, 1) != 0 {
+      let error = errno
+      Darwin.close(descriptor)
+      Darwin.unlink(path)
+      throw BoundUnixSocketError(operation: "listen", errno: error)
     }
     self.path = path
     self.descriptor = descriptor

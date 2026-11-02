@@ -1,0 +1,3 @@
+# 実測: Bash ツールから `(sleep 300 &)` で残した孤児 (pgid は起動した shell のまま) と、
+# fork + setsid した Python (pid = pgid だが tty が ??)。どちらも tty が ?? なので候補にしない。
+expect=

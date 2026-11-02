@@ -1,0 +1,2 @@
+# 実測: 親が 1 の隔離 tmux server。args に `-c <scratchpad>` を含むが tty が ?? で comm が tmux。
+expect=

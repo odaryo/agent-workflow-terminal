@@ -1,0 +1,2 @@
+# 合成: warn-orphan-relative の行から pgid だけを 42110 に変えたもの。pgid == pid の条件だけで除く。
+expect=

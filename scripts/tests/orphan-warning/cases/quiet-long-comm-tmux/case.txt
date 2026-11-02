@@ -1,0 +1,3 @@
+# 合成: quiet-tmux-server-ppid1 の行から tty を ttys008 に、comm を長い絶対パスに変えたもの。
+# comm の条件だけで除かれることと、comm を basename で比べることを固定する。
+expect=

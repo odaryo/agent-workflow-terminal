@@ -14,6 +14,10 @@ tools: Bash, Read, Grep, Glob, WebFetch, WebSearch
 ## 検証の手段は対象の種類で決まる
 
 - **外部 CLI の挙動** (tmux・git など) — 隔離したリソース上での**計測**で検証する。tmux は専用ソケット `env -u TMUX tmux -L <一意な名前>` を使い、後始末は**自分が作った名前を指定して** `env -u TMUX tmux -L <一意な名前> kill-session -t '=<作った名前>'` で消す。**`TMUX_TMPDIR` を隔離手段にしない。`kill-server` を書かない** — 理由と実測は `CLAUDE.md`「外部 CLI を計測するときの作法」を読むこと (2026-09-09 にユーザーの既定 server を全 session ごと消した事故がある)。
+  - **偽エージェントを pane で動かした計測では、`kill-session` の前にプロセスグループごと止める。** HUP を trap したプロセスは `kill-session` では終わらず、孤児として CPU を空回りさせ続ける (#540。#517 では 120 個・合計約 800%)。起動した直後に `list-panes -a -F '#{pane_pid}'` を控え、終わるときは (1) 控えた各 pgid へ `kill -TERM -- -<pane_pid>`、(2) 0.5 秒待って残っていれば `kill -KILL -- -<pane_pid>`、(3) `ps -p <pids>` が空なことを確かめ、(4) `kill-session` で session を消す。この順は、相対パスで起動したか・HUP を trap しているか・どこに置いたかによらず効く。
+  - 偽エージェントで HUP を trap するなら handler は必ず `exit` する。受け流すなら、ループの各周で `[ "$(ps -o ppid= -p $$ | tr -d ' ')" = 1 ] && exit` を確かめる。**bash 3.2 (macOS の `/bin/bash`) の `read -t` は、時間切れ・EOF・pty の消失のどれでも 1 を返すので、終了コードで端末の生死を判定できない。**
+  - **後始末の確認に「偽バイナリのパスで `pgrep -f` して 0 件」を使わない。** 相対パスで起動すると args に絶対パスが現れず、確認が空振りする (#540 で、レビューアが実際にこれで孤児を見逃した)。確認は控えた pid に対する `ps -p` で行う。
+  - 残った孤児は PostToolUse フック (`scripts/warn_orphan_processes.py`) が次の Bash 呼び出しで警告する。フックは止めないので、止めるのは自分が作ったと確かめられたものだけ。ほかのセッションやユーザーのプロセスには触らない。
 - **外部の仕様** (Claude Code の設定・API 仕様など、実行して確かめられないもの) — **公式ドキュメントを WebFetch** して検証する。記憶や推測を根拠にしない。
 
 ## 担当範囲外

@@ -290,6 +290,18 @@ jobs:
         timeout-minutes: 5
         run: scripts/check-tmux-kill-guard.sh
 
+      # 孤児の警告フック (Issue #540) は警告用なので fail-open だが、構文エラーは python3 が
+      # exit 1 で終わり、ツール呼び出しは止まらないまま警告だけが黙って消える。
+      - name: Orphan warning - compile
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: python3 -m py_compile scripts/warn_orphan_processes.py
+
+      - name: Orphan warning - fixtures
+        if: ${{ !cancelled() }}
+        timeout-minutes: 5
+        run: scripts/check-orphan-warning.sh
+
       # wf-pr-merge.sh は、この判定器が「CI は起動しない」と返した PR の待ちを省く。誤って
       # そう返すと CI 未検証のままマージされるため、判定の向きを fixture と変異で固定する。
       - name: CI paths-ignore detector - fixtures

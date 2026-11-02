@@ -1,0 +1,5 @@
+# 実測 (macOS 27.0.1 / bash 3.2.57 / tmux 3.8): HUP を trap した偽エージェントを絶対パスの
+# symlink (bin/claude -> /bin/bash) で pane に動かし、session と server が消えた後の行。
+# comm は 16 文字を超える (comm を最後の列で取らないと /private/tmp/cla で切れる)。
+expect=42110
+marked=42110

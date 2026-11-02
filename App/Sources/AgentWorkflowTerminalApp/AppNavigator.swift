@@ -10,6 +10,13 @@ final class AppNavigator: ObservableObject {
   /// `openWindow` は View の environment からしか取れないので、window の root view が入れる。
   /// 通知を開いた経路 (`UNUserNotificationCenterDelegate`) には View が無い。
   var openWindow: OpenWindowAction?
+  /// メイン window が閉じているかの判定用。`openWindow(id:)` は開いているかを返さない。
+  weak var mainWindow: NSWindow?
+
+  var isMainWindowOpen: Bool {
+    guard let mainWindow else { return false }
+    return mainWindow.isVisible || mainWindow.isMiniaturized
+  }
 
   /// Project → タブ → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`
   /// ならタブまで。
@@ -39,7 +46,34 @@ final class AppNavigator: ObservableObject {
 
   func showOverview(notice: String?) {
     overviewNotice = notice
-    openWindow?(id: "overview")
+    if OverviewPresentation.current() == .sidebar {
+      showOverviewSidebar()
+    } else {
+      openWindow?(id: "overview")
+      NSApp.activate()
+    }
+  }
+
+  /// サイドバー表示で Overview を前に出す。Overview のウィンドウは開かない (§13)。
+  func showOverviewSidebar(defaults: UserDefaults = .standard) {
+    defaults.set(true, forKey: OverviewSidebarPreferences.isOpenKey)
+    openWindow?(id: "main")
+    NSApp.activate()
+  }
+
+  /// ⌘⇧O のサイドバー表示での動作。メイン window が閉じていれば開いて、サイドバーを開いた状態にする。
+  func toggleOverviewSidebar(
+    openWindow: OpenWindowAction, defaults: UserDefaults = .standard
+  ) {
+    if isMainWindowOpen {
+      let isOpen =
+        defaults.object(forKey: OverviewSidebarPreferences.isOpenKey) as? Bool
+        ?? OverviewSidebarPreferences.defaultIsOpen
+      defaults.set(!isOpen, forKey: OverviewSidebarPreferences.isOpenKey)
+    } else {
+      defaults.set(true, forKey: OverviewSidebarPreferences.isOpenKey)
+    }
+    openWindow(id: "main")
     NSApp.activate()
   }
 }

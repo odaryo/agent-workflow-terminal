@@ -104,10 +104,13 @@ struct WindowExpansion: NSViewRepresentable {
 
 struct ProjectWindowExpansion: View {
   @ObservedObject var model: AppModel
+  /// 左の Overview サイドバーが占める幅。端末が最小幅を割らないよう、Drawer の分に足す。
+  var extraWidth: CGFloat = 0
 
   var body: some View {
     WindowExpansion(
       size: NSSize(
-        width: ViewerDrawerMetrics.minimumWindowWidth(for: model.viewerDrawerLayout), height: 320))
+        width: ViewerDrawerMetrics.minimumWindowWidth(for: model.viewerDrawerLayout) + extraWidth,
+        height: 320))
   }
 }

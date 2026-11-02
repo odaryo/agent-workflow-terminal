@@ -125,7 +125,7 @@ jobs:
 
       # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
       # これらの suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
-      # filter は、環境変数で skip される統合テストの全 20 ファイル (140 テスト) を1回で走らせる。
+      # filter は、環境変数で skip される統合テストの全 21 ファイル (146 テスト) を1回で走らせる。
       # skip を静かに見逃さないよう、実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       # 並べるのは suite の struct 名ではなくファイル名。swift test の filter は test ID の中の
       # ソースの位置にも一致するので、struct 名が違う GitWorktreeDetectorPrunableTests なども拾える (#512)。
@@ -138,7 +138,7 @@ jobs:
           AWT_GIT_INTEGRATION: "1"
           AWT_RIPGREP_INTEGRATION: "1"
           AWT_INTEGRATION_FILTER: >-
-            TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitWorktreeDetectorPrunableIntegrationTests|TmuxOrphanedServerProbeIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests|GitWorktreeDetectorPathSpellingIntegrationTests|DiffCommentSendGateIntegrationTests|InactivePaneObservationIntegrationTests|MainPaneRegistryIntegrationTests|TmuxPaneScreenBatchIntegrationTests|TmuxSessionActivityProbeIntegrationTests
+            TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitWorktreeDetectorPrunableIntegrationTests|TmuxOrphanedServerProbeIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests|GitWorktreeDetectorPathSpellingIntegrationTests|DiffCommentSendGateIntegrationTests|InactivePaneObservationIntegrationTests|MainPaneRegistryIntegrationTests|TmuxPaneScreenBatchIntegrationTests|TmuxSessionActivityProbeIntegrationTests|GitWorktreeDetectorSharedIdentityIntegrationTests
         run: |
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
@@ -150,8 +150,8 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
             --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --min-tests 140 \
-            --suites 20
+            --min-tests 146 \
+            --suites 21
 
       # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では
       # ないのは、concurrency の cancel-in-progress で途中で殺された回にも走ってしまい、

@@ -210,7 +210,8 @@ public struct GitWorktreeDetector: Sendable {
       case .failed(let failure): failures.append(failure)
       }
     }
-    return GitWorktreeScanResult(detected: detected, failures: failures)
+    return Self.resolveSharedIdentities(
+      detected: detected, failures: failures, commonDirectory: commonDirectory)
   }
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。
@@ -404,10 +405,10 @@ public struct GitWorktreeDetector: Sendable {
   ///   効くので残す。
   /// - Note: `isReachableWorkingTree` と同じく、打ち切る手段の無い同期 FS I/O をここでも行う。
   ///   `contentsOfDirectory` と `Data(contentsOf:)` はどちらも timeout も cancellation も取らない。
-  ///   prunable の事前判定か git が exit code を返した失敗で、到達不能と分かった entry に限られるが、
+  ///   到達不能と分かった entry に加え、同じ安定 ID の組では到達可能な entry にも呼ばれる。
   ///   読む先は Project Root 側であって作業ツリーではないので、応答しないマウント上の作業ツリーで
   ///   ここが詰まることは無い。
-  private static func administrativeDirectory(
+  static func administrativeDirectory(
     worktreePath: String,
     commonDirectory: WorktreeIdentity
   ) -> WorktreeIdentity? {

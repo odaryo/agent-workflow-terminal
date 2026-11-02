@@ -57,7 +57,10 @@ public struct TmuxPane: Sendable, Hashable, Codable {
     self.summaryReadings = summaryReadings
   }
 
-  public var snapshot: PaneSnapshot {
+  public var snapshot: PaneSnapshot { snapshot(listedAt: nil) }
+
+  /// `listedAt` には、この pane を返した `list-panes` を読み終えた時刻を渡す (`PaneSnapshot.listedAt`)。
+  public func snapshot(listedAt: ContinuousClock.Instant?) -> PaneSnapshot {
     PaneSnapshot(
       id: paneID,
       processID: panePID,
@@ -65,7 +68,8 @@ public struct TmuxPane: Sendable, Hashable, Codable {
       currentCommand: currentCommand,
       currentPath: currentPath,
       title: title,
-      termination: termination
+      termination: termination,
+      listedAt: listedAt
     )
   }
 }

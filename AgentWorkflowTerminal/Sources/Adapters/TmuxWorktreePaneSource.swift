@@ -17,14 +17,29 @@ actor TmuxAllSessionPaneListCache {
   private let runner: TmuxRunner
   private let timeToLive: Duration
   private let timeSource: any ContinuousTimeSource
-  private var latest: (panes: [TmuxPane], capturedAt: ContinuousClock.Instant)?
+  private var latest: CachedListing?
   private var inFlight: InFlightRead?
+
+  /// `capturedAt` は読み始めた時刻で TTL に使い、`listedAt` は読み終えた時刻で
+  /// `PaneSnapshot.listedAt` に渡す。
+  private struct CachedListing {
+    let panes: [TmuxPane]
+    let capturedAt: ContinuousClock.Instant
+    let listedAt: ContinuousClock.Instant
+  }
 
   /// 起動側と待ち手側で同じ時刻を刻むため、開始時刻を task と一緒に持つ。待ち手が完了時刻を
   /// 使うと、TTL が run にかかった時間ぶん伸びる。
   private struct InFlightRead {
-    let task: Task<Result<[TmuxPane], TmuxWorktreePaneSourceError>, Never>
+    let task: Task<ReadOutcome, Never>
     let capturedAt: ContinuousClock.Instant
+  }
+
+  /// 読み終えた時刻は task の中で1度だけ取る。待ち手がそれぞれ再開後に取ると、合流した
+  /// 呼び出しごとに `listedAt` が変わり、同じ一覧の pane が `ps` を共有できなくなる。
+  private struct ReadOutcome: Sendable {
+    let result: Result<[TmuxPane], TmuxWorktreePaneSourceError>
+    let listedAt: ContinuousClock.Instant
   }
 
   init(
@@ -38,32 +53,43 @@ actor TmuxAllSessionPaneListCache {
   }
 
   func panes() async throws(TmuxWorktreePaneSourceError) -> [TmuxPane] {
-    if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
-      return latest.panes
-    }
-    if let inFlight {
-      let result = await inFlight.task.value
-      if self.inFlight?.task == inFlight.task {
-        complete(result, capturedAt: inFlight.capturedAt)
-      }
-      return try result.get()
-    }
-    let capturedAt = timeSource.now
-    let task = Task { [runner] in await Self.read(runner: runner) }
-    inFlight = InFlightRead(task: task, capturedAt: capturedAt)
-    let result = await task.value
-    if inFlight?.task == task { complete(result, capturedAt: capturedAt) }
-    return try result.get()
+    try await listing().panes
   }
 
-  private func complete(
-    _ result: Result<[TmuxPane], TmuxWorktreePaneSourceError>,
-    capturedAt: ContinuousClock.Instant
+  /// `listedAt` は、返す pane 一覧を**読み終えた**時刻。TTL 内のキャッシュや読み込み中の結果へ
+  /// 合流したときも、その一覧の時刻を返す (呼ばれた時刻ではない)。
+  ///
+  /// - Important: 読み始めた時刻 (`capturedAt`) を渡さない。tmux が pane の前景を読むのは
+  ///   `list-panes` を起動した後なので、読み始めから読み終えまでの間に読み始めた `ps` は、
+  ///   tmux が前景として見た Agent を写していないことがある (Issue #553)。
+  func listing() async throws(TmuxWorktreePaneSourceError) -> (
+    panes: [TmuxPane], listedAt: ContinuousClock.Instant
   ) {
+    if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
+      return (latest.panes, latest.listedAt)
+    }
+    let read: InFlightRead
+    if let inFlight {
+      read = inFlight
+    } else {
+      let capturedAt = timeSource.now
+      let task = Task { [runner, timeSource] in
+        let result = await Self.read(runner: runner)
+        return ReadOutcome(result: result, listedAt: timeSource.now)
+      }
+      read = InFlightRead(task: task, capturedAt: capturedAt)
+      inFlight = read
+    }
+    let outcome = await read.task.value
+    if inFlight?.task == read.task { complete(outcome, capturedAt: read.capturedAt) }
+    return (try outcome.result.get(), outcome.listedAt)
+  }
+
+  private func complete(_ outcome: ReadOutcome, capturedAt: ContinuousClock.Instant) {
     inFlight = nil
     // 失敗はキャッシュしない。次の呼び出しで再試行できるようにする。
-    guard case .success(let panes) = result else { return }
-    latest = (panes, capturedAt)
+    guard case .success(let panes) = outcome.result else { return }
+    latest = CachedListing(panes: panes, capturedAt: capturedAt, listedAt: outcome.listedAt)
   }
 
   private static func read(
@@ -102,7 +128,8 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
   public func panes(
     of session: TerminalSessionKey
   ) async throws(TmuxWorktreePaneSourceError) -> [PaneSnapshot] {
-    try await panes(in: session).map(\.snapshot)
+    let listing = try await panes(in: session)
+    return listing.panes.map { $0.snapshot(listedAt: listing.listedAt) }
   }
 
   public func panes(
@@ -115,9 +142,11 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
   public func summaryReadings(
     of session: TerminalSessionKey
   ) async throws(TmuxWorktreePaneSourceError) -> [PaneSummaryReadingsSnapshot] {
-    try await panes(in: session).compactMap { pane in
+    let listing = try await panes(in: session)
+    return listing.panes.compactMap { pane in
       pane.summaryReadings.map {
-        PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0)
+        PaneSummaryReadingsSnapshot(
+          pane: pane.snapshot(listedAt: listing.listedAt), readings: $0)
       }
     }
   }
@@ -133,10 +162,12 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
   public func locatedSummaryReadings(
     of session: TerminalSessionKey
   ) async throws(TmuxWorktreePaneSourceError) -> [LocatedPaneSummaryReadings] {
-    try await panes(in: session).compactMap { pane in
+    let listing = try await panes(in: session)
+    return listing.panes.compactMap { pane in
       pane.summaryReadings.map {
         LocatedPaneSummaryReadings(
-          readings: PaneSummaryReadingsSnapshot(pane: pane.snapshot, readings: $0),
+          readings: PaneSummaryReadingsSnapshot(
+            pane: pane.snapshot(listedAt: listing.listedAt), readings: $0),
           location: PaneLocation(windowIndex: pane.windowIndex, paneIndex: pane.paneIndex))
       }
     }
@@ -150,13 +181,16 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
 
   private func panes(
     in session: TerminalSessionKey
-  ) async throws(TmuxWorktreePaneSourceError) -> [TmuxPane] {
+  ) async throws(TmuxWorktreePaneSourceError) -> (
+    panes: [TmuxPane], listedAt: ContinuousClock.Instant
+  ) {
     let name = TmuxSessionName(key: session)
     // `-a` は対象 server の全 session を返すので、ユーザー自身の session の pane が混ざる。
     // 振り分けは String の完全一致だけで行う。前方一致・部分一致・正規化を挟むと、
     // `TmuxSessionName` の生成名と重なる他の session (同じ worktree の `-<n>` 付きを含む)
     // を取り込む。
-    return try await paneList.panes().filter { $0.sessionName == name.rawValue }
+    let listing = try await paneList.listing()
+    return (listing.panes.filter { $0.sessionName == name.rawValue }, listing.listedAt)
   }
 
   /// tmux server の同一性 (`#{pid}`)。`nil` は server が居ない、または値を読めなかったことを

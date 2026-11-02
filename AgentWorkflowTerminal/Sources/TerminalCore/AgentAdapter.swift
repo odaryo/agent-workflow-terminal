@@ -28,6 +28,14 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
   /// `nil` は live、`.unknown` は終了済みだが理由を観測できない状態を表す。
   public let termination: ProcessTermination?
   public var isDead: Bool { termination != nil }
+  /// この snapshot を作った `list-panes` を読み終えた時刻。生存確認の `ps` の下限に使う
+  /// (設計書 §12.4.2、Issue #553)。`nil` は時刻を持たない snapshot (デコードしたものを含む)。
+  /// 時計は `ContinuousClock` で、プロセスの外では意味を持たない。
+  ///
+  /// - Important: `==` / `hash(into:)` / `Codable` には含めない。含めると、同じ pane でも
+  ///   `list-panes` を読み直すたびに別の値になり、snapshot の比較に頼る処理が毎 poll
+  ///   「変わった」と読む。`ContinuousClock.Instant` は Codable でもない。
+  public let listedAt: ContinuousClock.Instant?
 
   public init(
     id: PaneID,
@@ -36,7 +44,8 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
     currentCommand: String,
     currentPath: String,
     title: String,
-    termination: ProcessTermination?
+    termination: ProcessTermination?,
+    listedAt: ContinuousClock.Instant? = nil
   ) {
     self.id = id
     self.processID = processID
@@ -45,6 +54,40 @@ public struct PaneSnapshot: Sendable, Hashable, Codable {
     self.currentPath = currentPath
     self.title = title
     self.termination = termination
+    self.listedAt = listedAt
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, processID, tty, currentCommand, currentPath, title, termination
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    self.init(
+      id: try container.decode(PaneID.self, forKey: .id),
+      processID: try container.decode(Int32.self, forKey: .processID),
+      tty: try container.decode(String.self, forKey: .tty),
+      currentCommand: try container.decode(String.self, forKey: .currentCommand),
+      currentPath: try container.decode(String.self, forKey: .currentPath),
+      title: try container.decode(String.self, forKey: .title),
+      termination: try container.decodeIfPresent(ProcessTermination.self, forKey: .termination)
+    )
+  }
+
+  public static func == (lhs: Self, rhs: Self) -> Bool {
+    lhs.id == rhs.id && lhs.processID == rhs.processID && lhs.tty == rhs.tty
+      && lhs.currentCommand == rhs.currentCommand && lhs.currentPath == rhs.currentPath
+      && lhs.title == rhs.title && lhs.termination == rhs.termination
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(id)
+    hasher.combine(processID)
+    hasher.combine(tty)
+    hasher.combine(currentCommand)
+    hasher.combine(currentPath)
+    hasher.combine(title)
+    hasher.combine(termination)
   }
 }
 

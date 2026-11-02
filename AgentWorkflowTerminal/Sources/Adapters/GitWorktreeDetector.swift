@@ -210,7 +210,8 @@ public struct GitWorktreeDetector: Sendable {
       case .failed(let failure): failures.append(failure)
       }
     }
-    return GitWorktreeScanResult(detected: detected, failures: failures)
+    return Self.resolveSharedIdentities(
+      detected: detected, failures: failures, commonDirectory: commonDirectory)
   }
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。
@@ -407,7 +408,7 @@ public struct GitWorktreeDetector: Sendable {
   ///   prunable の事前判定か git が exit code を返した失敗で、到達不能と分かった entry に限られるが、
   ///   読む先は Project Root 側であって作業ツリーではないので、応答しないマウント上の作業ツリーで
   ///   ここが詰まることは無い。
-  private static func administrativeDirectory(
+  static func administrativeDirectory(
     worktreePath: String,
     commonDirectory: WorktreeIdentity
   ) -> WorktreeIdentity? {

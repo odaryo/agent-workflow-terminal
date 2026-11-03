@@ -94,6 +94,7 @@ struct OverviewView: View {
               })
           }
         }
+        .listStyle(.sidebar)
       }
     }
     .onAppear { navigator.openWindow = openWindow }
@@ -111,18 +112,64 @@ private struct OverviewProjectSection: View {
   @ObservedObject var model: AppModel
   @ObservedObject var store: PaneObservationStore
   @ObservedObject var mainPanes: MainPaneCoordinator
+  @AppStorage(OverviewProjectPreferences.collapsedProjectsKey) private var collapsedProjectsJSON =
+    "[]"
   let reveal: (TerminalSessionKey, PaneID?) -> Void
 
   var body: some View {
     let overview = makeAgentPaneOverview([input]).first
-    Section(model.project.displayName) {
+    let attentionCount = needsAttentionCount(overview)
+    let showsAttentionCount = !isExpanded.wrappedValue && attentionCount > 0
+    Section(isExpanded: isExpanded) {
       ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
         worktreeRows(projectRoot, title: model.sessionTitle(projectRoot.session))
       }
       ForEach(overview?.tasks ?? [], id: \.session) { task in
         worktreeRows(task, title: model.sessionTitle(task.session))
       }
+    } header: {
+      HStack {
+        Text(model.project.displayName)
+        Spacer()
+        if showsAttentionCount {
+          Text("要対応 \(attentionCount)")
+        }
+      }
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(
+        showsAttentionCount
+          ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
+          : model.project.displayName)
     }
+  }
+
+  private var isExpanded: Binding<Bool> {
+    Binding {
+      !OverviewProjectPreferences.collapsedProjects(storedValue: collapsedProjectsJSON)
+        .contains(model.project.commonDirectory.rawValue)
+    } set: { expanded in
+      var collapsedProjects = OverviewProjectPreferences.collapsedProjects(
+        storedValue: collapsedProjectsJSON)
+      let project = model.project.commonDirectory.rawValue
+      if expanded {
+        collapsedProjects.remove(project)
+      } else {
+        collapsedProjects.insert(project)
+      }
+      if let storedValue = OverviewProjectPreferences.storedValue(for: collapsedProjects) {
+        collapsedProjectsJSON = storedValue
+      }
+    }
+  }
+
+  private func needsAttentionCount(_ overview: OverviewProject?) -> Int {
+    let worktrees = (overview?.projectRootSessions ?? []) + (overview?.tasks ?? [])
+    return worktrees.flatMap(\.rows).filter { row in
+      if case .pane(let pane) = row {
+        return pane.display.category == .needsAttention
+      }
+      return false
+    }.count
   }
 
   @ViewBuilder

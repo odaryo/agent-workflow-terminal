@@ -39,10 +39,20 @@ struct GhosttyConfigurationLoadingTests {
       )
     )
 
-    #expect(try configuredFontSize(configurationFileURL: url) == expected)
+    #expect(
+      try configuredFontSize(
+        configurationFileURL: url,
+        productDefaults: GhosttyProductDefaults.configuration
+      ) == expected
+    )
     // 対照。既定値そのものは libghostty の ref で変わり得るのでアサートしない
     // (2026-09-09 時点の実測は 13.0)。
-    #expect(try configuredFontSize(configurationFileURL: nil) != expected)
+    #expect(
+      try configuredFontSize(
+        configurationFileURL: nil,
+        productDefaults: GhosttyProductDefaults.configuration
+      ) != expected
+    )
   }
 
   @Test("製品既定をユーザー設定より先に読み込む (設計書 §4.4)")
@@ -63,6 +73,7 @@ struct GhosttyConfigurationLoadingTests {
     )
   }
 
+  // ファイルを実際に読んだことは順序のテストが担う。読み込みに失敗しても diagnostics は 0 のままになる。
   @Test(
     "製品既定の key と値が libghostty に受け付けられる (設計書 §4.4)",
     arguments: [
@@ -96,7 +107,7 @@ struct GhosttyConfigurationLoadingTests {
   /// `ghostty_config_get` は 4 byte だけ書いて `true` を返し、残りは未初期化のまま読める。
   private func configuredFontSize(
     configurationFileURL: URL?,
-    productDefaults: String = GhosttyProductDefaults.configuration
+    productDefaults: String
   ) throws -> Float {
     let config = try makeGhosttyConfiguration(
       configurationFileURL: configurationFileURL,

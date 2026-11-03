@@ -266,7 +266,7 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
 @MainActor
 func makeGhosttyConfiguration(
   configurationFileURL: URL?,
-  productDefaults: String = GhosttyProductDefaults.configuration
+  productDefaults: String
 ) throws -> ghostty_config_t {
   guard let config = ghostty_config_new() else {
     throw GhosttyRendererError.configurationCreationFailed
@@ -292,7 +292,7 @@ func makeGhosttyConfiguration(
 @MainActor
 func loadGhosttyProductDefaults(
   into config: ghostty_config_t,
-  productDefaults: String = GhosttyProductDefaults.configuration
+  productDefaults: String
 ) throws {
   // C API は設定テキストを直接受け取れないため、一時ファイルを経由する。
   let fileURL = FileManager.default.temporaryDirectory
@@ -361,7 +361,10 @@ private final class GhosttyRuntime {
     guard ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == 0 else {
       throw GhosttyRendererError.initializationFailed
     }
-    let newConfig = try makeGhosttyConfiguration(configurationFileURL: configurationFileURL)
+    let newConfig = try makeGhosttyConfiguration(
+      configurationFileURL: configurationFileURL,
+      productDefaults: GhosttyProductDefaults.configuration
+    )
     config = newConfig
 
     var runtimeConfiguration = makeGhosttyRuntimeConfiguration()

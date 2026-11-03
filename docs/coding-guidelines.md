@@ -313,16 +313,33 @@ CI (`.github/workflows/ci.yml`) は swift-format lint と SwiftLint の両方を
 ローカルの SwiftLint 導入 (`brew install swiftlint`) は任意のままですが、CI では必須です。
 
 **シェルスクリプト (`scripts/*.sh`) は bash 3.2 で動く前提で書きます** (macOS の `/bin/bash` で、CI の
-runner の PATH 上の `bash` も 3.2.57。Issue #572)。bash 3.2 は EXIT の trap があると、`set -u` の未定義の
-変数の参照で止まっても exit 0 を返す (trap の中の `$?` も 0。`$( )` の中では 1 になったが、トップレベル・
-関数の中で張った trap・`( )` では 0 だった) ため、壊れた検査が緑に見えます。EXIT の
-trap を持つスクリプトでは、trap を張る前に `__awt_finished=0` とし、正常に終わる直前 (意図した `exit 0`
-の前を含む) に `__awt_finished=1` とし、trap の中で `$?` を取って後始末をした後、印が 1 でなく `$?` が 0 なら
+runner の PATH 上の `bash` も 3.2.57。Issue #572)。bash 3.2 は EXIT の trap があると、展開のエラー全般
+(`set -u` の未定義の変数の参照のほか、`${x:?}`・bad substitution・readonly への代入を含む) で止まっても
+exit 0 を返す (trap の中の `$?` も 0。`$( )` の中では未定義の変数の参照で 1 になったが、トップレベル・
+関数の中で張った trap・`( )` では 0 だった) ため、壊れた検査が緑に見えます。実測 (`/bin/bash` 3.2.57、
+trap 無し / 後始末だけの旧来の trap / 下の形の trap での終了コード。Issue #575):
+
+```text
+: "$UNSET"            trap 無し=1  旧来=0  下の形=1
+: "${UNSET:?msg}"     trap 無し=1  旧来=0  下の形=1
+: "${y!}" (bad subst) trap 無し=1  旧来=0  下の形=1
+readonly R=1; R=2     trap 無し=1  旧来=0  下の形=1
+```
+
+EXIT の trap を持つスクリプトでは、trap を張る前に `__awt_finished=0` とし、正常に終わる直前 (意図した
+`exit 0` の前を含む) に `__awt_finished=1` とし、trap の中で `$?` を取って後始末をした後、印が 1 でなく `$?` が 0 なら
 1 にして `exit` します (`scripts/check-ci-paths-ignored.sh` など)。印を立てる行の直前に、終了コードを
 決める素の `[[ … ]]` や `(( … ))` を置かないこと — bash 3.2 ではこの2つが偽でも `set -e` で止まらず、
 印が失敗を上書きします。また UTF-8 のロケールでは変数名の直後のマルチバイト文字も名前の一部として
 読まれるので、`$名前` の直後に ASCII 以外の文字を置かず `${名前}` と書きます (CI の
 `scripts/check-var-multibyte.sh` が検出する)。
+
+`$( … ) || rc=$?` のようにコマンド置換を失敗の扱いの中に置くと、その中では `set -e` が効きません
+(実測: 中の `false` で止まらず先へ進む。止まるのは展開のエラーと明示の `exit` だけ)。中の手順は
+`|| exit N` で明示的に止めます。終了コードが呼び出し側で意味を持つ (0 が「成功」以外の判定になる) 場合は、
+印が無いときに `$?` を引き継がず、意味の決まった値にします。`scripts/wf-pr-merge.sh` の paths-ignore の判定は、
+中で展開のエラーが起きると `$?` が 1 (=「一致しない」) になるため、印が無ければ 2 (=「判定できません」) に
+しています (Issue #575)。
 
 ---
 

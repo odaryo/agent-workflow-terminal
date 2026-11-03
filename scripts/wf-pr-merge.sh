@@ -99,16 +99,17 @@ if changed_paths=$(gh api --paginate "repos/$(nwo)/pulls/$pr_number/files" --jq 
           ci_paths_rc=0
           ci_paths_reason=$(
             ci_workflow=$(mktemp) || exit 2
-            # bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を
-            # 返す (docs/coding-guidelines.md §7)。$( ) の中では 3.2.57 で 1 になったが (実測)、
-            # ここの 0 は「CI は起動しない」の意味で待ちを省く側へ倒れるので、その挙動に頼らず
-            # 最後まで走った印が無ければ非 0 にする。
+            # bash 3.2 は EXIT の trap があると、展開のエラーで止まっても exit 0 を返す
+            # (docs/coding-guidelines.md §7)。$( ) の中では未定義の変数の参照で 3.2.57 が 1 を
+            # 返したが (実測)、ここの 0 は「CI は起動しない」の意味で待ちを省く側へ倒れるので、
+            # その挙動に頼らず、最後まで走った印が無ければ非 0 にする。§7 の形と違い元の rc を
+            # 保たず 2 にするのは、その 1 が判定器の「一致しない」(1) と区別できないため。
             __awt_finished=0
             # shellcheck disable=SC2329 # 下の trap から呼ぶ。$( ) の中の trap は ShellCheck が追跡しない
             __awt_on_exit() {
               local rc=$?
               rm -f -- "$ci_workflow"
-              [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
+              [[ $__awt_finished -eq 1 ]] || rc=2
               exit "$rc"
             }
             trap __awt_on_exit EXIT

@@ -13,6 +13,10 @@ usage() {
 文字が続く箇所を、ファイル:行:桁 で列挙する。1件でもあれば exit 1。*.sh が1件も無ければ exit 2。
 `${名前}` の形は対象外。
 
+字面だけで判定するので、bash が展開しない文脈 (`<<'EOF'` のヒアドキュメント・コメント・単一引用符・
+`\$name`) も検出する。その場合も `${名前}` に直せば消える。逆に、算術の中で `$` を付けずに書いた名前
+(`$(( count・ + 0 ))`) は検出しない。
+
   -h, --help  このヘルプを表示
 EOF
 }
@@ -54,7 +58,11 @@ for path in files:
             print(f"{path}:{lineno}:{column}: {shown}", file=sys.stderr)
 
 if hits:
-    print(f"NG: {hits} 件。変数名を ${{名前}} で囲むこと", file=sys.stderr)
+    print(
+        f"NG: {hits} 件。変数名を ${{名前}} で囲むこと"
+        " (bash が展開しない文脈も検出する。その場合も ${名前} に直せば消える)",
+        file=sys.stderr,
+    )
     sys.exit(1)
 print(f"{len(files)} 件の *.sh に該当はありません", file=sys.stderr)
 PY

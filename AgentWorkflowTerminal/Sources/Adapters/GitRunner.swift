@@ -90,7 +90,7 @@ public struct GitReadCommand: Sendable, Equatable {
     untrackedFiles: GitUntrackedFilesMode = .normal
   ) -> Self {
     // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
-    // --renames は git 2.18 以降。サポート下限の決定は Issue #83 に委ねる。
+    // --renames は git 2.18 以降。サポート下限 (2.39、設計書 §17.3) はこれより新しい。
     // `--ignore-submodules=none` が無いと `diff.ignoreSubmodules=all` で gitlink の変更が
     // 出力から消える (git 2.50.1 で実測: 巻き戻した gitlink があるのに entry ゼロ)。
     // `status` に `--submodule` は無い (実測: `error: unknown option`)。

@@ -199,7 +199,7 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
 
 - tmux / git / ripgrep は外部 CLI として呼ぶ。version 差は Adapter 境界で吸収する。
 - サポートする下限 version を決め、`Adapters` 側で検出する。tmux の下限は 3.4
-  (設計書 §4.3)。git の下限は未決定 (Issue #83)。
+  (設計書 §4.3)、git の下限は 2.39 (設計書 §17.3)。
 - CLI は shell を経由せず argv 配列で起動し、パイプ・リダイレクトに依存しない
   (`TerminalRendererConfiguration.command` は libghostty C API の制約により、renderer 内で
   POSIX shell quoting して shell 経由で実行するため、この外部 CLI 方針とは異なる)。

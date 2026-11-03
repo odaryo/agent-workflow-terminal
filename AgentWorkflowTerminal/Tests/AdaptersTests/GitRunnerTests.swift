@@ -137,7 +137,7 @@ struct GitRunnerTests {
   }
 }
 
-private actor GitProcessSpy: ProcessRunning {
+actor GitProcessSpy: ProcessRunning {
   struct Call: Sendable {
     let arguments: [String]
     let environment: [String: String]

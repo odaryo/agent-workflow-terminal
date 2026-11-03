@@ -30,7 +30,7 @@ APP="${PACKAGE_DIR}/build/AgentWorkflowTerminal.app"
 EXECUTABLE="AgentWorkflowTerminalApp"
 
 require_cmd swift codesign plutil
-[ -d "${XCFRAMEWORK}" ] || die "先に scripts/build-ghostty.sh を実行してください"
+[ -d "${XCFRAMEWORK}" ] || die "先に scripts/fetch-ghostty.sh を実行してください (ghostty の ref を上げる担当者は scripts/build-ghostty.sh)"
 [ -d "${SHARE_DIR}/ghostty" ] || die "ghostty resources がありません"
 [ -d "${SHARE_DIR}/terminfo" ] || die "terminfo resources がありません"
 

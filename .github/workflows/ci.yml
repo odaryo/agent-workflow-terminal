@@ -133,7 +133,8 @@ jobs:
 
       # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
       # これらの suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
-      # filter は、環境変数で skip される統合テストの全 21 ファイル (146 テスト) を1回で走らせる。
+      # filter は、環境変数で skip される統合テストの全 20 ファイルと、実 git を使うが skip されない
+      # DiffSnapshotRangeIntegrationTests の計 21 ファイル (146 テスト) を1回で走らせる。
       # skip を静かに見逃さないよう、実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
       # 並べるのは suite の struct 名ではなくファイル名。swift test の filter は test ID の中の
       # ソースの位置にも一致するので、struct 名が違う GitWorktreeDetectorPrunableTests なども拾える (#512)。

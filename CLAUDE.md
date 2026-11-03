@@ -35,7 +35,7 @@ swift format lint --configuration .swift-format --recursive --strict \
 swift format format --configuration .swift-format --recursive --in-place \
   AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
   App/Sources App/Tests App/Package.swift
-swiftlint lint --config .swiftlint.yml                    # requires `brew install swiftlint`
+swiftlint lint --config .swiftlint.yml --strict           # requires `brew install swiftlint`; --strict as in CI
 ```
 
 `swift-format` ships with the Swift 6 toolchain (no install); SwiftLint must be installed separately and is optional locally. CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` for `AgentWorkflowTerminal/`, compiles `App/`, and runs format/lint over both packages. The app job downloads a prebuilt `GhosttyKit.xcframework` from a Release asset, so CI does not require the toolchain that builds the xcframework (the `checks` job installs SwiftLint via brew if the runner image lacks it). CI keeps its macOS jobs to three because the account-wide limit of five concurrent macOS runners is shared by every PR and `main` push in flight; add a new check as a step in an existing job, not as a new job.

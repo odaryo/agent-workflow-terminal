@@ -169,13 +169,15 @@ struct TmuxSessionProvisionerTests {
     #expect(text.contains("kill -USR1 77"))
   }
 
-  @Test("Resume では create が session の重複を返したあと detach-on-destroy を入れ直す")
+  @Test("Resume では create が session の重複を返したあと detach-on-destroy と未設定の window-size を入れ直す")
   func resumeReappliesDetachOnDestroy() async throws {
     let key = try makeKey(index: 2)
     let name = TmuxSessionName(key: key).rawValue
     let process = TerminationProcessRunner(results: [
       .init(exitCode: 1, stdout: "", stderr: "can't find session: \(name)\n"),
       .init(exitCode: 1, stdout: "", stderr: "duplicate session: \(name)\n"),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 0, stdout: "", stderr: ""),
       .init(exitCode: 0, stdout: "", stderr: ""),
     ])
 
@@ -188,6 +190,8 @@ struct TmuxSessionProvisionerTests {
           "-u", "new-session", "-d", "-s", name, "-c", "/", "-P", "-F", "#{session_id}",
         ],
         ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+        ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
+        ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"],
       ])
     #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
   }
@@ -199,6 +203,8 @@ struct TmuxSessionProvisionerTests {
     let process = TerminationProcessRunner(results: [
       .init(exitCode: 0, stdout: "", stderr: ""),
       .init(exitCode: 1, stdout: "", stderr: "no such session: =\(name):\n"),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 0, stdout: "", stderr: ""),
     ])
 
     let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
@@ -207,6 +213,88 @@ struct TmuxSessionProvisionerTests {
       await process.calls == [
         ["-u", "has-session", "-t", "=\(name)"],
         ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+        ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
+        ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"],
+      ])
+    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+  }
+
+  @Test("Resume では既存の window-size を保持する")
+  func resumeKeepsExistingWindowSize() async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let process = TerminationProcessRunner(results: [
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 0, stdout: "window-size largest\n", stderr: ""),
+    ])
+
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+
+    #expect(
+      await process.calls == [
+        ["-u", "has-session", "-t", "=\(name)"],
+        ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+        ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
+      ])
+    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+  }
+
+  @Test(
+    "Resume で window-size の確認や設定に失敗しても attach の argv を返す",
+    arguments: [true, false])
+  func resumeIgnoresWindowSizeFailure(showOptionsFails: Bool) async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let success = ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
+    let failure = ProcessRunResult(exitCode: 1, stdout: "", stderr: "permission denied\n")
+    let process = TerminationProcessRunner(
+      results: [success, success] + (showOptionsFails ? [failure] : [success, failure]))
+
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+
+    var expectedCalls = [
+      ["-u", "has-session", "-t", "=\(name)"],
+      ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+      ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
+    ]
+    if !showOptionsFails {
+      expectedCalls.append(
+        ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"])
+    }
+    #expect(await process.calls == expectedCalls)
+    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+  }
+
+  @Test(
+    "bootstrap 後の Resume でも detach-on-destroy に続けて未設定の window-size を修復する",
+    arguments: [true, false])
+  func bootstrapResumeRepairsSession(detachOnDestroyFails: Bool) async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let process = TerminationProcessRunner(results: [
+      .init(exitCode: 1, stdout: "", stderr: "no server running on /tmp/awt-test\n"),
+      .init(exitCode: 1, stdout: "", stderr: "can't find session: \(name)\n"),
+      .init(exitCode: 1, stdout: "", stderr: "duplicate session: \(name)\n"),
+      .init(
+        exitCode: detachOnDestroyFails ? 1 : 0, stdout: "",
+        stderr: detachOnDestroyFails ? "permission denied\n" : ""),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+      .init(exitCode: 0, stdout: "", stderr: ""),
+    ])
+
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+
+    #expect(
+      await process.calls == [
+        ["-u", "has-session", "-t", "=\(name)"],
+        ["-u", "has-session", "-t", "=\(name)"],
+        ["-u", "new-session", "-d", "-s", name, "-c", "/", "-P", "-F", "#{session_id}"],
+        ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
+        ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
+        ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"],
+        ["-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use"],
       ])
     #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
   }

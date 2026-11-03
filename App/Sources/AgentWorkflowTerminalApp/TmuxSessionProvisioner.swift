@@ -84,7 +84,7 @@ struct TmuxSessionProvisioner: Sendable {
     } catch .sessionAlreadyExists {
       // 設計書 §3.3 の Resume。`exists` で先に分けないのは、`exists` と `create` の間に
       // 他のクライアントが同じ名前を作る窓があり、そこで返るこの値も Resume だからである。
-      await reapplyDetachOnDestroy(session)
+      await repairResumedSession(session)
     } catch .serverNotRunning {
       return await attachCommandBootstrappingServer(
         session: session, workingDirectory: workingDirectory)
@@ -104,14 +104,25 @@ struct TmuxSessionProvisioner: Sendable {
     return .success(attachCommand(for: session))
   }
 
-  /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す (#491)。
+  /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す。`detach-on-destroy` は
+  /// 無条件 (#491)、`window-size` は current window が未設定のときだけ (設計書 §3.3、#322)。
   /// 失敗しても attach を止めない: session 消滅は attach 側で失敗が表示され、それ以外の設定失敗で
   /// タブを開けなくする方が害が大きい。
-  private func reapplyDetachOnDestroy(_ session: TmuxSessionName) async {
+  private func repairResumedSession(_ session: TmuxSessionName) async {
     do {
       try await operations.ensureDetachOnDestroy(session: session)
     } catch {
       NSLog("[app] session \(session.rawValue) の detach-on-destroy 設定に失敗: \(error)")
+    }
+    do {
+      let repair = try await operations.ensureWindowSizeIfUnset(session: session)
+      if case .applied(let windowSize) = repair {
+        NSLog(
+          "[app] session \(session.rawValue) の current window の window-size を修復: \(windowSize.rawValue)"
+        )
+      }
+    } catch {
+      NSLog("[app] session \(session.rawValue) の window-size 修復に失敗: \(error)")
     }
   }
 
@@ -157,7 +168,7 @@ struct TmuxSessionProvisioner: Sendable {
       try await operations.create(session: session, workingDirectory: workingDirectory)
       result = .success(attachCommand(for: session))
     } catch .sessionAlreadyExists {
-      await reapplyDetachOnDestroy(session)
+      await repairResumedSession(session)
       result = .success(attachCommand(for: session))
     } catch {
       result = .failure(.operation(error))

@@ -247,19 +247,32 @@ public struct GitRunner: Sendable {
     else {
       throw .invalidRepositoryDirectory(repositoryDirectory)
     }
-    guard let executableURL = executableCandidates.first(where: isExecutableFile) else {
+    guard
+      let executableURL = Self.resolveExecutable(
+        candidates: executableCandidates, isExecutableFile: isExecutableFile)
+    else {
       throw .binaryNotFound(candidates: executableCandidates)
     }
     self.repositoryDirectory = repositoryDirectory
     self.processRunner = processRunner
     self.executableURL = executableURL
-    var environment = ["LC_ALL": "C"]
-    for key in ["HOME", "PATH"] where parentEnvironment[key] != nil {
-      environment[key] = parentEnvironment[key]
-    }
     // global/system config は include.path 等を保つ。出力形式に効く config は各 command の
     // 明示 option で固定し、意味を選ぶ range 等とは区別する。
-    self.environment = environment
+    self.environment = Self.restrictedEnvironment(parent: parentEnvironment)
+  }
+
+  static func resolveExecutable(
+    candidates: [URL], isExecutableFile: @Sendable (URL) -> Bool
+  ) -> URL? {
+    candidates.first(where: isExecutableFile)
+  }
+
+  static func restrictedEnvironment(parent: [String: String]) -> [String: String] {
+    var environment = ["LC_ALL": "C"]
+    for key in ["HOME", "PATH"] where parent[key] != nil {
+      environment[key] = parent[key]
+    }
+    return environment
   }
 
   public func run(

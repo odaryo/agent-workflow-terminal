@@ -24,6 +24,7 @@ public struct GitVersion: Sendable, Equatable, Hashable, Comparable, CustomStrin
 
   /// 2.39.0-rc1 は 2.39.0 より前なので、正式版へ丸めると下限の判定を誤る。
   /// `-rc` / `.rc` は解釈不能とし、それ以外の patch 後方は配布元ごとに不揃いなので比較しない。
+  /// 上流の GIT-VERSION-GEN の DEF_VER は X.Y.0 の後の開発版を X.Y.GIT と表す。
   public static func parse(versionOutput: String) -> GitVersionParseResult {
     let trimmedOutput = versionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
     let prefix = "git version "
@@ -48,6 +49,8 @@ public struct GitVersion: Sendable, Equatable, Hashable, Comparable, CustomStrin
           return .unparsable(versionOutput)
         }
         patch = parsedPatch
+      } else if components[2] != "GIT" {
+        return .unparsable(versionOutput)
       }
       let suffix = components[2].dropFirst(digits.count)
       guard !suffix.hasPrefix("-rc"), !suffix.hasPrefix(".rc") else {
@@ -95,21 +98,35 @@ public enum GitVersionSupport: Sendable, Equatable {
 
 /// 実行の失敗と版数の解釈不能では対処が異なるため、失敗時の出力と実行層エラーを保持する。
 public enum GitVersionDetectionError: Error, Sendable, Equatable {
+  case binaryNotFound(candidates: [URL])
   case process(ProcessRunnerError)
   case commandFailed(exitCode: Int32, stdout: String, stderr: String)
 }
 
 extension GitVersion {
   /// 実行失敗を unknown に丸めると観測不能の原因を失うため、TmuxRunner.version と同じく投げる（設計書 §12.3）。
-  /// `/usr/bin/git` の xcrun shim が動くよう HOME / PATH は残し、親環境はテストから差し替えられるようにする。
   public static func detect(
-    executableURL: URL, processRunner: some ProcessRunning, timeout: Duration = .seconds(5),
-    parentEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    executableCandidates: [URL] = GitRunner.defaultExecutableCandidates,
+    processRunner: some ProcessRunning, timeout: Duration = .seconds(5)
   ) async throws(GitVersionDetectionError) -> GitVersionSupport {
-    var environment = ["LC_ALL": "C"]
-    for key in ["HOME", "PATH"] where parentEnvironment[key] != nil {
-      environment[key] = parentEnvironment[key]
+    try await detect(
+      executableCandidates: executableCandidates, processRunner: processRunner, timeout: timeout,
+      parentEnvironment: ProcessInfo.processInfo.environment,
+      isExecutableFile: { FileManager.default.isExecutableFile(atPath: $0.path) })
+  }
+
+  static func detect(
+    executableCandidates: [URL], processRunner: some ProcessRunning,
+    timeout: Duration = .seconds(5), parentEnvironment: [String: String],
+    isExecutableFile: @Sendable (URL) -> Bool
+  ) async throws(GitVersionDetectionError) -> GitVersionSupport {
+    guard
+      let executableURL = GitRunner.resolveExecutable(
+        candidates: executableCandidates, isExecutableFile: isExecutableFile)
+    else {
+      throw .binaryNotFound(candidates: executableCandidates)
     }
+    let environment = GitRunner.restrictedEnvironment(parent: parentEnvironment)
     let result: ProcessRunResult
     do {
       result = try await processRunner.run(

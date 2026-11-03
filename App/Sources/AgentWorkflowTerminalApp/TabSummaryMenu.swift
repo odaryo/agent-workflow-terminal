@@ -44,7 +44,11 @@ struct TabSummaryMenu: View {
       let name = paneShortName(
         paneID: pane.paneID, isMain: pane.isMain, location: pane.detail.location)
       var title = "\(presentation.label)  \(name)"
-      if let purpose = pane.detail.purpose, !purpose.isEmpty { title += "  \(purpose)" }
+      if let purpose = pane.detail.purpose, !purpose.isEmpty {
+        title += "  \(purpose)"
+      } else if let paneTitle = pane.detail.title {
+        title += "  \(paneTitle)"
+      }
       if pane.detail.isTaskCompleted { title += " ✓完了" }
       return entry(
         title: title,

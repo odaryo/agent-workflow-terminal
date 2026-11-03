@@ -33,7 +33,7 @@ struct OverviewPaneRow: View {
         // 記号と Text から label が合成されない (AX 属性に description が無かった、実測)。
         .accessibilityLabel("\(presentation.label) \(name)")
 
-        TextField("目的", text: $draft)
+        TextField("目的", text: $draft, prompt: Text(pane.detail.title ?? "目的"))
           .textFieldStyle(.roundedBorder)
           .focused($isEditing)
           .onSubmit(submit)

@@ -247,7 +247,8 @@ final class PaneObservationStore: ObservableObject {
       summaries.append(summary)
       processIDs[summary.paneID] = snapshot.pane.processID
       details[summary.paneID] = OverviewPaneDetail(
-        location: item.location, purpose: summary.purpose.value, status: summary.status.value)
+        location: item.location, purpose: summary.purpose.value, status: summary.status.value,
+        title: OverviewPaneDetail.displayTitle(fromPaneTitle: snapshot.pane.title))
     }
     guard !Task.isCancelled, var current = observed[session] else { return }
     let rawStates = Dictionary(

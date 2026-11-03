@@ -4,6 +4,7 @@ import TerminalCore
 public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// tmux 3.4 実測: exit 1 と stderr `can't find session: <name>\n`。
   /// tmux 3.8 の `set-option` 実測: exit 1 と stderr `no such session: =<name>:\n`。
+  /// tmux 3.8 の `show-options` 実測: exit 1 と stderr `no such window: =<name>:\n`。
   /// 「対象が既に無い」を成功へ丸めないのは `TmuxPaneOperations.paneNotFound` と同じ理由による。
   case sessionNotFound(TmuxSessionName)
   /// tmux 3.4 実測: exit 1 と stderr `duplicate session: <name>\n`。
@@ -42,6 +43,9 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   case invalidHistoryLimit(Int)
   /// `new-session -P -F '#{session_id}'` が `$N` 以外を返した。原文を捨てずに載せる。
   case unexpectedSessionIDOutput(String)
+  /// 想定外の出力を未設定とみなすとユーザーの値を上書きしかねないため、設定せずに失敗させる。
+  /// tmux の版数差や形式の変化を診断できるよう、stdout の原文を保持する。
+  case unexpectedShowOptionsOutput(String)
   /// session を作った後の設定で失敗し、**その後始末にも失敗した**。この worktree には
   /// §4.2 / §4.4 を満たさない session が残っており、`exists` は Resume 可能と答える。
   /// 呼び出し側が手を打てるよう、原因と後始末の失敗を両方載せる。
@@ -363,7 +367,7 @@ public struct TmuxSessionOperations: Sendable {
   /// `messageTarget` は tmux のメッセージに現れる target 表記。`can't find session` では `=` が
   /// 剥がされ、`set-option` の `no such session` では `=<名前>:` がそのまま出る (実測)。
   /// session ID 指定では `$N` がそのまま出る。
-  private func run(
+  func run(
     _ arguments: [String],
     session: TmuxSessionName?,
     messageTarget: String? = nil
@@ -375,7 +379,7 @@ public struct TmuxSessionOperations: Sendable {
     }
   }
 
-  private static func mapFailure(
+  static func mapFailure(
     _ error: TmuxRunnerError,
     session: TmuxSessionName?,
     target: String?
@@ -397,6 +401,7 @@ public struct TmuxSessionOperations: Sendable {
     switch stderr {
     case "can't find session: \(target)\n": return .sessionNotFound(session)
     case "no such session: \(target)\n": return .sessionNotFound(session)
+    case "no such window: \(target)\n": return .sessionNotFound(session)
     case "duplicate session: \(target)\n": return .sessionAlreadyExists(session)
     default: return .tmux(error)
     }

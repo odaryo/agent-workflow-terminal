@@ -299,12 +299,14 @@ SwiftLint の版数は CI で固定していないため、更新で既定ルー
 ```shell
 # フォーマット確認 / 適用
 swift format lint --configuration .swift-format --recursive --strict \
-  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift
+  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
+  App/Sources App/Tests App/Package.swift
 swift format format --configuration .swift-format --recursive --in-place \
-  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift
+  AgentWorkflowTerminal/Sources AgentWorkflowTerminal/Tests AgentWorkflowTerminal/Package.swift \
+  App/Sources App/Tests App/Package.swift
 
-# Lint (要 `brew install swiftlint`)
-swiftlint lint --config .swiftlint.yml
+# Lint (要 `brew install swiftlint`)。CI と同じく --strict で warning も落とす
+swiftlint lint --config .swiftlint.yml --strict
 ```
 
 `Spikes/` は両方の対象外です (`.swiftlint.yml` の `excluded`)。

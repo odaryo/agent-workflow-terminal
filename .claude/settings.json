@@ -25,6 +25,8 @@
       "Bash(scripts/wf-review-diff.sh:*)",
       "Bash(scripts/wf-issue-create.sh:*)",
       "Bash(scripts/wf-issue-comment.sh:*)",
+      "Bash(scripts/wf-issue-edit.sh:*)",
+      "Bash(scripts/wf-issue-close.sh:*)",
       "Bash(scripts/wf-project-status.sh:*)",
       "Bash(scripts/wf-issue-label.sh:*)",
       "Bash(scripts/wf-milestone.sh:*)",

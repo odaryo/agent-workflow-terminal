@@ -1,7 +1,10 @@
 import TerminalCore
 
 public enum TmuxWindowSizeResumeRepair: Sendable, Equatable {
-  /// 設計書 §3.3 に従い、生成時に設定し損ねた window だけを修復したことを呼び出し元へ残す。
+  /// Resume 時点の current window で window 単位の設定が無かったため、値を設定した。
+  /// アプリ外で作られた session や、ユーザーが `set-option -wu` で設定を外した window も対象になる。
+  /// 設計書 §4.1 の 1 window 運用を前提とするため、複数 window の session でも判定は current window
+  /// で決まり、他の window の未設定は修復しない。
   case applied(TmuxWindowSize)
   /// 設計書 §3.3 に従いユーザーの設定を上書きしない。アプリが選択肢に持たない値も保持するため、
   /// `TmuxWindowSize` へ変換せず原文の値を返す。

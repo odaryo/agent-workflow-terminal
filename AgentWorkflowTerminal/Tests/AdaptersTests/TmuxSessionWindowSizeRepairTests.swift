@@ -64,6 +64,28 @@ struct TmuxSessionWindowSizeRepairTests: TmuxSessionOperationsTestSupport {
         == [prefix + ["show-options", "-w", "-t", "=\(name.rawValue):", "window-size"]])
   }
 
+  @Test("show-options 後に session が消えたら set-option の no such window を sessionNotFound に写す")
+  func reportsSessionDisappearingBeforeSetOption() async throws {
+    let name = try sessionName()
+    let stub = TmuxSessionRunnerStub(handler: { arguments in
+      if arguments.contains("set-option") {
+        return stubFailure(stderr: "no such window: =\(name.rawValue):\n")
+      }
+      return stubSuccess()
+    })
+    let operations = try makeOperations(stub)
+
+    await #expect(throws: TmuxSessionOperationError.sessionNotFound(name)) {
+      try await operations.ensureWindowSizeIfUnset(session: name)
+    }
+    #expect(
+      await stub.invocations.map(\.arguments)
+        == [
+          prefix + ["show-options", "-w", "-t", "=\(name.rawValue):", "window-size"],
+          prefix + ["set-option", "-w", "-t", "=\(name.rawValue):", "window-size", "smallest"],
+        ])
+  }
+
   @Test(
     "server の停止と socket の欠落を既存のエラー写像で区別する",
     arguments: [

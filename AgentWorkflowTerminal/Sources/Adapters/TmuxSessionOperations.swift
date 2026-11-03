@@ -4,7 +4,7 @@ import TerminalCore
 public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// tmux 3.4 実測: exit 1 と stderr `can't find session: <name>\n`。
   /// tmux 3.8 の `set-option` 実測: exit 1 と stderr `no such session: =<name>:\n`。
-  /// tmux 3.8 の `show-options` 実測: exit 1 と stderr `no such window: =<name>:\n`。
+  /// tmux 3.8 の `show-options` と `set-option -w` 実測: exit 1 と stderr `no such window: =<name>:\n`。
   /// 「対象が既に無い」を成功へ丸めないのは `TmuxPaneOperations.paneNotFound` と同じ理由による。
   case sessionNotFound(TmuxSessionName)
   /// tmux 3.4 実測: exit 1 と stderr `duplicate session: <name>\n`。
@@ -366,6 +366,7 @@ public struct TmuxSessionOperations: Sendable {
 
   /// `messageTarget` は tmux のメッセージに現れる target 表記。`can't find session` では `=` が
   /// 剥がされ、`set-option` の `no such session` では `=<名前>:` がそのまま出る (実測)。
+  /// `show-options` / `set-option -w` の `no such window: =<名前>:` でもそのまま出る (tmux 3.8 実測)。
   /// session ID 指定では `$N` がそのまま出る。
   func run(
     _ arguments: [String],

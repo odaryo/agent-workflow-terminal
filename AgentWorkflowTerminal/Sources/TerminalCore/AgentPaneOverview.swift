@@ -1,3 +1,5 @@
+import Foundation
+
 /// tmux の `#{window_index}` と `#{pane_index}`。pane の短い識別として表示する (設計書 §13)。
 /// `PaneID` と違い、pane の分割・削除で振り直される。
 public struct PaneLocation: Sendable, Hashable {
@@ -20,15 +22,26 @@ public struct OverviewPaneDetail: Sendable, Hashable {
   /// ハーネスの明示信号によるタスク完了 (`PaneTaskCompletionDisplay.completed`)。pane の
   /// 応答終了 (`AgentState.completed`) とは別 (§12.7)。
   public var isTaskCompleted: Bool
+  public var title: String?
 
   public init(
     location: PaneLocation? = nil, purpose: String? = nil, status: String? = nil,
-    isTaskCompleted: Bool = false
+    isTaskCompleted: Bool = false, title: String? = nil
   ) {
     self.location = location
     self.purpose = purpose
     self.status = status
     self.isTaskCompleted = isTaskCompleted
+    self.title = title
+  }
+
+  /// 1行に出せない値を表示しないため、制御文字 (Cc) と行区切りを拒否する (設計書 §12.7)。
+  public static func displayTitle(fromPaneTitle raw: String) -> String? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty,
+      !trimmed.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine)
+    else { return nil }
+    return trimmed
   }
 }
 

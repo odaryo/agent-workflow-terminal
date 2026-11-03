@@ -45,10 +45,63 @@ struct GhosttyConfigurationLoadingTests {
     #expect(try configuredFontSize(configurationFileURL: nil) != expected)
   }
 
+  @Test("製品既定をユーザー設定より先に読み込む (設計書 §4.4)")
+  func loadsProductDefaultsBeforeUserConfiguration() throws {
+    #expect(ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == 0)
+    let productDefaults = "font-size = 11\n"
+    #expect(
+      try configuredFontSize(configurationFileURL: nil, productDefaults: productDefaults) == 11
+    )
+
+    let fileURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("awt-font-size-\(UUID().uuidString)")
+    try "font-size = 22\n".write(to: fileURL, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: fileURL) }
+
+    #expect(
+      try configuredFontSize(configurationFileURL: fileURL, productDefaults: productDefaults) == 22
+    )
+  }
+
+  @Test(
+    "製品既定の key と値が libghostty に受け付けられる (設計書 §4.4)",
+    arguments: [
+      (GhosttyProductDefaults.configuration, true),
+      ("scrollback-limitt = 1\n", false),
+      ("scrollback-limit = abc\n", false),
+    ]
+  )
+  func validatesProductDefaults(configuration: String, isValid: Bool) throws {
+    #expect(ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) == 0)
+    let config = try #require(ghostty_config_new())
+    defer { ghostty_config_free(config) }
+
+    try loadGhosttyProductDefaults(into: config, productDefaults: configuration)
+    ghostty_config_finalize(config)
+
+    let diagnosticsCount = ghostty_config_diagnostics_count(config)
+    if isValid {
+      #expect(diagnosticsCount == 0)
+    } else {
+      #expect(diagnosticsCount >= 1)
+    }
+  }
+
+  @Test("製品既定の scrollback-limit は 10000000 byte (設計書 §4.4)")
+  func productDefaultsConfigurationHasFixedScrollbackLimit() {
+    #expect(GhosttyProductDefaults.configuration == "scrollback-limit = 10000000\n")
+  }
+
   /// `font-size` は libghostty 側で `f32` (`src/config/Config.zig`)。`Double` の領域を渡すと
   /// `ghostty_config_get` は 4 byte だけ書いて `true` を返し、残りは未初期化のまま読める。
-  private func configuredFontSize(configurationFileURL: URL?) throws -> Float {
-    let config = try makeGhosttyConfiguration(configurationFileURL: configurationFileURL)
+  private func configuredFontSize(
+    configurationFileURL: URL?,
+    productDefaults: String = GhosttyProductDefaults.configuration
+  ) throws -> Float {
+    let config = try makeGhosttyConfiguration(
+      configurationFileURL: configurationFileURL,
+      productDefaults: productDefaults
+    )
     defer { ghostty_config_free(config) }
     let key = "font-size"
     var value = Float.nan

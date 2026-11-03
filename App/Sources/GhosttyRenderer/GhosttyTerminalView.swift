@@ -264,9 +264,18 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
 /// Why not `GhosttyRuntime` の private method: この手順そのものをテストが叩くため
 /// (Issue #236)。テスト側に同じ手順を書き直すと、本番経路が腐っても緑のままになる。
 @MainActor
-func makeGhosttyConfiguration(configurationFileURL: URL?) throws -> ghostty_config_t {
+func makeGhosttyConfiguration(
+  configurationFileURL: URL?,
+  productDefaults: String = GhosttyProductDefaults.configuration
+) throws -> ghostty_config_t {
   guard let config = ghostty_config_new() else {
     throw GhosttyRendererError.configurationCreationFailed
+  }
+  do {
+    try loadGhosttyProductDefaults(into: config, productDefaults: productDefaults)
+  } catch {
+    ghostty_config_free(config)
+    throw error
   }
   if let configurationFileURL {
     configurationFileURL.path.withCString { path in
@@ -276,6 +285,35 @@ func makeGhosttyConfiguration(configurationFileURL: URL?) throws -> ghostty_conf
   ghostty_config_finalize(config)
   logGhosttyConfigurationDiagnostics(from: config)
   return config
+}
+
+/// - Precondition: `ghostty_init` が済んでおり、`config` が未 finalize であること。
+///   ユーザー設定による上書きを許すため、その読み込みより先に呼ぶ (設計書 §4.4)。
+@MainActor
+func loadGhosttyProductDefaults(
+  into config: ghostty_config_t,
+  productDefaults: String = GhosttyProductDefaults.configuration
+) throws {
+  // C API は設定テキストを直接受け取れないため、一時ファイルを経由する。
+  let fileURL = FileManager.default.temporaryDirectory
+    .appendingPathComponent("awt-product-defaults-\(UUID().uuidString)")
+  do {
+    try productDefaults.write(to: fileURL, atomically: true, encoding: .utf8)
+  } catch {
+    // 製品既定を欠いたまま起動して libghostty の既定に依存することを防ぐ。
+    throw GhosttyRendererError.productDefaultsWriteFailed(error.localizedDescription)
+  }
+  defer {
+    do {
+      try FileManager.default.removeItem(at: fileURL)
+    } catch {
+      // 設定は既に読み込み済みなので、後始末の失敗で起動を止めない。
+      NSLog("[app] ghostty 製品既定の一時ファイルを削除できません: \(fileURL.path): \(error)")
+    }
+  }
+  fileURL.path.withCString { path in
+    ghostty_config_load_file(config, path)
+  }
 }
 
 private func logGhosttyConfigurationDiagnostics(from config: ghostty_config_t) {
@@ -480,6 +518,7 @@ private enum GhosttyRendererError: LocalizedError {
   case resourcesUnavailable
   case initializationFailed
   case configurationCreationFailed
+  case productDefaultsWriteFailed(String)
   case applicationCreationFailed
   case runtimeUnavailable
   case configurationFileChanged
@@ -491,6 +530,7 @@ private enum GhosttyRendererError: LocalizedError {
     case .resourcesUnavailable: "アプリバンドルの Resources を解決できません"
     case .initializationFailed: "ghostty_init が失敗しました"
     case .configurationCreationFailed: "ghostty_config_new が失敗しました"
+    case .productDefaultsWriteFailed(let reason): "ghostty 製品既定を書き出せません: \(reason)"
     case .applicationCreationFailed: "ghostty_app_new が失敗しました"
     case .runtimeUnavailable: "libghostty runtime を利用できません"
     case .configurationFileChanged:

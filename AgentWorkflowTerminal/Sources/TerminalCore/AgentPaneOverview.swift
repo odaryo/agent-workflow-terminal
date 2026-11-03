@@ -35,7 +35,8 @@ public struct OverviewPaneDetail: Sendable, Hashable {
     self.title = title
   }
 
-  /// 1行に出せない値を表示しないため、制御文字 (Cc) と行区切りを拒否する (設計書 §12.7)。
+  /// 1行に出せない値を表示しないため、前後の空白と改行を除いた後に残った制御文字 (Cc) と行区切りを拒否する
+  /// (設計書 §12.7)。`@awt_*` の読み取りと違い、末尾の CR などは除いて受理する。
   public static func displayTitle(fromPaneTitle raw: String) -> String? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty,

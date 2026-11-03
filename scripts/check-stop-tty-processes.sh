@@ -215,6 +215,9 @@ fi
 # 待ちの間に A の pane が閉じて tty が空き、別の server C の新しい pane が同じ tty を受け取る。
 # 待ちの後に数え直すと C を SIGKILL する。最初に数えたものだけを撃つなら C は生き残り、
 # 「記録に無いプロセス」として一覧に出る。
+# 既定の待ち (0.5 秒) での再利用の窓は固定しない (#577)。窓の大きさは TERM から pane が閉じるまでの
+# 時間 (Python の起動を含む) と tty の割り当ての順で決まり、runner で安定して再現できない。安全性は
+# 待ちの長さによらず「記録したものにだけ KILL を送る」ことで決まり、それを待ち 3 秒のこの検査で固定する。
 info "--- 止めている途中に tty が再利用される"
 checked=$((checked + 1))
 env -u TMUX tmux -L "$SOCK_REUSE_A" -f /dev/null new-session -d -s a -x 80 -y 24 "sleep 600"

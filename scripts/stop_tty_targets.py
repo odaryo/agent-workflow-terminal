@@ -21,8 +21,15 @@ group と tty には宛先を出さない。group は TERM の後に fork した
 除外できない。tty は、止めている途中に pane が閉じ、別の server の新しい pane が同じ tty を
 受け取った可能性がある (#540)。両方に当たるものは group にだけ出す。
 
-ps の行の形が想定と違うとき、または --self の行がどちらかの断面に無いときは、何も出さずに
-exit 2 で終わる。後者は、空や切れた断面を「すべて消えた」と読まないための確認である。
+次のどれかに当たるときは、何も出さずに exit 2 で終わる。
+
+  - ps の行の形が想定と違う
+  - 断面が改行で終わっていない (行の途中で切れている)
+  - --self の行がどちらかの断面に無い (空の断面を含む)
+
+確かめるのはこの 3 つだけで、断面が最後まであることは確かめない。行の境目で切れた断面は、
+--self の行がその前にあれば通り、記録したものが「消えた」と読まれうる。ps が途中で失敗した
+場合は、stop-tty-processes.sh が ps の終了コードで止める。
 
 依存は標準ライブラリのみ。macOS の /usr/bin/python3 (3.9) でも動く書き方にする。
 """
@@ -63,6 +70,8 @@ class Row:
 
 
 def parse_ps(text, label):
+    if text and not text.endswith("\n"):
+        raise InputError("%s の断面が改行で終わっていません (行の途中で切れています)" % label)
     rows = []
     for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():

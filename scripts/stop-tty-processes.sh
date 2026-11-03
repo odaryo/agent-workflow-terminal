@@ -177,16 +177,28 @@ fi
 # tty で絞るのは stop_tty_targets.py の側。`ps -t` でも絞れるが (実測 macOS 27: ttys006 / s006 /
 # /dev/ttys006 のどれも効いた)、`pgrep -t` は同じ綴りで何も返さなかったので、ps の全体を取る。
 # 全体を取るのは、tty を失った子を pgid で探すためでもある (#573)。
+#
+# 断面は snap に受け、ps の終了コードを返す。`$( )` は末尾の改行を落とすので、ps が成功したときだけ
+# 印 '.' を足して受け、印を外す。こうすると、断面が改行で終わっているか (行の途中で切れていないか)
+# を判定の側で確かめられる。ps の終了コードは `|| rc=$?` で受ける。この形の中では set -e が
+# 効かないので、ps の失敗で止まることに頼らない (docs/coding-guidelines.md §7)。
+snap=""
 snapshot() {
-  LC_ALL=C ps -A -o pid=,pgid=,tty=,lstart=,args=
+  local rc=0
+  snap=$(LC_ALL=C ps -A -o pid=,pgid=,tty=,lstart=,args= && printf '.') || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    info "ps が exit $rc で終わりました。断面が途中までしか無いかもしれません"
+    return "$rc"
+  fi
+  snap="${snap%.}"
 }
 
 # 宛先の判定は stop_tty_targets.py に置く。pid の再利用や group の移動は実プロセスでは起こせない
 # ので、判定は scripts/check-stop-tty-targets.sh が ps の fixture で検査する (Issue #573)。ps を
 # 差し替える口をこのスクリプトに作らないため、判定にだけ断面を文字列で渡す。
 judge() {
-  "$TARGETS" --self $$ --recorded <(printf '%s\n' "$recorded_snapshot") \
-    --now <(printf '%s\n' "$1") "${names[@]}"
+  "$TARGETS" --self $$ --recorded <(printf '%s' "$recorded_snapshot") \
+    --now <(printf '%s' "$1") "${names[@]}"
 }
 
 # judge の出力から、$1 の種類の行を、種類の語を外して出す。
@@ -197,7 +209,11 @@ section() {
 # 止める対象は、最初に数えたプロセスに固定する。TERM の後の待ちの間に pane が閉じて tty が
 # 空くと、別の server の新しい pane が同じ tty を受け取る (実測: 隔離 server A を止めている
 # 0.2 秒後に立てた C が ttys006 を受け取り、数え直していた版は C を SIGKILL した、#540)。
-recorded_snapshot=$(snapshot)
+if ! snapshot; then
+  info "ps の断面を取れないので、何も止めません"
+  exit 2
+fi
+recorded_snapshot="$snap"
 if ! plan=$(judge "$recorded_snapshot"); then
   info "ps の出力を判定できないので、何も止めません"
   exit 2
@@ -218,8 +234,8 @@ while read -r target; do
 done <<<"$(section target "$plan")"
 sleep "$grace"
 
-if ! plan=$(judge "$(snapshot)"); then
-  info "ps の出力を判定できないので、SIGKILL を送らずに終わります。止まったかどうかは確かめていません"
+if ! snapshot || ! plan=$(judge "$snap"); then
+  info "ps の断面を取れないか判定できないので、SIGKILL を送らずに終わります。止まったかどうかは確かめていません"
   exit 1
 fi
 kill_targets=$(section target "$plan")
@@ -232,8 +248,8 @@ if [[ -n "$kill_targets" ]]; then
   sleep 0.2
 fi
 
-if ! plan=$(judge "$(snapshot)"); then
-  info "ps の出力を判定できないので、止まったかどうかを確かめられません"
+if ! snapshot || ! plan=$(judge "$snap"); then
+  info "ps の断面を取れないか判定できないので、止まったかどうかを確かめられません"
   exit 1
 fi
 status=0

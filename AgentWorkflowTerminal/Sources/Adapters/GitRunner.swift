@@ -96,7 +96,7 @@ public struct GitReadCommand: Sendable, Equatable {
     ignoreSubmodules: GitIgnoreSubmodulesMode = .none
   ) -> Self {
     // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
-    // --renames は git 2.18 以降。サポート下限の決定は Issue #83 に委ねる。
+    // --renames は git 2.18 以降。サポート下限 (2.39、設計書 §17.3) はこれより新しい。
     // 値の明示で `diff.ignoreSubmodules` / `submodule.<name>.ignore` を上書きし、gitlink の
     // 変更を残す (`untracked` でも出る。git 2.50.1 で実測)。既定の `none` は Close の
     // 安全確認 (§3.4) と File Browser が submodule 内の untracked を見落とさないため。
@@ -259,19 +259,32 @@ public struct GitRunner: Sendable {
     else {
       throw .invalidRepositoryDirectory(repositoryDirectory)
     }
-    guard let executableURL = executableCandidates.first(where: isExecutableFile) else {
+    guard
+      let executableURL = Self.resolveExecutable(
+        candidates: executableCandidates, isExecutableFile: isExecutableFile)
+    else {
       throw .binaryNotFound(candidates: executableCandidates)
     }
     self.repositoryDirectory = repositoryDirectory
     self.processRunner = processRunner
     self.executableURL = executableURL
-    var environment = ["LC_ALL": "C"]
-    for key in ["HOME", "PATH"] where parentEnvironment[key] != nil {
-      environment[key] = parentEnvironment[key]
-    }
     // global/system config は include.path 等を保つ。出力形式に効く config は各 command の
     // 明示 option で固定し、意味を選ぶ range 等とは区別する。
-    self.environment = environment
+    self.environment = Self.restrictedEnvironment(parent: parentEnvironment)
+  }
+
+  static func resolveExecutable(
+    candidates: [URL], isExecutableFile: @Sendable (URL) -> Bool
+  ) -> URL? {
+    candidates.first(where: isExecutableFile)
+  }
+
+  static func restrictedEnvironment(parent: [String: String]) -> [String: String] {
+    var environment = ["LC_ALL": "C"]
+    for key in ["HOME", "PATH"] where parent[key] != nil {
+      environment[key] = parent[key]
+    }
+    return environment
   }
 
   public func run(

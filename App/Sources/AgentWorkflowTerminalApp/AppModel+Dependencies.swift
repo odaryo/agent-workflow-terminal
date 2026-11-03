@@ -71,14 +71,16 @@ struct AppDependencies: Sendable {
         applicationSupportWarning: applicationSupportWarning,
         error: "AWT_TMUX_SOCKET_NAME が不正なため、この起動では tmux を使いません: \(value)")
     }
-    let executable = TmuxRunner.defaultExecutableCandidates.first {
-      FileManager.default.isExecutableFile(atPath: $0.path)
-    }
-    guard let executable else {
+    let resolution = TmuxExecutableResolution.resolve(
+      overridePath: TmuxPreferences.overridePath(), fileKind: TmuxSettings.fileKind)
+    guard case .found(let executable, let source) = resolution else {
       return withoutTmux(
         launchProject: launchProject, applicationSupport: applicationSupport,
         applicationSupportWarning: applicationSupportWarning,
-        error: "tmux 実行ファイルが見つかりません。tmux をインストールしてください。")
+        error: TmuxSettings.failureMessage(for: resolution))
+    }
+    if source == .override {
+      NSLog("[app] tmux 実行ファイルを上書き: %@", executable.path)
     }
 
     do {
@@ -115,7 +117,7 @@ struct AppDependencies: Sendable {
 
   private static func withoutTmux(
     launchProject: LaunchProjectArgument, applicationSupport: URL?,
-    applicationSupportWarning: String?, error: String
+    applicationSupportWarning: String?, error: String?
   ) -> Self {
     Self(
       launchProject: launchProject,

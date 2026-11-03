@@ -48,21 +48,21 @@ struct GitRunnerTests {
     #expect(
       GitReadCommand.diffFileSummaries(.index(against: .head), pathspec: [path]).arguments == [
         "diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat",
-        "--no-abbrev", "--ignore-submodules=none", "-z", "--cached", "HEAD", "--",
+        "--no-abbrev", "--ignore-submodules=untracked", "-z", "--cached", "HEAD", "--",
         "Sources/a.swift",
       ])
     #expect(
       GitReadCommand.diffPatch(.workingTree(against: .head)).arguments == [
         "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
         "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
-        "--submodule=short", "--ignore-submodules=none", "HEAD", "--",
+        "--submodule=short", "--ignore-submodules=untracked", "HEAD", "--",
       ])
     // §9.1.3: staged と混ざらない unstaged だけの diff は revision を渡さない形になる。
     #expect(
       GitReadCommand.diffPatch(.unstaged).arguments == [
         "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--find-renames",
         "--patch", "--no-color", "--full-index", "--src-prefix=a/", "--dst-prefix=b/",
-        "--submodule=short", "--ignore-submodules=none", "--",
+        "--submodule=short", "--ignore-submodules=untracked", "--",
       ])
     #expect(
       GitReadCommand.status(untrackedFiles: .all).arguments == [
@@ -76,6 +76,15 @@ struct GitRunnerTests {
     #expect(
       GitReadCommand.listRefs().arguments == [
         "for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/",
+      ])
+  }
+
+  @Test("status は submodule の untracked 除外を rename と untracked-files の間に置く")
+  func buildsStatusIgnoringUntrackedSubmoduleFiles() {
+    #expect(
+      GitReadCommand.status(ignoreSubmodules: .untracked).arguments == [
+        "status", "--porcelain=v2", "--branch", "--renames", "--ignore-submodules=untracked",
+        "--untracked-files=normal", "-z",
       ])
   }
 

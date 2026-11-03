@@ -551,7 +551,9 @@ tmuxサーバを共有する(§4.1)ため、シェルと別のtmuxを拾うと�
 
 どちらもアプリ設定から変更可能とする。tmux側は`window-size`(§4.2)と同じくsession単位で設定し、サーバ全体のglobal option(`-g`)としては設定しない。ユーザーが自分で作った他のsessionへ波及させないためである。
 
-**アプリ側の製品既定の与え方 — 確定(2026-11-03、Issue #335)。** `scrollback-limit`の製品既定はアプリのコードがlibghosttyへ与え、libghosttyのコンパイル既定に頼らない(v1.3.1のコンパイル既定も10,000,000で、値が偶然一致しているだけであり、refを上げたときに黙って変わりうるため)。libghosttyのC APIには値を1つ設定する関数が無いので、製品既定を一時ファイルに書き出して`ghostty_config_load_file`で読み込む。読み込む順序は製品既定が先、§21.6のこのアプリ用の設定ファイルが後で、ユーザーはそのファイルで製品既定を上書きできる。ghostty本体向けの設定ファイルは読まない(§21.6)ので、別アプリの設定で黙って上書きされることは無い。製品既定を書き出せなければ、libghosttyの既定で起動せずに失敗として扱う。
+**アプリ側の製品既定の与え方 — 確定(2026-11-03、Issue #335)。** `scrollback-limit`の製品既定はアプリのコードがlibghosttyへ与え、libghosttyのコンパイル既定に頼らない(v1.3.1のコンパイル既定も10,000,000で、値が偶然一致しているだけであり、refを上げたときに黙って変わりうるため)。libghosttyのC APIには値を1つ設定する関数が無いので、製品既定を一時ファイルに書き出して`ghostty_config_load_file`で読み込む。読み込む順序は製品既定が先、§21.6のこのアプリ用の設定ファイルが後で、ユーザーはそのファイルで製品既定を上書きできる。ghostty本体向けの設定ファイルは読まない(§21.6)ので、別アプリの設定で黙って上書きされることは無い。製品既定を書き出せなければ、libghosttyの既定に頼った設定は作らず、端末の初期化の失敗(他の初期化の失敗と同じく、そのプロセスでは端末を表示できない)として扱う。
+
+この方式で残る弱点は2つある。書き出した後の読み込みが失敗した場合(ファイルが消えた・開けない)、C APIは結果を返さずdiagnosticsも積まないので、検出できずにlibghosttyの既定で動く。また、ユーザーが設定ファイルに値を空にした`scrollback-limit =`を書くと、製品既定ではなくlibghosttyのコンパイル既定に戻る(ghosttyの設定構文で空の値は既定へ戻す意味を持つため)。`scrollback-limit`は`usize`で、v1.3.1の`ghostty_config_get`の対象外のため、実際に効いている値をアプリから読み戻して確かめることもできない(Issue #335)。
 
 Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
 
@@ -1916,7 +1918,7 @@ Gate 1を通過した版数から黙ってずれないこと、CIがxcframework�
 
 **この節は実装済みの事実の記録であり、§21章の状態(現在の推奨)を変えるものではない。**
 
-macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-terminal/config`から読む。書式はghosttyの設定構文で、ファイルが無ければ何も読まない。`ghostty_config_load_file`で1プロセスにつき1回だけ読み込む(libghosttyの設定はプロセス全体で共有されるため、§21.5のrenderer隔離の内側で完結する)。
+macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-terminal/config`から読む。書式はghosttyの設定構文で、ファイルが無ければ何も読まない(このファイルより先に、§4.4の製品既定をアプリが読み込ませる)。`ghostty_config_load_file`で1プロセスにつき1回だけ読み込む(libghosttyの設定はプロセス全体で共有されるため、§21.5のrenderer隔離の内側で完結する)。
 
 **`ghostty_config_load_default_files`は呼ばない。** vendored libghostty v1.3.1の実体(`src/config/Config.zig`の`loadDefaultFiles`、`src/config/file_load.zig`)では、これがmacOSで読むのは次の4経路である。
 

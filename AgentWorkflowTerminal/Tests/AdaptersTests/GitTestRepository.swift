@@ -89,6 +89,24 @@ struct GitTestRepository {
     try await git(["checkout", "-q", "HEAD~1"], in: "main/\(name)")
   }
 
+  func addSubmoduleWithOnlyUntrackedFiles(name: String) async throws {
+    let upstreamName = "upstream-\(name)"
+    let upstream = root.appending(path: upstreamName)
+    try FileManager.default.createDirectory(at: upstream, withIntermediateDirectories: true)
+    try await git(["init", "-q", "-b", "main"], in: upstreamName)
+    try "tracked\n".write(
+      to: upstream.appending(path: "s.txt"), atomically: true, encoding: .utf8)
+    try await git(["add", "-A"], in: upstreamName)
+    try await git(["commit", "-q", "-m", "base"], in: upstreamName)
+    // file 経由の submodule clone は既定で拒否される (CVE-2022-39253 の緩和)。
+    try await git(
+      ["-c", "protocol.file.allow=always", "submodule", "add", "-q", upstream.path, name])
+    try await git(["commit", "-q", "-m", "add \(name)"])
+    try "untracked\n".write(
+      to: mainWorktree.appending(path: name).appending(path: "untracked.txt"),
+      atomically: true, encoding: .utf8)
+  }
+
   func detector() throws -> GitWorktreeDetector {
     try GitWorktreeDetector(
       projectDirectory: mainWorktree,

@@ -338,7 +338,7 @@ public struct DiffSnapshotBuilder: Sendable {
     untrackedFiles: GitUntrackedFilesMode
   ) async throws(DiffSnapshotBuilderError) -> GitStatusParseResult {
     GitStatusPorcelainV2.parse(
-      output: try await run(.status(untrackedFiles: untrackedFiles)))
+      output: try await run(.status(untrackedFiles: untrackedFiles, ignoreSubmodules: .untracked)))
   }
 
   private func run(

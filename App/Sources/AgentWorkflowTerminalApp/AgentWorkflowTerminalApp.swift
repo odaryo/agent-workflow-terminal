@@ -45,7 +45,7 @@ struct AgentWorkflowTerminalApp: App {
     }
     OverviewScene(projects: projects)
     Settings {
-      NotificationSettingsView()
+      AppSettingsView()
     }
   }
 }

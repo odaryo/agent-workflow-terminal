@@ -1,7 +1,9 @@
 import AppKit
 import SwiftUI
 
-// Icon Only ではタブ名が消え、右クリックも表示形式メニューに取られた (#431)。
+// Icon and Label は Project メニューの Label の title をアイコンの下に描き、ツールバーが2段になる (#583)。
+// #431 の「Icon Only でタブ名が消える」は各 Label に labelStyle(.titleAndIcon) を明示する前の記録で、
+// 今は消えない (#583 で実測)。macOS 14 は allowsDisplayModeCustomization が無く、表示形式メニューが残る。
 // SceneBuilder は if #available を扱えず、windowToolbarLabelStyle(fixed:) を macOS 14 と両立できない。
 @MainActor
 struct ToolbarDisplayModeLock: NSViewRepresentable {
@@ -28,7 +30,7 @@ struct ToolbarDisplayModeLock: NSViewRepresentable {
 
     private func applyDisplayMode() {
       guard let toolbar = window?.toolbar else { return }
-      toolbar.displayMode = .iconAndLabel
+      toolbar.displayMode = .iconOnly
       if #available(macOS 15, *) {
         toolbar.allowsDisplayModeCustomization = false
       }

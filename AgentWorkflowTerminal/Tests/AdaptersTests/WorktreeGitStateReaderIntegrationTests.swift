@@ -10,9 +10,8 @@ struct WorktreeGitStateReaderIntegrationTests {
   func detectsSubmoduleWithOnlyUntrackedFiles() async throws {
     try await withGitRepository { repository in
       try await repository.addSubmoduleWithOnlyUntrackedFiles(name: "sub")
-      let reader = try WorktreeGitStateReader(
-        repositoryDirectory: repository.mainWorktree,
-        processRunner: FoundationProcessRunner())
+      // 開発者の ~/.gitconfig の excludesFile が submodule 内の untracked を隠さないよう、HOME を隔離する。
+      let reader = WorktreeGitStateReader(runner: try repository.runner(globalConfig: ""))
 
       let result = try await reader.read()
       let overlay = WorktreeFileGitStateOverlay(entries: result.entries)

@@ -66,7 +66,7 @@ struct GitSubmoduleConfigIndependenceTests {
     try await withGitRepository { repository in
       try await repository.addRewoundSubmodule(name: "sub")
       let baseline = try await observe(
-        repository, globalConfig: "", ignoreSubmodules: .untracked)
+        repository, globalConfig: "", untrackedFiles: .all, ignoreSubmodules: .untracked)
       let baselineStatus = GitStatusPorcelainV2.parse(output: baseline.status)
       let baselinePatch = UnifiedDiffPatch.parse(output: baseline.patch)
       #expect(baselineStatus.failures.isEmpty)
@@ -93,7 +93,7 @@ struct GitSubmoduleConfigIndependenceTests {
       try await repository.git(["commit", "-q", "--only", "-m", "ignore submodule", ".gitmodules"])
 
       let observation = try await observe(
-        repository, globalConfig: "", ignoreSubmodules: .untracked)
+        repository, globalConfig: "", untrackedFiles: .all, ignoreSubmodules: .untracked)
       let status = GitStatusPorcelainV2.parse(output: observation.status)
       #expect(observation.patch == baseline.patch)
       #expect(observation.summaries == baseline.summaries)
@@ -122,6 +122,7 @@ struct GitSubmoduleConfigIndependenceTests {
 
   private func observe(
     _ repository: GitTestRepository, globalConfig: String,
+    untrackedFiles: GitUntrackedFilesMode = .normal,
     ignoreSubmodules: GitIgnoreSubmodulesMode = .none
   ) async throws -> Observation {
     let runner = try repository.runner(globalConfig: globalConfig)
@@ -130,7 +131,7 @@ struct GitSubmoduleConfigIndependenceTests {
       patch: try await runner.run(.diffPatch(target)).stdout,
       summaries: try await runner.run(.diffFileSummaries(target)).stdout,
       status: try await runner.run(
-        .status(untrackedFiles: .all, ignoreSubmodules: ignoreSubmodules)
+        .status(untrackedFiles: untrackedFiles, ignoreSubmodules: ignoreSubmodules)
       ).stdout)
   }
 }

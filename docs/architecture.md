@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-03(Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-03(§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -256,8 +256,17 @@ worktreeのActive状態とtmux sessionの存在は独立して扱う。
 適用するはずのoption(§4.2の`window-size`など)が**未設定**なら適用し直し、ユーザーが別の値を設定して
 いれば上書きしない。生成が途中で中断されるとoptionを適用し損ねたsessionが残り、Resumeがそれを
 そのまま使い続けるためである(Issue #322)。`history-limit`(§4.4)は既存paneへ遡及しないので対象外とする。
-tmuxは未設定と空文字を同じに返すことがあるため、「未設定」の観測方法は実装前にtmux 3.4と3.7cの
-両方で計測して決める。
+「未設定」は`show-options -w -t =<名前>: window-size`の出力が空であることで判定する(2026-11-03、tmux 3.8で計測。
+ローカルとCIがどちらも3.8であるため、ユーザーの決定で3.8だけを計測した)。設定済みなら`window-size <値>`が返り、
+でたらめなoption名はrc=1の`invalid option`になるので未設定と区別できる。`-q`を付けるとこの区別が消えるので付けない。
+`window-size`は選択肢型のoptionで空文字の値を取れないため、未設定と空文字の取り違えは起きない。globalだけを変えた
+ユーザーのsessionは未設定として扱う。生成時もglobalを見ずにwindow単位で入れるのと同じ扱いである。
+
+**修復の対象はResumeの時点のcurrent window — 確定(2026-11-03)。** `=<名前>:`が指すcurrent windowだけを見て、
+未設定ならそこへ入れる。§4.1の1 worktree = 1 windowの運用ではcurrent windowがアプリの作ったwindowである。
+ユーザーがtmuxのキーでwindowを足した場合は、足した未設定のwindowへ`smallest`を入れることも、アプリのwindowを
+直し損ねることもありうる。全windowを対象にする案と、作ったwindowのIDを保存する案は、この運用の外の場合のために
+変更が大きくなるので採らない。
 
 **例外: `detach-on-destroy`は無条件に入れ直す — 確定(2026-11-03)。** Terminalはsession生成時に、session単位で
 `detach-on-destroy on`を設定する。Resumeのたびにも、未設定かどうかを問わず`on`を入れ直し、そのsessionに
@@ -551,6 +560,10 @@ tmuxサーバを共有する(§4.1)ため、シェルと別のtmuxを拾うと�
 
 どちらもアプリ設定から変更可能とする。tmux側は`window-size`(§4.2)と同じくsession単位で設定し、サーバ全体のglobal option(`-g`)としては設定しない。ユーザーが自分で作った他のsessionへ波及させないためである。
 
+**アプリ側の製品既定の与え方 — 確定(2026-11-03、Issue #335)。** `scrollback-limit`の製品既定はアプリのコードがlibghosttyへ与え、libghosttyのコンパイル既定に頼らない(v1.3.1のコンパイル既定も10,000,000で、値が偶然一致しているだけであり、refを上げたときに黙って変わりうるため)。libghosttyのC APIには値を1つ設定する関数が無いので、製品既定を一時ファイルに書き出して`ghostty_config_load_file`で読み込む。読み込む順序は製品既定が先、§21.6のこのアプリ用の設定ファイルが後で、ユーザーはそのファイルで製品既定を上書きできる。ghostty本体向けの設定ファイルは読まない(§21.6)ので、別アプリの設定で黙って上書きされることは無い。製品既定を書き出せなければ、libghosttyの既定に頼った設定は作らず、端末の初期化の失敗(他の初期化の失敗と同じく、そのプロセスでは端末を表示できない)として扱う。
+
+この方式で残る弱点は2つある。書き出した後の読み込みが失敗した場合(ファイルが消えた・開けない)、C APIは結果を返さずdiagnosticsも積まないので、検出できずにlibghosttyの既定で動く。また、ユーザーが設定ファイルに値を空にした`scrollback-limit =`を書くと、製品既定ではなくlibghosttyのコンパイル既定に戻る(ghosttyの設定構文で空の値は既定へ戻す意味を持つため)。`scrollback-limit`は`usize`で、v1.3.1の`ghostty_config_get`の対象外のため、実際に効いている値をアプリから読み戻して確かめることもできない(Issue #335)。
+
 Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
 
 - **`scrollback-limit`(バイト)がほぼそのまま常駐メモリ増になる。** 既定の10MBで1 surfaceあたり最大+17MB、100MBにすると+103MB。上限に達すると頭から捨てられ、それ以上は増えない(上限として正しく機能している)。
@@ -830,8 +843,11 @@ snapshot内では出所を区別して表示する。区別はcommit済み／sta
 (§7.1のFile Browserがignoredを列挙することとは別の判断で、Diffは対象外)。
 
 **submodule内のuntrackedファイルは観測しない — 確定(2026-10-08)。** `--ignore-submodules=untracked`
-(gitの既定と同じ値)を明示して観測する。ユーザーが自分の端末で`git diff`した結果と揃えるためで、
-値を明示するのはユーザーのgit設定に観測を左右させないためである。submodule内の追跡ファイルの変更で
+を、Diffが使う`git diff`と`git status`の両方に明示して観測する。ユーザーが自分の端末で`git diff`した結果と揃えるためで、
+値を明示するのはユーザーのgit設定に観測を左右させないためである。`untracked`は`git diff`の既定と同じ値だが、`git status`の既定は
+submodule内のuntrackedも報告するので、status側は`git diff`に揃えるための選択である(2026-11-03、Issue #285。git 2.50.1と2.56.0で計測)。
+Close時の安全確認(§3.4)とFile Browser(§7.1)はこの決定の対象外で、submodule内のuntrackedも未保存の作業として検出するため
+`--ignore-submodules=none`を明示する。submodule内の追跡ファイルの変更で
 現れる`-dirty`のエントリを、通常のファイルではなくsubmoduleとして識別する修正は、この決定とは別にIssue #368で扱う。
 
 **競合(unmerged) — 確定(2026-09-08)。** マージ／rebase中の競合ファイルは一覧とDiffに表示するが、
@@ -1914,7 +1930,7 @@ Gate 1を通過した版数から黙ってずれないこと、CIがxcframework�
 
 **この節は実装済みの事実の記録であり、§21章の状態(現在の推奨)を変えるものではない。**
 
-macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-terminal/config`から読む。書式はghosttyの設定構文で、ファイルが無ければ何も読まない。`ghostty_config_load_file`で1プロセスにつき1回だけ読み込む(libghosttyの設定はプロセス全体で共有されるため、§21.5のrenderer隔離の内側で完結する)。
+macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-terminal/config`から読む。書式はghosttyの設定構文で、ファイルが無ければ何も読まない(このファイルより先に、§4.4の製品既定をアプリが読み込ませる)。`ghostty_config_load_file`で1プロセスにつき1回だけ読み込む(libghosttyの設定はプロセス全体で共有されるため、§21.5のrenderer隔離の内側で完結する)。
 
 **`ghostty_config_load_default_files`は呼ばない。** vendored libghostty v1.3.1の実体(`src/config/Config.zig`の`loadDefaultFiles`、`src/config/file_load.zig`)では、これがmacOSで読むのは次の4経路である。
 
@@ -2479,6 +2495,7 @@ PR_READY
 - [x] tmuxが見つからなければ探した場所と導入手順を案内し、設定で実行ファイルのパスを上書きできる。アプリからインストールしない
 - [x] Resume時はTerminalが適用するはずのoptionが未設定のときだけ適用し直し、ユーザーが設定した値は上書きしない
 - [x] 例外として`detach-on-destroy on`はResumeのたびに無条件に入れ直す(sessionが消えたときの誤入力を防ぐ。2026-11-03)
+- [x] Resume時の`window-size`の修復はcurrent windowだけを見て、未設定(`show-options -w`の出力が空)なら入れる(2026-11-03)
 - [x] session用意に失敗したタブは`再試行`操作を出し、自動では再試行しない
 - [x] attachが終わったタブは明示操作で再接続し、sessionが消えていれば保証付きで作り直す。自動再attachはしない
 - [x] attachが終わったタブは自動では閉じず、消えるのは人がCloseしたときだけ
@@ -2488,6 +2505,7 @@ PR_READY
 - [x] gitのサポート下限は2.39、下限未満は警告のみで拒否しない
 - [x] paneへのテキスト注入は`load-buffer` + `paste-buffer -p`、受け側次第で実行され得ることは残存リスクとして受容
 - [x] `scrollback-limit` 10MBと`history-limit` 10000を製品既定として明示(tmux側はsession単位)
+- [x] アプリ側の製品既定はコードからlibghosttyへ与え、このアプリ用の設定ファイルで上書きできる(2026-11-03)
 - [x] 代表状態はNeeds Attention／Ready for Reviewへ即時反映、`Idle`／`Unknown`へ入る遷移は遷移元を問わず9秒保持
 - [x] Adapterが使う信号はGate 3の混同行列に数字が残るものに限る
 - [x] Claude Code／Codexの初回起動時trust promptはPermission信号に含め、タブ優先度で`Needs Attention`として扱う(信号採用時のfixture化・再採点は§12.5に従う)

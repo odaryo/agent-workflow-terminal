@@ -76,6 +76,8 @@ final class ProjectsModel: ObservableObject {
   }
 
   private func load() async {
+    async let tmuxVersionWarning = Self.tmuxVersionWarning(runner: dependencies.tmuxRunner)
+    async let gitVersionWarning = Self.gitVersionWarning()
     var restored = ProjectRegistry()
     if let store {
       do {
@@ -101,15 +103,33 @@ final class ProjectsModel: ObservableObject {
     case .directory(let directory): await register(directory: directory)
     }
 
-    if let applicationSupportWarning = dependencies.applicationSupportWarning {
-      warning = [applicationSupportWarning, warning].compactMap { $0 }.joined(separator: "\n")
-    }
-    if let tmuxError = dependencies.tmuxError {
-      warning = [tmuxError, warning].compactMap { $0 }.joined(separator: "\n")
-    }
+    let startupWarnings = await [
+      tmuxVersionWarning, gitVersionWarning, dependencies.tmuxError,
+      dependencies.applicationSupportWarning, warning,
+    ].compactMap { $0 }
+    warning = startupWarnings.isEmpty ? nil : startupWarnings.joined(separator: "\n")
     registry.reselect(selectable: isSelectable)
     didLoad = true
     save()
+  }
+
+  nonisolated private static func tmuxVersionWarning(runner: TmuxRunner?) async -> String? {
+    guard let runner else { return nil }
+    do {
+      return ToolVersionWarnings.tmux(.success(try await runner.version(timeout: .seconds(5))))
+    } catch {
+      return ToolVersionWarnings.tmux(.failure(error))
+    }
+  }
+
+  nonisolated private static func gitVersionWarning() async -> String? {
+    do {
+      let support = try await GitVersion.detect(
+        processRunner: FoundationProcessRunner(), timeout: .seconds(5))
+      return ToolVersionWarnings.git(.success(support))
+    } catch {
+      return ToolVersionWarnings.git(.failure(error))
+    }
   }
 
   /// `--project` と「Project を追加…」の両方の入口。重複なら既存を選択する。

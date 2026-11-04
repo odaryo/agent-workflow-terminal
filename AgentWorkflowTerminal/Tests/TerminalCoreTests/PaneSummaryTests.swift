@@ -75,6 +75,13 @@ struct PaneSummaryTests {
     #expect(AgentStampedValue.parse(raw) == .malformed(violation))
   }
 
+  @Test(
+    "PID の後ろが見えない scalar だけなら本文が空として棄却する (設計書 §12.7)",
+    arguments: ["123 \u{FEFF}", "123 \u{3164}"])
+  func rejectsInvisibleOnlyStampedText(raw: String) {
+    #expect(AgentStampedValue.parse(raw) == .malformed(.emptyText))
+  }
+
   // MARK: - 現在地 (@awt_status) と PID 照合
 
   @Test("現在の Agent プロセスの PID と一致した現在地だけを受理する")
@@ -168,6 +175,20 @@ struct PaneSummaryTests {
     ])
   func purposeEdgeCases(raw: String, expected: PaneSummaryEntry<String>) {
     #expect(summary(readings(purpose: raw)).purpose == expected)
+  }
+
+  @Test(
+    "目的が見えない scalar だけなら空白として棄却する (設計書 §12.7)",
+    arguments: ["\u{FEFF}", "\u{200B}", "\u{3164}", "\u{FE0F}", " \u{FEFF} "])
+  func discardsInvisibleOnlyPurpose(raw: String) {
+    #expect(summary(readings(purpose: raw)).purpose == .discarded(.malformed(.blank)))
+  }
+
+  @Test(
+    "目的の U+2800 と見える文字を含む書式文字の混在値はそのまま受理する (設計書 §12.7)",
+    arguments: ["\u{2800}", "a\u{FEFF}"])
+  func acceptsPurposeWithBraillePatternBlankOrVisibleContent(raw: String) {
+    #expect(summary(readings(purpose: raw)).purpose == .accepted(raw))
   }
 
   // MARK: - タスク完了 (@awt_done)

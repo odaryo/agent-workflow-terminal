@@ -231,6 +231,28 @@ struct AgentPaneOverviewTests {
   }
 
   @Test(
+    "default-ignorable と空白だけの pane title は表示しない (設計書 §12.7)",
+    arguments: [
+      "\u{3164}", "\u{115F}\u{1160}", "\u{FFA0}", "\u{FE0F}", "\u{E0100}", "\u{034F}",
+      " \u{3164} ",
+    ])
+  func defaultIgnorableOnlyDisplayTitleIsNil(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test("U+2800 は見えない scalar の対象外として pane title にそのまま表示する (設計書 §12.7)")
+  func displayTitlePreservesBraillePatternBlank() {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: "\u{2800}") == "\u{2800}")
+  }
+
+  @Test(
+    "見える文字と default-ignorable が混ざった pane title はそのまま表示する (設計書 §12.7)",
+    arguments: ["a\u{FE0F}", "\u{3164}abc"])
+  func displayTitlePreservesDefaultIgnorablesWithVisibleContent(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == raw)
+  }
+
+  @Test(
     "見える文字と書式文字 (Cf) が混ざった pane title はそのまま表示する (設計書 §12.7)",
     arguments: [
       ("\u{202E}abc", "\u{202E}abc"),

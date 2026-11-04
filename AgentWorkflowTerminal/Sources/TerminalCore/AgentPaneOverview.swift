@@ -37,9 +37,14 @@ public struct OverviewPaneDetail: Sendable, Hashable {
 
   /// 1行に出せない値を表示しないため、前後の空白と改行を除いた後に残った制御文字 (Cc) と行区切りを拒否する
   /// (設計書 §12.7)。`@awt_*` の読み取りと違い、末尾の CR などは除いて受理する。
+  /// Cf と空白だけでは見えない title が placeholder「目的」を消すため表示しない。
+  /// アプリが書かない pane title だけの判定で、`@awt_purpose` の読み書きの判定には加えない。
   public static func displayTitle(fromPaneTitle raw: String) -> String? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty,
+      !trimmed.unicodeScalars.allSatisfy({
+        $0.properties.generalCategory == .format || CharacterSet.whitespacesAndNewlines.contains($0)
+      }),
       !trimmed.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine)
     else { return nil }
     return trimmed

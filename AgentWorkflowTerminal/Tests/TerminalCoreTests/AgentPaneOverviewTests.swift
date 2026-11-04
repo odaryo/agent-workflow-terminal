@@ -224,7 +224,7 @@ struct AgentPaneOverviewTests {
   }
 
   @Test(
-    "書式文字 (Cf) と空白だけの pane title は表示しない (設計書 §12.7)",
+    "default-ignorable な書式文字と空白だけの pane title は表示しない (設計書 §12.7)",
     arguments: ["\u{FEFF}", "\u{200B}", " \u{FEFF} ", "\u{FEFF}\u{200B}", "\u{FEFF} \u{FEFF}"])
   func formatOnlyDisplayTitleIsNil(raw: String) {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
@@ -238,6 +238,13 @@ struct AgentPaneOverviewTests {
     ])
   func defaultIgnorableOnlyDisplayTitleIsNil(raw: String) {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test(
+    "見える字形を持つ Cf と空白に続く結合文字の pane title は trim 後の値を表示する (設計書 §12.7)",
+    arguments: [("\u{6DD}", "\u{6DD}"), (" \u{301}", "\u{301}")])
+  func displayTitlePreservesVisibleFormatOrCombiningCharacter(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
   }
 
   @Test("U+2800 は見えない scalar の対象外として pane title にそのまま表示する (設計書 §12.7)")

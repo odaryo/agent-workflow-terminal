@@ -123,11 +123,13 @@ public enum PaneSummaryFormatViolation: Sendable, Hashable, Codable {
   }
 
   /// 読み取り側が未設定と扱う値を書かず、見えない title が placeholder「目的」を消さないよう、
-  /// 読み取り・書き込み・title の表示で共有する。U+2800 は default-ignorable ではないので対象外。
+  /// 読み取り・書き込み・title の表示で共有する。
+  /// default-ignorable でない Cf は U+06DD などの見える字形を持つため、Cf を条件にしない。
+  /// U+2800 は default-ignorable でも空白でもなく、字形を測らずに見えないと決める規則を
+  /// 持たないため対象外とする。
   public static func isInvisibleOnly(_ text: String) -> Bool {
     text.unicodeScalars.allSatisfy {
-      $0.properties.generalCategory == .format
-        || $0.properties.isDefaultIgnorableCodePoint
+      $0.properties.isDefaultIgnorableCodePoint
         || CharacterSet.whitespacesAndNewlines.contains($0)
     }
   }

@@ -350,6 +350,22 @@ struct TmuxPanePurposeWriterTests {
   }
 
   @Test(
+    "見える字形を持つ Cf と空白に続く結合文字の目的は値として書く (設計書 §12.7)",
+    arguments: ["\u{6DD}", " \u{301}"])
+  func writesPurposeWithVisibleFormatOrCombiningCharacter(text: String) async throws {
+    let (writer, spy) = try makeWriter()
+    try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
+
+    #expect(
+      await spy.invocations == [
+        [
+          "-u", "-L", "purpose-test", "set-option", "-p", "-t", "%3", "--", "@awt_purpose",
+          text,
+        ]
+      ])
+  }
+
+  @Test(
     "目的の U+2800 と見える文字を含む書式文字の混在値はそのまま書く (設計書 §12.7)",
     arguments: ["\u{2800}", "a\u{FEFF}"])
   func writesPurposeWithBraillePatternBlankOrVisibleContent(text: String) async throws {

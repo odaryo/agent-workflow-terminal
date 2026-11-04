@@ -37,18 +37,32 @@ public struct OverviewPaneDetail: Sendable, Hashable {
 
   /// 1行に出せない値を表示しないため、前後の空白と改行を除いた後に残った制御文字 (Cc) と行区切りを拒否する
   /// (設計書 §12.7)。`@awt_*` の読み取りと違い、末尾の CR などは除いて受理する。
+  /// 記号直後の空白除去で改行や制御文字が消えて拒否をすり抜けないよう、接頭辞の除去前に検証する。
+  /// fish の `~/…` などを壊さないよう接頭辞の記号は So に限り、`★重要` のような語の一部を
+  /// 削らないよう直後に空白がある場合だけ除く。
   /// Cf と `whitespacesAndNewlines` (U+200B を含み、`Character.isWhitespace` とは別の集合) だけの title は、
   /// 見えないのに placeholder「目的」を消すため表示しない。
   /// アプリが書かない pane title だけの判定で、`@awt_purpose` の読み書きの判定には加えない。
   public static func displayTitle(fromPaneTitle raw: String) -> String? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty,
-      !trimmed.unicodeScalars.allSatisfy({
-        $0.properties.generalCategory == .format || CharacterSet.whitespacesAndNewlines.contains($0)
-      }),
-      !trimmed.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine)
+    guard !trimmed.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine)
     else { return nil }
-    return trimmed
+    let symbols = trimmed.prefix {
+      $0.unicodeScalars.first?.properties.generalCategory == .otherSymbol
+    }
+    let whitespace = trimmed[symbols.endIndex...].prefix { $0.isWhitespace }
+    let title =
+      if !symbols.isEmpty && !whitespace.isEmpty {
+        String(trimmed[whitespace.endIndex...])
+      } else {
+        trimmed
+      }
+    guard !title.isEmpty,
+      !title.unicodeScalars.allSatisfy({
+        $0.properties.generalCategory == .format || CharacterSet.whitespacesAndNewlines.contains($0)
+      })
+    else { return nil }
+    return title
   }
 }
 

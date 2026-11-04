@@ -24,7 +24,7 @@ struct OverviewPaneRow: View {
         Button(action: reveal) {
           HStack(spacing: 6) {
             AgentStateIcon(presentation: presentation)
-            Text(name).monospacedDigit().frame(minWidth: 44, alignment: .leading)
+            Text(name).monospacedDigit()
           }
           .contentShape(.rect)
         }
@@ -39,19 +39,25 @@ struct OverviewPaneRow: View {
           .onSubmit(submit)
           .onExitCommand { isEditing = false }
           .accessibilityLabel("目的")
+          .frame(maxWidth: .infinity)
 
-        Button(action: reveal) {
-          HStack(spacing: 6) {
-            Text(pane.detail.status ?? "").foregroundStyle(.secondary).lineLimit(1)
-              .frame(maxWidth: .infinity, alignment: .leading)
-            if pane.detail.isTaskCompleted {
-              AgentStateIcon(presentation: .taskCompleted)
+        // 空の現在地にも幅を割くと、目的欄が狭いサイドバーで数文字分まで縮む (#604)。
+        if pane.detail.status != nil || pane.detail.isTaskCompleted {
+          Button(action: reveal) {
+            HStack(spacing: 6) {
+              if let status = pane.detail.status {
+                Text(status).foregroundStyle(.secondary).lineLimit(1)
+                  .frame(maxWidth: .infinity, alignment: .leading)
+              }
+              if pane.detail.isTaskCompleted {
+                AgentStateIcon(presentation: .taskCompleted)
+              }
             }
+            .contentShape(.rect)
           }
-          .contentShape(.rect)
+          .buttonStyle(.plain)
+          .accessibilityLabel(statusAccessibilityLabel)
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(statusAccessibilityLabel)
       }
       if let error {
         Text(error).font(.caption).foregroundStyle(.red)

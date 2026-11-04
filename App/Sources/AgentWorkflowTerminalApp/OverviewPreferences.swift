@@ -25,6 +25,20 @@ enum OverviewPresentation: String, CaseIterable {
   }
 }
 
+enum OverviewProjectPreferences {
+  static let collapsedProjectsKey = "overview.collapsedProjects"
+
+  static func collapsedProjects(storedValue: String) -> Set<String> {
+    let data = Data(storedValue.utf8)
+    return Set((try? JSONDecoder().decode([String].self, from: data)) ?? [])
+  }
+
+  static func storedValue(for collapsedProjects: Set<String>) -> String? {
+    guard let data = try? JSONEncoder().encode(collapsedProjects.sorted()) else { return nil }
+    return String(decoding: data, as: UTF8.self)
+  }
+}
+
 enum OverviewSidebarPreferences {
   static let isOpenKey = "overview.sidebar.isOpen"
   static let widthKey = "overview.sidebar.width"

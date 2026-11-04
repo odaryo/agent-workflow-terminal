@@ -128,7 +128,7 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
-  /// 空 (空白だけ) は削除 (`TmuxPanePurposeWriter.setPurpose`)。
+  /// `PaneSummaryFormatViolation.isInvisibleOnly` が真なら削除。
   func setPurpose(_ text: String, of pane: PaneID) async -> TmuxPanePurposeWriterError? {
     guard let purposeWriter else { return nil }
     do {

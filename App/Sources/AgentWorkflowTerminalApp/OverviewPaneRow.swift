@@ -107,7 +107,7 @@ struct OverviewPaneRow: View {
         return
       }
       error = nil
-      written = text.allSatisfy(\.isWhitespace) ? "" : text
+      written = PaneSummaryFormatViolation.isInvisibleOnly(text) ? "" : text
       isEditing = false
     }
   }

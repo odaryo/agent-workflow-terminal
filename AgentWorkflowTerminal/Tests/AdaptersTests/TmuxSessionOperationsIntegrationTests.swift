@@ -54,6 +54,62 @@ struct TmuxSessionOperationsIntegrationTests {
     }
   }
 
+  @Test("create を通さず作った session の未設定 window-size を smallest に修復する")
+  func repairsUnsetWindowSizeForExistingSession() async throws {
+    try await withServer("session-resume-size") { runner, _ in
+      let name = try sessionName()
+      _ = try await runner.run(arguments: ["new-session", "-d", "-s", name.rawValue])
+
+      let result = try await TmuxSessionOperations(runner: runner).ensureWindowSizeIfUnset(
+        session: name)
+
+      #expect(result == .applied(.smallest))
+      #expect(
+        try await lines(
+          runner, ["show-options", "-w", "-t", "=\(name.rawValue):", "-v", "window-size"])
+          == ["smallest"])
+    }
+  }
+
+  @Test("ユーザーが window 単位で設定した largest を Resume 時に保持する")
+  func keepsUserWindowSizeForExistingSession() async throws {
+    try await withServer("session-resume-user-size") { runner, _ in
+      let name = try sessionName()
+      _ = try await runner.run(arguments: ["new-session", "-d", "-s", name.rawValue])
+      _ = try await runner.run(
+        arguments: ["set-option", "-w", "-t", "=\(name.rawValue):", "window-size", "largest"])
+
+      let result = try await TmuxSessionOperations(runner: runner).ensureWindowSizeIfUnset(
+        session: name)
+
+      #expect(result == .keptExisting("largest"))
+      #expect(
+        try await lines(
+          runner, ["show-options", "-w", "-t", "=\(name.rawValue):", "-v", "window-size"])
+          == ["largest"])
+    }
+  }
+
+  @Test("global が manual でも window 単位の未設定を修復し global は保持する")
+  func repairsUnsetWindowSizeWithoutChangingGlobal() async throws {
+    try await withServer("session-resume-global-size") { runner, _ in
+      _ = try await runner.run(arguments: ["set-option", "-gw", "window-size", "manual"])
+      let name = try sessionName()
+      _ = try await runner.run(arguments: ["new-session", "-d", "-s", name.rawValue])
+
+      let result = try await TmuxSessionOperations(runner: runner).ensureWindowSizeIfUnset(
+        session: name)
+
+      #expect(result == .applied(.smallest))
+      #expect(
+        try await lines(
+          runner, ["show-options", "-w", "-t", "=\(name.rawValue):", "-v", "window-size"])
+          == ["smallest"])
+      #expect(
+        try await lines(runner, ["show-options", "-gw", "-v", "window-size"]) == ["manual"])
+    }
+  }
+
   @Test("作成した session は最初の pane に history-limit が、残った window に window-size が効く")
   func createdSessionAppliesProductDefaultsWhereTheyTakeEffect() async throws {
     try await withServer("session-create") { runner, workingDirectory in

@@ -35,12 +35,17 @@ func requireClickTarget(at point: CGPoint, pid: pid_t) {
 }
 
 MainActor.assumeIsolated {
-  let args = CommandLine.arguments
+  var args = CommandLine.arguments
+  let isRight = args.count == 4 && args[3] == "--right"
+  if isRight { args.removeLast() }
   guard args.count == 3, let x = Double(args[1]), let y = Double(args[2]),
     Float(x).isFinite, Float(y).isFinite
   else {
-    fail("使い方: ui-click.swift <x> <y>", code: 2)
+    fail("使い方: ui-click.swift <x> <y> [--right]", code: 2)
   }
+  let button: CGMouseButton = isRight ? .right : .left
+  let (downType, upType): (CGEventType, CGEventType) =
+    isRight ? (.rightMouseDown, .rightMouseUp) : (.leftMouseDown, .leftMouseUp)
   let processName = "AgentWorkflowTerminalApp"
   let applications = NSWorkspace.shared.runningApplications.filter {
     $0.executableURL?.lastPathComponent == processName || $0.localizedName == processName
@@ -58,16 +63,17 @@ MainActor.assumeIsolated {
   // down/up の前にカーソルを運ぶ。移動なしで down を送ると、hover 状態を前提にした
   // ヒットテストが直前の位置のまま解決されることがある。
   CGEvent(
-    mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left
+    mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point,
+    mouseButton: button
   )?.post(tap: .cghidEventTap)
   usleep(120_000)
 
-  for type in [CGEventType.leftMouseDown, .leftMouseUp] {
+  for type in [downType, upType] {
     let event = CGEvent(
-      mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
+      mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)
     // クリック回数を明示しないと double click 扱いになる連投がある。
     event?.setIntegerValueField(.mouseEventClickState, value: 1)
-    if type == .leftMouseDown {
+    if type == downType {
       requireClickTarget(at: point, pid: application.processIdentifier)
     }
     event?.post(tap: .cghidEventTap)

@@ -21,6 +21,10 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「Ag
   click <x> <y>         activate 後、座標上のアプリを確認して実 HID クリックを送る
   click-text <文字列> [--exact] [--role AXRole]
                         find した要素の中心を activate してから click する
+  right-click <x> <y>   click と同じ確認をしてから実 HID の右クリックを送る
+  right-click-text <文字列> [--exact] [--role AXRole]
+                        find した要素の中心を activate してから right-click する
+                        (開いたメニューは texts の AXMenuItem で読み、Esc で閉じる)
   expect <文字列> [--exact] [--role AXRole]
                         find で見つかれば成功、無ければ失敗 (ボタン・タブ・sheet も対象)
   type <文字列>          今フォーカスがある所へ打鍵する (改行は拒否する)
@@ -73,9 +77,16 @@ app_click_text() {
   app_click "$(echo "$geom" | awk '{print $1 + int($3 / 2)}')" "$(echo "$geom" | awk '{print $2 + int($4 / 2)}')"
 }
 
+app_right_click_text() {
+  local geom
+  geom=$(app_find "$@") || return 1
+  app_click "$(echo "$geom" | awk '{print $1 + int($3 / 2)}')" "$(echo "$geom" | awk '{print $2 + int($4 / 2)}')" --right
+}
+
+# 3つ目の引数 --right で右クリックにする。宛先の pid の確認は左右で同じ。
 app_click() {
   app_activate
-  swift "$SCRIPT_DIR/ui-click.swift" "$1" "$2" || return 1
+  swift "$SCRIPT_DIR/ui-click.swift" "$1" "$2" ${3:+"$3"} || return 1
   sleep 1
 }
 
@@ -294,6 +305,14 @@ case "$command" in
   click-text)
     [ $# -ge 1 ] || die "click-text には検索する文字列が必要です"
     app_click_text "$@"
+    ;;
+  right-click)
+    [ $# -ge 2 ] || die "right-click には x と y が必要です"
+    app_click "$1" "$2" --right
+    ;;
+  right-click-text)
+    [ $# -ge 1 ] || die "right-click-text には検索する文字列が必要です"
+    app_right_click_text "$@"
     ;;
   expect)
     [ $# -ge 1 ] || die "expect には検索する文字列が必要です"

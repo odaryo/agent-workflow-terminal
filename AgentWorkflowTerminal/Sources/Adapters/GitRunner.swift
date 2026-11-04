@@ -75,6 +75,11 @@ public enum GitUntrackedFilesMode: String, Sendable, Equatable {
   case all
 }
 
+public enum GitIgnoreSubmodulesMode: String, Sendable, Equatable {
+  case none
+  case untracked
+}
+
 /// internal initializer により、モジュール外から書き込み subcommand を注入できない (§17.2)。
 public struct GitReadCommand: Sendable, Equatable {
   public let arguments: [String]
@@ -87,15 +92,18 @@ public struct GitReadCommand: Sendable, Equatable {
 
   public static func status(
     includeIgnored: Bool = false,
-    untrackedFiles: GitUntrackedFilesMode = .normal
+    untrackedFiles: GitUntrackedFilesMode = .normal,
+    ignoreSubmodules: GitIgnoreSubmodulesMode = .none
   ) -> Self {
     // user config で観測集合と rename 表現が変わらないよう、形式決定用 option を固定する。
-    // --renames は git 2.18 以降。サポート下限の決定は Issue #83 に委ねる。
-    // `--ignore-submodules=none` が無いと `diff.ignoreSubmodules=all` で gitlink の変更が
-    // 出力から消える (git 2.50.1 で実測: 巻き戻した gitlink があるのに entry ゼロ)。
+    // --renames は git 2.18 以降。サポート下限 (2.39、設計書 §17.3) はこれより新しい。
+    // 値の明示で `diff.ignoreSubmodules` / `submodule.<name>.ignore` を上書きし、gitlink の
+    // 変更を残す (`untracked` でも出る。git 2.50.1 で実測)。既定の `none` は Close の
+    // 安全確認 (§3.4) と File Browser が submodule 内の untracked を見落とさないため。
     // `status` に `--submodule` は無い (実測: `error: unknown option`)。
     var arguments = [
-      "status", "--porcelain=v2", "--branch", "--renames", "--ignore-submodules=none",
+      "status", "--porcelain=v2", "--branch", "--renames",
+      "--ignore-submodules=" + ignoreSubmodules.rawValue,
       "--untracked-files=" + untrackedFiles.rawValue, "-z",
     ]
     if includeIgnored { arguments.append("--ignored=matching") }
@@ -158,13 +166,15 @@ public struct GitReadCommand: Sendable, Equatable {
   ) -> Self {
     // --no-abbrev は man page に無い否定形。--full-index は patch の index 行にしか効かず、
     // raw OID を config 非依存の完全長にする代替にはならない。
-    // `--ignore-submodules=none` は `diff.ignoreSubmodules=all` による gitlink 欠落を止める。
+    // `untracked` は設計書 §9.1.3 に従う。値の明示で `diff.ignoreSubmodules` /
+    // `submodule.<name>.ignore` を上書きし、どちらが `all` でも gitlink の変更を残す
+    // (git 2.50.1 で実測)。
     // `--submodule` は付けない — raw / numstat は gitlink を常に1件として出すため、
     // `diff.submodule` の値で出力が変わらないことを実測した。
     diff(
       [
         "--no-ext-diff", "--no-textconv", "--find-renames", "--raw", "--numstat", "--no-abbrev",
-        "--ignore-submodules=none", "-z",
+        "--ignore-submodules=untracked", "-z",
       ],
       target,
       pathspec)
@@ -180,12 +190,14 @@ public struct GitReadCommand: Sendable, Equatable {
     // `--submodule=short` が無いと `diff.submodule=diff` で **別 repository (submodule 内) の
     // ファイル**が worktree の変更として並び、その行に付いたコメントがこの worktree に無い
     // パスを指す (§9.2 の誤送信)。`=log` では gitlink の変更が解析不能な1件に化ける。
-    // `--ignore-submodules=none` は `diff.ignoreSubmodules=all` による gitlink 欠落を止める。
+    // `untracked` は設計書 §9.1.3 に従う。値の明示で `diff.ignoreSubmodules` /
+    // `submodule.<name>.ignore` を上書きし、どちらが `all` でも gitlink の変更を残す
+    // (git 2.50.1 で実測)。
     let patched = diff(
       [
         "--no-ext-diff", "--no-textconv", "--find-renames", "--patch", "--no-color",
         "--full-index", "--src-prefix=a/", "--dst-prefix=b/", "--submodule=short",
-        "--ignore-submodules=none",
+        "--ignore-submodules=untracked",
       ],
       target,
       pathspec)
@@ -247,19 +259,32 @@ public struct GitRunner: Sendable {
     else {
       throw .invalidRepositoryDirectory(repositoryDirectory)
     }
-    guard let executableURL = executableCandidates.first(where: isExecutableFile) else {
+    guard
+      let executableURL = Self.resolveExecutable(
+        candidates: executableCandidates, isExecutableFile: isExecutableFile)
+    else {
       throw .binaryNotFound(candidates: executableCandidates)
     }
     self.repositoryDirectory = repositoryDirectory
     self.processRunner = processRunner
     self.executableURL = executableURL
-    var environment = ["LC_ALL": "C"]
-    for key in ["HOME", "PATH"] where parentEnvironment[key] != nil {
-      environment[key] = parentEnvironment[key]
-    }
     // global/system config は include.path 等を保つ。出力形式に効く config は各 command の
     // 明示 option で固定し、意味を選ぶ range 等とは区別する。
-    self.environment = environment
+    self.environment = Self.restrictedEnvironment(parent: parentEnvironment)
+  }
+
+  static func resolveExecutable(
+    candidates: [URL], isExecutableFile: @Sendable (URL) -> Bool
+  ) -> URL? {
+    candidates.first(where: isExecutableFile)
+  }
+
+  static func restrictedEnvironment(parent: [String: String]) -> [String: String] {
+    var environment = ["LC_ALL": "C"]
+    for key in ["HOME", "PATH"] where parent[key] != nil {
+      environment[key] = parent[key]
+    }
+    return environment
   }
 
   public func run(

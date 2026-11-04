@@ -43,6 +43,41 @@ struct GitSubmoduleConfigIndependenceTests {
     }
   }
 
+  @Test("§9.1.3 submodule 内の untracked だけでは作業ツリーの Diff に現れない", .timeLimit(.minutes(1)))
+  func excludesSubmoduleWithOnlyUntrackedFilesFromDiff() async throws {
+    try await withGitRepository { repository in
+      try await repository.addSubmoduleWithOnlyUntrackedFiles(name: "sub")
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+
+      let result = try await builder.build(
+        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+
+      #expect(result.patchFailures.isEmpty)
+      #expect(result.statusFailures.isEmpty)
+      #expect(result.unreadableUntrackedPaths.isEmpty)
+      #expect(!result.snapshot.sections.flatMap(\.files).contains { $0.path == "sub" })
+      #expect(result.snapshot.isEmpty)
+    }
+  }
+
+  @Test("§3.4 Close は submodule 内の untracked だけでも変更を検出する", .timeLimit(.minutes(1)))
+  func closeDetectsSubmoduleWithOnlyUntrackedFiles() async throws {
+    try await withGitRepository { repository in
+      try await repository.addSubmoduleWithOnlyUntrackedFiles(name: "sub")
+      let scan = try await repository.detector().scan()
+      let target = try #require(scan.detected.first { $0.isProjectRoot })
+      let inspector = GitCloseSafetyInspector(
+        runner: try repository.runner(globalConfig: ""), target: target)
+
+      let result = await inspector.inspect(projectRootBranch: "main")
+
+      #expect(scan.failures.isEmpty)
+      #expect(result.failures.isEmpty)
+      #expect(result.report.inspection.uncommittedChanges == .present)
+    }
+  }
+
   private func observe(
     _ repository: GitTestRepository, globalConfig: String
   ) async throws -> Observation {

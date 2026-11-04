@@ -13,6 +13,22 @@ import Testing
 /// 落とすため、境界へ渡す上限そのものを固定する。
 @Suite("§9.1.3 Diff 取得の出力上限")
 struct DiffSnapshotBuilderOutputLimitTests {
+  @Test("§9.1.3 worktree Diff の status は submodule 内の untracked を除外する")
+  func passesUntrackedSubmoduleModeToStatus() async throws {
+    let spy = OutputLimitSpy()
+    let builder = try DiffSnapshotBuilder(
+      worktreeRoot: URL(fileURLWithPath: "/repo"),
+      processRunner: spy,
+      executableCandidates: [URL(fileURLWithPath: "/usr/bin/git")])
+
+    _ = try await builder.build(
+      .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+
+    let statusCalls = await spy.calls.filter { $0.arguments.contains("status") }
+    try #require(!statusCalls.isEmpty)
+    #expect(statusCalls.allSatisfy { $0.arguments.contains("--ignore-submodules=untracked") })
+  }
+
   @Test("patch には既定ではなく diff 専用の上限を渡す")
   func passesDiffOutputLimit() async throws {
     let spy = OutputLimitSpy()

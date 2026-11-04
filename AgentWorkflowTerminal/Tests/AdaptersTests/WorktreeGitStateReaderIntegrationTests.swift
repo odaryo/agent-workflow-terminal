@@ -6,6 +6,26 @@ import Testing
 
 @Suite("§7.1 実 git と実ファイルシステムでの状態重ね合わせ")
 struct WorktreeGitStateReaderIntegrationTests {
+  @Test("submodule 内の untracked だけでも File Browser は変更を表示する", .timeLimit(.minutes(1)))
+  func detectsSubmoduleWithOnlyUntrackedFiles() async throws {
+    try await withGitRepository { repository in
+      try await repository.addSubmoduleWithOnlyUntrackedFiles(name: "sub")
+      // 開発者の ~/.gitconfig の excludesFile が submodule 内の untracked を隠さないよう、HOME を隔離する。
+      let reader = WorktreeGitStateReader(runner: try repository.runner(globalConfig: ""))
+
+      let result = try await reader.read()
+      let overlay = WorktreeFileGitStateOverlay(entries: result.entries)
+      let submodule = try #require(WorktreeRelativePath("sub"))
+
+      #expect(result.statusParseFailures.isEmpty)
+      #expect(result.conversionFailures.isEmpty)
+      #expect(result.submoduleListingFailure == nil)
+      #expect(
+        overlay.state(for: submodule, kind: .directory)
+          == .tracked(.init(index: .unchanged, worktree: .modified)))
+    }
+  }
+
   /// macOS の git は `core.precomposeunicode` が既定 true で、ディスク上が NFD でも出力は NFC。
   /// 列挙側は FS のバイト列をそのまま返すため、両者を突き合わせられることを実物で固定する。
   @Test("NFD の名前でもディレクトリと配下ファイルの状態が食い違わない", .timeLimit(.minutes(1)))

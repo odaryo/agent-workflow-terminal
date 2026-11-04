@@ -61,6 +61,48 @@ struct GitSubmoduleConfigIndependenceTests {
     }
   }
 
+  @Test("submodule.sub.ignore=all を設定しても Diff の gitlink の観測が動かない", .timeLimit(.minutes(1)))
+  func submoduleIgnoreAllDoesNotChangeDiffOutput() async throws {
+    try await withGitRepository { repository in
+      try await repository.addRewoundSubmodule(name: "sub")
+      let baseline = try await observe(
+        repository, globalConfig: "", untrackedFiles: .all, ignoreSubmodules: .untracked)
+      let baselineStatus = GitStatusPorcelainV2.parse(output: baseline.status)
+      let baselinePatch = UnifiedDiffPatch.parse(output: baseline.patch)
+      #expect(baselineStatus.failures.isEmpty)
+      #expect(baselinePatch.failures.isEmpty)
+      #expect(baselinePatch.files.map(\.path) == ["sub"])
+      #expect(baselinePatch.files.first?.newMode == "160000")
+      #expect(!baseline.summaries.isEmpty)
+      try #require(baselineStatus.status.entries.count == 1)
+      guard case .changed(let changed) = baselineStatus.status.entries[0] else {
+        Issue.record("baseline に gitlink の変更が必要")
+        return
+      }
+      #expect(changed.path == "sub")
+      #expect(
+        changed.submodule
+          == .submodule(
+            commitChanged: true, trackedChanges: false, untrackedChanges: false))
+
+      try await repository.git(["config", "--local", "submodule.sub.ignore", "all"])
+      try await repository.git([
+        "config", "--file", ".gitmodules", "submodule.sub.ignore", "all",
+      ])
+      // .gitmodules 自体の差分を混ぜず、巻き戻した gitlink は commit しない。
+      try await repository.git(["commit", "-q", "--only", "-m", "ignore submodule", ".gitmodules"])
+
+      let observation = try await observe(
+        repository, globalConfig: "", untrackedFiles: .all, ignoreSubmodules: .untracked)
+      let status = GitStatusPorcelainV2.parse(output: observation.status)
+      #expect(observation.patch == baseline.patch)
+      #expect(observation.summaries == baseline.summaries)
+      #expect(status.failures.isEmpty)
+      // 設定を commit すると branch OID が変わるため、変更エントリを比較する。
+      #expect(status.status.entries == baselineStatus.status.entries)
+    }
+  }
+
   @Test("§3.4 Close は submodule 内の untracked だけでも変更を検出する", .timeLimit(.minutes(1)))
   func closeDetectsSubmoduleWithOnlyUntrackedFiles() async throws {
     try await withGitRepository { repository in
@@ -79,13 +121,17 @@ struct GitSubmoduleConfigIndependenceTests {
   }
 
   private func observe(
-    _ repository: GitTestRepository, globalConfig: String
+    _ repository: GitTestRepository, globalConfig: String,
+    untrackedFiles: GitUntrackedFilesMode = .normal,
+    ignoreSubmodules: GitIgnoreSubmodulesMode = .none
   ) async throws -> Observation {
     let runner = try repository.runner(globalConfig: globalConfig)
     let target = GitDiffTarget.workingTree(against: .head)
     return Observation(
       patch: try await runner.run(.diffPatch(target)).stdout,
       summaries: try await runner.run(.diffFileSummaries(target)).stdout,
-      status: try await runner.run(.status()).stdout)
+      status: try await runner.run(
+        .status(untrackedFiles: untrackedFiles, ignoreSubmodules: ignoreSubmodules)
+      ).stdout)
   }
 }

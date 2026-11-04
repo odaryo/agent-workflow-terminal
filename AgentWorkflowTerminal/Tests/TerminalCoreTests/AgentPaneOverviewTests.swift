@@ -166,6 +166,41 @@ struct AgentPaneOverviewTests {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
   }
 
+  @Test(
+    "末尾の NEL・行区切り・TAB は拒否判定の前に除いて表示する (設計書 §12.7)",
+    arguments: [
+      ("title\u{0085}", "title"),
+      ("title\u{2028}", "title"),
+      ("title\t", "title"),
+    ])
+  func displayTitleTrimsTrailingWhitespaceBeforeValidation(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
+  @Test(
+    "末尾でも trim されない ESC・DEL を含む pane title は表示しない (設計書 §12.7)",
+    arguments: ["title\u{1B}", "title\u{7F}"])
+  func displayTitleWithTrailingNonWhitespaceControlIsNil(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test(
+    "書式文字 (Cf) と空白だけの pane title は表示しない (設計書 §12.7)",
+    arguments: ["\u{FEFF}", "\u{200B}", " \u{FEFF} ", "\u{FEFF}\u{200B}"])
+  func formatOnlyDisplayTitleIsNil(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test(
+    "見える文字と書式文字 (Cf) が混ざった pane title はそのまま表示する (設計書 §12.7)",
+    arguments: [
+      ("\u{202E}abc", "\u{202E}abc"),
+      ("a\u{200B}b", "a\u{200B}b"),
+    ])
+  func displayTitlePreservesFormatCharactersWithVisibleContent(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
   @Test("概要の title は既定で nil になり、等価性と Hashable に含まれる (設計書 §12.7)")
   func titleParticipatesInEqualityAndHashing() {
     let empty = OverviewPaneDetail()

@@ -337,6 +337,51 @@ struct TmuxPanePurposeWriterTests {
   }
 
   @Test(
+    "見えない scalar だけの目的は削除 (-u) と同じにする (設計書 §12.7)",
+    arguments: ["\u{FEFF}", "\u{200B}", "\u{3164}", "\u{FE0F}", " \u{FEFF} "])
+  func invisibleOnlyPurposeClears(text: String) async throws {
+    let (writer, spy) = try makeWriter()
+    try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
+
+    #expect(
+      await spy.invocations == [
+        ["-u", "-L", "purpose-test", "set-option", "-p", "-u", "-t", "%3", "@awt_purpose"]
+      ])
+  }
+
+  @Test(
+    "見える字形を持つ Cf と空白に続く結合文字の目的は値として書く (設計書 §12.7)",
+    arguments: ["\u{6DD}", " \u{301}"])
+  func writesPurposeWithVisibleFormatOrCombiningCharacter(text: String) async throws {
+    let (writer, spy) = try makeWriter()
+    try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
+
+    #expect(
+      await spy.invocations == [
+        [
+          "-u", "-L", "purpose-test", "set-option", "-p", "-t", "%3", "--", "@awt_purpose",
+          text,
+        ]
+      ])
+  }
+
+  @Test(
+    "目的の U+2800 と見える文字を含む書式文字の混在値はそのまま書く (設計書 §12.7)",
+    arguments: ["\u{2800}", "a\u{FEFF}"])
+  func writesPurposeWithBraillePatternBlankOrVisibleContent(text: String) async throws {
+    let (writer, spy) = try makeWriter()
+    try await writer.setPurpose(text, of: PaneID(rawValue: "%3"))
+
+    #expect(
+      await spy.invocations == [
+        [
+          "-u", "-L", "purpose-test", "set-option", "-p", "-t", "%3", "--", "@awt_purpose",
+          text,
+        ]
+      ])
+  }
+
+  @Test(
     "改行などの制御文字を含む入力は書かずに拒否する (1行へ正規化しない)",
     arguments: ["1行目\n2行目", "末尾改行\n", "a\tb", "a\u{1B}b", "a\u{2028}b", "a\u{2029}b"])
   func rejectsControlCharacters(text: String) async throws {

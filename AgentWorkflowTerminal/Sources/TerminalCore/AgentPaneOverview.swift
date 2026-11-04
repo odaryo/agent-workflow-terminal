@@ -40,9 +40,6 @@ public struct OverviewPaneDetail: Sendable, Hashable {
   /// 記号直後の空白除去で改行や制御文字が消えて拒否をすり抜けないよう、接頭辞の除去前に検証する。
   /// fish の `~/…` などを壊さないよう接頭辞の記号は So に限り、`★重要` のような語の一部を
   /// 削らないよう直後に空白がある場合だけ除く。
-  /// Cf と `whitespacesAndNewlines` (U+200B を含み、`Character.isWhitespace` とは別の集合) だけの title は、
-  /// 見えないのに placeholder「目的」を消すため表示しない。
-  /// アプリが書かない pane title だけの判定で、`@awt_purpose` の読み書きの判定には加えない。
   public static func displayTitle(fromPaneTitle raw: String) -> String? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine)
@@ -57,11 +54,7 @@ public struct OverviewPaneDetail: Sendable, Hashable {
       } else {
         trimmed
       }
-    guard !title.isEmpty,
-      !title.unicodeScalars.allSatisfy({
-        $0.properties.generalCategory == .format || CharacterSet.whitespacesAndNewlines.contains($0)
-      })
-    else { return nil }
+    guard !PaneSummaryFormatViolation.isInvisibleOnly(title) else { return nil }
     return title
   }
 }

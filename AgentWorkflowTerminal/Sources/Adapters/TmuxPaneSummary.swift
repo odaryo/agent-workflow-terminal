@@ -111,12 +111,12 @@ public struct TmuxPanePurposeWriter: Sendable {
     self.runner = runner
   }
 
-  /// 空文字と空白だけの文字列は削除と同じ (読み取り側がどちらも「未設定」と扱うため)。
+  /// 読み取り側が未設定と扱う値を書かないよう、見えない scalar だけなら削除する。
   public func setPurpose(
     _ text: String, of pane: PaneID
   ) async throws(TmuxPanePurposeWriterError) {
     guard TmuxCapturePane.isWellFormed(pane) else { throw .invalidPaneID(pane) }
-    if text.allSatisfy(\.isWhitespace) {
+    if PaneSummaryFormatViolation.isInvisibleOnly(text) {
       try await clearPurpose(of: pane)
       return
     }

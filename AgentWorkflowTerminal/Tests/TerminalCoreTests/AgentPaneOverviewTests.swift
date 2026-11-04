@@ -224,10 +224,39 @@ struct AgentPaneOverviewTests {
   }
 
   @Test(
-    "書式文字 (Cf) と空白だけの pane title は表示しない (設計書 §12.7)",
+    "default-ignorable な書式文字と空白だけの pane title は表示しない (設計書 §12.7)",
     arguments: ["\u{FEFF}", "\u{200B}", " \u{FEFF} ", "\u{FEFF}\u{200B}", "\u{FEFF} \u{FEFF}"])
   func formatOnlyDisplayTitleIsNil(raw: String) {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test(
+    "default-ignorable と空白だけの pane title は表示しない (設計書 §12.7)",
+    arguments: [
+      "\u{3164}", "\u{115F}\u{1160}", "\u{FFA0}", "\u{FE0F}", "\u{E0100}", "\u{034F}",
+      " \u{3164} ",
+    ])
+  func defaultIgnorableOnlyDisplayTitleIsNil(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test(
+    "見える字形を持つ Cf と空白に続く結合文字の pane title は trim 後の値を表示する (設計書 §12.7)",
+    arguments: [("\u{6DD}", "\u{6DD}"), (" \u{301}", "\u{301}")])
+  func displayTitlePreservesVisibleFormatOrCombiningCharacter(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
+  @Test("U+2800 は見えない scalar の対象外として pane title にそのまま表示する (設計書 §12.7)")
+  func displayTitlePreservesBraillePatternBlank() {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: "\u{2800}") == "\u{2800}")
+  }
+
+  @Test(
+    "見える文字と default-ignorable が混ざった pane title はそのまま表示する (設計書 §12.7)",
+    arguments: ["a\u{FE0F}", "\u{3164}abc"])
+  func displayTitlePreservesDefaultIgnorablesWithVisibleContent(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == raw)
   }
 
   @Test(

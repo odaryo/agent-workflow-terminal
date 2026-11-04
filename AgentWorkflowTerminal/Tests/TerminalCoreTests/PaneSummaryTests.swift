@@ -24,11 +24,14 @@ struct PaneSummaryTests {
 
   // MARK: - `<agent-pid> <text>` の parse
 
-  @Test("先頭の10進数と半角空白1個で PID と本文に分ける")
-  func parsesAgentStampedValue() {
-    #expect(
-      AgentStampedValue.parse("4242 設計｜実装中")
-        == .value(AgentStampedValue(agentProcessID: 4242, text: "設計｜実装中")))
+  @Test(
+    "先頭の10進数と半角空白1個で PID と本文に分け、見える字形を持つ Cf も受理する",
+    arguments: [
+      ("4242 設計｜実装中", AgentStampedValue(agentProcessID: 4242, text: "設計｜実装中")),
+      ("123 \u{6DD}", AgentStampedValue(agentProcessID: 123, text: "\u{6DD}")),
+    ])
+  func parsesAgentStampedValue(raw: String, expected: AgentStampedValue) {
+    #expect(AgentStampedValue.parse(raw) == .value(expected))
   }
 
   @Test("区切りは最初の半角空白1個だけで、残りは本文としてそのまま持つ")
@@ -73,6 +76,13 @@ struct PaneSummaryTests {
     ])
   func rejectsMalformedValue(raw: String, violation: PaneSummaryFormatViolation) {
     #expect(AgentStampedValue.parse(raw) == .malformed(violation))
+  }
+
+  @Test(
+    "PID の後ろが見えない scalar だけなら本文が空として棄却する (設計書 §12.7)",
+    arguments: ["123 \u{FEFF}", "123 \u{3164}"])
+  func rejectsInvisibleOnlyStampedText(raw: String) {
+    #expect(AgentStampedValue.parse(raw) == .malformed(.emptyText))
   }
 
   // MARK: - 現在地 (@awt_status) と PID 照合
@@ -168,6 +178,20 @@ struct PaneSummaryTests {
     ])
   func purposeEdgeCases(raw: String, expected: PaneSummaryEntry<String>) {
     #expect(summary(readings(purpose: raw)).purpose == expected)
+  }
+
+  @Test(
+    "目的が見えない scalar だけなら空白として棄却する (設計書 §12.7)",
+    arguments: ["\u{FEFF}", "\u{200B}", "\u{3164}", "\u{FE0F}", " \u{FEFF} "])
+  func discardsInvisibleOnlyPurpose(raw: String) {
+    #expect(summary(readings(purpose: raw)).purpose == .discarded(.malformed(.blank)))
+  }
+
+  @Test(
+    "目的の U+2800・見える Cf・空白に続く結合文字・見える文字と書式文字の混在値はそのまま受理する (設計書 §12.7)",
+    arguments: ["\u{2800}", "a\u{FEFF}", "\u{6DD}", " \u{301}"])
+  func acceptsPurposeWithBraillePatternBlankOrVisibleContent(raw: String) {
+    #expect(summary(readings(purpose: raw)).purpose == .accepted(raw))
   }
 
   // MARK: - タスク完了 (@awt_done)

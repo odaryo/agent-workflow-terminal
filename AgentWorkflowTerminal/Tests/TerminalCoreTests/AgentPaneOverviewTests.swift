@@ -138,17 +138,53 @@ struct AgentPaneOverviewTests {
   }
 
   @Test(
-    "pane title は接頭辞と途中の空白を保ち、前後の空白と改行だけ除く (設計書 §12.7)",
+    "pane title は接頭辞以外の内容と途中の空白を保ち、前後の空白と改行を除く (設計書 §12.7)",
     arguments: [
-      ("✳ 進捗の確認", "✳ 進捗の確認"),
-      ("  ✳ 作業  ", "✳ 作業"),
       ("\n title \n", "title"),
       ("title\r", "title"),
-      ("~/w/h/ktc-platform", "~/w/h/ktc-platform"),
-      ("✳ 作業  の確認", "✳ 作業  の確認"),
+      ("作業  の確認", "作業  の確認"),
     ])
-  func displayTitlePreservesContent(raw: String, expected: String) {
+  func displayTitlePreservesNonPrefixContent(raw: String, expected: String) {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
+  @Test(
+    "pane title の先頭の So 記号の Character 列と直後の空白列を1回だけ除く (設計書 §12.7)",
+    arguments: [
+      ("✳ 進捗の確認", "進捗の確認"),
+      ("✳ 進捗の検索", "進捗の検索"),
+      ("  ✳ 作業  ", "作業"),
+      ("✳ 作業  の確認", "作業  の確認"),
+      ("✳  作業  の確認", "作業  の確認"),
+      ("✳️ 作業", "作業"),
+      ("⠋ repo", "repo"),
+      ("✳✳ 作業", "作業"),
+      ("✳ ✳ 作業", "✳ 作業"),
+      ("✳\u{3000}作業", "作業"),
+    ])
+  func displayTitleStripsLeadingSymbolPrefixOnce(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
+  @Test(
+    "pane title の空白が続かない記号・So 以外の記号・途中の記号は保つ (設計書 §12.7)",
+    arguments: [
+      ("★重要", "★重要"),
+      ("✳", "✳"),
+      ("~/w/h/ktc-platform", "~/w/h/ktc-platform"),
+      ("$ make", "$ make"),
+      ("^ up", "^ up"),
+      ("a ✳ b", "a ✳ b"),
+    ])
+  func displayTitlePreservesContentWithoutSymbolPrefix(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
+  @Test(
+    "pane title の接頭辞を除いた後も書式文字と空白だけの値や改行を含む値は表示しない (設計書 §12.7)",
+    arguments: ["✳ \u{FEFF}", "✳ a\nb"])
+  func displayTitleValidatesAfterStrippingSymbolPrefix(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
   }
 
   @Test("空か空白と改行だけの pane title は表示しない (設計書 §12.7)", arguments: ["", "   ", "\n"])

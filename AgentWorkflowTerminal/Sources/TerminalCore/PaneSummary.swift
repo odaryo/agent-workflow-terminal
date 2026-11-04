@@ -1,3 +1,5 @@
+import Foundation
+
 /// 連携変数1つぶんの読み取り結果 (設計書 §12.7)。
 ///
 /// - Important: tmux は「未設定」と「空文字を書いた」を区別できない (3.4 / 3.7c とも
@@ -106,7 +108,7 @@ public enum PaneSummaryFormatViolation: Sendable, Hashable, Codable {
   case missingSeparator
   /// 0 または `Int32` に収まらない。
   case agentProcessIDOutOfRange
-  /// PID の後ろが空か空白だけ。
+  /// PID の後ろに見える scalar が無い。
   case emptyText
   /// 本文は1行 (§12.7)。Unicode の制御文字 (Cc: LF / CR / TAB / ESC / U+0085 を含む C1) と
   /// 行区切り・段落区切り (Zl: U+2028 / Zp: U+2029) を拒否する。
@@ -120,11 +122,21 @@ public enum PaneSummaryFormatViolation: Sendable, Hashable, Codable {
     }
   }
 
+  /// 読み取り側が未設定と扱う値を書かず、見えない title が placeholder「目的」を消さないよう、
+  /// 読み取り・書き込み・title の表示で共有する。U+2800 は default-ignorable ではないので対象外。
+  public static func isInvisibleOnly(_ text: String) -> Bool {
+    text.unicodeScalars.allSatisfy {
+      $0.properties.generalCategory == .format
+        || $0.properties.isDefaultIgnorableCodePoint
+        || CharacterSet.whitespacesAndNewlines.contains($0)
+    }
+  }
+
   static func textViolation(_ text: String) -> Self? {
     if text.unicodeScalars.contains(where: breaksSingleLine) {
       return .containsLineBreakOrControlCharacter
     }
-    if text.allSatisfy(\.isWhitespace) { return .blank }
+    if isInvisibleOnly(text) { return .blank }
     return nil
   }
 }

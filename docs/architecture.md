@@ -1368,8 +1368,11 @@ process fallbackについては、**process観測だけでは`Working`と`Idle`�
   変更)。剥がすのは、先頭に並ぶ記号(最初のscalarがUnicodeの一般カテゴリSoであるCharacter)の並びと、
   その直後の空白で、1回だけ行う。直後に空白が無い記号(`★重要`)と記号だけのtitleは剥がさない。So以外の
   記号(`~`・`$`・`^`)は対象外で、fishが書く`~/w/h/…`は変わらない。Agentごとの書式を知らずに済ませる
-  (Agent非依存)ための一般化した規則で、Claude Codeの`✳`(U+2733)もCodexのbraille spinnerも、直後に
-  空白があれば同じ規則で剥がれる。titleはAgent自身が書いた観測値であり、Terminalが推測した要約では
+  (Agent非依存)ための一般化した規則で、Claude Codeの`✳`(U+2733、直後はU+0020。2.1.318で実測)は
+  この規則で剥がれる。Codexのbraille spinner(So)も直後に空白があれば剥がれるが、Codexのtitleの形は
+  未計測である(#589)。So全般が対象なので、ユーザーやshellが書いた`© 2026`・`🚀 Deploy`などの先頭の
+  記号も剥がれる。これは一般化の代償として受け入れる。改行や制御文字を含むtitleは、剥がす前に拒否する
+  (剥がす区間の空白として消して素通りさせないため)。titleはAgent自身が書いた観測値であり、Terminalが推測した要約では
   ない。ただし`@awt_status`と違ってPID照合をしないので、どのプロセスが書いたかは区別しない。値はpane一覧と
   同じ1回の`list-panes`で読み、外部プロセスの起動を増やさない。titleを設定しないAgentのpaneには、tmuxの
   既定のtitle(ホスト名)や、shellや前のAgentが書いたtitle(fishの短縮パスなど)がそのまま出る(tmux 3.8で

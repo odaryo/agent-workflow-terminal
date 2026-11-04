@@ -181,9 +181,12 @@ struct AgentPaneOverviewTests {
   }
 
   @Test(
-    "pane title の接頭辞を除いた後も書式文字と空白だけの値や改行を含む値は表示しない (設計書 §12.7)",
-    arguments: ["✳ \u{FEFF}", "✳ a\nb"])
-  func displayTitleValidatesAfterStrippingSymbolPrefix(raw: String) {
+    "pane title は接頭辞内の制御文字・行区切りも拒否し、接頭辞除去後に書式文字と空白だけなら表示しない (設計書 §12.7)",
+    arguments: [
+      "✳ \u{FEFF}", "✳ a\nb", "✳\n作業", "✳\r\n作業", "✳\t作業", "✳\u{85}作業",
+      "✳\u{2028}作業", "✳\u{2029}作業", "✳ \n作業",
+    ])
+  func displayTitleValidatesBeforeAndAfterStrippingSymbolPrefix(raw: String) {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
   }
 

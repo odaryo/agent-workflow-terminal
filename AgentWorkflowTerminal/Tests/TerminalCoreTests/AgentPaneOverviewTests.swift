@@ -186,7 +186,7 @@ struct AgentPaneOverviewTests {
 
   @Test(
     "書式文字 (Cf) と空白だけの pane title は表示しない (設計書 §12.7)",
-    arguments: ["\u{FEFF}", "\u{200B}", " \u{FEFF} ", "\u{FEFF}\u{200B}"])
+    arguments: ["\u{FEFF}", "\u{200B}", " \u{FEFF} ", "\u{FEFF}\u{200B}", "\u{FEFF} \u{FEFF}"])
   func formatOnlyDisplayTitleIsNil(raw: String) {
     #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
   }

@@ -1366,8 +1366,9 @@ process fallbackについては、**process観測だけでは`Working`と`Idle`�
   Agentがtitleを変えるたびにtmuxへの書き込みが走る。titleは不透明な1行の文字列として扱い、`✳`などの
   接頭辞を剥がさない(Agent非依存)。titleはAgent自身が書いた観測値であり、Terminalが推測した要約では
   ない。ただし`@awt_status`と違ってPID照合をしないので、どのプロセスが書いたかは区別しない。値はpane一覧と
-  同じ1回の`list-panes`で読み、外部プロセスの起動を増やさない。titleを設定しないAgentのpaneは、手入力する
-  まで空欄のままとする。
+  同じ1回の`list-panes`で読み、外部プロセスの起動を増やさない。titleを設定しないAgentのpaneには、tmuxの
+  既定のtitle(ホスト名)や、shellや前のAgentが書いたtitle(fishの短縮パスなど)がそのまま出る(tmux 3.8で
+  実測、Issue #582のレビュー)。
 - **連携由来の情報の寿命はAgentプロセス単位とする — 確定(2026-10-08)。** pane内のAgentプロセスが
   終了するか入れ替わったら、連携由来の現在地とタスク完了を破棄する(手入力の目的は残す)。タスク完了の
   表示は、同じpaneが再び`Working`になったら解除する。「再び`Working`になった」は、応答終了(`Idle`

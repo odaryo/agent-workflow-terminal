@@ -137,11 +137,55 @@ struct AgentPaneOverviewTests {
     #expect(paneIDs(overview.tasks[0]) == ["%1"])
   }
 
-  @Test("概要と位置を行へ渡し、概要がまだ無い pane は空の概要になる")
+  @Test(
+    "pane title は接頭辞と途中の空白を保ち、前後の空白と改行だけ除く (設計書 §12.7)",
+    arguments: [
+      ("✳ 進捗の確認", "✳ 進捗の確認"),
+      ("  ✳ 作業  ", "✳ 作業"),
+      ("\n title \n", "title"),
+      ("title\r", "title"),
+      ("~/w/h/ktc-platform", "~/w/h/ktc-platform"),
+      ("✳ 作業  の確認", "✳ 作業  の確認"),
+    ])
+  func displayTitlePreservesContent(raw: String, expected: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == expected)
+  }
+
+  @Test("空か空白と改行だけの pane title は表示しない (設計書 §12.7)", arguments: ["", "   ", "\n"])
+  func emptyDisplayTitleIsNil(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test(
+    "途中に制御文字か行区切りを含む pane title は表示しない (設計書 §12.7)",
+    arguments: [
+      "a\rb", "a\nb", "a\tb", "a\u{0}b", "a\u{1B}b", "a\u{7F}b", "a\u{85}b",
+      "a\u{2028}b", "a\u{2029}b",
+    ])
+  func multilineOrControlDisplayTitleIsNil(raw: String) {
+    #expect(OverviewPaneDetail.displayTitle(fromPaneTitle: raw) == nil)
+  }
+
+  @Test("概要の title は既定で nil になり、等価性と Hashable に含まれる (設計書 §12.7)")
+  func titleParticipatesInEqualityAndHashing() {
+    let empty = OverviewPaneDetail()
+    let titled = OverviewPaneDetail(title: "x")
+    var changed = titled
+    changed.title = "y"
+
+    #expect(empty.title == nil)
+    #expect(titled.title == "x")
+    #expect(titled != empty)
+    #expect(changed != titled)
+    #expect(titled == OverviewPaneDetail(title: "x"))
+    #expect(Set([empty, titled, changed, OverviewPaneDetail(title: "x")]).count == 3)
+  }
+
+  @Test("概要と位置と title を行へ渡し、概要がまだ無い pane は空の概要になる (設計書 §12.7 / §13)")
   func detailsArePassedThrough() throws {
     let detail = OverviewPaneDetail(
       location: PaneLocation(windowIndex: 1, paneIndex: 2), purpose: "目的", status: "実装中",
-      isTaskCompleted: true)
+      isTaskCompleted: true, title: "✳ 進捗の確認")
     var input = try task("/a/.git/worktrees/t", [pane("%1", .working, 2), pane("%2", .idle, 1)])
     input.details = [PaneID(rawValue: "%1"): detail]
 
@@ -150,7 +194,9 @@ struct AgentPaneOverviewTests {
 
     let panes = overview.tasks[0].rows.compactMap(\.pane)
     #expect(panes.first?.detail == detail)
+    #expect(panes.first?.detail.title == "✳ 進捗の確認")
     #expect(panes.last?.detail == OverviewPaneDetail())
+    #expect(panes.last?.detail.title == nil)
   }
 
   @Test("メイン pane に登録された pane だけに印を付ける")

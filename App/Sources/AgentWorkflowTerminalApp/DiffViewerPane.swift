@@ -226,19 +226,23 @@ struct DiffViewerPane: View {
   }
 
   private var snapshotHistoryMenu: some View {
-    Menu("履歴 (\(model.history.count))") {
+    let summary = model.unsentCommentSummary
+    return Menu("履歴 (\(model.history.count))") {
       ForEach(model.history.snapshots.reversed(), id: \.id) { snapshot in
-        Button(Self.snapshotLabel(snapshot)) { model.showSnapshot(snapshot.id) }
+        Button(Self.snapshotLabel(snapshot, unsentCount: summary.count(in: snapshot.id))) {
+          model.showSnapshot(snapshot.id)
+        }
       }
     }
     .menuStyle(.borderlessButton)
     .fixedSize()
   }
 
-  private static func snapshotLabel(_ snapshot: DiffSnapshot) -> String {
+  private static func snapshotLabel(_ snapshot: DiffSnapshot, unsentCount: Int) -> String {
     let time = snapshot.createdAt.formatted(date: .omitted, time: .standard)
     let state = snapshot.reviewState == .reviewed ? "Reviewed" : "Reviewing"
-    return "\(time) — \(state)"
+    let unsent = unsentCount > 0 ? " — 未送信 \(unsentCount)" : ""
+    return "\(time) — \(state)\(unsent)"
   }
 
   // MARK: - 通知
@@ -255,6 +259,7 @@ struct DiffViewerPane: View {
       if model.isViewingOldSnapshot {
         banner("過去の snapshot を表示しています。", icon: "clock.arrow.circlepath")
       }
+      otherUnsentCommentsBanner
       if let comparison = model.changeSinceOpened, comparison.hasChanges {
         banner(Self.changeMessage(comparison), icon: "exclamationmark.arrow.circlepath")
       }
@@ -275,6 +280,32 @@ struct DiffViewerPane: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  @ViewBuilder
+  private var otherUnsentCommentsBanner: some View {
+    let summary = model.unsentCommentSummary
+    if summary.hasOtherUnsentComments, let snapshot = summary.latestOtherSnapshot {
+      VStack(alignment: .leading, spacing: 2) {
+        banner(Self.unsentCommentsMessage(summary, snapshot: snapshot), icon: "text.bubble")
+        Button("その snapshot を開く") { model.showSnapshot(snapshot.id) }
+          .buttonStyle(.link)
+          .font(.caption)
+          .padding(.horizontal, 8)
+          .padding(.bottom, 3)
+      }
+    }
+  }
+
+  private static func unsentCommentsMessage(
+    _ summary: DiffUnsentCommentSummary, snapshot: DiffSnapshot
+  ) -> String {
+    if summary.otherSnapshotCount == 1 {
+      let time = snapshot.createdAt.formatted(date: .omitted, time: .standard)
+      return "別の snapshot (\(time)) に未送信のコメントが \(summary.otherCommentCount) 件あります。"
+    }
+    return "別の snapshot \(summary.otherSnapshotCount) つに未送信のコメントが計 "
+      + "\(summary.otherCommentCount) 件あります。"
   }
 
   private static func changeMessage(_ comparison: DiffSnapshotComparison) -> String {

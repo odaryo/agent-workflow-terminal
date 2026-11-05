@@ -275,6 +275,7 @@ public func planWorktreeClose(
   case .terminateSession(.keepWorktree):
     return WorktreeClosePlan(worktree: identity, branch: branch, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
+    try requireNoRemovalObstacles(progress.removalObstacles)
     guard let confirmation else { throw .removalNotConfirmed }
     // 対象の一致を問うのは確認を読むここだけである。§3.4 が検査と確認を課すのは選択肢3・4 だけで、
     // 1・2 は確認そのものを要求しない。
@@ -310,5 +311,18 @@ private func requireNoOperationInProgress(
   case .observed(let operations) where !operations.isEmpty:
     throw .operationInProgress(operations)
   case .observed: break
+  }
+}
+
+private func requireNoRemovalObstacles(
+  _ obstacles: WorktreeRemovalObstacles
+) throws(WorktreeClosePlanError) {
+  switch obstacles {
+  case .unknown: throw .removalObstaclesUnknown
+  case .observed(let reason, let paths, let hasModules):
+    if let reason { throw .worktreeLocked(reason: reason) }
+    guard paths.isEmpty, !hasModules else {
+      throw .worktreeContainsSubmodules(paths: paths, hasAdministrativeModules: hasModules)
+    }
   }
 }

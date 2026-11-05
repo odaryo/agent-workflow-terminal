@@ -360,9 +360,10 @@ struct WorktreeCloseExecutorTests {
   /// ので、両方を1回の Close で押さえる。規約は `expectFixedGitInvocation` の doc コメント。
   @Test("書き込みも失敗後の読み直しも timeout と子プロセス環境を固定して撃つ")
   func fixesTimeoutAndEnvironmentForEveryGitInvocation() async throws {
+    let worktreeGit = gitStub()
     let harness = try WorktreeCloseHarness(
-      git: refusedRemovalGitStub(), parentEnvironment: pollutedParentEnvironment)
-
+      git: refusedRemovalGitStub(), worktreeGit: worktreeGit,
+      parentEnvironment: pollutedParentEnvironment)
     _ = try await harness.run(
       try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
@@ -379,14 +380,26 @@ struct WorktreeCloseExecutorTests {
       expectFixedGitInvocation(invocation, timeout: .seconds(30))
     }
     // branch 削除を含む計画では先端の読み直しが1回増える (Issue #359)。
+    let deletingWorktreeGit = gitStub()
     let deleting = try WorktreeCloseHarness(
-      git: refusedRemovalGitStub(), parentEnvironment: pollutedParentEnvironment)
+      git: refusedRemovalGitStub(), worktreeGit: deletingWorktreeGit,
+      parentEnvironment: pollutedParentEnvironment)
     _ = try await deleting.run(
       try deleting.plan(.terminateSession(.removeWorktree(.deleteBranch)), merge: merged(.squash)))
     let deletingPreflight = await deleting.git.preflightInvocations
     #expect(deletingPreflight.count == 5)
     for invocation in deletingPreflight {
       expectFixedGitInvocation(invocation, timeout: .seconds(30))
+    }
+    for git in [worktreeGit, deletingWorktreeGit] {
+      let worktreeInvocations = await git.invocations
+      #expect(
+        worktreeInvocations.map(\.arguments) == [
+          ["--no-optional-locks", "-C", "/repo/wt", "--no-pager", "ls-files", "--stage", "-z"]
+        ])
+      for invocation in worktreeInvocations {
+        expectFixedGitInvocation(invocation, timeout: .seconds(30))
+      }
     }
   }
 }

@@ -76,10 +76,11 @@ public enum GitWorktreeProgressReadError: Error, Sendable, Equatable {
 
 /// Close の拒否条件 (設計書 §3.4) —— HEAD が branch を指しているかと作業途中か —— を読む。
 ///
-/// **git は対象 worktree の管理ディレクトリ (`WorktreeIdentity`) で動かす。** git 2.50.1 実測では、
+/// **HEAD と pseudo ref は対象 worktree の管理ディレクトリ (`WorktreeIdentity`) で問う。** git 2.50.1 実測では、
 /// `git -C <common>/worktrees/<名前>` は作業ツリーで動かしたときと同じ worktree の HEAD と
 /// pseudo ref を答えた。作業ツリーのパスで動かさないのは、答えが安定 ID に結び付くからである ——
 /// 作業ツリーのディレクトリが無くなっても読め、管理ディレクトリが無くなれば rc=128 で失敗する。
+/// 削除の妨げの `ls-files` だけは作業ツリーで問う (§3.4)。管理ディレクトリでの動作は未検証。
 ///
 /// 観測手段の選び方 (Issue #355、git 2.50.1 実測):
 ///
@@ -178,7 +179,37 @@ struct GitWorktreeProgressReader: Sendable {
 
   /// `ls-files` は管理ディレクトリではなく作業ツリーで実行する (§3.4)。
   func removalObstacles() async throws(GitWorktreeProgressReadError) -> WorktreeRemovalObstacles {
-    .observed(lockReason: nil, populatedSubmodules: [])
+    let lockReason: String?
+    if exists("locked") {
+      let contents: String
+      do {
+        contents = try readFile(administrativeDirectory + "/locked")
+      } catch {
+        throw .lockFileUnreadable(path: administrativeDirectory + "/locked")
+      }
+      lockReason = contents.hasSuffix("\n") ? String(contents.dropLast()) : contents
+    } else {
+      lockReason = nil
+    }
+    let hasModules = exists("modules")
+    let output: String
+    do {
+      output = try await worktreeRunner.run(
+        .listFilesStage(), outputLimit: GitRunner.indexListingOutputLimit
+      ).stdout
+    } catch {
+      throw .git(error)
+    }
+    let submodules = GitIndexSubmodules.parse(output: output)
+    guard submodules.failures.isEmpty else { throw .invalidSubmodulePaths(submodules.failures) }
+    let populated = submodules.entries.compactMap { entry -> WorktreeRelativePath? in
+      guard case .submodule(let path) = entry,
+        fileExists(worktreePath + "/" + path.value + "/.git")
+      else { return nil }
+      return path
+    }
+    return .observed(
+      lockReason: lockReason, populatedSubmodules: populated, hasAdministrativeModules: hasModules)
   }
 
   func tip(ofBranch branch: String) async throws(GitWorktreeProgressReadError) -> CommitObjectID {
@@ -244,6 +275,14 @@ extension GitWorktreeProgressReader {
       }
       let inProgress = try await operations()
       guard inProgress.isEmpty else { return .operationInProgress(inProgress) }
+      if removesWorktree,
+        case .observed(let reason, let paths, let hasModules) = try await removalObstacles()
+      {
+        if let reason { return .worktreeLocked(reason: reason) }
+        if !paths.isEmpty || hasModules {
+          return .worktreeContainsSubmodules(paths: paths, hasAdministrativeModules: hasModules)
+        }
+      }
       guard let plannedTip else { return nil }
       let currentTip = try await tip(ofBranch: plannedBranch)
       return currentTip == plannedTip
@@ -297,19 +336,26 @@ public struct GitWorktreeProgressInspector: Sendable {
   }
 
   public func inspect() async -> GitWorktreeProgressInspectionResult {
+    let progress: WorktreeOperationProgress
+    let failure: GitWorktreeProgressReadError?
     do {
-      let operations = try await reader.operations()
-      return .init(
-        report: .init(
-          target: target, progress: .observed(operations),
-          removalObstacles: .observed(lockReason: nil, populatedSubmodules: [])), failure: nil,
-        removalObstaclesFailure: nil)
+      progress = .observed(try await reader.operations())
+      failure = nil
     } catch {
-      return .init(
-        report: .init(
-          target: target, progress: .unknown,
-          removalObstacles: .observed(lockReason: nil, populatedSubmodules: [])), failure: error,
-        removalObstaclesFailure: nil)
+      progress = .unknown
+      failure = error
     }
+    let obstacles: WorktreeRemovalObstacles
+    let obstaclesFailure: GitWorktreeProgressReadError?
+    do {
+      obstacles = try await reader.removalObstacles()
+      obstaclesFailure = nil
+    } catch {
+      obstacles = .unknown
+      obstaclesFailure = error
+    }
+    return .init(
+      report: .init(target: target, progress: progress, removalObstacles: obstacles),
+      failure: failure, removalObstaclesFailure: obstaclesFailure)
   }
 }

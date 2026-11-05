@@ -130,7 +130,7 @@ struct WorktreeCloseHarness {
 
   init(
     tmux: TmuxSessionRunnerStub = .init(result: stubSuccess()),
-    git: WorktreeCloseGitStub = gitStub(),
+    git: WorktreeCloseGitStub = gitStub(), worktreeGit: WorktreeCloseGitStub? = nil,
     orphanedServerProbe: TmuxOrphanedServerProbe = TmuxOrphanedServerProbe(
       runner: OrphanedServerRunnerStub(result: stubFailure(stderr: ""))),
     repositoryDirectory: URL = URL(fileURLWithPath: "/repo"),
@@ -150,7 +150,9 @@ struct WorktreeCloseHarness {
           executableCandidates: [URL(fileURLWithPath: "/test/bin/tmux")], parentEnvironment: [:],
           isExecutableFile: { _ in true })),
       orphanedServerProbe: orphanedServerProbe,
-      processRunner: git, executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
+      processRunner: WorktreeCloseGitRoutingStub(
+        git: git, worktreeGit: worktreeGit ?? git, worktreePath: worktreePath),
+      executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
       parentEnvironment: parentEnvironment, isExecutableFile: { _ in true },
       fileExists: { existingFiles.contains($0) }, readFile: readFile)
   }
@@ -220,5 +222,22 @@ actor WorktreeCloseGitStub: ProcessRunning {
   ) -> ProcessRunResult {
     invocations.append(.init(arguments: arguments, environment: environment, timeout: timeout))
     return handler(arguments)
+  }
+}
+
+struct WorktreeCloseGitRoutingStub: ProcessRunning {
+  let git: WorktreeCloseGitStub
+  let worktreeGit: WorktreeCloseGitStub
+  let worktreePath: String
+
+  func run(
+    executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
+    outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    let runner =
+      arguments.starts(with: ["--no-optional-locks", "-C", worktreePath]) ? worktreeGit : git
+    return await runner.run(
+      executableURL: executableURL, arguments: arguments, environment: environment,
+      timeout: timeout, outputLimit: outputLimit)
   }
 }

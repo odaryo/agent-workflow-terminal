@@ -80,7 +80,8 @@ struct GitWorktreeProgressReaderTests {
   @Test("管理ディレクトリで git を撃ち、どの ref を問うかを固定する")
   func queriesTheAdministrativeDirectory() async throws {
     let git = gitStub()
-    _ = try await inspect(git: git)
+    let worktreeGit = gitStub()
+    _ = try await inspect(git: git, worktreeGit: worktreeGit)
 
     let prefix: [String] = [
       "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
@@ -89,6 +90,10 @@ struct GitWorktreeProgressReaderTests {
     let expected: [[String]] = references.map { prefix + ["rev-parse", "--verify", "--quiet", $0] }
     let actual: [[String]] = await git.arguments
     #expect(actual == expected)
+    #expect(
+      await worktreeGit.arguments == [
+        ["--no-optional-locks", "-C", "/repo/wt", "--no-pager", "ls-files", "--stage", "-z"]
+      ])
   }
 
   /// rc=1 は「無い」という答えだが、rc=128 は答えではない (git 2.50.1 実測: 管理ディレクトリが
@@ -129,14 +134,15 @@ struct GitWorktreeProgressReaderTests {
   }
 
   private func inspect(
-    git: WorktreeCloseGitStub? = nil, references: [String: ProcessRunResult] = [:],
+    git: WorktreeCloseGitStub? = nil, worktreeGit: WorktreeCloseGitStub = gitStub(),
+    references: [String: ProcessRunResult] = [:],
     existingFiles: [String] = []
   ) async throws -> GitWorktreeProgressInspectionResult {
     let target = try WorktreeCloseHarness.detected(identity: Self.administrativeDirectory)
     let paths = Set(existingFiles.map { "\(Self.administrativeDirectory)/\($0)" })
     return await GitWorktreeProgressInspector(
       target: target, runner: try runner(git: git ?? gitStub(references: references)),
-      worktreeRunner: try runner(git: git ?? gitStub()),
+      worktreeRunner: try runner(git: worktreeGit, directory: "/repo/wt"),
       fileExists: { paths.contains($0) }
     ).inspect()
   }
@@ -149,9 +155,11 @@ struct GitWorktreeProgressReaderTests {
       fileExists: { _ in false })
   }
 
-  private func runner(git: WorktreeCloseGitStub) throws -> GitRunner {
+  private func runner(
+    git: WorktreeCloseGitStub, directory: String = Self.administrativeDirectory
+  ) throws -> GitRunner {
     try GitRunner(
-      repositoryDirectory: URL(fileURLWithPath: Self.administrativeDirectory),
+      repositoryDirectory: URL(fileURLWithPath: directory),
       processRunner: git, executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
       parentEnvironment: [:], isExecutableFile: { _ in true })
   }

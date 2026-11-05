@@ -38,7 +38,7 @@ struct GitCloseHistoryRewriteIntegrationTests {
           to: repository.mainWorktree.appending(path: ".git/info/grafts"), atomically: true,
           encoding: .utf8)
       }
-      #expect(try await repository.gitExitCode(ancestorArguments).exitCode == 0)
+      #expect(try await repository.gitExitCode(ancestorArguments, in: "feature").exitCode == 0)
 
       let target = DetectedWorktree(
         identity: try #require(
@@ -53,6 +53,24 @@ struct GitCloseHistoryRewriteIntegrationTests {
         let result = await inspector.inspect(projectRootBranch: "main")
         #expect(result.failures.isEmpty)
         #expect(result.report.inspection.branchMerge == .unmerged)
+      }
+    }
+  }
+
+  @Test("履歴書き換えを無視しても失敗時の stderr の先頭を hint で隠さない")
+  func preservesFailureFirstLine() async throws {
+    try await withGitRepository { repository in
+      let runner = try GitRunner(
+        repositoryDirectory: repository.mainWorktree,
+        processRunner: ConfigIsolatedGitProcessRunner(), ignoresHistoryRewrites: true)
+      let missing = try #require(GitRevision(String(repeating: "1", count: 40)))
+      do {
+        _ = try await runner.run(.mergeBase(.head, missing))
+        Issue.record("存在しない OID への merge-base が成功した")
+      } catch GitRunnerError.commandFailed(_, _, let stderr) {
+        let firstLine = try #require(stderr.split(separator: "\n").first)
+        #expect(!firstLine.hasPrefix("hint:"))
+        #expect(firstLine.hasPrefix("fatal:"))
       }
     }
   }

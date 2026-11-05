@@ -63,6 +63,7 @@ struct GitCloseWriteCommand: Sendable, Equatable {
 /// - Important: 実行ファイルの解決と子プロセスへ渡す環境は `GitRunner` と同じ規則で組み立てる。
 ///   同じ規則が2か所にあるのは、`GitRunner` 側の該当メンバが `private` で、別ファイルからは
 ///   参照できないためである。**片方だけを変えると git の起動条件が読み取りと書き込みで割れる。**
+///   例外として replace / grafts の無視は読み取り側の Close 安全確認だけに付ける。書き込み前の tip 照合は ref の OID を引くため影響を受けない。
 struct GitCloseWriteRunner: Sendable {
   /// 作業ツリーの実削除に掛かる時間はファイル数に比例する。git 2.50.1 の実測では、ignored な
   /// 30,000ファイルを持つ worktree の `worktree remove` が 1.9 秒だった。読み取り用の

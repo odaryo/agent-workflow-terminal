@@ -121,7 +121,7 @@ struct GitRunnerTests {
     #expect(
       call.environment == [
         "LC_ALL": "C", "HOME": "/home", "PATH": "/bin",
-        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "/dev/null",
+        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "/dev/null/grafts",
       ])
   }
 

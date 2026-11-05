@@ -275,7 +275,9 @@ public struct GitRunner: Sendable {
     var environment = Self.restrictedEnvironment(parent: parentEnvironment)
     if ignoresHistoryRewrites {
       environment["GIT_NO_REPLACE_OBJECTS"] = "1"
-      environment["GIT_GRAFT_FILE"] = "/dev/null"
+      // /dev/null のような存在するファイルを指すと git が deprecated の hint を出し、
+      // 失敗時の stderr の1行目が本当の原因ではなくなる。
+      environment["GIT_GRAFT_FILE"] = "/dev/null/grafts"
     }
     self.environment = environment
   }

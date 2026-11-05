@@ -55,12 +55,20 @@ struct WorktreeCloseReview: Sendable {
     if option.terminatesSession, !canTerminateSessions {
       return "tmux を利用できないため、session を終了できません。"
     }
-    guard option == .deleteBranch else { return nil }
+    guard option.removesWorktree else { return nil }
     do {
-      _ = try plan(.deleteBranch, acknowledged: true)
+      _ = try plan(option, acknowledged: true)
       return nil
     } catch {
-      return branchDeletionUnavailability
+      switch error {
+      case .worktreeLocked, .worktreeContainsSubmodules, .removalObstaclesUnknown:
+        return WorktreeCloseRefusalText(
+          error, progressFailure: progress.failure,
+          removalObstaclesFailure: progress.removalObstaclesFailure
+        ).description
+      default:
+        return option == .deleteBranch ? branchDeletionUnavailability : nil
+      }
     }
   }
 

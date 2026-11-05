@@ -85,13 +85,18 @@ struct WorktreeRemovalObstaclesPreflightTests {
       })
     let outcome = try await harness.run(try harness.plan(.terminateSession(.keepWorktree)))
     #expect(outcome.failure == nil)
-    let prefix = ["--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager"]
-    #expect(
-      await harness.git.arguments == [
-        prefix + ["symbolic-ref", "--quiet", "HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
-        prefix + ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
-      ])
+    // 型注釈が無いと Swift 6.1.2 (CI) が式の型推論を時間内に終えられない。
+    let prefix: [String] = [
+      "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
+    ]
+    let queries: [[String]] = [
+      ["symbolic-ref", "--quiet", "HEAD"],
+      ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
+      ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
+      ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
+    ]
+    let expected: [[String]] = queries.map { prefix + $0 }
+    let actual: [[String]] = await harness.git.arguments
+    #expect(actual == expected)
   }
 }

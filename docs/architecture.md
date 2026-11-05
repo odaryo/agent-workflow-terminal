@@ -369,7 +369,7 @@ lockはユーザーが意図して付けたもの(可搬ボリューム上のwor
 アプリは`-f -f`でlockを外さない。lockの理由を表示し、shellでunlockしてから閉じるよう案内する。
 submoduleの中の未commit・未pushをアプリは検査していないので、submoduleごと消してよいと言える根拠が無い。
 shellで削除するよう案内する。ここでいう「submoduleを含む」は、gitが削除を拒否する条件と同じく、
-対象worktreeの管理ディレクトリ(`<common>/worktrees/<名前>`)に`modules`があるか、indexのgitlinkの位置に
+対象worktreeの管理ディレクトリ(`<common>/worktrees/<名前>`)に`modules`ディレクトリがあるか(空でもよい。通常ファイルならgitは削除する)、indexのgitlinkの位置に
 `.git`があることを指す。初期化していないsubmoduleはgitが`--force`なしで削除するので対象にしない
 (git 2.50.1で実測: 未初期化はrc=0、初期化済み・`deinit`後・別途cloneした形はrc=128)。計画の後にlockされた場合やsubmoduleが追加された場合も、session終了の
 前に同じ理由で止まるよう、上の拒否と同じく実行直前にも読み直す。HEADと途中状態と同じく、読み直しから

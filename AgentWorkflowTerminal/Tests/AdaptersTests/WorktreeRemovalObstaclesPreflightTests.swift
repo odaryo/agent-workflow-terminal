@@ -17,7 +17,9 @@ struct WorktreeRemovalObstaclesPreflightTests {
     ]
     for (files, expected) in cases {
       let harness = try WorktreeCloseHarness(
-        existingFiles: files, readFile: { _ in "portable\nvolume\n" })
+        existingFiles: files,
+        existingDirectories: files.filter { $0.hasSuffix("/modules") },
+        readFile: { _ in "portable\nvolume\n" })
       let plan = try harness.plan(
         .terminateSession(.removeWorktree(deleteBranch ? .deleteBranch : .keepBranch)),
         merge: merged(.ancestor))
@@ -26,6 +28,33 @@ struct WorktreeRemovalObstaclesPreflightTests {
       #expect(await harness.tmux.invocations.isEmpty)
       #expect(await harness.git.repositoryInvocations.isEmpty)
     }
+  }
+
+  @Test("lock と modules が同時にあれば lock の理由で中止する")
+  func prioritizesLockOverAdministrativeModules() async throws {
+    let harness = try WorktreeCloseHarness(
+      existingFiles: [Self.administrativeDirectory + "/locked"],
+      existingDirectories: [Self.administrativeDirectory + "/modules"],
+      readFile: { _ in "portable\nvolume\n" })
+    let plan = try harness.plan(.terminateSession(.removeWorktree(.keepBranch)))
+    let execution = try await harness.executor.execute(plan)
+    #expect(execution == .abandoned(.worktreeLocked(reason: "portable\nvolume")))
+    #expect(await harness.tmux.invocations.isEmpty)
+    #expect(await harness.git.repositoryInvocations.isEmpty)
+  }
+
+  @Test("modules が通常ファイルなら session 終了と worktree 削除を実行する")
+  func permitsRemovalWithAdministrativeModulesFile() async throws {
+    let harness = try WorktreeCloseHarness(
+      existingFiles: [Self.administrativeDirectory + "/modules"])
+    let outcome = try await harness.run(
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
+    #expect(outcome.failure == nil)
+    #expect(outcome.completed == [.terminateSession, .removeWorktree(force: false)])
+    #expect(
+      await harness.git.repositoryInvocations.map(\.arguments) == [
+        gitArgv("worktree", "remove", "--", "/repo/wt")
+      ])
   }
 
   @Test("削除の妨げを読めなければ session 終了前に中止する")

@@ -136,6 +136,7 @@ struct WorktreeCloseHarness {
     repositoryDirectory: URL = URL(fileURLWithPath: "/repo"),
     identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
     parentEnvironment: [String: String] = [:], existingFiles: Set<String> = [],
+    existingDirectories: Set<String> = [],
     readFile: @escaping @Sendable (String) throws -> String = { _ in "" }
   ) throws {
     let worktree = try Self.detected(identity: identity, worktreePath: worktreePath)
@@ -154,7 +155,8 @@ struct WorktreeCloseHarness {
         git: git, worktreeGit: worktreeGit ?? git, worktreePath: worktreePath),
       executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
       parentEnvironment: parentEnvironment, isExecutableFile: { _ in true },
-      fileExists: { existingFiles.contains($0) }, readFile: readFile)
+      fileExists: { existingFiles.contains($0) || existingDirectories.contains($0) },
+      isDirectory: { existingDirectories.contains($0) }, readFile: readFile)
   }
 
   /// 実行直前の読み直しで中止されたら落とす。中止を検証するテストは `executor.execute` を直に呼ぶ。

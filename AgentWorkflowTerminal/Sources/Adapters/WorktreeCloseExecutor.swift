@@ -143,6 +143,7 @@ public struct WorktreeCloseExecutor: Sendable {
     parentEnvironment: [String: String],
     isExecutableFile: @Sendable (URL) -> Bool,
     fileExists: @escaping @Sendable (String) -> Bool,
+    isDirectory: @escaping @Sendable (String) -> Bool = GitWorktreeProgressReader.directoryExists,
     readFile: @escaping @Sendable (String) throws -> String = {
       try String(contentsOfFile: $0, encoding: .utf8)
     }
@@ -189,7 +190,7 @@ public struct WorktreeCloseExecutor: Sendable {
           processRunner: processRunner, executableCandidates: executableCandidates,
           parentEnvironment: parentEnvironment, isExecutableFile: isExecutableFile),
         identity: worktree.identity, worktreePath: worktree.worktreePath,
-        fileExists: fileExists, readFile: readFile)
+        fileExists: fileExists, isDirectory: isDirectory, readFile: readFile)
     } catch {
       throw .git(error)
     }
@@ -198,6 +199,8 @@ public struct WorktreeCloseExecutor: Sendable {
   /// 最初の step を撃つ前に、対象の HEAD と途中状態を読み直す (§3.4、Issue #354)。branch 削除を
   /// 含む計画では branch の先端も読み直す (Issue #359)。detached、計画時と別の branch、作業途中、
   /// 先端の移動のいずれか —— または読み直せなかった —— なら何も撃たずに `.abandoned` を返す。
+  /// worktree 削除を含む計画では lock と submodule も読み直し、session 終了後に削除だけが
+  /// 拒否されたり、`--force` で submodule ごと消えたりするのを防ぐ (§3.4)。
   ///
   /// - Note: 空の計画 (選択肢1) では読み直さない。撃つものが無く、中止しても止める操作が無い。
   ///   §3.4 の拒否は計画段階 (`planWorktreeClose`) で選択肢1にも掛かっている。

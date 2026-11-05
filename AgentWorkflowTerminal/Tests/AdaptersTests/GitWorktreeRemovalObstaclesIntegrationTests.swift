@@ -40,12 +40,15 @@ struct GitRemovalObstaclesIntegrationTests {
         FileManager.default.fileExists(atPath: target.worktreePath + "/libs/sub/.git")
           == !deinitialize)
       let result = try await inspect(target)
-      guard case .observed(let lock, _, let hasModules) = result.report.removalObstacles else {
+      guard case .observed(let lock, let populated, let hasModules) = result.report.removalObstacles
+      else {
         Issue.record("削除の妨げを観測できなかった")
         return
       }
       #expect(lock == nil)
       #expect(hasModules)
+      let path = try #require(WorktreeRelativePath("libs/sub"))
+      #expect(populated == (deinitialize ? [] : [path]))
       #expect(result.removalObstaclesFailure == nil)
     }
   }
@@ -61,6 +64,38 @@ struct GitRemovalObstaclesIntegrationTests {
       let result = try await inspect(target)
       #expect(result.report.removalObstacles == .observed(lockReason: nil, populatedSubmodules: []))
       #expect(result.removalObstaclesFailure == nil)
+    }
+  }
+
+  @Test("modules が無くても gitlink の位置へ別途 clone した submodule は削除を妨げる")
+  func observesSeparatelyClonedSubmodule() async throws {
+    try await withGitRepository { repository in
+      try await repository.addRewoundSubmodule(name: "libs/sub")
+      try await repository.addWorktree("topic")
+      try await repository.git(
+        [
+          "clone", "-q", repository.root.appending(path: "upstream-libs/sub").path, "libs/sub",
+        ], in: "topic")
+      let target = try await repository.detected(branch: "topic")
+      #expect(!FileManager.default.fileExists(atPath: target.identity.rawValue + "/modules"))
+      var isDirectory: ObjCBool = false
+      #expect(
+        FileManager.default.fileExists(
+          atPath: target.worktreePath + "/libs/sub/.git", isDirectory: &isDirectory))
+      #expect(isDirectory.boolValue)
+      let result = try await inspect(target)
+      let path = try #require(WorktreeRelativePath("libs/sub"))
+      #expect(
+        result.report.removalObstacles
+          == .observed(
+            lockReason: nil, populatedSubmodules: [path], hasAdministrativeModules: false))
+      #expect(result.removalObstaclesFailure == nil)
+      let removal = try await repository.gitExitCode([
+        "worktree", "remove", "--", target.worktreePath,
+      ])
+      #expect(removal.exitCode == 128)
+      #expect(
+        removal.stderr.contains("working trees containing submodules cannot be moved or removed"))
     }
   }
 

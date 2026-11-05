@@ -17,14 +17,33 @@ struct GitWorktreeRemovalObstaclesReaderTests {
       result.report.removalObstacles == .observed(lockReason: expected, populatedSubmodules: []))
   }
 
-  @Test("modules があれば gitlink の一覧が空でも submodule を含む")
+  @Test("modules ディレクトリがあれば gitlink の一覧が空でも submodule を含む")
   func detectsAdministrativeModules() async throws {
-    let result = try await removalInspection(existingFiles: [
+    let result = try await removalInspection(existingDirectories: [
       Self.administrativeDirectory + "/modules"
     ])
     #expect(
       result.report.removalObstacles
         == .observed(lockReason: nil, populatedSubmodules: [], hasAdministrativeModules: true))
+  }
+
+  @Test("modules が通常ファイルなら削除の妨げにならない")
+  func ignoresAdministrativeModulesFile() async throws {
+    let result = try await removalInspection(
+      existingFiles: [Self.administrativeDirectory + "/modules"])
+    #expect(result.report.removalObstacles == .observed(lockReason: nil, populatedSubmodules: []))
+    #expect(result.removalObstaclesFailure == nil)
+  }
+
+  @Test("gitlink のパスを読めなければ削除の妨げは unknown")
+  func reportsUnknownRemovalOnInvalidSubmodulePaths() async throws {
+    let index = ProcessRunResult(
+      exitCode: 0, stdout: "160000 \(fixtureTipHex) 0\t../escape\0", stderr: "")
+    let result = try await removalInspection(git: gitStub(index: index))
+    #expect(result.report.removalObstacles == .unknown)
+    #expect(result.removalObstaclesFailure == .invalidSubmodulePaths([.invalidPath("../escape")]))
+    #expect(result.report.progress == .observed([]))
+    #expect(result.failure == nil)
   }
 
   @Test("gitlink の .git があるときだけ submodule を妨げとする", arguments: [true, false])
@@ -87,6 +106,7 @@ struct GitWorktreeRemovalObstaclesReaderTests {
 
   private func removalInspection(
     git: WorktreeCloseGitStub = gitStub(), existingFiles: Set<String> = [],
+    existingDirectories: Set<String> = [],
     readFile: @escaping @Sendable (String) throws -> String = { _ in "" }
   ) async throws -> GitWorktreeProgressInspectionResult {
     let target = try WorktreeCloseHarness.detected(identity: Self.administrativeDirectory)
@@ -96,7 +116,8 @@ struct GitWorktreeRemovalObstaclesReaderTests {
       parentEnvironment: pollutedParentEnvironment, isExecutableFile: { _ in true })
     return await GitWorktreeProgressInspector(
       target: target, runner: try runner(git: git), worktreeRunner: worktreeRunner,
-      fileExists: { existingFiles.contains($0) }, readFile: readFile
+      fileExists: { existingFiles.contains($0) || existingDirectories.contains($0) },
+      isDirectory: { existingDirectories.contains($0) }, readFile: readFile
     ).inspect()
   }
 

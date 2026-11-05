@@ -104,6 +104,27 @@ struct GitRunnerTests {
     #expect(call.outputLimit == GitRunner.defaultOutputLimit)
   }
 
+  @Test("履歴書き換えを無視する実行は限定環境へ replace と grafts の無効化を加える")
+  func runsWithoutHistoryRewrites() async throws {
+    let spy = GitProcessSpy(result: .success(.init(exitCode: 0, stdout: "", stderr: "")))
+    let runner = try GitRunner(
+      repositoryDirectory: URL(fileURLWithPath: "/repo"), processRunner: spy,
+      executableCandidates: [URL(fileURLWithPath: "/git")], ignoresHistoryRewrites: true,
+      parentEnvironment: [
+        "HOME": "/home", "PATH": "/bin", "GIT_DIR": "/wrong",
+        "GIT_NO_REPLACE_OBJECTS": "0", "GIT_GRAFT_FILE": "/wrong", "LANG": "ja",
+      ], isExecutableFile: { _ in true })
+
+    _ = try await runner.run(.status())
+
+    let call = try #require(await spy.calls.first)
+    #expect(
+      call.environment == [
+        "LC_ALL": "C", "HOME": "/home", "PATH": "/bin",
+        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "/dev/null",
+      ])
+  }
+
   @Test("非ゼロ終了と実行層エラーを変換する")
   func convertsErrors() async throws {
     let spy = GitProcessSpy(result: .success(.init(exitCode: 3, stdout: "out", stderr: "err")))
@@ -141,7 +162,7 @@ struct GitRunnerTests {
       executableCandidates: [URL(fileURLWithPath: "/git")],
       parentEnvironment: [
         "HOME": "/home", "PATH": "/bin", "GIT_DIR": "/wrong", "GIT_CONFIG_GLOBAL": "/wrong",
-        "LANG": "ja",
+        "GIT_NO_REPLACE_OBJECTS": "1", "GIT_GRAFT_FILE": "/wrong", "LANG": "ja",
       ], isExecutableFile: { _ in executable })
   }
 }

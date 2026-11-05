@@ -24,6 +24,42 @@ struct GitBranchMergeCacheTests {
     #expect(await git.judgementCalls == judgementsAfterFirst)
   }
 
+  @Test("squash 判定の再利用は保存した branch 先端をそのまま返す")
+  func preservesSquashTipOnReuse() async throws {
+    let git = MergeJudgementGit(matchesSquash: true)
+    let cache = GitBranchMergeCache()
+    let tip = try #require(CommitObjectID(fixtureTipHex))
+
+    let first = try await inspect(git, cache: cache)
+    let judgementsAfterFirst = await git.judgementCalls
+    let second = try await inspect(git, cache: cache)
+
+    #expect(first.report.inspection.branchMerge == .merged(.squash, tip: tip))
+    #expect(second.report.inspection.branchMerge == .merged(.squash, tip: tip))
+    #expect(await git.judgementCalls == judgementsAfterFirst)
+  }
+
+  @Test("走査上限が異なる検査器は同じキャッシュでも互いの答えを再利用しない", arguments: [true, false])
+  func separatesScanLimits(shortScanFirst: Bool) async throws {
+    let git = MergeJudgementGit(matchesSquash: true)
+    let cache = GitBranchMergeCache()
+    let tip = try #require(CommitObjectID(fixtureTipHex))
+    let firstLimit = shortScanFirst ? 1 : 2
+    let secondLimit = shortScanFirst ? 2 : 1
+
+    let first = try await inspect(git, cache: cache, scanLimit: firstLimit)
+    let judgementsAfterFirst = await git.judgementCalls
+    let second = try await inspect(git, cache: cache, scanLimit: secondLimit)
+
+    #expect(
+      first.report.inspection.branchMerge
+        == (shortScanFirst ? .unmerged : .merged(.squash, tip: tip)))
+    #expect(
+      second.report.inspection.branchMerge
+        == (shortScanFirst ? .merged(.squash, tip: tip) : .unmerged))
+    #expect(await git.judgementCalls > judgementsAfterFirst)
+  }
+
   @Test("既定 branch の先端が動いたら判定し直す")
   func judgesAgainWhenTheDefaultBranchMoves() async throws {
     let git = MergeJudgementGit()
@@ -68,7 +104,7 @@ struct GitBranchMergeCacheTests {
   }
 
   private func inspect(
-    _ git: MergeJudgementGit, cache: GitBranchMergeCache
+    _ git: MergeJudgementGit, cache: GitBranchMergeCache, scanLimit: Int = 300
   ) async throws -> GitCloseSafetyInspectionResult {
     let runner = try GitRunner(
       repositoryDirectory: URL(fileURLWithPath: "/repo"), processRunner: git,
@@ -77,8 +113,9 @@ struct GitBranchMergeCacheTests {
     let target = DetectedWorktree(
       identity: try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/topic")),
       worktreePath: "/repo/wt", branch: "topic", isProjectRoot: false)
-    return await GitCloseSafetyInspector(runner: runner, target: target, mergeCache: cache)
-      .inspect(projectRootBranch: "main")
+    return await GitCloseSafetyInspector(
+      runner: runner, target: target, squashScanCommitLimit: scanLimit, mergeCache: cache
+    ).inspect(projectRootBranch: "main")
   }
 }
 
@@ -87,11 +124,14 @@ struct GitBranchMergeCacheTests {
 private actor MergeJudgementGit: ProcessRunning {
   private var defaultTip = fixtureDefaultTipHex
   private var failsDiff: Bool
+  private let matchesSquash: Bool
+  private let squashCandidate = String(repeating: "9", count: 40)
   /// `merge-base` / `log` / `diff` の呼び出し回数。再利用の有無はこれで観測する。
   private(set) var judgementCalls = 0
 
-  init(failsDiff: Bool = false) {
+  init(failsDiff: Bool = false, matchesSquash: Bool = false) {
     self.failsDiff = failsDiff
+    self.matchesSquash = matchesSquash
   }
 
   func moveDefaultBranch(to hex: String) {
@@ -107,7 +147,6 @@ private actor MergeJudgementGit: ProcessRunning {
     outputLimit: Int
   ) throws(ProcessRunnerError) -> ProcessRunResult {
     let command = commandArguments(arguments)
-    let candidate = String(repeating: "d", count: 40)
     switch command.first {
     case "status":
       return .init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: "")
@@ -125,12 +164,7 @@ private actor MergeJudgementGit: ProcessRunning {
       return .init(exitCode: 0, stdout: String(repeating: "e", count: 40) + "\n", stderr: "")
     case "log":
       judgementCalls += 1
-      let date = "2026-10-08T00:00:00+09:00"
-      let record = [
-        candidate, "ddddddd", String(repeating: "f", count: 40), "a", "a@example.com", date,
-        "c", "c@example.com", date, "s", "s",
-      ]
-      return .init(exitCode: 0, stdout: record.joined(separator: "\u{1F}") + "\0", stderr: "")
+      return logOutput(command: command)
     case "diff":
       judgementCalls += 1
       guard !failsDiff else {
@@ -138,9 +172,29 @@ private actor MergeJudgementGit: ProcessRunning {
       }
       let isBranchChange = command.contains { $0.hasPrefix(String(repeating: "e", count: 40)) }
       return .init(
-        exitCode: 0, stdout: isBranchChange ? "branch-change" : "other-change", stderr: "")
+        exitCode: 0,
+        stdout: isBranchChange
+          || (matchesSquash && command.contains { $0.hasSuffix(squashCandidate) })
+          ? "branch-change" : "other-change", stderr: "")
     default:
       throw .launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: "")
     }
   }
+
+  private func logOutput(command: [String]) -> ProcessRunResult {
+    let candidate = String(repeating: "d", count: 40)
+    let date = "2026-10-08T00:00:00+09:00"
+    let record = [
+      candidate, "ddddddd", String(repeating: "f", count: 40), "a", "a@example.com", date,
+      "c", "c@example.com", date, "s", "s",
+    ]
+    var output = record.joined(separator: "\u{1F}") + "\0"
+    if matchesSquash && !command.contains("--max-count=1") {
+      var olderRecord = record
+      olderRecord[0] = squashCandidate
+      output += olderRecord.joined(separator: "\u{1F}") + "\0"
+    }
+    return .init(exitCode: 0, stdout: output, stderr: "")
+  }
+
 }

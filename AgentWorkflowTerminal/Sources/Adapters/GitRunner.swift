@@ -238,11 +238,12 @@ public struct GitRunner: Sendable {
   public init(
     repositoryDirectory: URL,
     processRunner: any ProcessRunning,
-    executableCandidates: [URL] = Self.defaultExecutableCandidates
+    executableCandidates: [URL] = Self.defaultExecutableCandidates,
+    ignoresHistoryRewrites: Bool = false
   ) throws(GitRunnerError) {
     try self.init(
       repositoryDirectory: repositoryDirectory, processRunner: processRunner,
-      executableCandidates: executableCandidates,
+      executableCandidates: executableCandidates, ignoresHistoryRewrites: ignoresHistoryRewrites,
       parentEnvironment: ProcessInfo.processInfo.environment,
       isExecutableFile: { FileManager.default.isExecutableFile(atPath: $0.path) })
   }
@@ -251,6 +252,7 @@ public struct GitRunner: Sendable {
     repositoryDirectory: URL,
     processRunner: any ProcessRunning,
     executableCandidates: [URL],
+    ignoresHistoryRewrites: Bool = false,
     parentEnvironment: [String: String],
     isExecutableFile: @Sendable (URL) -> Bool
   ) throws(GitRunnerError) {
@@ -270,7 +272,12 @@ public struct GitRunner: Sendable {
     self.executableURL = executableURL
     // global/system config は include.path 等を保つ。出力形式に効く config は各 command の
     // 明示 option で固定し、意味を選ぶ range 等とは区別する。
-    self.environment = Self.restrictedEnvironment(parent: parentEnvironment)
+    var environment = Self.restrictedEnvironment(parent: parentEnvironment)
+    if ignoresHistoryRewrites {
+      environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+      environment["GIT_GRAFT_FILE"] = "/dev/null"
+    }
+    self.environment = environment
   }
 
   static func resolveExecutable(

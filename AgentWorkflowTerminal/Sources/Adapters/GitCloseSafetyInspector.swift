@@ -51,7 +51,7 @@ public struct GitCloseSafetyInspector: Sendable {
     self.runner = try GitRunner(
       repositoryDirectory: URL(fileURLWithPath: target.worktreePath),
       processRunner: processRunner,
-      executableCandidates: executableCandidates)
+      executableCandidates: executableCandidates, ignoresHistoryRewrites: true)
     self.target = target
     self.squashScanCommitLimit = Self.defaultSquashScanCommitLimit
     self.mergeCache = mergeCache

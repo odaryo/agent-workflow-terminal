@@ -70,6 +70,8 @@ public enum GitWorktreeProgressReadError: Error, Sendable, Equatable {
   case invalidBranchName(String)
   /// `rev-parse` が rc=0 で、完全な OID 1行として読めない出力を返した。
   case unexpectedTipOutput(String)
+  case lockFileUnreadable(path: String)
+  case invalidSubmodulePaths([GitStatusWorktreeStateFailure])
 }
 
 /// Close の拒否条件 (設計書 §3.4) —— HEAD が branch を指しているかと作業途中か —— を読む。
@@ -101,14 +103,24 @@ struct GitWorktreeProgressReader: Sendable {
   private static let branchRefPrefix = "refs/heads/"
 
   private let runner: GitRunner
+  private let worktreeRunner: GitRunner
+  private let worktreePath: String
+  private let readFile: @Sendable (String) throws -> String
   private let administrativeDirectory: String
   private let fileExists: @Sendable (String) -> Bool
 
   /// `runner` は `identity` のパスで動くものを渡す。
   init(
-    runner: GitRunner, identity: WorktreeIdentity, fileExists: @escaping @Sendable (String) -> Bool
+    runner: GitRunner, worktreeRunner: GitRunner, identity: WorktreeIdentity, worktreePath: String,
+    fileExists: @escaping @Sendable (String) -> Bool,
+    readFile: @escaping @Sendable (String) throws -> String = {
+      try String(contentsOfFile: $0, encoding: .utf8)
+    }
   ) {
     self.runner = runner
+    self.worktreeRunner = worktreeRunner
+    self.worktreePath = worktreePath
+    self.readFile = readFile
     self.administrativeDirectory = identity.rawValue
     self.fileExists = fileExists
   }
@@ -164,6 +176,11 @@ struct GitWorktreeProgressReader: Sendable {
     return operations
   }
 
+  /// `ls-files` は管理ディレクトリではなく作業ツリーで実行する (§3.4)。
+  func removalObstacles() async throws(GitWorktreeProgressReadError) -> WorktreeRemovalObstacles {
+    .observed(lockReason: nil, populatedSubmodules: [])
+  }
+
   func tip(ofBranch branch: String) async throws(GitWorktreeProgressReadError) -> CommitObjectID {
     try await readLocalBranchTip(branch, with: runner)
   }
@@ -200,6 +217,8 @@ public enum WorktreeClosePreflightRefusal: Sendable, Equatable {
   /// `refs/heads/` を除いた値。
   case branchChanged(planned: String, current: String)
   case operationInProgress(Set<WorktreeInProgressOperation>)
+  case worktreeLocked(reason: String)
+  case worktreeContainsSubmodules(paths: [WorktreeRelativePath], hasAdministrativeModules: Bool)
   /// branch の先端がマージ判定のとき (`WorktreeCloseStep.deleteBranch` の `tip`) から動いた。
   /// 判定の後に積まれた commit はマージ済みと確かめられておらず、`branch -D` はそれごと消す。
   /// branch 削除を含む計画でだけ問う。
@@ -216,7 +235,7 @@ extension GitWorktreeProgressReader {
   /// `plannedTip` は branch 削除を含む計画でだけ渡す。先端を読むのは HEAD が計画どおりの branch を
   /// 指していると確かめた後なので、読むのは計画時と同じ名前の branch である。
   func preflightRefusal(
-    plannedBranch: String, plannedTip: CommitObjectID?
+    plannedBranch: String, plannedTip: CommitObjectID?, removesWorktree: Bool
   ) async -> WorktreeClosePreflightRefusal? {
     do {
       guard case .branch(let current) = try await head() else { return .detachedHead }
@@ -239,6 +258,8 @@ public struct GitWorktreeProgressInspectionResult: Sendable, Equatable {
   public let report: WorktreeOperationProgressReport
   /// `report.progress` が `.unknown` になった理由。
   public let failure: GitWorktreeProgressReadError?
+  /// 途中状態の失敗と独立に扱う。片方が失敗しても他方の観測は捨てない (§3.4)。
+  public let removalObstaclesFailure: GitWorktreeProgressReadError?
 }
 
 /// `planWorktreeClose` が要求する途中状態の観測 (設計書 §3.4、Issue #355) を作る。
@@ -256,25 +277,39 @@ public struct GitWorktreeProgressInspector: Sendable {
       runner: try GitRunner(
         repositoryDirectory: URL(fileURLWithPath: target.identity.rawValue),
         processRunner: processRunner, executableCandidates: executableCandidates),
+      worktreeRunner: try GitRunner(
+        repositoryDirectory: URL(fileURLWithPath: target.worktreePath),
+        processRunner: processRunner, executableCandidates: executableCandidates),
       fileExists: { FileManager.default.fileExists(atPath: $0) })
   }
 
   init(
-    target: DetectedWorktree, runner: GitRunner,
-    fileExists: @escaping @Sendable (String) -> Bool
+    target: DetectedWorktree, runner: GitRunner, worktreeRunner: GitRunner,
+    fileExists: @escaping @Sendable (String) -> Bool,
+    readFile: @escaping @Sendable (String) throws -> String = {
+      try String(contentsOfFile: $0, encoding: .utf8)
+    }
   ) {
     self.target = target
     self.reader = GitWorktreeProgressReader(
-      runner: runner, identity: target.identity, fileExists: fileExists)
+      runner: runner, worktreeRunner: worktreeRunner, identity: target.identity,
+      worktreePath: target.worktreePath, fileExists: fileExists, readFile: readFile)
   }
 
   public func inspect() async -> GitWorktreeProgressInspectionResult {
     do {
       let operations = try await reader.operations()
       return .init(
-        report: .init(target: target, progress: .observed(operations)), failure: nil)
+        report: .init(
+          target: target, progress: .observed(operations),
+          removalObstacles: .observed(lockReason: nil, populatedSubmodules: [])), failure: nil,
+        removalObstaclesFailure: nil)
     } catch {
-      return .init(report: .init(target: target, progress: .unknown), failure: error)
+      return .init(
+        report: .init(
+          target: target, progress: .unknown,
+          removalObstacles: .observed(lockReason: nil, populatedSubmodules: [])), failure: error,
+        removalObstaclesFailure: nil)
     }
   }
 }

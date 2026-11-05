@@ -136,14 +136,16 @@ struct GitWorktreeProgressReaderTests {
     let paths = Set(existingFiles.map { "\(Self.administrativeDirectory)/\($0)" })
     return await GitWorktreeProgressInspector(
       target: target, runner: try runner(git: git ?? gitStub(references: references)),
+      worktreeRunner: try runner(git: git ?? gitStub()),
       fileExists: { paths.contains($0) }
     ).inspect()
   }
 
   private func reader(git: WorktreeCloseGitStub) throws -> GitWorktreeProgressReader {
     GitWorktreeProgressReader(
-      runner: try runner(git: git),
+      runner: try runner(git: git), worktreeRunner: try runner(git: git),
       identity: try #require(WorktreeIdentity(rawValue: Self.administrativeDirectory)),
+      worktreePath: "/repo/wt",
       fileExists: { _ in false })
   }
 

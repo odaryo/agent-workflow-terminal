@@ -92,9 +92,10 @@ func gitStub(
   removeWorktree: ProcessRunResult = gitSuccess, worktreeList: ProcessRunResult = gitSuccess,
   deleteBranch: ProcessRunResult = gitSuccess, head: ProcessRunResult = headOnBranch("topic"),
   references: [String: ProcessRunResult] = [:], tip: ProcessRunResult = tipOutput(fixtureTipHex),
-  tipBeforeDeletion: ProcessRunResult? = nil
+  tipBeforeDeletion: ProcessRunResult? = nil, index: ProcessRunResult = gitSuccess
 ) -> WorktreeCloseGitStub {
   WorktreeCloseGitStub { arguments in
+    if arguments.contains("ls-files") { return index }
     if arguments.contains("symbolic-ref") { return head }
     if arguments.contains("rev-parse") {
       let reference = arguments.last ?? ""
@@ -134,7 +135,8 @@ struct WorktreeCloseHarness {
       runner: OrphanedServerRunnerStub(result: stubFailure(stderr: ""))),
     repositoryDirectory: URL = URL(fileURLWithPath: "/repo"),
     identity: String = "/repo/.git/worktrees/feature-a", worktreePath: String = "/repo/wt",
-    parentEnvironment: [String: String] = [:], existingFiles: Set<String> = []
+    parentEnvironment: [String: String] = [:], existingFiles: Set<String> = [],
+    readFile: @escaping @Sendable (String) throws -> String = { _ in "" }
   ) throws {
     let worktree = try Self.detected(identity: identity, worktreePath: worktreePath)
     self.tmux = tmux
@@ -150,7 +152,7 @@ struct WorktreeCloseHarness {
       orphanedServerProbe: orphanedServerProbe,
       processRunner: git, executableCandidates: [URL(fileURLWithPath: "/test/bin/git")],
       parentEnvironment: parentEnvironment, isExecutableFile: { _ in true },
-      fileExists: { existingFiles.contains($0) })
+      fileExists: { existingFiles.contains($0) }, readFile: readFile)
   }
 
   /// 実行直前の読み直しで中止されたら落とす。中止を検証するテストは `executor.execute` を直に呼ぶ。
@@ -171,7 +173,10 @@ struct WorktreeCloseHarness {
     let db = DefaultBranchResolution.originHead(branch: "main")
     let rp: WorktreeCloseInspectionReport = .init(target: wt, inspection: ci, defaultBranch: db)
     return try planWorktreeClose(
-      worktree: wt, progress: .init(target: wt, progress: progress), choice: choice,
+      worktree: wt,
+      progress: .init(
+        target: wt, progress: progress,
+        removalObstacles: .observed(lockReason: nil, populatedSubmodules: [])), choice: choice,
       confirmation: .init(report: rp, continuation: continuation))
   }
 

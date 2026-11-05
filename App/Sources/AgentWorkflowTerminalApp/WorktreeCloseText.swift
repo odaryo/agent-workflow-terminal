@@ -50,6 +50,9 @@ extension GitWorktreeProgressReadError {
     case .git(let error): error.closeDescription
     case .unexpectedHeadOutput, .unexpectedTipOutput: "git の出力を解釈できませんでした。"
     case .invalidBranchName(let name): "branch 名を git へ渡せません (\(name))。"
+    case .lockFileUnreadable(let path): "lock ファイルを読めませんでした: \(path)"
+    case .invalidSubmodulePaths: "submodule のパスを解釈できませんでした。"
+    case .removalObstaclesUnknown: "削除を妨げる条件 (lock・submodule) の観測結果が不明です。"
     }
   }
 }
@@ -78,7 +81,12 @@ struct WorktreeCloseRefusalText {
   let reason: String
   let guidance: String
 
-  init(_ error: WorktreeClosePlanError, progressFailure: GitWorktreeProgressReadError?) {
+  var description: String { guidance.isEmpty ? reason : reason + guidance }
+
+  init(
+    _ error: WorktreeClosePlanError, progressFailure: GitWorktreeProgressReadError?,
+    removalObstaclesFailure: GitWorktreeProgressReadError? = nil
+  ) {
     switch error {
     case .detachedHeadIsNotClosable:
       reason = "HEAD が branch を指していません (detached HEAD)。"
@@ -91,6 +99,19 @@ struct WorktreeCloseRefusalText {
         "作業の途中かどうかを確認できませんでした"
         + (progressFailure.map { ": \($0.closeDescription)" } ?? "。")
       guidance = "確認できない間は Close できません。時間をおいて再検査してください。"
+    case .worktreeLocked(let lockReason):
+      let detail = lockReason.isEmpty ? "" : " (理由: \(singleLine(lockReason)))"
+      reason = "この worktree は lock されています\(detail)。"
+      guidance = "shell で git worktree unlock してから Close してください。"
+    case .worktreeContainsSubmodules(let paths, _):
+      let detail = paths.isEmpty ? "" : " (\(paths.map(\.value).joined(separator: "、")))"
+      reason = "submodule を含む worktree は削除できません\(detail)。"
+      guidance = "submodule の中の変更を確かめたうえで、shell で削除してください。"
+    case .removalObstaclesUnknown:
+      reason =
+        "削除を妨げる条件 (lock・submodule) を確認できませんでした: "
+        + (removalObstaclesFailure?.closeDescription ?? "観測結果が不明です。")
+      guidance = "確認できない間は削除できません。時間をおいて再検査してください。"
     case .projectRootIsNotClosable:
       reason = "Project Root は Close できません。"
       guidance = ""
@@ -111,6 +132,13 @@ extension WorktreeClosePreflightRefusal {
       "HEAD が「\(planned)」から「\(current)」へ切り替わっています。"
     case .operationInProgress(let operations):
       "作業の途中になっています: \(describe(operations))"
+    case .worktreeLocked(let reason):
+      WorktreeCloseRefusalText(.worktreeLocked(reason: reason), progressFailure: nil).description
+    case .worktreeContainsSubmodules(let paths, let hasModules):
+      WorktreeCloseRefusalText(
+        .worktreeContainsSubmodules(paths: paths, hasAdministrativeModules: hasModules),
+        progressFailure: nil
+      ).description
     case .branchTipMoved(let planned, let current):
       "branch の先端が検査の後に動きました (\(short(planned)) → \(short(current)))。"
     case .observationFailed(let error):
@@ -182,4 +210,8 @@ private func short(_ commit: CommitObjectID) -> String {
 
 private func firstLine(of text: String) -> String {
   text.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? ""
+}
+
+private func singleLine(_ text: String) -> String {
+  text.split(whereSeparator: \.isNewline).joined(separator: " ")
 }

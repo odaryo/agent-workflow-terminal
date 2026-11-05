@@ -157,6 +157,7 @@ extension GitTestRepository {
   {
     let result = await GitWorktreeProgressInspector(
       target: target, runner: try runner(globalConfig: "", in: try relativeName(target.identity)),
+      worktreeRunner: try runner(globalConfig: "", in: target.branch),
       fileExists: { FileManager.default.fileExists(atPath: $0) }
     ).inspect()
     #expect(result.failure == nil)

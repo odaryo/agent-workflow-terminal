@@ -76,7 +76,8 @@ struct WorktreeCloseExecutorPreflightTests {
   /// HEAD である。対象の管理ディレクトリで撃っていることを argv で固定する。
   @Test("読み直しは対象の管理ディレクトリで撃ち、通れば計画どおり実行する")
   func rereadsInTheAdministrativeDirectoryAndThenExecutes() async throws {
-    let harness = try WorktreeCloseHarness()
+    let worktreeGit = gitStub()
+    let harness = try WorktreeCloseHarness(worktreeGit: worktreeGit)
 
     let outcome = try await harness.run(
       try harness.plan(
@@ -96,6 +97,10 @@ struct WorktreeCloseExecutorPreflightTests {
     let expected: [[String]] = commands.map { prefix + $0 }
     let actual: [[String]] = await harness.git.preflightInvocations.map(\.arguments)
     #expect(actual == expected)
+    #expect(
+      await worktreeGit.arguments == [
+        ["--no-optional-locks", "-C", "/repo/wt", "--no-pager", "ls-files", "--stage", "-z"]
+      ])
   }
 
   /// `branch -D` は未マージの commit も消す。判定の後に積まれた commit はマージ済みと

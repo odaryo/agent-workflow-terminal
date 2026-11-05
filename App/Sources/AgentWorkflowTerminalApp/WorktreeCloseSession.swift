@@ -139,7 +139,9 @@ final class WorktreeCloseSession: ObservableObject {
     do {
       plan = try review.plan(option, acknowledged: acknowledged)
     } catch {
-      let refusal = WorktreeCloseRefusalText(error, progressFailure: review.progress.failure)
+      let refusal = WorktreeCloseRefusalText(
+        error, progressFailure: review.progress.failure,
+        removalObstaclesFailure: review.progress.removalObstaclesFailure)
       phase = .finished(
         .init(closedWorktree: false, headline: refusal.reason, details: [refusal.guidance]))
       return

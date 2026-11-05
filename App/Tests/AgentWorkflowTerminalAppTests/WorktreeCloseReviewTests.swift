@@ -105,17 +105,116 @@ struct WorktreeCloseReviewTests {
     #expect(result.details == ["HEAD が「topic」から「other」へ切り替わっています。"])
   }
 
+  @Test("lock は選択肢1・2を許可し、3・4では理由と unlock を案内する", arguments: ["持ち出し中\n再接続待ち", ""])
+  func disablesRemovalForLockedWorktree(reason: String) async throws {
+    let review = try await review(CloseGit(ancestorMerged: true), lockReason: reason)
+
+    #expect(review.refusal == nil)
+    for option in [WorktreeCloseOption.hideFromUI, .terminateSession] {
+      #expect(review.unavailability(of: option) == nil)
+      _ = try review.plan(option, acknowledged: false)
+    }
+    for option in [WorktreeCloseOption.removeWorktree, .deleteBranch] {
+      let text = try #require(review.unavailability(of: option))
+      #expect(text.contains("lock されています"))
+      #expect(text.contains("shell で git worktree unlock"))
+      #expect(text.contains("理由:") == !reason.isEmpty)
+      if !reason.isEmpty {
+        #expect(text.contains("持ち出し中 再接続待ち"))
+      }
+    }
+  }
+
+  @Test("lock かつ未マージでも選択肢4には lock の理由を出す")
+  func prioritizesLockOverUnmergedBranch() async throws {
+    let review = try await review(CloseGit(), lockReason: "保管中")
+
+    let text = try #require(review.unavailability(of: .deleteBranch))
+    #expect(text.contains("lock されています (理由: 保管中)"))
+    #expect(!text.contains("マージされていない"))
+  }
+
+  @Test("submodule は選択肢3・4を拒否し shell での削除を案内する", arguments: [true, false])
+  func disablesRemovalForSubmodules(withPaths: Bool) async throws {
+    let review = try await review(
+      CloseGit(ancestorMerged: true), submodulePaths: withPaths ? ["libs/one", "libs/two"] : [],
+      hasAdministrativeModules: !withPaths)
+
+    #expect(review.refusal == nil)
+    #expect(review.unavailability(of: .hideFromUI) == nil)
+    #expect(review.unavailability(of: .terminateSession) == nil)
+    for option in [WorktreeCloseOption.removeWorktree, .deleteBranch] {
+      let text = try #require(review.unavailability(of: option))
+      #expect(text.contains("submodule を含む worktree は削除できません"))
+      #expect(text.contains("submodule の中の変更を確かめたうえで、shell で削除"))
+      #expect(text.contains("(libs/one、libs/two)") == withPaths)
+      #expect(text.contains("()") == false)
+    }
+  }
+
+  @Test("削除の妨げを観測できなければ3・4だけを拒否し、読み取り失敗の理由を出す")
+  func disablesRemovalWhenObstaclesUnknown() async throws {
+    let review = try await review(CloseGit(ancestorMerged: true, indexReadFails: true))
+
+    #expect(review.refusal == nil)
+    #expect(review.unavailability(of: .hideFromUI) == nil)
+    #expect(review.unavailability(of: .terminateSession) == nil)
+    for option in [WorktreeCloseOption.removeWorktree, .deleteBranch] {
+      let text = try #require(review.unavailability(of: option))
+      #expect(text.contains("削除を妨げる条件 (lock・submodule) を確認できませんでした:"))
+      #expect(text.contains("index unavailable"))
+    }
+    let text = WorktreeCloseRefusalText(
+      .removalObstaclesUnknown, progressFailure: nil,
+      removalObstaclesFailure: review.progress.removalObstaclesFailure)
+    #expect(text.reason.contains("index unavailable"))
+  }
+
+  @Test("実行直前に lock が見つかったら、未実行と理由・unlock の案内を出す")
+  func describesExecutionAbandonedForLock() {
+    let result = WorktreeCloseResultText(.abandoned(.worktreeLocked(reason: "保管中")))
+
+    #expect(!result.closedWorktree)
+    #expect(result.headline.contains("何も実行しませんでした"))
+    #expect(
+      result.details == [
+        "この worktree は lock されています (理由: 保管中)。shell で git worktree unlock してから Close してください。"
+      ])
+  }
+
   private func review(
-    _ git: CloseGit, branch: String? = "topic", canTerminateSessions: Bool = true
+    _ git: CloseGit, branch: String? = "topic", canTerminateSessions: Bool = true,
+    lockReason: String? = nil, submodulePaths: [String] = [], hasAdministrativeModules: Bool = false
   ) async throws -> WorktreeCloseReview {
+    let manager = FileManager.default
+    let root = manager.temporaryDirectory.appending(path: UUID().uuidString)
+    let administrative = root.appending(path: "admin")
+    let worktree = root.appending(path: "worktree")
+    try manager.createDirectory(at: administrative, withIntermediateDirectories: true)
+    defer { try? manager.removeItem(at: root) }
+    if let lockReason {
+      try lockReason.write(
+        to: administrative.appending(path: "locked"), atomically: true, encoding: .utf8)
+    }
+    if hasAdministrativeModules {
+      try manager.createDirectory(
+        at: administrative.appending(path: "modules"), withIntermediateDirectories: true)
+    }
+    for path in submodulePaths {
+      try manager.createDirectory(
+        at: worktree.appending(path: path).appending(path: ".git"),
+        withIntermediateDirectories: true)
+    }
+    var git = git
+    git.submodulePaths = submodulePaths
     let target = DetectedWorktree(
-      identity: try #require(WorktreeIdentity(rawValue: "/nonexistent-awt/.git/worktrees/topic")),
-      worktreePath: "/nonexistent-awt/topic", branch: branch, isProjectRoot: false)
+      identity: try #require(WorktreeIdentity(rawValue: administrative.path)),
+      worktreePath: worktree.path, branch: branch, isProjectRoot: false)
     let executable = [URL(fileURLWithPath: "/usr/bin/true")]
-    let progress = await try GitWorktreeProgressInspector(
+    let progress = try await GitWorktreeProgressInspector(
       target: target, processRunner: git, executableCandidates: executable
     ).inspect()
-    let safety = await try GitCloseSafetyInspector(
+    let safety = try await GitCloseSafetyInspector(
       target: target, processRunner: git, executableCandidates: executable
     ).inspect(projectRootBranch: "main")
     return WorktreeCloseReview(
@@ -133,6 +232,8 @@ private struct CloseGit: ProcessRunning {
   var ancestorMerged = false
   var squashMerged = false
   var upstreamInSync = false
+  var indexReadFails = false
+  var submodulePaths: [String] = []
 
   func run(
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
@@ -141,6 +242,11 @@ private struct CloseGit: ProcessRunning {
     let command = Array(arguments.drop { $0 != "--no-pager" }.dropFirst())
     let mergeBase = String(repeating: "e", count: 40)
     switch command.first {
+    case "ls-files":
+      return .init(
+        exitCode: indexReadFails ? 128 : 0,
+        stdout: submodulePaths.map { "160000 \(tipHex) 0\t\($0)\0" }.joined(),
+        stderr: indexReadFails ? "index unavailable" : "")
     case "status":
       let status =
         upstreamInSync

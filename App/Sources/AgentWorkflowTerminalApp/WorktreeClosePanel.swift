@@ -49,7 +49,9 @@ private struct WorktreeClosePanel: View {
       actions(executable: nil)
     case .ready(let review):
       if let refusal = review.refusal {
-        let text = WorktreeCloseRefusalText(refusal, progressFailure: review.progress.failure)
+        let text = WorktreeCloseRefusalText(
+          refusal, progressFailure: review.progress.failure,
+          removalObstaclesFailure: review.progress.removalObstaclesFailure)
         Label("Close できません: \(text.reason)", systemImage: "nosign").foregroundStyle(.red)
         if !text.guidance.isEmpty {
           Text(text.guidance)

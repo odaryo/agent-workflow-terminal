@@ -21,20 +21,36 @@ public struct WorktreeCloseInspectionReport: Sendable, Hashable {
   }
 }
 
+/// 設計書 §3.4。理由なしの lock は空文字列、lock なしは `nil`。
+/// `modules` は deinit 後も残り、gitlink のパスがなくても git は削除を拒否する
+/// (git 2.50.1 実測)。そのためパス一覧とは独立に保持する。
+public enum WorktreeRemovalObstacles: Sendable, Hashable {
+  case observed(
+    lockReason: String?, populatedSubmodules: [WorktreeRelativePath],
+    hasAdministrativeModules: Bool = false)
+  case unknown
+}
+
 /// 対象 worktree に途中の作業 (merge／rebase など) が残っているか (設計書 §3.4、Issue #355)。
 ///
 /// 削除を伴わない選択肢1・2 も含め、`planWorktreeClose` が**すべての選択肢で**要求する。
 /// §3.4 は作業途中の worktree の Close を選択肢1〜4のすべてで拒否すると確定しており、
 /// 選択肢1・2 は `WorktreeRemovalConfirmation` を要求しないので、そちらに相乗りさせると素通りする。
+/// この全選択肢の契約は途中状態についてであり、`removalObstacles` は3・4でだけ読む (§3.4)。
 public struct WorktreeOperationProgressReport: Sendable, Hashable {
   public let worktree: WorktreeIdentity
   public let progress: WorktreeOperationProgress
+  public let removalObstacles: WorktreeRemovalObstacles
 
   /// `WorktreeCloseInspectionReport` と同じ理由で `package` に限定する —— `App` の糊が
   /// 別の worktree の観測結果を詰め替えられないようにするため。
-  package init(target: DetectedWorktree, progress: WorktreeOperationProgress) {
+  package init(
+    target: DetectedWorktree, progress: WorktreeOperationProgress,
+    removalObstacles: WorktreeRemovalObstacles
+  ) {
     self.worktree = target.identity
     self.progress = progress
+    self.removalObstacles = removalObstacles
   }
 }
 
@@ -100,7 +116,8 @@ public struct WorktreeRemovalConfirmation: Sendable, Hashable {
     self.continuation = continuation
   }
 
-  /// git 2.50.1 の実測では、`worktree remove` が拒否するのは変更ありまたは untracked がある場合
+  /// lock と submodule は計画段階で拒否するため、ここの `--force` 判断には関わらない (§3.4)。
+  /// それらを除くと git 2.50.1 の実測で `worktree remove` が拒否するのは変更ありまたは untracked がある場合
   /// だけで、`.gitignore` 済みのファイルしか無い worktree は `--force` 無しに rc=0 で、その
   /// ignored ファイルごと消える (§3.4 の表がこの検査を独立させている理由でもある)。
   /// そのため未commit検査が `absent` なら `--force` は付けない。要らない場面で付けても
@@ -209,6 +226,14 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
   case operationInProgress(Set<WorktreeInProgressOperation>)
   /// 作業途中かどうかを観測できなかった。「途中の作業は無い」へ丸めず拒否する。
   case operationProgressUnknown
+  /// §3.4。lock は `--force` 1つでも削除を拒否する (git 2.50.1 実測)。
+  /// session 終了後の失敗を避け、理由を示して shell での unlock を促す。
+  case worktreeLocked(reason: String)
+  /// §3.4。初期化済み・deinit 後の submodule は削除を拒否する (git 2.50.1 実測)。
+  /// `--force` で配下の作業を消す根拠がないので、shell での削除を促す。
+  case worktreeContainsSubmodules(paths: [WorktreeRelativePath], hasAdministrativeModules: Bool)
+  /// §3.4 の削除拒否条件を観測できなかった。「妨げなし」へ丸めず3・4を拒否する。
+  case removalObstaclesUnknown
   /// 別の worktree について作られた途中状態の観測を渡した。
   case progressReportIsForAnotherWorktree(report: WorktreeIdentity, target: WorktreeIdentity)
 }
@@ -250,6 +275,7 @@ public func planWorktreeClose(
   case .terminateSession(.keepWorktree):
     return WorktreeClosePlan(worktree: identity, branch: branch, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
+    try requireNoRemovalObstacles(progress.removalObstacles)
     guard let confirmation else { throw .removalNotConfirmed }
     // 対象の一致を問うのは確認を読むここだけである。§3.4 が検査と確認を課すのは選択肢3・4 だけで、
     // 1・2 は確認そのものを要求しない。
@@ -285,5 +311,18 @@ private func requireNoOperationInProgress(
   case .observed(let operations) where !operations.isEmpty:
     throw .operationInProgress(operations)
   case .observed: break
+  }
+}
+
+private func requireNoRemovalObstacles(
+  _ obstacles: WorktreeRemovalObstacles
+) throws(WorktreeClosePlanError) {
+  switch obstacles {
+  case .unknown: throw .removalObstaclesUnknown
+  case .observed(let reason, let paths, let hasModules):
+    if let reason { throw .worktreeLocked(reason: reason) }
+    guard paths.isEmpty, !hasModules else {
+      throw .worktreeContainsSubmodules(paths: paths, hasAdministrativeModules: hasModules)
+    }
   }
 }

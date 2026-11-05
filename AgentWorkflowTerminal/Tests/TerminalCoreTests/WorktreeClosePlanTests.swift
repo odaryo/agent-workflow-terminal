@@ -358,7 +358,8 @@ struct WorktreeClosePlanTests {
   ) throws {
     let target = try worktree()
     let progress = WorktreeOperationProgressReport(
-      target: target, progress: .observed([operation]))
+      target: target, progress: .observed([operation]),
+      removalObstacles: .observed(lockReason: nil, populatedSubmodules: []))
 
     for choice in Self.everyChoice {
       #expect(throws: WorktreeClosePlanError.operationInProgress([operation])) {
@@ -372,7 +373,9 @@ struct WorktreeClosePlanTests {
   @Test("途中状態を観測できなければ、途中の作業は無いと見なさず拒否する")
   func planRejectsEveryChoiceWhenProgressIsUnknown() throws {
     let target = try worktree()
-    let progress = WorktreeOperationProgressReport(target: target, progress: .unknown)
+    let progress = WorktreeOperationProgressReport(
+      target: target, progress: .unknown,
+      removalObstacles: .observed(lockReason: nil, populatedSubmodules: []))
 
     for choice in Self.everyChoice {
       #expect(throws: WorktreeClosePlanError.operationProgressUnknown) {
@@ -445,7 +448,9 @@ struct WorktreeClosePlanTests {
   }
 
   private func idle(_ worktree: DetectedWorktree) -> WorktreeOperationProgressReport {
-    WorktreeOperationProgressReport(target: worktree, progress: .observed([]))
+    WorktreeOperationProgressReport(
+      target: worktree, progress: .observed([]),
+      removalObstacles: .observed(lockReason: nil, populatedSubmodules: []))
   }
 
   private func worktree(

@@ -372,7 +372,10 @@ shellで削除するよう案内する。ここでいう「submoduleを含む」
 対象worktreeの管理ディレクトリ(`<common>/worktrees/<名前>`)に`modules`があるか、indexのgitlinkの位置に
 `.git`があることを指す。初期化していないsubmoduleはgitが`--force`なしで削除するので対象にしない
 (git 2.50.1で実測: 未初期化はrc=0、初期化済み・`deinit`後・別途cloneした形はrc=128)。計画の後にlockされた場合やsubmoduleが追加された場合も、session終了の
-前に同じ理由で止まるよう、上の拒否と同じく実行直前にも読み直す。
+前に同じ理由で止まるよう、上の拒否と同じく実行直前にも読み直す。HEADと途中状態と同じく、読み直しから
+worktree削除までの窓は残存リスクとして受け入れる。未commit変更の警告を承諾して`--force`で消す計画では、
+この窓にsubmoduleが初期化されると、gitは拒否せずsubmoduleごと消す(`--force`はsubmoduleの検査を飛ばす。
+git 2.50.1で実測)。
 
 **3と4は実行前に未commit、未push、未mergeを検査し、該当すればユーザーへ警告して明示的な確認を求める。** 検査の結果は「実行を機械的に禁止する条件」ではなく、確認のうえ続行できる警告として扱う。gitの`worktree remove`はuntracked／変更ありを拒否するが、未pushと未mergeは止めないため、gitの失敗に任せるだけでは安全確認にならない。
 

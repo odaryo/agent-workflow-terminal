@@ -117,6 +117,13 @@ TerminalCore  ←  Adapters  ←  (将来) App / Host Core
 - `fatalError` / `try!` / `as!` / 強制アンラップ (`x!`) は使わない。テストコードも同様
   (前提条件は Swift Testing の `#require` で表現できる)。担保の対応は §7。
 
+### 2.4 ログ
+
+- ログを出すのは `App/` だけで、`NSLog` に `[app]` を前置して書く。`print` / `os.Logger` は使っていない。
+- `TerminalCore` / `Adapters` はログを出さない。失敗は §2.3 のとおり呼び出し側へ返し、記録するかどうかは
+  `App/` が決める。
+- git などの生の出力は1行に収まらないのでバナーに載せず、原文を `NSLog` に残す。
+
 ---
 
 ## 3. TDD 方針

@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `AgentWorkflowTerminal/` — the SwiftPM package. Targets: `TerminalCore` (domain model, no UI/process deps) ← `Adapters` (external-world boundary: tmux / git / ps / ripgrep CLI and file-system adapters). Each has a Swift Testing test target. Swift 6 language mode, strict concurrency.
 - `App/` — the separate macOS SwiftPM package for the app and libghostty renderer. CI compiles it with a prebuilt `GhosttyKit.xcframework` downloaded from a Release asset; CI does not build the xcframework itself. There is no Xcode project. See `App/README.md`.
 - **Tasks live in GitHub Issues — Issues are the single source of truth for *what* to do.** Never keep TODO lists in files, docs, or code comments; file an Issue instead.
-- **Phase progress lives in `docs/roadmap.md`** — which phase is in progress, which Issue numbers remain to close it, and what is in flight. It is the only file that may reference Issues by number as a plan; it never restates Issue bodies or per-Issue status. GitHub milestones (`P1`〜`P5`, managed by `scripts/wf-milestone.sh`) are a mirror of the roadmap's phases for filtering Issues, not a second source. Update the roadmap when a phase closes, when a phase's Issue set changes, or when the in-flight Issue changes.
+- **Phase progress lives in `docs/roadmap.md`** — which phase is in progress, which Issue numbers remain to close it, and what is in flight. It is the only file that may reference Issues by number as a plan; it never restates Issue bodies or per-Issue status. GitHub milestones (`P1`〜`P5`, managed by `scripts/wf-milestone.sh`) are a mirror of the roadmap's phases for filtering Issues, not a second source; all of them are closed now (P4 / P5 have no Issues until they are re-filed), and the only open milestone is the legacy `P3 バグ改修` parking lot. Update the roadmap when a phase closes, when a phase's Issue set changes, or when the in-flight Issue changes.
 
 ### Build / test / lint
 
@@ -444,6 +444,8 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
 ## Task tracking (GitHub Projects)
 
 Issues are the single source of truth for tasks (see Repository state); [Project #6](https://github.com/users/odaryo/projects/6) is the board over them, and `docs/roadmap.md` holds phase progress (which phase, which Issues remain). One Issue = one worktree = one PR = one task tab. Milestones `P1`〜`P5` mirror the roadmap's phases; use them to filter, not to plan.
+
+**`wf-project-status.sh` は1回ごとに Project の全 item を読む** (`gh project item-list --limit 2000` と `field-list` など)。1件の更新には足りるが、まとめて流す手段ではない。2026-11-05、閉じた Issue 38 件の Status を90秒おきに直すループを回している間、`API rate limit exceeded` が断続的に返り、`wf-project-status.sh` のほか `wf-issue-comment.sh` / `wf-ci-rerun.sh` も失敗した。そのとき `gh api rate_limit` の `graphql.remaining` は 2644 残っていたので、この値だけでは余裕を判断できない。
 
 | Status | Meaning | Transition |
 | --- | --- | --- |

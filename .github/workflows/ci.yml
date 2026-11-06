@@ -64,7 +64,7 @@ jobs:
         timeout-minutes: 15
         run: swift build --build-tests
 
-      # 経過時間とプロセス全体の CPU を測る AdaptersSerialTimingTests は、同一プロセス内で
+      # 経過時間とポーリングの観測回数を測る AdaptersSerialTimingTests は、同一プロセス内で
       # 並行実行されると他テストの負荷を観測してしまうため分けて走らせる。
       #
       # run-swift-test.sh を挟むのは、job の timeout-minutes ではハングを cancel でしか

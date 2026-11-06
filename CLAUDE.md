@@ -445,7 +445,7 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
 
 Issues are the single source of truth for tasks (see Repository state); [Project #6](https://github.com/users/odaryo/projects/6) is the board over them, and `docs/roadmap.md` holds phase progress (which phase, which Issues remain). One Issue = one worktree = one PR = one task tab. Milestones `P1`〜`P5` mirror the roadmap's phases; use them to filter, not to plan.
 
-**`wf-project-status.sh` は1回ごとに Project の全 item を読む** (`gh project item-list --limit 2000` と `field-list` など)。1件の更新には足りるが、まとめて流す手段ではない。2026-11-05、閉じた Issue 38 件の Status を90秒おきに直すループを回している間、`API rate limit exceeded` が断続的に返り、`wf-project-status.sh` のほか `wf-issue-comment.sh` / `wf-ci-rerun.sh` も失敗した。そのとき `gh api rate_limit` の `graphql.remaining` は 2644 残っていたので、この値だけでは余裕を判断できない。
+**Project の全 item を読む問い合わせは、ループの中で使わない。** `gh project item-list` は 373 item で1回 202 ポイントを消費し (実測 2026-11-06)、GraphQL の上限 5000/時に約 24 回で届く。2026-11-05、これを呼んでいた頃の `wf-project-status.sh` で閉じた Issue 38 件の Status を90秒おきに直すループを回している間、`API rate limit exceeded` が断続的に返り、`wf-issue-comment.sh` / `wf-ci-rerun.sh` も失敗した。そのとき `gh api rate_limit` の `graphql.remaining` は 2644 残っていたので、この値だけでは余裕を判断できない。`wf-project-status.sh` は今は Issue の `projectItems` から item を引く (1 ポイント、#616)。
 
 | Status | Meaning | Transition |
 | --- | --- | --- |

@@ -445,7 +445,7 @@ UI 確認は、アプリのウィンドウが画面上で見えていて、ユ�
 
 Issues are the single source of truth for tasks (see Repository state); [Project #6](https://github.com/users/odaryo/projects/6) is the board over them, and `docs/roadmap.md` holds phase progress (which phase, which Issues remain). One Issue = one worktree = one PR = one task tab. Milestones `P1`〜`P5` mirror the roadmap's phases; use them to filter, not to plan.
 
-**Project の全 item を読む問い合わせは、ループの中で使わない。** `gh project item-list` は 373 item で1回 202 ポイントを消費し (実測 2026-11-06)、GraphQL の上限 5000/時に約 24 回で届く。2026-11-05、これを呼んでいた頃の `wf-project-status.sh` で閉じた Issue 38 件の Status を90秒おきに直すループを回している間、`API rate limit exceeded` が断続的に返り、`wf-issue-comment.sh` / `wf-ci-rerun.sh` も失敗した。そのとき `gh api rate_limit` の `graphql.remaining` は 2644 残っていたので、この値だけでは余裕を判断できない。`wf-project-status.sh` は今は Issue の `projectItems` から item を引く (1 ポイント、#616)。
+**`gh project item-list` と `gh project field-list` をループの中で使わない。** どちらも item を読むので高い。`field-list` は `--limit` を付けなくても内部で `firstItems:100` を読み、1回 101 ポイントかかる。`item-list` は 100 件ごとに同じだけかかる計算で、374 item なら約 404 ポイントになる (実 API では未確認)。GraphQL の上限は 5000 ポイント/時である。2026-11-05、これらを呼んでいた頃の `wf-project-status.sh` で閉じた Issue 38 件の Status を90秒おきに直すループを回している間、`API rate limit exceeded` が断続的に返り、`wf-issue-comment.sh` / `wf-ci-rerun.sh` も失敗した。そのとき `gh api rate_limit` の `graphql.remaining` は 2644 残っていた。同じ token に GraphQL の枠が2つ見えることがあり (`rate_limit` と応答ヘッダの `X-Ratelimit-Used` の値が合わない。理由は未確認)、`rate_limit` の値や前後差では余裕もコストも判断できない。問い合わせのコストは `rateLimit(dryRun:true){cost}` で値付けする (このとき `data` は null で返る)。`wf-project-status.sh` は今はどちらも使わず、`gh api graphql` で引くので値付けの合計は1回 6 ポイントである (#616)。
 
 | Status | Meaning | Transition |
 | --- | --- | --- |

@@ -70,18 +70,34 @@ issue_json=$(gh api graphql -f query='
   }' -f owner="$owner" -f repo="$repo" -F issue="$issue_number") \
   || die "Issue #$issue_number を取得できません"
 item_id=$(jq -r --argjson p "$project_number" \
-  '.data.repository.issue.projectItems.nodes[] | select(.project.number == $p) | .id' <<<"$issue_json")
+  '.data.repository.issue.projectItems.nodes[] | select(.project.number == $p) | .id' <<<"$issue_json" 2>/dev/null) \
+  || die "Issue #$issue_number の応答を読み取れません"
 [[ -n "$item_id" ]] || die "Issue #$issue_number が Project '$project_title' 内に見つかりません"
 
-field_json=$(gh project field-list "$project_number" --owner "$owner" --format json)
-field_id=$(jq -r '.fields[] | select(.name == "Status") | .id' <<<"$field_json")
+# shellcheck disable=SC2016 # GraphQL の変数をシェルで展開しないため
+field_json=$(gh api graphql -f query='
+  query($owner:String!,$number:Int!){
+    user(login:$owner){
+      projectV2(number:$number){
+        field(name:"Status"){
+          ... on ProjectV2SingleSelectField{ id options{ id name } }
+        }
+      }
+    }
+  }' -f owner="$owner" -F number="$project_number") \
+  || die "Project '$project_title' の Status フィールドを取得できません"
+field_id=$(jq -r \
+  '.data.user.projectV2 // error("Project の応答がありません") | .field.id // empty' <<<"$field_json" 2>/dev/null) \
+  || die "Project '$project_title' の Status フィールドの応答を読み取れません"
 [[ -n "$field_id" ]] || die "Project '$project_title' に Status フィールドが見つかりません"
 
 option_id=$(jq -r --arg s "$status" \
-  '.fields[] | select(.name == "Status") | .options[]? | select(.name == $s) | .id' <<<"$field_json")
+  '.data.user.projectV2.field.options[]? | select(.name == $s) | .id' <<<"$field_json" 2>/dev/null) \
+  || die "Project '$project_title' の Status フィールドの応答を読み取れません"
 
 if [[ -z "$option_id" ]]; then
-  available_names=$(jq -r '.fields[] | select(.name == "Status") | .options[]?.name' <<<"$field_json")
+  available_names=$(jq -r '.data.user.projectV2.field.options[]?.name' <<<"$field_json" 2>/dev/null) \
+    || die "Project '$project_title' の Status フィールドの応答を読み取れません"
   available=""
   while IFS= read -r opt; do
     [[ -n "$opt" ]] || continue

@@ -43,7 +43,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 repo_root_cd
-require_cmd git gh
+require_cmd git gh jq
 
 [[ -n "$issue_number" ]] || die "Issue番号を指定してください"
 [[ "$issue_number" =~ ^[0-9]+$ ]] || die "Issue番号は数値で指定してください: $issue_number"
@@ -52,28 +52,52 @@ require_cmd git gh
 project_title="agent-workflow-terminal"
 repo_nwo=$(nwo)
 owner="${repo_nwo%%/*}"
+repo="${repo_nwo#*/}"
 
 project_line=$(gh project list --owner "$owner" --format json \
   --jq ".projects[] | select(.title == \"$project_title\") | [(.number|tostring), .id] | join(\"\t\")")
 [[ -n "$project_line" ]] || die "Project '$project_title' が owner '$owner' に見つかりません"
 IFS=$'\t' read -r project_number project_id <<<"$project_line"
 
-# limit は Project の全 item 数を超えていなければならない。超えていないと、溢れた分の Issue が
-# 「Project 内に見つかりません」として区別なく落ちる (実測: item 200 件で #314 が 200 に掛かった)。
-item_id=$(gh project item-list "$project_number" --owner "$owner" --format json --limit 2000 \
-  --jq ".items[] | select(.content.number == $issue_number) | .id")
+# shellcheck disable=SC2016 # GraphQL の変数をシェルで展開しないため
+issue_json=$(gh api graphql -f query='
+  query($owner:String!,$repo:String!,$issue:Int!){
+    repository(owner:$owner,name:$repo){
+      issue(number:$issue){
+        projectItems(first:20,includeArchived:false){ nodes{ id project{ number } } }
+      }
+    }
+  }' -f owner="$owner" -f repo="$repo" -F issue="$issue_number") \
+  || die "Issue #$issue_number を取得できません"
+item_id=$(jq -r --argjson p "$project_number" \
+  '.data.repository.issue.projectItems.nodes[] | select(.project.number == $p) | .id' <<<"$issue_json" 2>/dev/null) \
+  || die "Issue #$issue_number の応答を読み取れません"
 [[ -n "$item_id" ]] || die "Issue #$issue_number が Project '$project_title' 内に見つかりません"
 
-field_id=$(gh project field-list "$project_number" --owner "$owner" --format json \
-  --jq '.fields[] | select(.name == "Status") | .id')
+# shellcheck disable=SC2016 # GraphQL の変数をシェルで展開しないため
+field_json=$(gh api graphql -f query='
+  query($owner:String!,$number:Int!){
+    user(login:$owner){
+      projectV2(number:$number){
+        field(name:"Status"){
+          ... on ProjectV2SingleSelectField{ id options{ id name } }
+        }
+      }
+    }
+  }' -f owner="$owner" -F number="$project_number") \
+  || die "Project '$project_title' の Status フィールドを取得できません"
+field_id=$(jq -r \
+  '.data.user.projectV2 // error("Project の応答がありません") | .field.id // empty' <<<"$field_json" 2>/dev/null) \
+  || die "Project '$project_title' の Status フィールドの応答を読み取れません"
 [[ -n "$field_id" ]] || die "Project '$project_title' に Status フィールドが見つかりません"
 
-option_id=$(gh project field-list "$project_number" --owner "$owner" --format json \
-  --jq ".fields[] | select(.name == \"Status\") | .options[]? | select(.name == \"$status\") | .id")
+option_id=$(jq -r --arg s "$status" \
+  '.data.user.projectV2.field.options[]? | select(.name == $s) | .id' <<<"$field_json" 2>/dev/null) \
+  || die "Project '$project_title' の Status フィールドの応答を読み取れません"
 
 if [[ -z "$option_id" ]]; then
-  available_names=$(gh project field-list "$project_number" --owner "$owner" --format json \
-    --jq '.fields[] | select(.name == "Status") | .options[]?.name')
+  available_names=$(jq -r '.data.user.projectV2.field.options[]?.name' <<<"$field_json" 2>/dev/null) \
+    || die "Project '$project_title' の Status フィールドの応答を読み取れません"
   available=""
   while IFS= read -r opt; do
     [[ -n "$opt" ]] || continue

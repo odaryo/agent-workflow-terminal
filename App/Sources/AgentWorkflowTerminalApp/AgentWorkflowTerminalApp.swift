@@ -245,9 +245,7 @@ private struct InactiveWorktreeMenu: View {
   }
 
   private func title(of worktree: TaskWorktree) -> String {
-    let name =
-      worktree.detected.branch
-      ?? URL(fileURLWithPath: worktree.detected.worktreePath).lastPathComponent
+    let name = worktree.detected.tabName
     // 「観測失敗」を「到達不能」と出さない。到達できないと確かめられていないものを断定して
     // 見せないため (設計書 §12.3 と同じ理由、Issue #243)。
     switch worktree.detected.observation {

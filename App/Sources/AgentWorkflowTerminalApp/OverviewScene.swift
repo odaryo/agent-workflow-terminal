@@ -205,9 +205,10 @@ private struct OverviewProjectSection: View {
 
 extension DetectedWorktree {
   /// Task Tab と Overview の見出しで同じ名前を出す。食い違うと、Overview の行がどのタブか
-  /// 見分けられない。
+  /// 見分けられない。名前は作業ツリーのディレクトリ名で固定する (設計書 §5.3)。branch は
+  /// `git switch` で変わるため、名前に使うとタブが動く。
   var tabName: String {
-    branch ?? URL(fileURLWithPath: worktreePath).lastPathComponent
+    URL(fileURLWithPath: worktreePath).lastPathComponent
   }
 }
 

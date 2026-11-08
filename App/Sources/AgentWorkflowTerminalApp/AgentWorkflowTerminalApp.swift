@@ -129,7 +129,8 @@ struct ProjectView: View {
       if let content = model.viewerDrawerLayout.content { restored.open(content) }
       model.viewerDrawerLayout = restored
     }
-    .onReceive(model.paneObservations.$terminalFocusRequest.dropFirst()) { _ in
+    // Project の切替前に出た要求は、新しい view では初回値になる。dropFirst すると失われる。
+    .onReceive(model.paneObservations.$terminalFocusRequest) { _ in
       keyboardFocus.requestFocus()
     }
     .onChange(of: model.selectedTab) { _, _ in

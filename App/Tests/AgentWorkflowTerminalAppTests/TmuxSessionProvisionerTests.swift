@@ -342,7 +342,7 @@ struct TmuxSessionProvisionerTests {
       #expect(attachment.command == ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])
       let warning = try #require(attachment.warning)
       #expect(warning.contains(Self.cleanupInstruction))
-      #expect(warning.contains("\(cleanupFailure)"))
+      #expect(!warning.contains("\(cleanupFailure)"))
     } else {
       let cause = TmuxSessionOperationError.tmux(
         .commandFailed(exitCode: 1, stdout: "", stderr: "create denied\n"))
@@ -390,7 +390,7 @@ struct TmuxSessionProvisionerTests {
   }
 
   private static let cleanupInstruction =
-    "手で `tmux kill-session -t =awt-bootstrap-server-do-not-use` を実行してください"
+    "手で `tmux kill-session -t '=awt-bootstrap-server-do-not-use'` を実行してください"
 
   private func bootstrapProcess(
     name: String, createSucceeds: Bool, cleanup: Result<ProcessRunResult, ProcessRunnerError>

@@ -190,7 +190,7 @@ struct TmuxSessionProvisioner: Sendable {
     switch result {
     case .success(let command):
       return .success(
-        .init(command: command, warning: cleanupFailure.map(Self.bootstrapCleanupWarning)))
+        .init(command: command, warning: cleanupFailure.map { _ in Self.bootstrapCleanupWarning }))
     case .failure(let cause):
       if let cleanupFailure {
         return .failure(.leftoverBootstrapSession(cause: cause, cleanupFailure: cleanupFailure))
@@ -216,15 +216,15 @@ struct TmuxSessionProvisioner: Sendable {
         default: break
         }
       }
+      NSLog("[app] bootstrap session の後始末に失敗: \(error)")
       return error
     }
   }
 
-  static func bootstrapCleanupWarning(_ failure: TmuxRunnerError) -> String {
-    """
-    起動用の tmux session の後始末に失敗しました。手で `tmux kill-session -t =\(bootstrapSessionName)` \
-    を実行してください: 後始末の失敗 \(failure)
-    """
+  // 警告バーは1行で中央を省略する。手順を読めるよう生のエラーは載せない。
+  // `=` を引用符で囲むのは、zsh の EQUALS が `=name` をコマンド名として展開するため。
+  static var bootstrapCleanupWarning: String {
+    "起動用の tmux session が残っています。手で `tmux kill-session -t '=\(bootstrapSessionName)'` を実行してください。"
   }
 
   /// - Important: **`TmuxRunner` を通さない。** server を起こした側の環境がその server の
@@ -306,7 +306,7 @@ extension TmuxSessionOperationError {
       "worktree のパスを tmux へ渡せないため、session を用意できません: \(path)"
     case .leftoverSession(let session, let cause, let cleanupFailure):
       """
-      設定に失敗した session が残っています。手で `tmux kill-session -t =\(session.rawValue)` \
+      設定に失敗した session が残っています。手で `tmux kill-session -t '=\(session.rawValue)'` \
       してください: 原因 \(cause) / 後始末の失敗 \(cleanupFailure)
       """
     case .serverNotRunning, .serverSocketMissing:
@@ -330,7 +330,7 @@ enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
       result.orphanedServerExplanation(socketPath: socketPath)
     case .leftoverBootstrapSession(let cause, let cleanupFailure):
       cause.terminalTabDescription + "\n"
-        + TmuxSessionProvisioner.bootstrapCleanupWarning(cleanupFailure)
+        + TmuxSessionProvisioner.bootstrapCleanupWarning + "\n後始末の失敗: \(cleanupFailure)"
     }
   }
 

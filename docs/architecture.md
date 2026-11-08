@@ -565,7 +565,7 @@ paneへのテキスト注入方式は**`load-buffer` + `paste-buffer -p`**とす
 起動用sessionの後始末は呼び出し元のキャンセルを継承せず、後始末が終わるまでプロセス共通のゲートを保持する。
 削除成功、対象session不在、server停止・socket欠落は既存のsession操作の後始末と同じく許容する。
 それ以外で削除できなければ、セッションの用意に成功した場合はタブを開いて警告し、用意にも失敗した場合は
-元の原因と後始末の失敗を併記する。いずれも「手で`tmux kill-session -t =awt-bootstrap-server-do-not-use`を
+元の原因と後始末の失敗を併記する。いずれも「手で`tmux kill-session -t '=awt-bootstrap-server-do-not-use'`を
 実行してください」と案内する。
 
 ### 4.2 複数端末からの接続

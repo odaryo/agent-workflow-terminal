@@ -23,7 +23,7 @@ struct CloseNumberedSessionTests {
       outcome == WorktreeCloseOutcome(completed: [.terminateSession], failure: nil, skipped: []))
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)"],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-2"],
       ])

@@ -19,6 +19,7 @@ struct TerminalTabs: View {
             shouldOpen: { await model.shouldOpenTab(key) },
             approveCreation: { model.approveSessionCreation(key) },
             didPrepare: { model.didPrepareTab(key) },
+            reportWarning: { model.reportTabOpeningFailure($0) },
             didExit: { await model.handleTabExit(key) },
             focusRequest: keyboardFocus.focusRequest(isTabSelected: model.selectedTab == key)
           )
@@ -44,6 +45,7 @@ private struct TerminalTabContent: View {
   let shouldOpen: @MainActor () async -> TerminalTabOpening
   let approveCreation: @MainActor () -> Void
   let didPrepare: @MainActor () -> Void
+  let reportWarning: @MainActor (String) -> Void
   let didExit: @MainActor () async -> Void
   let focusRequest: TerminalFocusRequest?
   @State private var preparation = TerminalSessionPreparation.preparing
@@ -117,10 +119,13 @@ private struct TerminalTabContent: View {
       // Why not 書いてしまう: cancel 後のこの task はもう古い世代のものであり、その結果で
       // 新しい世代の用意を上書きすると、表示と argv の世代が食い違う。
       guard !Task.isCancelled else { return }
-      if case .success = result { didPrepare() }
+      if case .success(let attachment) = result {
+        didPrepare()
+        if let warning = attachment.warning { reportWarning(warning) }
+      }
       preparation =
         switch result {
-        case .success(let command): .ready(command)
+        case .success(let attachment): .ready(attachment.command)
         case .failure(let error): .failed(error.terminalTabDescription)
         }
     }

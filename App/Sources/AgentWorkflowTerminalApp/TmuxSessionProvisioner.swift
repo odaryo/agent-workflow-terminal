@@ -2,6 +2,16 @@ import Adapters
 import Foundation
 import TerminalCore
 
+struct TmuxSessionAttachment: Sendable, Equatable {
+  let command: [String]
+  let warning: String?
+
+  init(command: [String], warning: String? = nil) {
+    self.command = command
+    self.warning = warning
+  }
+}
+
 /// タブが端末を出す前に、その worktree の tmux session を用意する経路。
 ///
 /// **surface へ `new-session` を渡さない**ための型である。§4.4 の `history-limit` と §4.2 の
@@ -73,11 +83,10 @@ struct TmuxSessionProvisioner: Sendable {
     }
   }
 
-  /// - Returns: 成功時は surface へ渡す attach の argv。
   func attachCommand(
     for key: TerminalSessionKey,
     workingDirectory: String
-  ) async -> Result<[String], TmuxSessionProvisionerError> {
+  ) async -> Result<TmuxSessionAttachment, TmuxSessionProvisionerError> {
     let session = TmuxSessionName(key: key)
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
@@ -101,7 +110,7 @@ struct TmuxSessionProvisioner: Sendable {
     } catch {
       return .failure(.operation(error))
     }
-    return .success(attachCommand(for: session))
+    return .success(.init(command: attachCommand(for: session)))
   }
 
   /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す。`detach-on-destroy` は
@@ -154,7 +163,7 @@ struct TmuxSessionProvisioner: Sendable {
   private func attachCommandBootstrappingServer(
     session: TmuxSessionName,
     workingDirectory: String
-  ) async -> Result<[String], TmuxSessionProvisionerError> {
+  ) async -> Result<TmuxSessionAttachment, TmuxSessionProvisionerError> {
     guard await Self.bootstrapGate.acquire() else {
       return .failure(.operation(.tmux(.process(.cancelled))))
     }
@@ -163,7 +172,7 @@ struct TmuxSessionProvisioner: Sendable {
       return .failure(.operation(.tmux(.process(.cancelled))))
     }
     await startBootstrapSession()
-    let result: Result<[String], TmuxSessionProvisionerError>
+    let result: Result<[String], TmuxSessionOperationError>
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
       result = .success(attachCommand(for: session))
@@ -171,17 +180,51 @@ struct TmuxSessionProvisioner: Sendable {
       await repairResumedSession(session)
       result = .success(attachCommand(for: session))
     } catch {
-      result = .failure(.operation(error))
+      result = .failure(error)
     }
     // 成否にかかわらず消す。本来の session ができていれば server は残り、できていなければ
     // server ごと落ちて起動前の状態へ戻る。
     // 呼び出し元のキャンセルを継承すると、runner が起動前に抜けて bootstrap を残してしまう。
-    await Task { [runner] in
-      _ = try? await runner.run(
-        arguments: ["kill-session", "-t", "=\(Self.bootstrapSessionName)"])
-    }.value
+    let cleanupFailure = await Task { await cleanUpBootstrapSession() }.value
     await Self.bootstrapGate.release()
-    return result
+    switch result {
+    case .success(let command):
+      return .success(
+        .init(command: command, warning: cleanupFailure.map { _ in Self.bootstrapCleanupWarning }))
+    case .failure(let cause):
+      if let cleanupFailure {
+        return .failure(.leftoverBootstrapSession(cause: cause, cleanupFailure: cleanupFailure))
+      }
+      return .failure(.operation(cause))
+    }
+  }
+
+  private func cleanUpBootstrapSession() async -> TmuxRunnerError? {
+    do {
+      _ = try await runner.run(
+        arguments: ["kill-session", "-t", "=\(Self.bootstrapSessionName)"])
+      return nil
+    } catch {
+      if error.isServerAbsent { return nil }
+      // bootstrap 名は TmuxSessionName にできないため、不在判定を TmuxSessionOperations.mapFailure に合わせる。
+      if case .commandFailed(1, _, let stderr) = error {
+        switch stderr {
+        case "can't find session: \(Self.bootstrapSessionName)\n",
+          "no such session: \(Self.bootstrapSessionName)\n",
+          "no such window: \(Self.bootstrapSessionName)\n":
+          return nil
+        default: break
+        }
+      }
+      NSLog("[app] bootstrap session の後始末に失敗: \(error)")
+      return error
+    }
+  }
+
+  // 警告バーは1行で中央を省略する。手順を読めるよう生のエラーは載せない。
+  // `=` を引用符で囲むのは、zsh の EQUALS が `=name` をコマンド名として展開するため。
+  static var bootstrapCleanupWarning: String {
+    "起動用の tmux session が残っています。手で `tmux kill-session -t '=\(bootstrapSessionName)'` を実行してください。"
   }
 
   /// - Important: **`TmuxRunner` を通さない。** server を起こした側の環境がその server の
@@ -263,7 +306,7 @@ extension TmuxSessionOperationError {
       "worktree のパスを tmux へ渡せないため、session を用意できません: \(path)"
     case .leftoverSession(let session, let cause, let cleanupFailure):
       """
-      設定に失敗した session が残っています。手で `tmux kill-session -t =\(session.rawValue)` \
+      設定に失敗した session が残っています。手で `tmux kill-session -t '=\(session.rawValue)'` \
       してください: 原因 \(cause) / 後始末の失敗 \(cleanupFailure)
       """
     case .serverNotRunning, .serverSocketMissing:
@@ -278,12 +321,16 @@ extension TmuxSessionOperationError {
 enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
   case operation(TmuxSessionOperationError)
   case orphanedServer(socketPath: String, TmuxOrphanedServerProbeResult)
+  case leftoverBootstrapSession(cause: TmuxSessionOperationError, cleanupFailure: TmuxRunnerError)
 
   var terminalTabDescription: String {
     switch self {
     case .operation(let error): error.terminalTabDescription
     case .orphanedServer(let socketPath, let result):
       result.orphanedServerExplanation(socketPath: socketPath)
+    case .leftoverBootstrapSession(let cause, let cleanupFailure):
+      cause.terminalTabDescription + "\n"
+        + TmuxSessionProvisioner.bootstrapCleanupWarning + "\n後始末の失敗: \(cleanupFailure)"
     }
   }
 
@@ -292,6 +339,8 @@ enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
     case .operation(let error): "\(error)"
     case .orphanedServer(let socketPath, let result):
       result.orphanedServerExplanation(socketPath: socketPath)
+    case .leftoverBootstrapSession:
+      terminalTabDescription
     }
   }
 }

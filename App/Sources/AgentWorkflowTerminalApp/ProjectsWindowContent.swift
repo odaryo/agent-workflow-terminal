@@ -40,7 +40,7 @@ struct ProjectsWindowContent: View {
     .background { MainWindowCapture(navigator: projects.navigator) }
     .toolbar {
       ToolbarItem(placement: .navigation) {
-        ProjectMenu(projects: projects) { pendingAgentCommand = $0 }
+        ProjectMenu(projects: projects)
       }
     }
     .confirmationDialog(
@@ -84,7 +84,7 @@ struct ProjectsWindowContent: View {
 
   private var sidebar: some View {
     HStack(spacing: 0) {
-      OverviewView(projects: projects, navigator: projects.navigator)
+      OverviewView(projects: projects, navigator: projects.navigator) { pendingAgentCommand = $0 }
         .frame(width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)))
       DrawerResizeHandle(
         width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)),
@@ -164,24 +164,11 @@ private struct MainWindowCapture: NSViewRepresentable {
 
 private struct ProjectMenu: View {
   @ObservedObject var projects: ProjectsModel
-  let onSetAgentCommand: (RegisteredProject) -> Void
 
   var body: some View {
     Menu {
       ForEach(projects.registry.projects, id: \.commonDirectory) { project in
         projectItem(project)
-      }
-      if !projects.registry.projects.isEmpty {
-        Divider()
-      }
-      Button("Project を追加…") { chooseProjectDirectory(projects) }
-      if let selected = projects.selectedProject {
-        Button("「\(selected.displayName)」の Agent 起動コマンド…") {
-          onSetAgentCommand(selected)
-        }
-        Button("「\(selected.displayName)」の登録を解除") {
-          Task { await projects.requestUnregister(selected.commonDirectory) }
-        }
       }
     } label: {
       Label(projects.selectedProject?.displayName ?? "Project", systemImage: "folder")
@@ -218,7 +205,7 @@ private struct ProjectMenu: View {
 /// `NSOpenPanel` は選ばれた URL を返すだけで、repository root の抽出は `ProjectsModel` が git に
 /// 問い合わせて行う (設計書 §16.1)。
 @MainActor
-private func chooseProjectDirectory(_ projects: ProjectsModel) {
+func chooseProjectDirectory(_ projects: ProjectsModel) {
   let panel = NSOpenPanel()
   panel.canChooseDirectories = true
   panel.canChooseFiles = false

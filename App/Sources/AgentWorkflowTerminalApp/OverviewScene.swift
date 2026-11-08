@@ -19,6 +19,7 @@ struct OverviewMenuItem: View {
 struct OverviewView: View {
   @ObservedObject var projects: ProjectsModel
   @ObservedObject var navigator: AppNavigator
+  let onSetAgentCommand: (RegisteredProject) -> Void
   @Environment(\.openWindow) private var openWindow
 
   var body: some View {
@@ -27,6 +28,18 @@ struct OverviewView: View {
         WarningBar(text: notice) { navigator.overviewNotice = nil }
         Divider()
       }
+      HStack {
+        Spacer()
+        Button {
+          chooseProjectDirectory(projects)
+        } label: {
+          Image(systemName: "plus")
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Project を追加")
+        .help("Project を追加")
+      }
+      .padding(8)
       if projects.availableModels.isEmpty {
         ContentUnavailableView(
           "表示できる Project がありません", systemImage: "rectangle.stack",
@@ -37,6 +50,9 @@ struct OverviewView: View {
             OverviewProjectSection(
               model: model, store: model.paneObservations, mainPanes: model.mainPanes,
               isSelectedProject: projects.registry.selection == model.project.commonDirectory,
+              selectProject: { projects.select(model.project.commonDirectory) },
+              onSetAgentCommand: onSetAgentCommand,
+              requestUnregister: { await projects.requestUnregister($0) },
               reveal: { session, pane in
                 Task { await reveal(model, session: session, pane: pane) }
               })
@@ -63,6 +79,9 @@ private struct OverviewProjectSection: View {
   @AppStorage(OverviewProjectPreferences.collapsedProjectsKey) private var collapsedProjectsJSON =
     "[]"
   let isSelectedProject: Bool
+  let selectProject: () -> Void
+  let onSetAgentCommand: (RegisteredProject) -> Void
+  let requestUnregister: (WorktreeIdentity) async -> Void
   let reveal: (TerminalSessionKey, PaneID?) -> Void
 
   var body: some View {
@@ -88,7 +107,13 @@ private struct OverviewProjectSection: View {
       .accessibilityLabel(
         showsAttentionCount
           ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
-          : model.project.displayName)
+          : model.project.displayName
+      )
+      .contextMenu {
+        OverviewProjectMenu(
+          model: model, selectProject: selectProject, onSetAgentCommand: onSetAgentCommand,
+          requestUnregister: requestUnregister)
+      }
     }
   }
 
@@ -138,12 +163,20 @@ private struct OverviewProjectSection: View {
       .buttonStyle(.plain)
       .help("このセッションを表示")
       .accessibilityLabel(isDisplayed ? "表示中 \(title)" : title)
+      .contextMenu {
+        OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+      }
     }
     ForEach(worktree.rows, id: \.rowID) { row in
       let showsDisplayedMark = title == nil && isDisplayed && row == worktree.rows.first
       switch row {
       case .pane(let pane):
-        OverviewPaneRow(pane: pane, store: store, showsDisplayedMark: showsDisplayedMark) {
+        OverviewPaneRow(
+          pane: pane, store: store, showsDisplayedMark: showsDisplayedMark,
+          sessionMenu: title == nil
+            ? OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+            : nil
+        ) {
           reveal(worktree.session, pane.paneID)
         }
       case .noAgentPane, .notObserved:
@@ -161,6 +194,11 @@ private struct OverviewProjectSection: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(showsDisplayedMark ? "表示中 \(rowTitle)" : rowTitle)
+        .contextMenu {
+          if title == nil {
+            OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+          }
+        }
       }
     }
   }

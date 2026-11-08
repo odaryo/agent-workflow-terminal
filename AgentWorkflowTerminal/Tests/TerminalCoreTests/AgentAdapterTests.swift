@@ -119,7 +119,8 @@ struct AgentAdapterTests {
     let observation = AgentStateObservation(
       state: .unknown, adapterID: AgentAdapterID(rawValue: "test"),
       observedAt: Date(timeIntervalSince1970: 1), category: .needsAttention,
-      lastKnownAt: Date(timeIntervalSince1970: 0), diagnostics: "details",
+      lastKnownAt: Date(timeIntervalSince1970: 0),
+      lastTurnEndObservedAt: Date(timeIntervalSince1970: 0.5), diagnostics: "details",
       unknownReason: .adapterUndetermined
     )
     let representative = resolveWorktreeRepresentativeState(panes: [
@@ -130,6 +131,7 @@ struct AgentAdapterTests {
     let pane = PaneAgentState(id: PaneID(rawValue: "%1"), observation: observation)
     #expect(pane.adapterID == observation.adapterID)
     #expect(pane.lastKnownAt == observation.lastKnownAt)
+    #expect(pane.lastTurnEndObservedAt == observation.lastTurnEndObservedAt)
     #expect(pane.unknownReason == observation.unknownReason)
     #expect(pane.diagnostics == observation.diagnostics)
     #expect(pane.lastUpdatedAt == observation.observedAt)

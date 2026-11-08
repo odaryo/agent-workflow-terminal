@@ -10,8 +10,14 @@ protocol PaneNotificationPlannerTesting {
 
 extension PaneNotificationPlannerTesting {
   static var clock: ContinuousClock { ContinuousClock() }
-  static var first: AgentStampedValue { AgentStampedValue(agentProcessID: 42, text: "t1") }
-  static var second: AgentStampedValue { AgentStampedValue(agentProcessID: 42, text: "t2") }
+  static var first: AgentStampedValue {
+    AgentStampedValue(
+      agentProcessID: 42, text: "t1", turnStartedAt: Date(timeIntervalSince1970: 90))
+  }
+  static var second: AgentStampedValue {
+    AgentStampedValue(
+      agentProcessID: 42, text: "t2", turnStartedAt: Date(timeIntervalSince1970: 110))
+  }
   static var withProlongedUnknown: PaneNotificationSettings {
     PaneNotificationSettings(
       enabledKinds: PaneNotificationSettings().enabledKinds.union([.prolongedUnknown]))

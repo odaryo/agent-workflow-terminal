@@ -25,7 +25,7 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
     #expect(completions(&planner, ["%1": .completed(Self.first)]).isEmpty)
   }
 
-  @Test("完了表示が新しい (pid, token) で completed になったら1回だけ通知する")
+  @Test("完了表示が新しい (pid, 開始時刻, token) で completed になったら1回だけ通知する")
   func completionNotifiesOncePerToken() {
     var planner = completionBaselined(["%1": PaneTaskCompletionDisplay.none])
 
@@ -46,11 +46,26 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
   @Test("同じ token 文字列でも、別の Agent プロセスが書いたものは新しい完了")
   func completionDistinguishesAgentProcess() {
     var planner = completionBaselined(["%1": .completed(Self.first)])
-    let restarted = AgentStampedValue(agentProcessID: 77, text: Self.first.text)
+    let restarted = AgentStampedValue(
+      agentProcessID: 77, text: Self.first.text, turnStartedAt: Self.first.turnStartedAt)
 
     #expect(
       completions(&planner, ["%1": .completed(restarted)])
         == [event("%1", .taskCompleted, completion: restarted)])
+  }
+
+  @Test("同じ PID と token でも開始時刻が違えば1回ずつ完了を通知する")
+  func completionDistinguishesTurnStart() {
+    var planner = completionBaselined(["%1": .completed(Self.first)])
+    let next = AgentStampedValue(
+      agentProcessID: Self.first.agentProcessID, text: Self.first.text,
+      turnStartedAt: Date(timeIntervalSince1970: 110))
+
+    #expect(
+      completions(&planner, ["%1": .completed(next)])
+        == [event("%1", .taskCompleted, completion: next)])
+    #expect(completions(&planner, ["%1": .completed(next)]).isEmpty)
+    #expect(completions(&planner, ["%1": .dismissed(next)]).isEmpty)
   }
 
   @Test("dismissed への遷移では通知しない")
@@ -60,12 +75,12 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
     #expect(completions(&planner, ["%1": .dismissed(Self.first)]).isEmpty)
   }
 
-  @Test("完了表示が次のターンに入ってから遅れて現れても、通知は1回だけ (#386)")
+  @Test("tracker が受理した次ターンの完了表示は、Working 中でも1回だけ通知する (#386)")
   func delayedCompletionIsNotifiedOnce() {
     var planner = baselined([pane("%1", .working)])
     _ = completions(&planner, ["%1": PaneTaskCompletionDisplay.none])
 
-    // 応答終了 → 次のターン、の後で初めて token が読めた。
+    // 前ターンの応答終了を挟んでも、planner は tracker の受理した表示に従う。
     _ = observe(&planner, [pane("%1", .completed)])
     _ = observe(&planner, [pane("%1", .unknown)])
     _ = observe(&planner, [pane("%1", .working)])
@@ -143,7 +158,7 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
 
   @Test("ps を読めない起動直後の読み取りの後に、起動前の token を鳴らさない (tracker と合わせて)")
   func staleTokenAfterUnobservableStart() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     var planner = baselined([])
     let paneID = PaneID(rawValue: "%1")
     let readings: [PaneSummaryEntry<AgentStampedValue>] = [
@@ -151,7 +166,9 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
     ]
 
     for reading in readings {
-      let display = tracker.update(paneID: paneID, completion: reading, agentState: .completed)
+      let display = tracker.update(
+        paneID: paneID, completion: reading, agentState: .completed,
+        observedAt: Date(timeIntervalSince1970: 100))
       let undetermined: Set<String> =
         PaneTaskCompletionTracker.isUndetermined(reading) ? ["%1"] : []
       #expect(completions(&planner, ["%1": display], undetermined: undetermined).isEmpty)
@@ -165,7 +182,7 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
       (.discarded(.agentProcessAmbiguous(written: 42, candidates: [42, 43])), true),
       (.discarded(.agentProcessMismatch(written: 42, current: 43)), false),
       (.discarded(.agentProcessNotRunning(written: 42)), false),
-      (.accepted(AgentStampedValue(agentProcessID: 42, text: "t1")), false),
+      (.accepted(Self.first), false),
       (.unset, false),
     ])
   func undeterminedReadings(entry: PaneSummaryEntry<AgentStampedValue>, expected: Bool) {

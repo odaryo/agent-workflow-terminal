@@ -275,6 +275,8 @@ public struct AgentStateObservation: Sendable, Hashable, Codable {
   public let observedAt: Date
   /// 直近で状態を**確定できた**時刻。`observedAt` とは別物で、一度も確定できていなければ `nil`。
   public let lastKnownAt: Date?
+  /// Idle / Completed の最終観測時刻。配信しない回の観測も含む。
+  public let lastTurnEndObservedAt: Date?
   /// `.unknown` / `.error` の理由。診断表示専用で、分岐や差分配信の条件に使わない。
   public let diagnostics: String?
   public let unknownReason: UnknownReason?
@@ -282,6 +284,7 @@ public struct AgentStateObservation: Sendable, Hashable, Codable {
   public init(
     state: AgentState, adapterID: AgentAdapterID, observedAt: Date,
     category: WorktreeStateCategory? = nil, lastKnownAt: Date? = nil,
+    lastTurnEndObservedAt: Date? = nil,
     diagnostics: String? = nil, unknownReason: UnknownReason? = nil
   ) {
     self.state = state
@@ -289,6 +292,7 @@ public struct AgentStateObservation: Sendable, Hashable, Codable {
     self.adapterID = adapterID
     self.observedAt = observedAt
     self.lastKnownAt = lastKnownAt
+    self.lastTurnEndObservedAt = lastTurnEndObservedAt
     self.diagnostics = diagnostics
     self.unknownReason = unknownReason
   }
@@ -333,6 +337,7 @@ extension AgentAdapter {
         var nextLivenessCheck: ContinuousClock.Instant?
         var previous: AgentObservationResult?
         var lastKnownAt: Date?
+        var lastTurnEndObservedAt: Date?
         let clock = ContinuousClock()
         while !Task.isCancelled {
           let now = clock.now
@@ -354,14 +359,17 @@ extension AgentAdapter {
                   for: pane, minimumChangedLines: minimumChangedLinesForScreenActivity),
                 liveness: liveness
               )
-              result = Self.withLastKnownAt(classified, previous: &lastKnownAt)
+              result = Self.withObservationHistory(
+                classified, lastKnownAt: &lastKnownAt, lastTurnEndObservedAt: &lastTurnEndObservedAt
+              )
             } catch {
               let failed = AgentObservationResult.observation(
                 AgentStateObservation(
                   state: .unknown, adapterID: id, observedAt: Date(),
                   diagnostics: String(describing: error), unknownReason: .observationFailed
                 ))
-              result = Self.withLastKnownAt(failed, previous: &lastKnownAt)
+              result = Self.withObservationHistory(
+                failed, lastKnownAt: &lastKnownAt, lastTurnEndObservedAt: &lastTurnEndObservedAt)
             }
           }
           if !result.hasSameObservableState(as: previous) {
@@ -376,18 +384,22 @@ extension AgentAdapter {
     }
   }
 
-  private static func withLastKnownAt(
-    _ result: AgentObservationResult, previous lastKnownAt: inout Date?
+  private static func withObservationHistory(
+    _ result: AgentObservationResult, lastKnownAt: inout Date?, lastTurnEndObservedAt: inout Date?
   ) -> AgentObservationResult {
     guard case .observation(let observation) = result else { return result }
     if observation.state != .unknown {
       lastKnownAt = observation.observedAt
     }
+    if observation.state == .idle || observation.state == .completed {
+      lastTurnEndObservedAt = observation.observedAt
+    }
     return .observation(
       AgentStateObservation(
         state: observation.state, adapterID: observation.adapterID,
         observedAt: observation.observedAt, category: observation.category,
-        lastKnownAt: lastKnownAt, diagnostics: observation.diagnostics,
+        lastKnownAt: lastKnownAt, lastTurnEndObservedAt: lastTurnEndObservedAt,
+        diagnostics: observation.diagnostics,
         unknownReason: observation.unknownReason
       ))
   }

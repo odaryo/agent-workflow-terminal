@@ -33,12 +33,14 @@ struct TmuxPaneSummaryIntegrationTests {
       try await Self.set(
         TmuxPaneSummaryOption.status, "\(panes.claudePID) 設計｜相談中", panes.claude, runner)
       try await Self.set(
-        TmuxPaneSummaryOption.completion, "\(panes.claudePID) turn-1", panes.claude, runner)
+        TmuxPaneSummaryOption.completion, "\(panes.claudePID) turn=1794130451048 turn-1",
+        panes.claude, runner)
       // Codex の pane に Claude の PID で書いた現在地 (別 Agent の値) と、本人の PID の完了。
       try await Self.set(
         TmuxPaneSummaryOption.status, "\(panes.claudePID) 実装中", panes.codex, runner)
       try await Self.set(
-        TmuxPaneSummaryOption.completion, "\(panes.codexPID) turn-9", panes.codex, runner)
+        TmuxPaneSummaryOption.completion, "\(panes.codexPID) turn=1794130451048 turn-9",
+        panes.codex, runner)
       try await TmuxPanePurposeWriter(runner: runner).setPurpose("ログイン修正", of: panes.codex)
 
       let summaries = try await Self.interpret(worktree, runner: runner)
@@ -48,7 +50,10 @@ struct TmuxPaneSummaryIntegrationTests {
       #expect(claude.summary.status == .accepted("設計｜相談中"))
       #expect(
         claude.summary.completion
-          == .accepted(AgentStampedValue(agentProcessID: panes.claudePID, text: "turn-1")))
+          == .accepted(
+            AgentStampedValue(
+              agentProcessID: panes.claudePID, text: "turn-1",
+              turnStartedAt: Date(timeIntervalSince1970: 1794130451.048))))
       #expect(claude.summary.purpose == .unset)
 
       let codex = try #require(summaries[panes.codex])
@@ -60,7 +65,10 @@ struct TmuxPaneSummaryIntegrationTests {
             .agentProcessMismatch(written: panes.claudePID, current: panes.codexPID)))
       #expect(
         codex.summary.completion
-          == .accepted(AgentStampedValue(agentProcessID: panes.codexPID, text: "turn-9")))
+          == .accepted(
+            AgentStampedValue(
+              agentProcessID: panes.codexPID, text: "turn-9",
+              turnStartedAt: Date(timeIntervalSince1970: 1794130451.048))))
       // 目的は PID 照合をしない。
       #expect(codex.summary.purpose == .accepted("ログイン修正"))
 

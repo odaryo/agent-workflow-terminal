@@ -7,19 +7,13 @@ import TerminalCore
 struct ProjectsWindowContent: View {
   @ObservedObject var projects: ProjectsModel
   @Environment(\.openWindow) private var openWindow
-  @AppStorage(OverviewPresentation.key) private var presentation = OverviewPresentation.default
-    .rawValue
   @AppStorage(OverviewSidebarPreferences.isOpenKey) private var isSidebarOpen =
     OverviewSidebarPreferences.defaultIsOpen
   @AppStorage(OverviewSidebarPreferences.widthKey) private var sidebarWidth =
     OverviewSidebarPreferences.defaultWidth
 
-  private var isSidebarVisible: Bool {
-    OverviewPresentation(storedValue: presentation) == .sidebar && isSidebarOpen
-  }
-
   private var sidebarOccupiedWidth: CGFloat {
-    OverviewSidebarPreferences.occupiedWidth(isVisible: isSidebarVisible, width: sidebarWidth)
+    OverviewSidebarPreferences.occupiedWidth(isVisible: isSidebarOpen, width: sidebarWidth)
   }
 
   // Why not `.id(Project)` の内側: サイドバーを `ProjectView` の `.id` の内側や前後の分岐に置くと、
@@ -29,14 +23,12 @@ struct ProjectsWindowContent: View {
   // サイドバーの開閉と幅の変更は、端末の領域を変えるので tmux の window の大きさを変える (§13)。
   var body: some View {
     HStack(spacing: 0) {
-      if isSidebarVisible {
+      if isSidebarOpen {
         sidebar
       }
       mainColumn
     }
-    .modifier(
-      OverviewToolbarBand(isEnabled: OverviewPresentation(storedValue: presentation) == .sidebar)
-    )
+    .modifier(OverviewToolbarBand())
     .background {
       if let model = projects.selectedModel {
         ProjectWindowExpansion(model: model, extraWidth: sidebarOccupiedWidth)
@@ -123,17 +115,13 @@ struct ProjectsWindowContent: View {
 }
 
 private struct OverviewToolbarBand: ViewModifier {
-  let isEnabled: Bool
-
   func body(content: Content) -> some View {
-    // content ごと分岐すると端末の NSView と tmux client が作り直されるため、
-    // modifier の構造は固定し、表示形式は値で切り替える。
     // 項目の sharedBackgroundVisibility だけでは、sidebar の List 背景や境界線が
     // titlebar へ延びるのを防げない。内容の描画範囲と帯全体の背景を別々に固定する。
     content
       .clipped()
       .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
-      .toolbarBackground(isEnabled ? .visible : .automatic, for: .windowToolbar)
+      .toolbarBackground(.visible, for: .windowToolbar)
   }
 }
 

@@ -1,34 +1,8 @@
-import AppKit
 import SwiftUI
 import TerminalCore
 
-/// 全 Agent pane の Overview (設計書 §13)。
-///
-/// `WindowGroup` にしない。複製できると同じ一覧が2枚になるだけで、§13 の「通常のウィンドウ1枚」
-/// に反する。位置とサイズは `Window` の id (`overview`) を名前に SwiftUI が `NSWindow Frame
-/// overview` として保存する (メイン window の `NSWindow Frame main` と同じ機構、実測)。
-struct OverviewScene: Scene {
-  @ObservedObject var projects: ProjectsModel
-
-  var body: some Scene {
-    Window("Overview", id: "overview") {
-      OverviewWindowContent(projects: projects)
-        .frame(minWidth: 420, minHeight: 240)
-    }
-    .defaultSize(width: 640, height: 480)
-    .commands {
-      ProjectNavigationCommands(projects: projects)
-      TabCyclingCommands(projects: projects)
-      ViewerCommands(projects: projects)
-      CommandGroup(after: .toolbar) {
-        OverviewMenuItem(navigator: projects.navigator)
-      }
-    }
-  }
-}
-
 /// `openWindow` は View の environment からしか取れないので、メニュー項目を View にする。
-private struct OverviewMenuItem: View {
+struct OverviewMenuItem: View {
   let navigator: AppNavigator
   @Environment(\.openWindow) private var openWindow
 
@@ -36,69 +10,9 @@ private struct OverviewMenuItem: View {
     // 端末 (`GhosttySurfaceView`) は `performKeyEquivalent` を持たないので、⌘ 付きの打鍵は
     // 端末より先にメニューへ届く (§5.4)。
     Button("Overview を表示") {
-      switch OverviewPresentation.current() {
-      case .window:
-        if navigator.isOverviewWindowOpen {
-          navigator.overviewWindow?.close()
-        } else {
-          openWindow(id: "overview")
-        }
-      case .sidebar: navigator.toggleOverviewSidebar(openWindow: openWindow)
-      }
+      navigator.toggleOverviewSidebar(openWindow: openWindow)
     }
     .keyboardShortcut("o", modifiers: [.command, .shift])
-  }
-}
-
-/// サイドバー表示では Overview のウィンドウを出さない (§13)。
-///
-/// Why not `defaultLaunchBehavior(.suppressed)`: macOS 15 の API で、deployment target の 14 では
-/// 使えず、scene の修飾子なので条件付きにもできない。起動時に SwiftUI がこの scene を開くことが
-/// ある (main d3f897a でユーザーが観測。state restoration は無効にしているので原因は未計測) ため、
-/// 開いてしまったウィンドウを表示形態を見て閉じる。設定でサイドバーへ切り替えた時にも同じ経路で閉じる。
-private struct OverviewWindowContent: View {
-  @ObservedObject var projects: ProjectsModel
-  @AppStorage(OverviewPresentation.key) private var presentation = OverviewPresentation.default
-    .rawValue
-  @Environment(\.dismissWindow) private var dismissWindow
-
-  var body: some View {
-    Group {
-      if OverviewPresentation(storedValue: presentation) == .window {
-        OverviewView(projects: projects, navigator: projects.navigator)
-      }
-    }
-    .background { OverviewWindowCapture(navigator: projects.navigator) }
-    .onChange(of: presentation, initial: true) {
-      if OverviewPresentation(storedValue: presentation) == .sidebar {
-        dismissWindow(id: "overview")
-      }
-    }
-  }
-}
-
-private struct OverviewWindowCapture: NSViewRepresentable {
-  let navigator: AppNavigator
-
-  func makeNSView(context: Context) -> CaptureView { CaptureView() }
-
-  func updateNSView(_ view: CaptureView, context: Context) {
-    view.navigator = navigator
-    view.capture()
-  }
-
-  @MainActor
-  final class CaptureView: NSView {
-    weak var navigator: AppNavigator?
-
-    override func viewDidMoveToWindow() {
-      super.viewDidMoveToWindow()
-      capture()
-    }
-
-    func capture() {
-      if let window { navigator?.overviewWindow = window }
-    }
   }
 }
 

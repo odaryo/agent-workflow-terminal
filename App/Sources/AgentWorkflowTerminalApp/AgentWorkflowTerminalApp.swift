@@ -29,6 +29,12 @@ struct AgentWorkflowTerminalApp: App {
     .windowResizability(.contentMinSize)
     .defaultSize(width: 900, height: 560)
     .commands {
+      ProjectNavigationCommands(projects: projects)
+      TabCyclingCommands(projects: projects)
+      ViewerCommands(projects: projects)
+      CommandGroup(after: .toolbar) {
+        OverviewMenuItem(navigator: projects.navigator)
+      }
       // `Window` だけで File メニューごと消えることは計測済みで、この行は多重防御。
       CommandGroup(replacing: .newItem) {}
       // File メニューが消えると ⌘W も巻き添えになる。このアプリは
@@ -43,7 +49,6 @@ struct AgentWorkflowTerminalApp: App {
           .keyboardShortcut("w")
       }
     }
-    OverviewScene(projects: projects)
     Settings {
       AppSettingsView()
     }

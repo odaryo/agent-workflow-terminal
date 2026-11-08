@@ -283,7 +283,7 @@ public enum PaneTaskCompletionDisplay: Sendable, Hashable {
 /// - Important: 応答終了の観測時刻 tL (`lastTurnEndObservedAt`) は、Idle / Completed を最後に
 ///   観測した capture を発行する直前の時刻を渡す。状態の変化の回しか配信されない feed では、
 ///   状態の最初の観測時刻 (`lastUpdatedAt`) を使うと、Completed が続く間に走った短いターンの完了が残る。
-///   受信時刻だと Completed の capture と次のターン開始の差が数十 ms (実測 64〜77 ms) しかなく、
+///   受信時刻だと Completed の capture と次のターン開始の差が数十 ms (実測 21〜77 ms) しかなく、
 ///   次のターンの完了まで失う。`@awt_done` の開始時刻はエポックミリ秒で書くこと。
 ///   秒へ切り捨ててから 1000 倍すると、同じ秒に始まった次のターンの完了を失う (設計書 §12.7)。
 /// - Note: ターンの途中で誤った Idle / Completed を観測すると、そのターンの完了を失い得る

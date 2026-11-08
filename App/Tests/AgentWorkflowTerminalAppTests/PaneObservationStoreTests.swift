@@ -8,8 +8,14 @@ import Testing
 @MainActor
 @Suite("Issue #387 初回の観測完了")
 struct PaneObservationStoreTests {
-  @Test("Issue #386 概要で読んだ完了は応答終了後の Working で解除する")
-  func dismissesCompletionAfterObservedTurnEnd() async throws {
+  // 配信された Completed の時刻 (10) でも Working の観測時刻 (20) でもなく、Working が運ぶ
+  // 応答終了の最終観測時刻 (16) で判定することを、その前後に始まったターンで固定する。
+  @Test(
+    "Issue #386 Working が運ぶ応答終了の最終観測時刻より前のターンの完了だけを解除する",
+    arguments: [(11_000, false), (17_000, true)])
+  func dismissesCompletionAfterObservedTurnEnd(
+    turnStartMilliseconds: Int, remainsCompleted: Bool
+  ) async throws {
     let identity = try #require(WorktreeIdentity(rawValue: "/repo/.git"))
     let session = TerminalSessionKey.primary(identity)
     let states = AsyncStream<WorktreePaneAgentStates>.makeStream()
@@ -19,7 +25,8 @@ struct PaneObservationStoreTests {
       summaryGate.continuation.finish()
     }
     let processRunner = CompletionObservationRunner(
-      sessionName: TmuxSessionName(key: session).rawValue, summaryGate: summaryGate.stream)
+      sessionName: TmuxSessionName(key: session).rawValue, summaryGate: summaryGate.stream,
+      turnStartMilliseconds: turnStartMilliseconds)
     let executable = URL(fileURLWithPath: "/usr/bin/true")
     let runner = try TmuxRunner(
       server: .userDefault, processRunner: processRunner, executableCandidates: [executable])
@@ -38,12 +45,12 @@ struct PaneObservationStoreTests {
           identity: identity, worktreePath: "/repo", branch: "main", isProjectRoot: true),
         taskWorktrees: []), tabs: [session])
     let pane = PaneID(rawValue: "%2")
-    let turnEnd = Date(timeIntervalSince1970: 16)
+    let firstTurnEnd = Date(timeIntervalSince1970: 10)
     let completed = PaneAgentState(
       id: pane,
       observation: AgentStateObservation(
-        state: .completed, adapterID: AgentAdapterID(rawValue: "test"), observedAt: turnEnd,
-        lastTurnEndObservedAt: turnEnd))
+        state: .completed, adapterID: AgentAdapterID(rawValue: "test"), observedAt: firstTurnEnd,
+        lastTurnEndObservedAt: firstTurnEnd))
     states.continuation.yield(.init(panes: [completed], isComplete: true))
     try await waitUntil { store.observed[session]?.latestPaneStates == [completed] }
     #expect(store.observed[session]?.details[pane]?.isTaskCompleted == false)
@@ -56,10 +63,11 @@ struct PaneObservationStoreTests {
       id: pane,
       observation: AgentStateObservation(
         state: .working, adapterID: AgentAdapterID(rawValue: "test"),
-        observedAt: Date(timeIntervalSince1970: 17), lastTurnEndObservedAt: turnEnd))
+        observedAt: Date(timeIntervalSince1970: 20),
+        lastTurnEndObservedAt: Date(timeIntervalSince1970: 16)))
     states.continuation.yield(.init(panes: [working], isComplete: true))
     try await waitUntil { store.observed[session]?.latestPaneStates == [working] }
-    #expect(store.observed[session]?.details[pane]?.isTaskCompleted == false)
+    #expect(store.observed[session]?.details[pane]?.isTaskCompleted == remainsCompleted)
   }
 
   private func waitUntil(_ condition: () -> Bool) async throws {
@@ -130,6 +138,7 @@ struct PaneObservationStoreTests {
 private struct CompletionObservationRunner: ProcessRunning {
   let sessionName: String
   let summaryGate: AsyncStream<Void>
+  let turnStartMilliseconds: Int
 
   func run(
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
@@ -139,7 +148,7 @@ private struct CompletionObservationRunner: ProcessRunning {
       for await _ in summaryGate {}
       let fields = [
         "%2", sessionName, "0", "@1", "0", "100", "1", "codex", "0", "", "",
-        "/dev/ttys002", "/repo", "", "v", "v200 turn=11000 done", "v",
+        "/dev/ttys002", "/repo", "", "v", "v200 turn=\(turnStartMilliseconds) done", "v",
       ]
       return .init(exitCode: 0, stdout: fields.joined(separator: "\u{1F}") + "\n", stderr: "")
     }

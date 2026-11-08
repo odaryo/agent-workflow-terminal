@@ -86,7 +86,8 @@ public struct TmuxPaneOperations: Sendable {
   /// `select(pane:)` と違い、その pane の window を session の current window にもする
   /// (tmux 3.4 / 3.7c とも実測: 別 window の非 active pane を指すと current window と active pane の
   /// 両方がその pane へ移り、他の session は変わらない)。session に attach している全 client の
-  /// 表示が動く。
+  /// 表示が動く。window が複数の session に link されているときは、client の居る session の
+  /// current window が動く (3.4 / 3.7c で実測、Issue #189 のレビュー)。zoom は解除される。
   ///
   /// argv の `;` で2コマンドを1回の起動に載せる。tmux はこの列を原子的には扱わず、後ろの
   /// `select-pane` が失敗しても前の `select-window` は効いたまま残る (両版で実測)。同じ pane を

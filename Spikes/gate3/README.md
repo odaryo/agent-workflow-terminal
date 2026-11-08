@@ -344,8 +344,10 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 - Claude Code 2.1.319 (`claude-2.1.319-trust-prompt.json`): `Enter to confirm · Esc to cancel` の行と、
   `Yes, I trust this folder` か `Claude Code'll be able to read, edit, and execute files here.` の行。
   カーソル `❯` は選んだ側へ動くので、選択肢の移動で画面が変わっても `working` にしないよう、画面鮮度より前に見る。
-- Codex 0.166.0 (`codex-0.166.0-trust-prompt.json`): `Trust this folder?` / `› 1. Trust and continue`。
-  pane title は `codex <path>` で `Action Required` を含まない。起動直後には先に更新の確認
+- Codex 0.166.0 (`codex-0.166.0-trust-prompt.json`): `Folder access` の行と、`› 1. Trust and continue` か
+  `1. Trust and continue` の行 (前後の空白を除いた行の一致)。pane title は `codex <path>` で `Action Required`
+  を含まないので title より先に見る。そのぶん、文言を含むだけの判定では作業中・完了・入力欄の画面に出た
+  `Trust this folder?` で取り違えた (レビューで計測) ので、2行の組み合わせに限った。起動直後には先に更新の確認
   (`codex-0.166.0-update-prompt.json`、footer は `enter continue · esc skip`) が出て、trust 画面の footer
   `enter continue · esc back` と前半を共有する。更新の確認は Permission に含めると決まっていない
   (Issue #639) ので unknown のまま。git の repository でないディレクトリでは trust 画面は出なかった。

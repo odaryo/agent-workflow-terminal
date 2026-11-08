@@ -44,6 +44,66 @@ struct CodexAdapterTests {
     #expect(fixtureState(of: result) != "permission")
   }
 
+  @Test(
+    "返答中の trust 文言2行だけでは元の状態を変えない (Issue #252)",
+    arguments: ["codex-0.152.1-working", "codex-0.152.1-completed"]
+  )
+  func trustTextInResponsePreservesState(prefix: String) throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: prefix).first)
+    let responseLine = "  3（さん）— 三角形の辺の数です。"
+    let screen = fixture.screen.replacingOccurrences(
+      of: responseLine,
+      with: "Trust this folder?\n› 1. Trust and continue\n" + responseLine)
+    try #require(screen != fixture.screen)
+    try #require(!screen.contains("Folder access"))
+    let result = CodexAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == fixture.expectedState)
+  }
+
+  @Test("入力欄の trust 文言だけでは Permission にしない (Issue #252)")
+  func trustTextInInputIsUnknown() throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.152.1-idle").first)
+    try #require(fixture.expectedState == "idle")
+    let inputLine = try #require(
+      fixture.screen.split(separator: "\n").first { $0.contains("Ask Codex to do anything") })
+    let screen = fixture.screen.replacingOccurrences(
+      of: String(inputLine), with: "› Trust this folder?")
+    try #require(screen != fixture.screen)
+    try #require(!screen.contains("Ask Codex to do anything"))
+    let result = CodexAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    // 元の expectedState は idle だが、その根拠の Ask Codex to do anything が消え、
+    // spinner や完了の根拠もないため、置換後は unknown を期待する。
+    #expect(fixtureState(of: result) == "unknown")
+  }
+
+  @Test("trust prompt は選択肢2を選んでも Permission (Issue #252)")
+  func trustPromptWithSecondOptionSelectedIsPermission() throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt").first)
+    let withoutFirstSelection = fixture.screen.replacingOccurrences(
+      of: "› 1. Trust and continue", with: "  1. Trust and continue")
+    try #require(withoutFirstSelection != fixture.screen)
+    let screen = withoutFirstSelection.replacingOccurrences(
+      of: "  2. Back to Agent Command Center", with: "› 2. Back to Agent Command Center")
+    try #require(screen != withoutFirstSelection)
+    let result = CodexAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "permission")
+  }
+
   @Test("title 由来の操作待ち category を保つ")
   func titleAttention() {
     let signals = AgentSignals(

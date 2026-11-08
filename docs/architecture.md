@@ -1473,8 +1473,11 @@ Issue #252で行う。
 Issue #252で採用した(2026-11-08、`Spikes/gate3/README.md` §6.6)。Claude Code 2.1.319は
 `Enter to confirm · Esc to cancel`の行と、`Yes, I trust this folder`または
 `Claude Code'll be able to read, edit, and execute files here.`の行(前後の空白を除いた行の一致)、
-Codex 0.166.0は`Trust this folder?`または`› 1. Trust and continue`を見る。Codexのtrust画面は
-pane titleに`Action Required`を出さないので、titleより画面を先に見る。footerの`enter continue`は
+Codex 0.166.0は`Folder access`の行と、`› 1. Trust and continue`または`1. Trust and continue`の行
+(前後の空白を除いた行の一致)を見る。Codexのtrust画面はpane titleに`Action Required`を出さないので、
+titleより画面を先に見る。titleで絞れない分、文言を含むだけの判定では作業中の画面に出た文言
+(このrepositoryのソースや設計書を読ませたときなど)でPermissionになり、Diffコメントも送れなくなるので、
+2行の組み合わせに限る。footerの`enter continue`は
 起動時の更新の確認(Issue #639、扱いは未確定)と共有なので使わない。Codex 0.166.0はgitのrepositoryでない
 ディレクトリではtrust画面を出さなかった(task worktreeは常にrepositoryなので影響しない)。Gate 3の記録には
 どちらの画面も含まれず、再採点の数字は変わらない(24本の遷移列が変更前後で一致)。

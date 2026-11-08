@@ -8,10 +8,12 @@ public struct RegisteredProject: Sendable, Hashable {
   /// (設計書 §2.3)。`git worktree list` が返したパスをそのまま持ち、正規化しない
   /// (`WorktreeIdentity` と同じ理由)。
   public let directory: String
+  public var agentCommand: String?
 
-  public init(commonDirectory: WorktreeIdentity, directory: String) {
+  public init(commonDirectory: WorktreeIdentity, directory: String, agentCommand: String? = nil) {
     self.commonDirectory = commonDirectory
     self.directory = directory
+    self.agentCommand = agentCommand
   }
 }
 
@@ -42,7 +44,7 @@ public struct ProjectRegistry: Sendable, Hashable {
   public init(restoring persisted: PersistedProjectRegistry) {
     self.init()
     for project in persisted.projects {
-      append(RegisteredProject(project))
+      _ = append(RegisteredProject(project))
     }
     if let selection = persisted.selection, contains(selection) {
       self.selection = selection
@@ -53,6 +55,17 @@ public struct ProjectRegistry: Sendable, Hashable {
 
   public func project(_ commonDirectory: WorktreeIdentity) -> RegisteredProject? {
     projects.first { $0.commonDirectory == commonDirectory }
+  }
+
+  @discardableResult
+  public mutating func setAgentCommand(
+    _ command: String?, of commonDirectory: WorktreeIdentity
+  ) -> Bool {
+    guard let index = projects.firstIndex(where: { $0.commonDirectory == commonDirectory }) else {
+      return false
+    }
+    projects[index].agentCommand = command
+    return true
   }
 
   /// 追加でも重複でも、その Project を選択する。重複のときは既存の `directory` を保つ。
@@ -156,19 +169,27 @@ public struct PersistedProjectRegistry: Sendable, Hashable, Codable {
 public struct PersistedRegisteredProject: Sendable, Hashable, Codable {
   public let commonDirectory: WorktreeIdentity
   public let directory: String
+  public let agentCommand: String?
 
-  public init(commonDirectory: WorktreeIdentity, directory: String) {
+  public init(commonDirectory: WorktreeIdentity, directory: String, agentCommand: String? = nil) {
     self.commonDirectory = commonDirectory
     self.directory = directory
+    self.agentCommand = agentCommand
   }
 
   public init(_ project: RegisteredProject) {
-    self.init(commonDirectory: project.commonDirectory, directory: project.directory)
+    self.init(
+      commonDirectory: project.commonDirectory, directory: project.directory,
+      agentCommand: project.agentCommand
+    )
   }
 }
 
 extension RegisteredProject {
   init(_ persisted: PersistedRegisteredProject) {
-    self.init(commonDirectory: persisted.commonDirectory, directory: persisted.directory)
+    self.init(
+      commonDirectory: persisted.commonDirectory, directory: persisted.directory,
+      agentCommand: persisted.agentCommand
+    )
   }
 }

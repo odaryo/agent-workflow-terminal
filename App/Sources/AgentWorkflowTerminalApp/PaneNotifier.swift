@@ -178,10 +178,12 @@ final class PaneNotifier {
           containing: pane, in: model.paneObservations.observed, excluding: session,
           inventory: model.inventory)
       if let destination {
-        if let failure = await navigator.reveal(
+        switch await navigator.reveal(
           model, worktree: destination.identity, session: destination, pane: pane, in: projects)
         {
-          projects.showWarning(failure)
+        case .paneGone: projects.showWarning(Self.goneNotice)
+        case let failure?: projects.showWarning(failure.description)
+        case nil: break
         }
       } else {
         _ = await navigator.reveal(

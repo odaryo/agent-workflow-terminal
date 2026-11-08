@@ -89,8 +89,8 @@ struct PaneDisplayStateRetentionTests {
     #expect(stabilizer.observe(original, at: at(2)) == previous)
   }
 
-  @Test("新規 pane が増えて入力順が変わっても、前後に残る同順位の pane の相対順を保つ")
-  func unchangedTiedPanesKeepRelativeOrderWhenInputChanges() throws {
+  @Test("新規 pane が増えて入力順が変わると入力順に追従し、消失中の pane の表示を保つ")
+  func panesFollowChangedInputOrderWhileMissingDisplaysStayUnchanged() throws {
     var stabilizer = PaneDisplayStateStabilizer()
     let previous = stabilizer.observe(
       [pane("%1", .working), pane("%2", .working), pane("%3", .working), pane("%4", .working)],
@@ -101,17 +101,18 @@ struct PaneDisplayStateRetentionTests {
     let next = stabilizer.observe(
       [pane("%5", .working), pane("%4", .working), pane("%1", .working), pane("%6", .working)],
       at: at(2))
-    #expect(next.filter { $0.changedAt == nil } == previous)
-    #expect(next.filter { $0.changedAt != nil }.map(\.paneID.rawValue) == ["%5", "%6"])
+    #expect(next.map(\.paneID.rawValue) == ["%5", "%2", "%3", "%4", "%1", "%6"])
+    #expect(next.first { $0.paneID.rawValue == "%5" }?.changedAt == at(2))
+    #expect(next.first { $0.paneID.rawValue == "%6" }?.changedAt == at(2))
     #expect(
       next.filter { $0.paneID.rawValue == "%2" || $0.paneID.rawValue == "%3" }
         == Array(previous[1...2]))
     #expect(stabilizer.observe([], at: at(3)) == next)
   }
 
-  // 時刻を持つ新規 pane と nil の群の前後は Overview が並べ替えるので、ここでは固定しない。
-  @Test("新規 pane が先頭に増えても、保持中の pane を含む同順位の群は前回の順を保つ")
-  func missingLeadingPanesStayBeforeNewPanes() throws {
+  // 消失中の pane と新規 pane の前後は観測から決められないため、既存 pane の相対順だけを固定する。
+  @Test("新規 pane が先頭に増えても、保持中の pane を含む既存 pane は前回の相対順を保つ")
+  func existingPanesKeepRelativeOrderWhenNewPaneAppears() throws {
     var stabilizer = PaneDisplayStateStabilizer()
     _ = stabilizer.observe(
       [pane("%1", .working), pane("%2", .working), pane("%3", .working)], at: at(0))
@@ -120,6 +121,23 @@ struct PaneDisplayStateRetentionTests {
 
     #expect(shown.filter { $0.changedAt == nil }.map(\.paneID.rawValue) == ["%1", "%2", "%3"])
     #expect(shown.first { $0.paneID.rawValue == "%4" }?.changedAt == at(1))
+  }
+
+  @Test("消失と新規出現が重なる間も観測した pane は入力順に並び、全 pane が揃うと全体が tmux 順に戻る")
+  func allPanesReturnToTmuxOrderAfterOverlappingAbsenceAndArrival() {
+    var stabilizer = PaneDisplayStateStabilizer()
+    let originalIDs = ["%1", "%2", "%3", "%4", "%5"]
+    _ = stabilizer.observe(originalIDs.map { pane($0, .working) }, at: at(0))
+
+    let partialIDs = ["%1", "%2", "%3", "%4", "%6"]
+    let partial = stabilizer.observe(partialIDs.map { pane($0, .working) }, at: at(1))
+    let observedIDs = Set(partialIDs)
+    let partialPaneIDs = partial.map(\.paneID.rawValue)
+    #expect(partialPaneIDs.filter { observedIDs.contains($0) } == partialIDs)
+
+    let allIDs = ["%1", "%2", "%3", "%4", "%5", "%6"]
+    let restored = stabilizer.observe(allIDs.map { pane($0, .working) }, at: at(2))
+    #expect(restored.map(\.paneID.rawValue) == allIDs)
   }
 
   @Test("nextDeadline は状態の保持期限と消失の期限の早い方を返す", arguments: [false, true])

@@ -71,17 +71,6 @@ struct AgentPaneOverviewTests {
     #expect(overview.tasks.map(\.worktree) == [older, newer].map(\.worktree))
   }
 
-  @Test("最終更新が同じ Task は入力 (tab) の順を保つ")
-  func tiesKeepTabOrder() throws {
-    let first = try task("/a/.git/worktrees/first", [pane("%1", .working, 5)])
-    let second = try task("/a/.git/worktrees/second", [pane("%2", .idle, 5)])
-
-    let overview = try #require(
-      makeAgentPaneOverview([try project("/a/.git", tasks: [first, second])]).first)
-
-    #expect(overview.tasks.map(\.worktree) == [first, second].map(\.worktree))
-  }
-
   @Test("Agent pane の有無にかかわらず Task は入力順を保つ")
   func tasksKeepInputOrderRegardlessOfAgentPanes() throws {
     let emptyA = try task("/a/.git/worktrees/emptyA", [])

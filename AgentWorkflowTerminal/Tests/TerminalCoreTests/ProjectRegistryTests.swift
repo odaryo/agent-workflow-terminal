@@ -198,6 +198,174 @@ struct ProjectRegistryTests {
     #expect(registry.projects == [alpha])
   }
 
+  // MARK: - 隣の Project の選択 (設計書 §5.4 / §13)
+
+  @Test("隣の候補は名前順でなく登録順で返し、一覧と選択は変えない", arguments: [true, false])
+  func adjacentSelectionFollowsRegistrationOrder(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let gamma = try project("gamma")
+    let beta = try project("beta")
+    // 名前順 (alpha, beta, gamma) と巡回の向きが逆になる並び。3件では、向きが同じ並びだと
+    // どの Project を選んでも名前順と同じ答えになり、区別できない。
+    var registry = self.registry([alpha, gamma, beta])
+    registry.select(alpha.commonDirectory)
+    let original = registry
+
+    let candidate = registry.adjacentSelection(forward: forward) { _ in true }
+
+    #expect(candidate == (forward ? gamma.commonDirectory : beta.commonDirectory))
+    #expect(registry == original)
+  }
+
+  @Test("2件なら、どちらの向きでももう一方を返す", arguments: [true, false])
+  func adjacentSelectionWithTwoProjects(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    var registry = self.registry([alpha, beta])
+    registry.select(alpha.commonDirectory)
+
+    #expect(registry.adjacentSelection(forward: forward) { _ in true } == beta.commonDirectory)
+  }
+
+  @Test("選べる候補が一番遠い位置にしか無くても返す", arguments: [true, false])
+  func adjacentSelectionReachesFarthestCandidate(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    var registry = self.registry([alpha, beta, gamma])
+    registry.select(beta.commonDirectory)
+    // forward では gamma → alpha、backward では alpha → gamma の順に見るので、2歩目だけが選べる。
+    let only = forward ? alpha.commonDirectory : gamma.commonDirectory
+
+    #expect(registry.adjacentSelection(forward: forward) { $0 == only } == only)
+  }
+
+  @Test("両端からは反対の端へ循環する", arguments: [true, false])
+  func adjacentSelectionWrapsAtEnds(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    var registry = self.registry([alpha, beta, gamma])
+    registry.select(forward ? gamma.commonDirectory : alpha.commonDirectory)
+
+    let candidate = registry.adjacentSelection(forward: forward) { _ in true }
+
+    #expect(candidate == (forward ? alpha.commonDirectory : gamma.commonDirectory))
+  }
+
+  @Test("選択できない Project を飛ばして最も近い候補を返す", arguments: [true, false])
+  func adjacentSelectionSkipsUnselectableProjects(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    let delta = try project("delta")
+    let epsilon = try project("epsilon")
+    var registry = self.registry([alpha, beta, gamma, delta, epsilon])
+    registry.select(gamma.commonDirectory)
+
+    let candidate = registry.adjacentSelection(forward: forward) {
+      $0 == alpha.commonDirectory || $0 == epsilon.commonDirectory
+    }
+
+    #expect(candidate == (forward ? epsilon.commonDirectory : alpha.commonDirectory))
+  }
+
+  @Test("循環先でも選択できない Project を飛ばす", arguments: [true, false])
+  func adjacentSelectionSkipsUnselectableProjectsAfterWrapping(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    let delta = try project("delta")
+    var registry = self.registry([alpha, beta, gamma, delta])
+    registry.select(forward ? delta.commonDirectory : alpha.commonDirectory)
+
+    let candidate = registry.adjacentSelection(forward: forward) {
+      $0 == beta.commonDirectory || $0 == gamma.commonDirectory
+    }
+
+    #expect(candidate == (forward ? beta.commonDirectory : gamma.commonDirectory))
+  }
+
+  @Test("未選択なら選べる先頭または末尾を返し、未選択のまま保つ", arguments: [true, false])
+  func adjacentSelectionWithoutSelectionUsesSelectableEnd(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    let delta = try project("delta")
+    var registry = self.registry([alpha, beta, gamma, delta])
+    registry.reselect { _ in false }
+    try #require(registry.selection == nil)
+    let original = registry
+
+    let candidate = registry.adjacentSelection(forward: forward) {
+      $0 == beta.commonDirectory || $0 == gamma.commonDirectory
+    }
+
+    #expect(candidate == (forward ? beta.commonDirectory : gamma.commonDirectory))
+    #expect(registry == original)
+  }
+
+  @Test("選択中が選べなくてもその位置から隣の候補を返す", arguments: [true, false])
+  func adjacentSelectionStartsFromUnselectableSelection(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    let delta = try project("delta")
+    let epsilon = try project("epsilon")
+    var registry = self.registry([alpha, beta, gamma, delta, epsilon])
+    registry.select(gamma.commonDirectory)
+
+    let candidate = registry.adjacentSelection(forward: forward) { $0 != gamma.commonDirectory }
+
+    #expect(candidate == (forward ? delta.commonDirectory : beta.commonDirectory))
+  }
+
+  @Test("選べる Project が選択中だけなら候補はない", arguments: [true, false])
+  func adjacentSelectionExcludesCurrentProject(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    var registry = self.registry([alpha, beta, gamma])
+    registry.select(beta.commonDirectory)
+
+    let candidate = registry.adjacentSelection(forward: forward) { $0 == beta.commonDirectory }
+
+    #expect(candidate == nil)
+  }
+
+  @Test(
+    "選べる Project がなければ選択の有無に関わらず候補はない",
+    arguments: [true, false], [true, false])
+  func adjacentSelectionWithoutSelectableProject(forward: Bool, hasSelection: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    var registry = self.registry([alpha, beta])
+    if !hasSelection { registry.reselect { _ in false } }
+
+    let candidate = registry.adjacentSelection(forward: forward) { _ in false }
+
+    #expect(candidate == nil)
+  }
+
+  @Test(
+    "登録が1件だけなら選べるかに関わらず候補はない",
+    arguments: [true, false], [true, false])
+  func adjacentSelectionWithSingleProject(forward: Bool, selectable: Bool) throws {
+    let alpha = try project("alpha")
+    let registry = self.registry([alpha])
+
+    let candidate = registry.adjacentSelection(forward: forward) { _ in selectable }
+
+    #expect(candidate == nil)
+  }
+
+  @Test("空の一覧には隣の候補がない", arguments: [true, false])
+  func adjacentSelectionWithEmptyRegistry(forward: Bool) {
+    let registry = ProjectRegistry()
+
+    #expect(registry.adjacentSelection(forward: forward) { _ in true } == nil)
+  }
+
   // MARK: - 永続化形式からの復元
 
   @Test("保存した一覧と選択をそのまま復元する")

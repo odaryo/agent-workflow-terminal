@@ -127,7 +127,7 @@ public enum PersistedWorktreeActivation: String, Sendable, Hashable, Codable {
 ///   同じ結果になる。
 /// - Note: 同じ安定 ID の重複と `isProjectRoot` の重複の扱いは `reconcileDetectedWorktrees` と
 ///   同じで、どちらも最初の1件だけを採る。`saved.taskWorktrees` 側の重複も同様に最初の1件だけを
-///   採る。
+///   採る。git の検出順は開いた順を表さないため、保存側の順を優先する (設計書 §13)。
 /// - Note: 同じ安定 ID が `saved.projectRoot` と `saved.taskWorktrees` の両方に載った壊れた
 ///   ファイルでは、その ID が Project Root として復元されなかった場合に限り Task worktree として
 ///   復活する。`PersistedWorktreeInventory` はこの入力を型では排除できない (同型の doc 参照)。
@@ -193,6 +193,8 @@ public func restoreWorktreeInventory(
     saved: saved, retained: retained, unobservedPaths: unobservedPaths)
   taskWorktrees.append(contentsOf: leftovers.taskWorktrees)
   unobservedIdentities.append(contentsOf: leftovers.unobserved)
+  taskWorktrees = taskWorktreesInOpenedOrder(
+    taskWorktrees, previousIdentities: saved.taskWorktrees.map(\.identity))
 
   return WorktreeScanResult(
     inventory: WorktreeInventory(projectRoot: projectRoot, taskWorktrees: taskWorktrees),

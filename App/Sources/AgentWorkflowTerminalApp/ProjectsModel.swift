@@ -322,7 +322,7 @@ final class ProjectsModel: ObservableObject {
       inventoryLoadFailure: loadFailure, store: store)
   }
 
-  private func isSelectable(_ commonDirectory: WorktreeIdentity) -> Bool {
+  func isSelectable(_ commonDirectory: WorktreeIdentity) -> Bool {
     if case .available = slots[commonDirectory] { return true }
     return false
   }

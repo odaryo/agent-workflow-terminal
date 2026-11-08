@@ -29,6 +29,11 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
     content = nil
   }
 
+  /// 設計書 §6.1。
+  public mutating func toggle(_ content: ViewerContent) {
+    self.content = self.content == content ? nil : content
+  }
+
   public func arrangement(for content: ViewerContent) -> ViewerContentArrangement? {
     switch content {
     case .code: arrangements.code

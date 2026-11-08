@@ -5,6 +5,12 @@ struct TabCyclingCommands: Commands {
 
   var body: some Commands {
     CommandGroup(after: .toolbar) {
+      Button("前のタブ") { projects.selectedModel?.selectPreviousTab() }
+        .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+        .disabled(projects.selectedModel == nil)
+      Button("次のタブ") { projects.selectedModel?.selectNextTab() }
+        .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+        .disabled(projects.selectedModel == nil)
       Button("次のタブ") { projects.selectedModel?.selectNextTab() }
         .keyboardShortcut(.tab, modifiers: .control)
         .disabled(projects.selectedModel == nil)

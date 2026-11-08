@@ -64,9 +64,14 @@ final class AppModel: ObservableObject {
 
   /// 再スキャンの間隔。P1 の暫定値で、根拠は pane 観測 (`makeWorktreePaneStatesFeed`) と同じく
   /// 「体感で追随し、git への負荷が無視できる」程度でしかない。
-  private static let rescanInterval = Duration.seconds(5)
+  private let rescanInterval: Duration
+  private var reportedInitialScanFailure: String?
 
-  init(project: RegisteredProject, dependencies: AppDependencies, notifier: PaneNotifier?) {
+  init(
+    project: RegisteredProject, dependencies: AppDependencies, notifier: PaneNotifier?,
+    rescanInterval: Duration = .seconds(5)
+  ) {
+    self.rescanInterval = rescanInterval
     self.project = project
     projectDirectory = URL(fileURLWithPath: project.directory)
     applicationSupportDirectory = dependencies.applicationSupportDirectory
@@ -159,7 +164,7 @@ final class AppModel: ObservableObject {
   }
 
   /// すぐ返る。本体を呼び出し元の `.task` の寿命に乗せると、window を閉じた時点で再スキャンが
-  /// 止まり、§3.2 確定の「観測中に新規出現した worktree の自動 Active 化」が働かなくなる
+  /// 止まり、新しい worktree の追従が働かなくなる
   /// (Issue #238)。ループはアプリの生存期間そのものなので、`self` を握ったままにする。
   func run() {
     let projectDirectory = projectDirectory
@@ -176,39 +181,47 @@ final class AppModel: ObservableObject {
   }
 
   private func scanAndObserve(projectDirectory: URL) async {
-    let detector: GitWorktreeDetector
-    do {
-      detector = try GitWorktreeDetector(
-        projectDirectory: projectDirectory,
-        processRunner: FoundationProcessRunner()
-      )
-    } catch {
-      report(scanFailure: "\(error)")
-      return
-    }
-
-    switch await scan(with: detector) {
-    case .failure(let error):
-      report(scanFailure: "\(error)")
-      return
-    case .success(let scan):
-      let saved = await prepare(for: scan)
-      var sessionNames: [String]?
+    while !Task.isCancelled {
       do {
-        sessionNames = try await sessions?.sessionNames()
+        let detector = try GitWorktreeDetector(
+          projectDirectory: projectDirectory,
+          processRunner: FoundationProcessRunner()
+        )
+        let scan = try await self.scan(with: detector).get()
+        guard !Task.isCancelled else { return }
+        let saved = await prepare(for: scan)
+        guard !Task.isCancelled else { return }
+        var sessionNames: [String]?
+        do {
+          sessionNames = try await sessions?.sessionNames()
+        } catch {
+          warning = "tmux の session の一覧を取得できないため、前回のタブを復元できませんでした: \(error)"
+        }
+        guard !Task.isCancelled else { return }
+        applyInitial(
+          restoreWorktreeInventory(
+            detected: scan.detected,
+            saved: saved,
+            unobserved: scan.failures.map(\.worktreePath)
+          ), sessionNames: sessionNames, hasSavedInventory: saved != nil)
+        // applyInitial の前に消すと、PaneNotifier のまとめ通知の条件と空の一覧の表示が一瞬崩れる。
+        if let reportedInitialScanFailure, message == reportedInitialScanFailure {
+          message = nil
+        }
+        reportedInitialScanFailure = nil
+        report(scanFailures: scan.failures)
+        await observe(with: detector)
+        return
       } catch {
-        warning = "tmux の session の一覧を取得できないため、前回のタブを復元できませんでした: \(error)"
+        guard !Task.isCancelled else { return }
+        report(scanFailure: "\(error)")
       }
-      applyInitial(
-        restoreWorktreeInventory(
-          detected: scan.detected,
-          saved: saved,
-          unobserved: scan.failures.map(\.worktreePath)
-        ), sessionNames: sessionNames, hasSavedInventory: saved != nil)
-      report(scanFailures: scan.failures)
+      do {
+        try await Task.sleep(for: rescanInterval)
+      } catch {
+        return
+      }
     }
-
-    await observe(with: detector)
   }
 
   /// 起動時の1回だけ呼ぶ。2回目以降のスキャンは `reconcileDetectedWorktrees` の担当であり、
@@ -247,7 +260,7 @@ final class AppModel: ObservableObject {
 
   private func observe(with detector: GitWorktreeDetector) async {
     while !Task.isCancelled {
-      try? await Task.sleep(for: Self.rescanInterval)
+      try? await Task.sleep(for: rescanInterval)
       guard !Task.isCancelled else { return }
 
       // スキャンが失敗した回は何もしない。空の一覧や部分的な結果を
@@ -318,7 +331,11 @@ final class AppModel: ObservableObject {
 
   private func report(scanFailure detail: String) {
     NSLog("[app] worktree を検出できません: \(detail)")
-    message = "worktree を検出できません: \(detail)"
+    let failure = "worktree を検出できません: \(detail)"
+    // 再試行のたびに同じ値を代入して、@Published の購読者を起こさない。
+    guard reportedInitialScanFailure != failure else { return }
+    reportedInitialScanFailure = failure
+    message = failure
   }
 
   func setActivation(_ activation: WorktreeActivation, of identity: WorktreeIdentity) {

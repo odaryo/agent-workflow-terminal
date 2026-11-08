@@ -190,7 +190,8 @@ final class PaneObservationStore: ObservableObject {
     for pane in panes {
       // 解除の判定は生の状態で行う (§12.7)。安定化した状態で遅らせない。
       let display = completions.update(
-        paneID: pane.id, completion: completionEntries[pane.id] ?? .unset, agentState: pane.state)
+        paneID: pane.id, completion: completionEntries[pane.id] ?? .unset, agentState: pane.state,
+        lastTurnEndObservedAt: pane.lastTurnEndObservedAt)
       current.details[pane.id, default: OverviewPaneDetail()].isTaskCompleted =
         display.isCompleted
     }

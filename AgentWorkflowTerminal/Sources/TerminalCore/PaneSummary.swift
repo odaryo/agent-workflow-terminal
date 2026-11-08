@@ -280,7 +280,9 @@ public enum PaneTaskCompletionDisplay: Sendable, Hashable {
 /// - Important: 記憶はアプリの寿命だけ持つ。再起動直後は解除の記憶も直前の状態も無いので、
 ///   pane の状態によらず有効な token を完了として扱い、次に応答終了から Working へ入るまで残す
 ///   (§12.7 に受け入れる残存挙動として記録)。
-/// - Important: 応答終了の観測時刻 tL (`observedAt`) は capture を発行する直前の時刻を渡す。
+/// - Important: 応答終了の観測時刻 tL (`lastTurnEndObservedAt`) は、Idle / Completed を最後に
+///   観測した capture を発行する直前の時刻を渡す。状態の変化の回しか配信されない feed では、
+///   状態の最初の観測時刻 (`lastUpdatedAt`) を使うと、Completed が続く間に走った短いターンの完了が残る。
 ///   受信時刻だと Completed の capture と次のターン開始の差が数十 ms (実測 64〜77 ms) しかなく、
 ///   次のターンの完了まで失う。`@awt_done` の開始時刻はエポックミリ秒で書くこと。
 ///   秒へ切り捨ててから 1000 倍すると、同じ秒に始まった次のターンの完了を失う (設計書 §12.7)。
@@ -304,18 +306,20 @@ public struct PaneTaskCompletionTracker: Sendable {
   /// まだ無いか Agent が居ないことを表す。
   public mutating func update(
     paneID: PaneID, completion: PaneSummaryEntry<AgentStampedValue>, agentState: AgentState?,
-    observedAt: Date? = nil
+    lastTurnEndObservedAt observedAt: Date? = nil
   ) -> PaneTaskCompletionDisplay {
     var entry = entries[paneID] ?? Entry()
+    if let observedAt {
+      entry.lastTurnEndObservedAt = max(entry.lastTurnEndObservedAt ?? observedAt, observedAt)
+    }
     if agentState == .working, let previous = entry.lastKnownState,
       Self.turnEndingStates.contains(previous), let turnEnd = entry.lastTurnEndObservedAt
     {
-      entry.dismissBefore = max(entry.dismissBefore ?? turnEnd, turnEnd)
+      let threshold = Date(
+        timeIntervalSince1970: floor(turnEnd.timeIntervalSince1970 * 1000) / 1000)
+      entry.dismissBefore = max(entry.dismissBefore ?? threshold, threshold)
     }
     if let agentState, agentState != .unknown {
-      if Self.turnEndingStates.contains(agentState), let observedAt {
-        entry.lastTurnEndObservedAt = max(entry.lastTurnEndObservedAt ?? observedAt, observedAt)
-      }
       entry.lastKnownState = agentState
     }
     if Self.isUndetermined(completion) {

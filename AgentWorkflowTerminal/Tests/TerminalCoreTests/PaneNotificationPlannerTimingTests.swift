@@ -158,7 +158,7 @@ struct PaneNotificationPlannerTimingTests: PaneNotificationPlannerTesting {
 
   @Test("ps を読めない起動直後の読み取りの後に、起動前の token を鳴らさない (tracker と合わせて)")
   func staleTokenAfterUnobservableStart() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     var planner = baselined([])
     let paneID = PaneID(rawValue: "%1")
     let readings: [PaneSummaryEntry<AgentStampedValue>] = [

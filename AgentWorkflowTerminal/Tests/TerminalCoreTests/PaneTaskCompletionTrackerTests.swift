@@ -12,7 +12,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("解除の記憶が無い pane に有効な token があれば完了として扱う (再起動直後を含む)")
   func showsCompletionWithoutPriorMemory() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     #expect(
       tracker.update(
         paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
@@ -22,7 +22,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("Idle から Working に入ったら、以前に始まったターンの完了を解除する")
   func dismissesOnTransitionToWorking() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -47,7 +47,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("token が同じでも開始時刻が閾値より後なら新しい完了として再び表示する")
   func showsAgainWhenTurnStartChanges() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -64,7 +64,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("Working の最中に書かれた token は、Working が続いていても解除しない")
   func keepsTokenWrittenDuringWorking() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .unset, agentState: .working,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -90,7 +90,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("応答終了 (Completed) から Working に入っても解除する")
   func dismissesOnTransitionFromCompleted() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .completed,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -106,7 +106,7 @@ struct PaneTaskCompletionTrackerTests {
     "直前の既知の状態が応答終了でなければ、Working に入っても解除しない",
     arguments: [AgentState.question, .permission, .error, .unknown, nil])
   func keepsCompletionWhenResumingFromNonTurnEnd(previous: AgentState?) {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: previous,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -120,7 +120,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("同じターンの許可待ちを挟んでも、ターン中に書かれた完了は解除しない")
   func keepsCompletionAcrossPermissionInTheSameTurn() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -152,7 +152,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("観測を始めた時点で Working なら、直前が分からないので解除しない")
   func firstObservationInWorkingDoesNotDismiss() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     #expect(
       tracker.update(
         paneID: Self.pane, completion: .accepted(Self.first), agentState: .working,
@@ -167,7 +167,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("Agent プロセスを特定できなかった回は、解除済みの記憶を上書きしない", arguments: unidentified)
   func unidentifiedRoundKeepsDismissal(unidentified: PaneSummaryEntry<AgentStampedValue>) {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -194,7 +194,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("Agent プロセスを特定できない回の解除閾値で、次に読めた完了を判定する", arguments: unidentified)
   func unidentifiedRoundAdvancesThreshold(unidentified: PaneSummaryEntry<AgentStampedValue>) {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -213,7 +213,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("Agent プロセスを特定できなかった回が最初の観測なら、表示しない", arguments: unidentified)
   func unidentifiedFirstRoundShowsNothing(unidentified: PaneSummaryEntry<AgentStampedValue>) {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     #expect(
       tracker.update(
         paneID: Self.pane, completion: unidentified, agentState: .idle,
@@ -230,7 +230,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("Claude Code の通常の流れ: 応答終了 → 次のプロンプト入力中 (Unknown) → Working で解除する")
   func dismissesWhenUserTypesNextPrompt() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     // ハーネスは自分のターンの中で完了を書く。次のプロンプトを打っている間、ClaudeCodeAdapter は
     // Unknown を返す (fixture `claude-2.1.263-typed-not-dim.json`)。
     let sequence: [(AgentState, PaneTaskCompletionDisplay)] = [
@@ -253,7 +253,7 @@ struct PaneTaskCompletionTrackerTests {
     "Unknown と観測なしの回は直前の既知の状態を保ち、応答終了からの遷移として解除する",
     arguments: [AgentState.idle, .completed], [AgentState.unknown, nil])
   func unknownRoundKeepsTurnEnd(turnEnd: AgentState, between: AgentState?) {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: turnEnd,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -275,7 +275,7 @@ struct PaneTaskCompletionTrackerTests {
     "Unknown と観測なしの回を挟んでも、同じターンの続きは解除しない",
     arguments: [AgentState.question, .permission], [AgentState.unknown, nil])
   func unknownRoundKeepsInTurnState(inTurn: AgentState, between: AgentState?) {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .working,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -295,7 +295,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("同じ token 文字列でも別の Agent プロセスが書いたものは別の完了")
   func sameTokenFromAnotherProcessIsNew() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .working,
       observedAt: Date(timeIntervalSince1970: 100))
@@ -311,7 +311,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("受理されていない完了は表示しない")
   func ignoresDiscardedCompletion() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     #expect(
       tracker.update(
         paneID: Self.pane,
@@ -325,7 +325,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("別 pane の Working は他の pane の完了を解除しない")
   func workingInAnotherPaneDoesNotDismiss() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     let claudePane = PaneID(rawValue: "%1")
     let codexPane = PaneID(rawValue: "%2")
     let claudeDone = AgentStampedValue(
@@ -350,7 +350,7 @@ struct PaneTaskCompletionTrackerTests {
 
   @Test("forget した pane は解除の記憶を失う")
   func forgetDropsMemory() {
-    var tracker = PaneTaskCompletionTracker()
+    var tracker = CompletionObservationFixture()
     _ = tracker.update(
       paneID: Self.pane, completion: .accepted(Self.first), agentState: .idle,
       observedAt: Date(timeIntervalSince1970: 100))

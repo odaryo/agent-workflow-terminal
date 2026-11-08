@@ -46,6 +46,48 @@ struct WorktreePaneAgentStatesSnapshotTests {
     #expect(settled?.isComplete == true)
   }
 
+  @Test("absent の pane は状態列から外れて不在集合に入り、Agent が戻れば集合から外れる (#395 m2)")
+  func absentAgentReturns() async throws {
+    let context = try makeContext(panes: [.success([pane("%1")])])
+    var iterator = context.stream.makeAsyncIterator()
+    let initial = try #require(await iterator.next())
+    #expect(initial.agentAbsentPanes.isEmpty)
+    #expect(!initial.isComplete)
+    let paneID = PaneID(rawValue: "%1")
+    await context.channel.waitForSubscriber(paneID)
+    await context.channel.send(.absent, to: paneID)
+    let absent = try #require(await iterator.next())
+    #expect(absent.panes.isEmpty)
+    #expect(absent.agentAbsentPanes == [paneID])
+    #expect(absent.isComplete)
+    await context.channel.send(observation(.question), to: paneID)
+    let returned = try #require(await iterator.next())
+    #expect(returned.agentAbsentPanes.isEmpty)
+    #expect(returned.panes.map(\.id) == [paneID])
+    #expect(returned.panes.map(\.state) == [.question])
+  }
+
+  @Test("一覧から消えた不在 pane と、結果が未着の新しい pane は不在集合に入らない (#395 m2)")
+  func removedAndPendingPanesAreNotAbsent() async throws {
+    let context = try makeContext(panes: [.success([pane("%1")]), .success([pane("%2")])])
+    var iterator = context.stream.makeAsyncIterator()
+    _ = await iterator.next()
+    await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
+    await context.channel.send(.absent, to: PaneID(rawValue: "%1"))
+    let absent = try #require(await iterator.next())
+    #expect(absent.agentAbsentPanes == [PaneID(rawValue: "%1")])
+    await context.clock.advance()
+    let pending = try #require(await iterator.next())
+    #expect(pending.agentAbsentPanes.isEmpty)
+    #expect(pending.panes.isEmpty)
+    #expect(!pending.isComplete)
+    await context.channel.waitForSubscriber(PaneID(rawValue: "%2"))
+    await context.channel.send(observation(.working), to: PaneID(rawValue: "%2"))
+    let settled = try #require(await iterator.next())
+    #expect(settled.agentAbsentPanes.isEmpty)
+    #expect(settled.panes.map(\.id) == [PaneID(rawValue: "%2")])
+  }
+
   private struct Context {
     let stream: AsyncStream<WorktreePaneAgentStates>
     let channel: ObservationChannel

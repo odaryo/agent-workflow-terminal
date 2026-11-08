@@ -229,6 +229,57 @@ struct PaneNotificationPlannerHandoffTests: PaneNotificationPlannerTesting {
         == [notification(in: sessionB, paneID: "%2", kind: .question)])
   }
 
+  @Test(
+    "猶予満了で pane の記憶が消えても同じ完了値を移動先で再通知しない (#395 m4)",
+    arguments: [false, true])
+  func completionSurvivesExpiredHandoff(dismissed: Bool) {
+    let start = Self.clock.now
+    var planner = twoSessions(at: start, panesA: [pane("%1", .working)])
+    if dismissed {
+      #expect(displays(&planner, ["%1": .dismissed(Self.first)], in: sessionA, at: start).isEmpty)
+    } else {
+      #expect(
+        displays(&planner, ["%1": .completed(Self.first)], in: sessionA, at: start)
+          == [
+            notification(in: sessionA, paneID: "%1", kind: .taskCompleted, completion: Self.first)
+          ])
+    }
+    #expect(states(&planner, [], in: sessionA, at: start).isEmpty)
+    #expect(displays(&planner, [:], in: sessionA, at: start).isEmpty)
+    let returned = start.advanced(by: PaneNotificationPlanner.paneHandoffGrace + .seconds(1))
+    #expect(planner.advance(to: returned).isEmpty)
+    #expect(states(&planner, [pane("%1", .working)], in: sessionB, at: returned).isEmpty)
+    #expect(displays(&planner, ["%1": .completed(Self.first)], in: sessionB, at: returned).isEmpty)
+    #expect(displays(&planner, ["%1": .completed(Self.first)], in: sessionB, at: returned).isEmpty)
+  }
+
+  @Test(
+    "猶予を超えた移動でも pid・開始時刻・本文のどれかが違えば新しい完了を通知する (#395 m4)",
+    arguments: [
+      AgentStampedValue(
+        agentProcessID: 43, text: "t1", turnStartedAt: Date(timeIntervalSince1970: 90)),
+      AgentStampedValue(
+        agentProcessID: 42, text: "t1", turnStartedAt: Date(timeIntervalSince1970: 91)),
+      AgentStampedValue(
+        agentProcessID: 42, text: "t2", turnStartedAt: Date(timeIntervalSince1970: 90)),
+    ])
+  func changedCompletionAfterExpiredHandoff(value: AgentStampedValue) {
+    let start = Self.clock.now
+    var planner = twoSessions(at: start, panesA: [pane("%1", .working)])
+    #expect(
+      displays(&planner, ["%1": .completed(Self.first)], in: sessionA, at: start)
+        == [notification(in: sessionA, paneID: "%1", kind: .taskCompleted, completion: Self.first)])
+    #expect(states(&planner, [], in: sessionA, at: start).isEmpty)
+    #expect(displays(&planner, [:], in: sessionA, at: start).isEmpty)
+    let returned = start.advanced(by: PaneNotificationPlanner.paneHandoffGrace + .seconds(1))
+    #expect(planner.advance(to: returned).isEmpty)
+    #expect(states(&planner, [pane("%1", .working)], in: sessionB, at: returned).isEmpty)
+    #expect(
+      displays(&planner, ["%1": .completed(value)], in: sessionB, at: returned)
+        == [notification(in: sessionB, paneID: "%1", kind: .taskCompleted, completion: value)])
+    #expect(displays(&planner, ["%1": .completed(value)], in: sessionB, at: returned).isEmpty)
+  }
+
   private func twoSessions(
     at instant: ContinuousClock.Instant, panesA: [PaneAgentState],
     settings: PaneNotificationSettings = PaneNotificationSettings()

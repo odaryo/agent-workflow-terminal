@@ -172,9 +172,11 @@ User and Agent clarify the task
         ↓
 Agent creates a worktree according to project rules
         ↓
-Terminal detects the worktree
+Agent changes directory in the same session and keeps working (the tab stays a Project Root tab)
         ↓
-Worktree is registered/activated
+Terminal detects the worktree and keeps it Inactive (no tab is opened)
+        ↓
+If the user wants a Task Tab, the user activates the worktree from the Inactive menu
         ↓
 Dedicated tmux session and Task Tab become available
 ```

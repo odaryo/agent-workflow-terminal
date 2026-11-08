@@ -82,7 +82,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     {
       return .idle
     }
-    if hasEmptyInputPrompt, lastSubmittedPromptIndex != nil,
+    // Issue #382: 前ターンの完了行は今ターンの送信済みプロンプトより上にあるため、
+    // そのプロンプトが画面外へ流れたなら前ターンの完了行も画面内には残らない。
+    if hasEmptyInputPrompt,
       currentTurnLines.contains(where: {
         $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
       })

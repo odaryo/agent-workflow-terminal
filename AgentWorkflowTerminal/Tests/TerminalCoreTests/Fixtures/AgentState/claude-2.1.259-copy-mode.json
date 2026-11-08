@@ -1,9 +1,9 @@
 {
-  "expectedState": "unknown",
+  "expectedState": "completed",
   "acceptableStates": [
-    "unknown"
+    "completed"
   ],
-  "note": "40桁で過去の送信プロンプトが画面外へ流れ、完了を裏づける情報が不足した静止画面。copy-mode 自体は判定条件にしない (README §7.3.1)",
+  "note": "40桁で過去の送信プロンプトが画面外へ流れたターンの終わり (長考タスクが Cogitated for 26s · done で終わった後の静止画面)。当初は完了を裏づける情報が不足するとして unknown を期待したが、前のターンの完了行は今のターンの送信済みプロンプトより上にあるので、プロンプトが画面に無いときに見えている完了行は今のターンのものである (Issue #382)。copy-mode 自体は判定条件にしない (README §7.3.1)",
   "source": "claude-2.1.259-copy-mode",
   "paneTitle": "✳ 1から20の数字と豆知識",
   "paneCurrentCommand": "2.1.259",

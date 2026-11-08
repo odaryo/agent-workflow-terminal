@@ -8,13 +8,46 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 20)
+    #expect(fixtures.count == 21)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
       )
       #expect(fixture.acceptableStates.contains(actual), Comment(rawValue: fixture.source))
     }
+  }
+
+  @Test("送信済みプロンプトが画面外でも入力中は Unknown (Issue #382)")
+  func longTurnWithTypedInputIsUnknown() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-completed-long-turn").first)
+    let screen = fixture.screen.replacingOccurrences(
+      of: "❯\u{00A0}\n", with: "❯\u{00A0}typed\n")
+    try #require(screen != fixture.screen)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "unknown")
+  }
+
+  @Test("送信済みプロンプトが画面外でも完了行より上の spinner を優先して Working (Issue #382)")
+  func longTurnWithSpinnerAboveDoneMarkerIsWorking() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-completed-long-turn").first)
+    let doneLine = "✻ Crunched for 2s · done 4:30 PM\n"
+    let screen = fixture.screen.replacingOccurrences(
+      of: doneLine, with: "✻ Propagating… (5s · ↓ 12 tokens)\n" + doneLine)
+    try #require(screen != fixture.screen)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "working")
   }
 
   @Test(

@@ -1,0 +1,21 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "ターンの途中で transcript を上へスクロールして保った画面 (Issue #653 の R1)。スクロール中の印は `1 new message: fn+↓ to scroll` (スクロールの後に新しいメッセージが届いた。キーボードだけで操作) の形。最後の送信済み ❯ は前のターンのプロンプトで、その下に前のターンの完了行が見える。hook の [UPS, Stop] の区間の中で撮った。",
+  "source": "#653 のレビューの採取 (f3.jsonl、ts 1794135232.010)",
+  "paneTitle": "",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-08",
+  "processNames": [
+    "claude"
+  ],
+  "captureCommand": "tmux -L rv653k capture-pane -e -p (100x30)。screen は styledScreen から SGR と各行の末尾の半角スペース・タブを除いたもの (StyledScreenText.plainText と同じ)",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "❯ Use the Bash tool with run_in_background=true to run exactly: sleep 5 && echo ready. Then stop a…\n  Ran 1 shell command\n\n⏺ The background task is running. I'll wait for its completion notification before continuing.\n\n✻ Brewed for 3s · done 7:49 PM\n\n⏺ Background command \"Sleep 5 seconds then echo ready\" completed (exit code 0)\n\n⏺ 200. 200は2の三乗と5の二乗の積で、100の二倍の数です。\n  201. 201は3と67の積で、奇数の半素数の一つです。\n  202. 202は2と101の積で、半素数の一つです。\n  203. 203は7と29の積で、半素数の一つです。\n  204. 204は12と17の積で、正の約数が12個ある数です。\n  205. 205は5と41の積で、半素数の一つです。\n  206. 206は2と103の積で、半素数の一つです。\n  207. 207は9と23の積で、3の倍数である奇数の一つです。\n  208. 208は16と13の積で、正の約数が10個ある数です。\n  209. 209は11と19の積で、半素数の一つです。\n  210. 210は2、3、5、7の積で、最初の四つの素数の積です。\n  211. 211は素数で、2進法では11010011と書けます。\n  212. 212は4と53の積で、正の約数が6個ある数です。\n                                    1 new message: fn+↓ to scroll\n\n────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────\n  Haiku 5.5 │ ⚡ medium\n  Session: 5m │ ctx ▋░░░░░░░░░ 7% │ 5h ▏░░░░░░░░░ 2% │ 7d ██▊░░░░░░░ 28%\n  ⏵⏵ auto mode on (shift+tab to cycle)",
+  "styledScreen": "\u001b[38;5;231m\u001b[48;5;237m❯ Use the Bash tool with run_in_background=true to run exactly: sleep 5 && echo ready. Then stop a…\u001b[39m\n\u001b[49m  \u001b[38;5;246mRan \u001b[1m1\u001b[0m\u001b[38;5;246m shell command \u001b[39m\n\n\u001b[38;5;231m⏺\u001b[39m The background task is running. I'll wait for its completion notification before continuing.\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mBrewed for 3s · done 7:49 PM\u001b[39m\n\n\u001b[38;5;114m⏺\u001b[39m Background command \"Sleep 5 seconds then echo ready\" completed (exit code 0)\n\n\u001b[38;5;231m⏺\u001b[39m 200. 200は2の三乗と5の二乗の積で、100の二倍の数です。\n  201. 201は3と67の積で、奇数の半素数の一つです。\n  202. 202は2と101の積で、半素数の一つです。\n  203. 203は7と29の積で、半素数の一つです。\n  204. 204は12と17の積で、正の約数が12個ある数です。\n  205. 205は5と41の積で、半素数の一つです。\n  206. 206は2と103の積で、半素数の一つです。\n  207. 207は9と23の積で、3の倍数である奇数の一つです。\n  208. 208は16と13の積で、正の約数が10個ある数です。\n  209. 209は11と19の積で、半素数の一つです。\n  210. 210は2、3、5、7の積で、最初の四つの素数の積です。\n  211. 211は素数で、2進法では11010011と書けます。\n  212. 212は4と53の積で、正の約数が6個ある数です。\n                                   \u001b[38;5;231m\u001b[48;5;237m 1 new message: fn+↓ to scroll \u001b[39m\u001b[49m\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;246m❯ \u001b[39m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;114mHaiku 5.5\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m \u001b[38;5;222m⚡ medium\u001b[39m\n  \u001b[38;5;246mSession: 5m \u001b[2m│\u001b[0m\u001b[38;5;246m ctx \u001b[38;5;78m▋░░░░░░░░░ 7%\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m 5h \u001b[38;5;42m▏░░░░░░░░░ 2%\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m 7d \u001b[38;5;150m██▊░░░░░░░ 28%\u001b[39m\n  \u001b[38;5;220m⏵⏵ auto mode on\u001b[38;5;246m (shift+tab to cycle)\u001b[39m"
+}

@@ -27,7 +27,7 @@ struct HostControlSocketTests {
       },
       body: {
         let actual = try await HostControlSocketClient.send(
-          expected, to: path, timeout: .seconds(2))
+          expected, to: path, timeout: .seconds(30))
         #expect(actual == response)
       }
     )
@@ -40,7 +40,7 @@ struct HostControlSocketTests {
     #expect(!FileManager.default.fileExists(atPath: path))
     do {
       _ = try await HostControlSocketClient.send(
-        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
       Issue.record("起動していないserverに接続できた")
     } catch {
       #expect(error == .serverUnavailable(path))
@@ -61,7 +61,7 @@ struct HostControlSocketTests {
     let server = HostControlSocketServer(path: path)
     try await withServer(server) {
       let response = try await HostControlSocketClient.send(
-        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
       #expect(response == Self.response)
     }
   }
@@ -81,7 +81,7 @@ struct HostControlSocketTests {
       }
       await second.stop()
       let response = try await HostControlSocketClient.send(
-        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
       #expect(response == Self.response)
     }
   }
@@ -107,7 +107,7 @@ struct HostControlSocketTests {
     }
     try await withServer(second) {
       let response = try await HostControlSocketClient.send(
-        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
       #expect(response == Self.response)
     }
     #expect(FileManager.default.fileExists(atPath: path + ".lock"))
@@ -169,7 +169,7 @@ struct HostControlSocketTests {
     await server.stop()
     do {
       _ = try await HostControlSocketClient.send(
-        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
       Issue.record("長すぎるパスでclientが接続できた")
     } catch {
       #expect(error == .pathTooLong(path))

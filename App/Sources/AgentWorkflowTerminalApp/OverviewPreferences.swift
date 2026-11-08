@@ -1,30 +1,5 @@
 import Foundation
 
-/// 設計書 §13「表示形態の選択」。キーは UserDefaults に置く。
-enum OverviewPresentation: String, CaseIterable {
-  case window
-  case sidebar
-
-  static let key = "overview.presentation"
-  static let `default` = Self.window
-
-  /// 不明な値や未設定は既定のウィンドウ表示として読む。
-  init(storedValue: String?) {
-    self = storedValue.flatMap(Self.init(rawValue:)) ?? .default
-  }
-
-  static func current(_ defaults: UserDefaults = .standard) -> Self {
-    Self(storedValue: defaults.string(forKey: key))
-  }
-
-  var settingsLabel: String {
-    switch self {
-    case .window: "ウィンドウ"
-    case .sidebar: "サイドバー"
-    }
-  }
-}
-
 enum OverviewProjectPreferences {
   static let collapsedProjectsKey = "overview.collapsedProjects"
 

@@ -56,21 +56,8 @@ struct NotificationSettingsView: View {
   @AppStorage(NotificationPreferences.unknownMinutesKey) private var unknownMinutes =
     NotificationPreferences.defaultUnknownMinutes
 
-  @AppStorage(OverviewPresentation.key) private var overviewPresentation =
-    OverviewPresentation.default.rawValue
-
   var body: some View {
     Form {
-      Section("Overview") {
-        Picker(
-          "表示形態",
-          selection: Binding(
-            get: { OverviewPresentation(storedValue: overviewPresentation) },
-            set: { overviewPresentation = $0.rawValue })
-        ) {
-          ForEach(OverviewPresentation.allCases, id: \.self) { Text($0.settingsLabel) }
-        }
-      }
       Section("判断待ち") {
         Toggle(PaneNotificationKind.question.settingsLabel, isOn: $question)
         Toggle(PaneNotificationKind.permission.settingsLabel, isOn: $permission)

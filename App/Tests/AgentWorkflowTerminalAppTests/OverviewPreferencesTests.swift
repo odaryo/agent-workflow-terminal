@@ -1,19 +1,11 @@
-import Foundation
 import Testing
 
 @testable import AgentWorkflowTerminalApp
 
 struct OverviewPreferencesTests {
-  @Test(
-    "§13 保存値が読めなければウィンドウ表示にする", arguments: [nil, "", "Sidebar", "side", "window "] as [String?])
-  func unknownValueIsWindow(value: String?) {
-    #expect(OverviewPresentation(storedValue: value) == .window)
-  }
-
-  @Test("§13 保存値の window と sidebar を読む")
-  func knownValues() {
-    #expect(OverviewPresentation(storedValue: "window") == .window)
-    #expect(OverviewPresentation(storedValue: "sidebar") == .sidebar)
+  @Test("§13 サイドバーは既定で開く")
+  func sidebarIsOpenByDefault() {
+    #expect(OverviewSidebarPreferences.defaultIsOpen)
   }
 
   @Test("サイドバーの幅は 240〜480 に収め、非有限値は既定へ戻す")

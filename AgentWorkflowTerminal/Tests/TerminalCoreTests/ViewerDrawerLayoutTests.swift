@@ -48,6 +48,33 @@ struct ViewerDrawerLayoutTests {
     #expect(layout == original)
   }
 
+  @Test("閉じた Viewer を toggle すると指定した種類が開き、並びは保たれる", arguments: ViewerContent.allCases)
+  func toggleOpensClosedViewer(content: ViewerContent) {
+    let arrangements = ViewerContentArrangements(code: .stacked, diff: .sideBySide)
+    var layout = ViewerDrawerLayout(arrangements: arrangements)
+
+    layout.toggle(content)
+
+    #expect(layout.content == content)
+    #expect(layout.isOpen)
+    #expect(layout.arrangements == arrangements)
+  }
+
+  @Test(
+    "開いた Viewer を toggle すると同じ種類なら閉じ、別の種類なら置き換え、並びは保たれる",
+    arguments: ViewerContent.allCases, ViewerContent.allCases)
+  func toggleChangesOpenViewer(original: ViewerContent, requested: ViewerContent) {
+    let arrangements = ViewerContentArrangements(code: .stacked, diff: .sideBySide)
+    var layout = ViewerDrawerLayout(arrangements: arrangements)
+    layout.open(original)
+
+    layout.toggle(requested)
+
+    #expect(layout.content == (original == requested ? nil : requested))
+    #expect(layout.isOpen == (original != requested))
+    #expect(layout.arrangements == arrangements)
+  }
+
   @Test("変更した並びは閉じて開いても保たれる", arguments: ViewerContent.allCases)
   func retainsArrangementsAfterClosing(content: ViewerContent) {
     var layout = ViewerDrawerLayout()

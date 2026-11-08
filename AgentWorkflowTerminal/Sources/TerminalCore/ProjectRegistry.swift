@@ -86,6 +86,33 @@ public struct ProjectRegistry: Sendable, Hashable {
     selection = projects.first { selectable($0.commonDirectory) }?.commonDirectory
   }
 
+  /// 設計書 §5.4 / §16.1。選択中以外に選べる候補がなければ nil。
+  public func adjacentSelection(
+    forward: Bool, selectable: (WorktreeIdentity) -> Bool
+  ) -> WorktreeIdentity? {
+    guard let selection,
+      let currentIndex = projects.firstIndex(where: { $0.commonDirectory == selection })
+    else {
+      let candidate =
+        forward
+        ? projects.first { selectable($0.commonDirectory) }
+        : projects.last { selectable($0.commonDirectory) }
+      return candidate?.commonDirectory
+    }
+
+    var index = currentIndex
+    for _ in 1..<projects.count {
+      if forward {
+        index = index + 1 < projects.count ? index + 1 : 0
+      } else {
+        index = index > 0 ? index - 1 : projects.count - 1
+      }
+      let candidate = projects[index].commonDirectory
+      if selectable(candidate) { return candidate }
+    }
+    return nil
+  }
+
   private func contains(_ commonDirectory: WorktreeIdentity) -> Bool {
     project(commonDirectory) != nil
   }

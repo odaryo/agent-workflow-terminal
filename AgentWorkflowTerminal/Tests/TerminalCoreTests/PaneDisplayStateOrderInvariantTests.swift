@@ -2,12 +2,12 @@ import Foundation
 import TerminalCore
 import Testing
 
-@Suite("同順位の pane の相対順の不変条件 (設計書 §13 / Issue #387)")
+@Suite("pane の入力順と保持中の行順の不変条件 (設計書 §13 / Issue #387)")
 struct PaneDisplayStateOrderInvariantTests {
   private let start = ContinuousClock().now
 
-  @Test("R5: 前への新規 pane と別々の pane の消失・復帰が重なっても同順位の相対順を保つ")
-  func reappearingPaneDoesNotCrossRetainedPeer() {
+  @Test("R5: 前への新規 pane と別々の pane の消失・復帰が重なっても入力順と保持中の行順を守る")
+  func reappearingPanesPreserveInputAndRetainedOrder() {
     var stabilizer = PaneDisplayStateStabilizer()
     let inputs = [
       ["%2", "%3", "%4"], ["%1", "%3", "%4"],
@@ -18,7 +18,7 @@ struct PaneDisplayStateOrderInvariantTests {
     for (step, ids) in inputs.enumerated() {
       let current = stabilizer.observe(
         ids.map { pane($0, .working) }, at: start.advanced(by: .seconds(step)))
-      expectStableTies(previous, current, seed: 0, step: step)
+      expectInputAndRetainedOrder(previous, current, inputIDs: ids, seed: 0, step: step)
       #expect(current.filter { $0.changedAt == nil }.map(\.paneID.rawValue) == ["%2", "%3", "%4"])
       #expect(current.filter { $0.changedAt == nil }.allSatisfy { $0.category == .working })
       if step > 0 {
@@ -31,9 +31,9 @@ struct PaneDisplayStateOrderInvariantTests {
   }
 
   @Test(
-    "固定 tmux 順のランダムな部分集合・状態・期限再観測でも同順位の相対順を保つ",
+    "固定 tmux 順のランダムな部分集合・状態・期限再観測でも入力順と保持中の行順を守る",
     arguments: Array(1...256))
-  func randomizedObservationsPreserveUnchangedTies(seed: Int) {
+  func randomizedObservationsPreserveInputAndRetainedOrder(seed: Int) {
     var random = OrderRandomGenerator(state: UInt64(seed))
     var stabilizer = PaneDisplayStateStabilizer()
     let ids = (1...6).map { "%\($0)" }
@@ -49,7 +49,8 @@ struct PaneDisplayStateOrderInvariantTests {
       let next = instant.advanced(by: .seconds([1, 2, 9, 10][random.index(4)]))
       while let deadline = stabilizer.nextDeadline, deadline <= next {
         let replayed = stabilizer.observe(latest, at: deadline)
-        expectStableTies(previous, replayed, seed: seed, step: step)
+        expectInputAndRetainedOrder(
+          previous, replayed, inputIDs: latest.map(\.id.rawValue), seed: seed, step: step)
         previous = replayed
       }
       instant = next
@@ -58,7 +59,8 @@ struct PaneDisplayStateOrderInvariantTests {
         return random.index(3) == 0 ? nil : pane(id, states[index])
       }
       let current = stabilizer.observe(latest, at: instant)
-      expectStableTies(previous, current, seed: seed, step: step)
+      expectInputAndRetainedOrder(
+        previous, current, inputIDs: latest.map(\.id.rawValue), seed: seed, step: step)
       previous = current
     }
   }
@@ -78,7 +80,8 @@ struct PaneDisplayStateOrderInvariantTests {
     var previous: [PaneDisplayState] = []
     for (step, input) in inputs.enumerated() {
       let current = stabilizer.observe(input, at: start.advanced(by: .seconds(step)))
-      expectStableTies(previous, current, seed: 0, step: step)
+      expectInputAndRetainedOrder(
+        previous, current, inputIDs: input.map(\.id.rawValue), seed: 0, step: step)
       #expect(current.map(\.paneID.rawValue) == ["%1", "%2", "%3"], "step=\(step)")
       #expect(current.map(\.changedAt) == [nil, nil, nil], "step=\(step)")
       previous = current
@@ -87,7 +90,7 @@ struct PaneDisplayStateOrderInvariantTests {
   }
 
   @Test(
-    "基準の全 pane が残る40手の一時消失と初回確定の後は同じ Overview 順位の群が tmux 順",
+    "基準の全 pane が残る40手の一時消失と初回確定の後は出力全体が tmux 順",
     arguments: Array(1...256))
   func temporaryAbsencesAndInitialResolutionsEndInTmuxOrder(seed: Int) {
     var random = OrderRandomGenerator(state: UInt64(seed))
@@ -109,19 +112,14 @@ struct PaneDisplayStateOrderInvariantTests {
         return pane(id, states[index])
       }
       let current = stabilizer.observe(input, at: start.advanced(by: .seconds(step)))
-      expectStableTies(previous, current, seed: seed, step: step)
+      expectInputAndRetainedOrder(
+        previous, current, inputIDs: input.map(\.id.rawValue), seed: seed, step: step)
       #expect(current.count == ids.count, "seed=\(seed), step=\(step)")
       #expect(current.allSatisfy { $0.changedAt == nil }, "seed=\(seed), step=\(step)")
       previous = current
     }
 
-    for attention in [false, true] {
-      let expected = ids.enumerated().filter {
-        (destinations[$0.offset].worktreeCategory == .needsAttention) == attention
-      }.map(\.element)
-      let actual = previous.filter { ($0.category == .needsAttention) == attention }
-      #expect(actual.map(\.paneID.rawValue) == expected, "seed=\(seed), step=40")
-    }
+    #expect(previous.map(\.paneID.rawValue) == ids, "seed=\(seed), step=40")
     for (id, destination) in zip(ids, destinations) {
       #expect(
         previous.first { $0.paneID.rawValue == id }?.state == destination,
@@ -129,37 +127,23 @@ struct PaneDisplayStateOrderInvariantTests {
     }
   }
 
-  private func expectStableTies(
-    _ previous: [PaneDisplayState], _ current: [PaneDisplayState], seed: Int, step: Int
+  private func expectInputAndRetainedOrder(
+    _ previous: [PaneDisplayState], _ current: [PaneDisplayState], inputIDs: [String],
+    seed: Int, step: Int
   ) {
-    let positions = Dictionary(
-      uniqueKeysWithValues: current.enumerated().map { ($0.element.paneID, $0.offset) })
-    for (offset, left) in previous.enumerated() {
-      guard let leftIndex = positions[left.paneID] else { continue }
-      let newLeft = current[leftIndex]
-      guard sameOverviewRank(newLeft, left) else { continue }
-      for right in previous.dropFirst(offset + 1) {
-        guard sameOverviewRank(right, left),
-          let rightIndex = positions[right.paneID]
-        else { continue }
-        let newRight = current[rightIndex]
-        guard sameOverviewRank(newRight, right) else {
-          continue
-        }
-        #expect(
-          leftIndex < rightIndex,
-          """
-          seed=\(seed), step=\(step), pair=\(left.paneID.rawValue),\(right.paneID.rawValue)
-          previous=\(previous.map(\.paneID.rawValue)), current=\(current.map(\.paneID.rawValue))
-          """
-        )
-      }
+    let previousIDs = previous.map(\.paneID.rawValue)
+    let currentIDs = current.map(\.paneID.rawValue)
+    let inputSet = Set(inputIDs)
+    let context = """
+      seed=\(seed), step=\(step), input=\(inputIDs)
+      previous=\(previousIDs), current=\(currentIDs)
+      """
+    #expect(currentIDs.filter { inputSet.contains($0) } == inputIDs, Comment(rawValue: context))
+    if previousIDs.filter({ inputSet.contains($0) }) == inputIDs {
+      let currentSet = Set(currentIDs)
+      #expect(
+        currentIDs == previousIDs.filter { currentSet.contains($0) }, Comment(rawValue: context))
     }
-  }
-
-  private func sameOverviewRank(_ lhs: PaneDisplayState, _ rhs: PaneDisplayState) -> Bool {
-    (lhs.category == .needsAttention) == (rhs.category == .needsAttention)
-      && lhs.changedAt == rhs.changedAt
   }
 
   private func pane(_ id: String, _ state: AgentState) -> PaneAgentState {

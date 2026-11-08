@@ -113,6 +113,93 @@ struct PaneDisplayStateStabilizerTests {
       ])
   }
 
+  @Test("状態が変わらず入力の pane 順が変わったら出力も入力順に追従する (設計書 §13)")
+  func inputOrderChangesWithoutStateChanges() {
+    let start = clock.now
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe(
+      [pane("%1", .working), pane("%2", .working), pane("%3", .working)], at: start)
+
+    let shown = stabilizer.observe(
+      [pane("%2", .working), pane("%1", .working), pane("%3", .working)],
+      at: start.advanced(by: .seconds(1)))
+
+    #expect(
+      shown == [
+        display("%2", .working, changedAt: nil),
+        display("%1", .working, changedAt: nil),
+        display("%3", .working, changedAt: nil),
+      ])
+  }
+
+  @Test("入力の pane 順を変えた後に Question になっても出力順は変わらない (設計書 §13)")
+  func questionAfterInputReorderKeepsInputOrder() {
+    let start = clock.now
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe(
+      [pane("%1", .working), pane("%2", .working), pane("%3", .working)], at: start)
+    let reordered = stabilizer.observe(
+      [pane("%2", .working), pane("%1", .working), pane("%3", .working)],
+      at: start.advanced(by: .seconds(1)))
+    #expect(reordered.map(\.paneID.rawValue) == ["%2", "%1", "%3"])
+    let later = start.advanced(by: .seconds(2))
+
+    let shown = stabilizer.observe(
+      [pane("%2", .working), pane("%1", .question), pane("%3", .working)], at: later)
+
+    #expect(
+      shown == [
+        display("%2", .working, changedAt: nil),
+        display("%1", .question, changedAt: later),
+        display("%3", .working, changedAt: nil),
+      ])
+  }
+
+  @Test(
+    "後ろの pane が Needs Attention になっても出力は入力順を保つ (設計書 §13)",
+    arguments: [AgentState.question, .permission, .error])
+  func attentionInLaterPaneKeepsInputOrder(_ destination: AgentState) {
+    let start = clock.now
+    let later = start.advanced(by: .seconds(1))
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe(
+      [pane("%1", .working), pane("%2", .working), pane("%3", .working)], at: start)
+
+    let shown = stabilizer.observe(
+      [pane("%1", .working), pane("%2", .working), pane("%3", destination)], at: later)
+
+    #expect(
+      shown == [
+        display("%1", .working, changedAt: nil),
+        display("%2", .working, changedAt: nil),
+        display("%3", destination, changedAt: later),
+      ])
+  }
+
+  @Test("入力の pane 順を変えた後に消えた pane は保持中も前回の位置に補う (設計書 §13)")
+  func missingPaneRetainsPositionAfterInputReorder() {
+    let start = clock.now
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe(
+      [pane("%1", .working), pane("%2", .working), pane("%3", .working)], at: start)
+    let reordered = stabilizer.observe(
+      [pane("%2", .working), pane("%1", .working), pane("%3", .working)],
+      at: start.advanced(by: .seconds(1)))
+    #expect(reordered.map(\.paneID.rawValue) == ["%2", "%1", "%3"])
+    let remaining = [pane("%2", .working), pane("%3", .working)]
+    let expected = [
+      display("%2", .working, changedAt: nil),
+      display("%1", .working, changedAt: nil),
+      display("%3", .working, changedAt: nil),
+    ]
+
+    let missing = stabilizer.observe(remaining, at: start.advanced(by: .seconds(2)))
+
+    #expect(missing == expected)
+    #expect(stabilizer.nextDeadline == start.advanced(by: .seconds(11)))
+    #expect(stabilizer.observe(remaining, at: start.advanced(by: .seconds(10))) == expected)
+  }
+
   @Test("保持の期限は保持中の pane のうち最も早いもの")
   func nextDeadlineIsTheEarliestPendingHold() throws {
     let start = clock.now

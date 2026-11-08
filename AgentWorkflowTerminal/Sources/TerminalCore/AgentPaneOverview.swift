@@ -96,7 +96,7 @@ public struct OverviewProjectInput: Sendable {
   public var project: WorktreeIdentity
   /// Project Root のタブの順。出力もこの順のままで、状態では並べ替えない (設計書 §13)。
   public var projectRootSessions: [OverviewWorktreeInput]
-  /// tab の順。並べ替えの同順位はこの順を保つ。同じ worktree の session は別々の要素として
+  /// 開いた順で渡す。同じ worktree の session は別々の要素として
   /// 渡し、束ねない (設計書 §12.2)。
   public var tasks: [OverviewWorktreeInput]
 
@@ -161,7 +161,7 @@ public struct TabSummary: Sendable, Hashable {
   public let rows: [OverviewRow]
 }
 
-/// 入力はタブ列の順で渡し、状態によって並べ替えない (設計書 §5.3)。
+/// 入力は session を開いた順、pane を tmux 上の順で渡す (設計書 §13)。
 public func makeTabSummaries(_ tabs: [OverviewWorktreeInput]) -> [TabSummary] {
   tabs.map { input in
     let overview = overviewWorktree(input)
@@ -169,22 +169,14 @@ public func makeTabSummaries(_ tabs: [OverviewWorktreeInput]) -> [TabSummary] {
   }
 }
 
-/// 設計書 §13 の並び順。
-///
-/// - Project は入力 (登録) の順で固定する。並べ替えると、見ている場所が状態の変化で動く。
-/// - Project Root は Task と混ぜず別枠に置く。その session どうしは入力 (タブ) の順で固定する。
-/// - Task は Needs Attention の pane を含むものを先に、それぞれ pane の最終更新の最大値が新しい順。
-///   Agent pane の無い Task は最後。同順位は入力 (tab) の順。
-/// - Task 内の pane は Needs Attention を先に、それぞれ最終更新の新しい順。同順位は入力の順。
-///
-/// - Important: Needs Attention は `category` で判定する。`state` で `Question` / `Permission` /
-///   `Error` を列挙すると、種別不明の注意状態 (§12.4.3) が後ろへ沈む。
+/// 状態の変化で見ている場所が動かないよう、入力は Project を登録順、session を開いた順、
+/// pane を tmux 上の順で渡す。Project Root は Task と混ぜず別枠に置く (設計書 §13)。
 public func makeAgentPaneOverview(_ projects: [OverviewProjectInput]) -> [OverviewProject] {
   projects.map { project in
     OverviewProject(
       project: project.project,
       projectRootSessions: project.projectRootSessions.map(overviewWorktree),
-      tasks: stableSorted(project.tasks.map(overviewWorktree), by: taskPrecedes))
+      tasks: project.tasks.map(overviewWorktree))
   }
 }
 
@@ -192,7 +184,7 @@ private func overviewWorktree(_ input: OverviewWorktreeInput) -> OverviewWorktre
   guard input.isObserved else {
     return OverviewWorktree(session: input.session, rows: [.notObserved])
   }
-  let panes = stableSorted(input.paneStates, by: panePrecedes).map { state in
+  let panes = input.paneStates.map { state in
     OverviewRow.pane(
       OverviewPane(
         display: state,
@@ -200,40 +192,4 @@ private func overviewWorktree(_ input: OverviewWorktreeInput) -> OverviewWorktre
         isMain: state.paneID == input.mainPane))
   }
   return OverviewWorktree(session: input.session, rows: panes.isEmpty ? [.noAgentPane] : panes)
-}
-
-private func panePrecedes(_ lhs: PaneDisplayState, _ rhs: PaneDisplayState) -> Bool {
-  let lhsAttention = lhs.category == .needsAttention
-  let rhsAttention = rhs.category == .needsAttention
-  if lhsAttention != rhsAttention { return lhsAttention }
-  guard let lhsChangedAt = lhs.changedAt else { return false }
-  guard let rhsChangedAt = rhs.changedAt else { return true }
-  return lhsChangedAt > rhsChangedAt
-}
-
-private func taskPrecedes(_ lhs: OverviewWorktree, _ rhs: OverviewWorktree) -> Bool {
-  let lhsPanes = lhs.rows.compactMap(\.pane)
-  let rhsPanes = rhs.rows.compactMap(\.pane)
-  if lhsPanes.isEmpty != rhsPanes.isEmpty { return !lhsPanes.isEmpty }
-  let lhsAttention = lhsPanes.contains { $0.display.category == .needsAttention }
-  let rhsAttention = rhsPanes.contains { $0.display.category == .needsAttention }
-  if lhsAttention != rhsAttention { return lhsAttention }
-  let lhsLatest = lhsPanes.compactMap(\.display.changedAt).max()
-  let rhsLatest = rhsPanes.compactMap(\.display.changedAt).max()
-  guard let lhsLatest else { return false }
-  guard let rhsLatest else { return true }
-  return lhsLatest > rhsLatest
-}
-
-/// `sort(by:)` は安定性を保証しないので、同順位で入力順を保つために添字を鍵へ足す。
-private func stableSorted<Element>(
-  _ elements: [Element], by precedes: (Element, Element) -> Bool
-) -> [Element] {
-  elements.enumerated()
-    .sorted { lhs, rhs in
-      if precedes(lhs.element, rhs.element) { return true }
-      if precedes(rhs.element, lhs.element) { return false }
-      return lhs.offset < rhs.offset
-    }
-    .map(\.element)
 }

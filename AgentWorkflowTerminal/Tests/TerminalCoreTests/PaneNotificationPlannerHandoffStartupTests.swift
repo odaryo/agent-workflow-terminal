@@ -104,7 +104,7 @@ struct PaneNotificationHandoffStartupTests: PaneNotificationPlannerTesting {
     #expect(states(&planner, [pane("%1", .question)], in: sessionA, at: resumed).isEmpty)
   }
 
-  @Test("猶予の1ms前は通知済み記録を引き継ぎ、猶予ちょうどでは新しい pane とする", arguments: [true, false])
+  @Test("猶予の1ms前は状態の記憶を引き継ぎ、猶予ちょうどでは状態だけ新しい pane とする", arguments: [true, false])
   func returningPaneAtGraceBoundary(beforeBoundary: Bool) {
     let start = Self.clock.now
     var planner = PaneNotificationPlanner()
@@ -130,11 +130,8 @@ struct PaneNotificationHandoffStartupTests: PaneNotificationPlannerTesting {
     let expected: [PaneNotification] =
       beforeBoundary ? [] : [notification(in: sessionB, kind: .question)]
     #expect(states(&planner, [pane("%1", .question)], in: sessionB, at: returned) == expected)
-    let completed: [PaneNotification] =
-      beforeBoundary
-      ? [] : [notification(in: sessionB, kind: .taskCompleted, completion: Self.first)]
-    #expect(
-      displays(&planner, ["%1": .completed(Self.first)], in: sessionB, at: returned) == completed)
+    // 状態の記憶は猶予で切れるが、同じ完了は猶予の長さによらず1回だけ (§11.2、#395 m4)。
+    #expect(displays(&planner, ["%1": .completed(Self.first)], in: sessionB, at: returned).isEmpty)
     #expect(states(&planner, [pane("%1", .question)], in: sessionB, at: returned).isEmpty)
     #expect(displays(&planner, ["%1": .completed(Self.first)], in: sessionB, at: returned).isEmpty)
   }

@@ -342,10 +342,12 @@ public struct PaneTaskCompletionTracker: Sendable {
     return entry.display
   }
 
-  /// この回の token を特定できず表示を空にすると、完了通知が二重になるため直前の表示を保つ。
+  /// Agent プロセスを特定できないか完了の変数を読めない回に表示を空にすると、完了通知が二重になるため直前の表示を保つ。
   public static func isUndetermined(_ completion: PaneSummaryEntry<AgentStampedValue>) -> Bool {
     switch completion {
-    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous): true
+    case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous),
+      .discarded(.unreadable):
+      true
     default: false
     }
   }

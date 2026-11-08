@@ -22,7 +22,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable)
     }
-    if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend") {
+    if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend")
+      || Self.hasTrustPrompt(screen)
+    {
       return observation(.permission, signals)
     }
     if screen.contains("Enter to select ·") && screen.contains("Type something.") {
@@ -49,6 +51,16 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return unknown(signals, reason: .screenAttributesUnavailable)
     }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  // Issue #252、設計書 §12.8: 2.1.319 で採取した trust 画面は選択肢の移動でも変わるため、
+  // 画面変化による Working より優先する。文中の部分一致を避け、採取した行に限定する。
+  private static func hasTrustPrompt(_ screen: String) -> Bool {
+    let lines = screen.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+    return lines.contains("Enter to confirm · Esc to cancel")
+      && (lines.contains("Yes, I trust this folder")
+        || lines.contains("❯ Yes, I trust this folder")
+        || lines.contains("Claude Code'll be able to read, edit, and execute files here."))
   }
 
   private static func currentTurnState(screen: String, hasEmptyInputPrompt: Bool) -> AgentState? {

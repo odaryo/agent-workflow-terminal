@@ -336,6 +336,26 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 0 になった。長い応答を流している間は spinner 行が出ないので (§6.3-2)、そこは今までどおり画面鮮度で拾う。
 2.1.263 の記録 (§6.4) は記録した Mac に残っていなかったので、再採点していない。
 
+### 6.6 起動時の trust prompt (Issue #252)
+
+§12.8 (設計書) が Permission に含めると決めた起動時の trust 画面を、両 CLI の現行版で採って fixture にした
+(2026-11-08、tmux 3.8、macOS 27.0.1、160×40、新しいディレクトリで起動しただけ)。
+
+- Claude Code 2.1.319 (`claude-2.1.319-trust-prompt.json`): `Enter to confirm · Esc to cancel` の行と、
+  `Yes, I trust this folder` か `Claude Code'll be able to read, edit, and execute files here.` の行。
+  カーソル `❯` は選んだ側へ動くので、選択肢の移動で画面が変わっても `working` にしないよう、画面鮮度より前に見る。
+- Codex 0.166.0 (`codex-0.166.0-trust-prompt.json`): `Folder access` の行と、`› 1. Trust and continue` か
+  `1. Trust and continue` の行 (前後の空白を除いた行の一致)。pane title は `codex <path>` で `Action Required`
+  を含まないので title より先に見る。そのぶん、文言を含むだけの判定では作業中・完了・入力欄の画面に出た
+  `Trust this folder?` で取り違えた (レビューで計測) ので、2行の組み合わせに限った。起動直後には先に更新の確認
+  (`codex-0.166.0-update-prompt.json`、footer は `enter continue · esc skip`) が出て、trust 画面の footer
+  `enter continue · esc back` と前半を共有する。更新の確認は Permission に含めると決まっていない
+  (Issue #639) ので unknown のまま。git の repository でないディレクトリでは trust 画面は出なかった。
+
+この記録 (24 本) には、どちらの画面の文言も現れない (`grep -rlF` で 0 件)。判定を足す前後で
+`replay-swift --score` (2.0s / 0.25s) の表は一致し、`--dump` の遷移列は main と変更後でバイトまで一致した。
+つまり採点の数字は §6.5 のまま変わらない。
+
 ### 6.3 読み取れること
 
 1. **単独信号はどれか一つで必ず 100% 危険側へ倒れる。**

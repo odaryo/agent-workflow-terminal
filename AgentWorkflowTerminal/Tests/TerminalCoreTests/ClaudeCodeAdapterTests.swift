@@ -8,13 +8,36 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 18)
+    #expect(fixtures.count == 19)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
       )
       #expect(fixture.acceptableStates.contains(actual), Comment(rawValue: fixture.source))
     }
+  }
+
+  @Test(
+    "§12.8 trust prompt は初回観測・画面変化直後もカーソル位置によらず Permission (Issue #252)",
+    arguments: [nil, 0.0] as [TimeInterval?], [false, true]
+  )
+  func trustPromptIsPermission(elapsed: TimeInterval?, selectTrust: Bool) throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: "claude-2.1.319-trust-prompt").first)
+    var screen = fixture.screen
+    if selectTrust {
+      screen = screen.replacingOccurrences(of: " ❯ No, exit\n", with: "   No, exit\n")
+      try #require(screen != fixture.screen)
+      let selectedScreen = screen.replacingOccurrences(
+        of: "   Yes, I trust this folder\n", with: " ❯ Yes, I trust this folder\n")
+      try #require(selectedScreen != screen)
+      screen = selectedScreen
+    }
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: elapsed, hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: .alive)
+    #expect(fixtureState(of: result) == "permission")
   }
 
   @Test("入力欄のサジェストが dim なら空欄として扱う")

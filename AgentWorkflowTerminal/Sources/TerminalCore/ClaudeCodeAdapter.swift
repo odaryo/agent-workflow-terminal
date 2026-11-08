@@ -82,7 +82,10 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     {
       return .idle
     }
-    if hasEmptyInputPrompt, lastSubmittedPromptIndex != nil,
+    // Issue #382: 送信済みプロンプトで始まるターンでは、前ターンの完了行はそのプロンプトより上にあるため、
+    // プロンプトが画面外へ流れたなら前ターンの完了行も画面内には残らない。プロンプトの無いターン
+    // (バックグラウンドのコマンドの完了で始まる) と `--continue` の再開直後はこの限りでない (レビューで実測)。
+    if hasEmptyInputPrompt,
       currentTurnLines.contains(where: {
         $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
       })

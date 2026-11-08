@@ -25,6 +25,13 @@ public enum IgnoredFilesStatus: Sendable, Hashable {
   case unknown
 }
 
+public enum BranchStashStatus: Sendable, Hashable {
+  case present(count: Int)
+  case absent
+  case unknown
+  case notApplicable
+}
+
 public enum UnpushedCommitsStatus: Sendable, Hashable {
   case present
   case absent
@@ -128,17 +135,20 @@ public enum DefaultBranchResolution: Sendable, Hashable {
 public struct WorktreeCloseInspection: Sendable, Hashable {
   public let uncommittedChanges: UncommittedChangesStatus
   public let ignoredFiles: IgnoredFilesStatus
+  public let branchStashes: BranchStashStatus
   public let unpushedCommits: UnpushedCommitsStatus
   public let branchMerge: BranchMergeStatus
 
   public init(
     uncommittedChanges: UncommittedChangesStatus,
     ignoredFiles: IgnoredFilesStatus,
+    branchStashes: BranchStashStatus,
     unpushedCommits: UnpushedCommitsStatus,
     branchMerge: BranchMergeStatus
   ) {
     self.uncommittedChanges = uncommittedChanges
     self.ignoredFiles = ignoredFiles
+    self.branchStashes = branchStashes
     self.unpushedCommits = unpushedCommits
     self.branchMerge = branchMerge
   }

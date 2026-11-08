@@ -172,7 +172,8 @@ struct WorktreeCloseHarness {
   ) throws -> WorktreeClosePlan {
     let wt = worktree ?? self.worktree
     let ci = WorktreeCloseInspection(
-      uncommittedChanges: uncommitted, ignoredFiles: .absent, unpushedCommits: .absent,
+      uncommittedChanges: uncommitted, ignoredFiles: .absent, branchStashes: .absent,
+      unpushedCommits: .absent,
       branchMerge: merge)
     let db = DefaultBranchResolution.originHead(branch: "main")
     let rp: WorktreeCloseInspectionReport = .init(target: wt, inspection: ci, defaultBranch: db)

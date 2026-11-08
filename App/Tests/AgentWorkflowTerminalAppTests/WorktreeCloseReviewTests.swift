@@ -51,6 +51,61 @@ struct WorktreeCloseReviewTests {
     #expect(plan.steps == [.terminateSession, .removeWorktree(force: false)])
   }
 
+  @Test("branch 名で作られた stash の件数と削除後の扱いを警告する")
+  func warnsBranchStashesBeforeRemoval() async throws {
+    let review = try await review(
+      CloseGit(
+        ancestorMerged: true, upstreamInSync: true,
+        stashOutput: "WIP on topic: abc first\nOn topic: second\n"))
+
+    #expect(review.safety.report.inspection.branchStashes == .present(count: 2))
+    #expect(
+      review.removalWarnings == [
+        "branch topic の名前で作られた stash が 2 件あります。worktree を消しても stash は残りますが、この worktree からは辿れなくなります。"
+      ])
+    #expect(review.requiresAcknowledgement(.removeWorktree))
+    #expect(review.requiresAcknowledgement(.deleteBranch))
+  }
+
+  @Test("stash を確認できなければ警告して確認を求める")
+  func warnsUnknownBranchStashes() async throws {
+    let review = try await review(
+      CloseGit(ancestorMerged: true, upstreamInSync: true, stashExitCode: 128))
+
+    #expect(review.safety.report.inspection.branchStashes == .unknown)
+    #expect(review.removalWarnings == ["stash があるかを確認できませんでした。"])
+    #expect(review.requiresAcknowledgement(.removeWorktree))
+    #expect(review.requiresAcknowledgement(.deleteBranch))
+  }
+
+  @Test(
+    "stash 無し・対象外は警告を足さない",
+    arguments: [BranchStashStatus.absent, .notApplicable])
+  func doesNotWarnForAbsentOrInapplicableStashes(stashes: BranchStashStatus) async throws {
+    let review = try await review(CloseGit(ancestorMerged: true, upstreamInSync: true))
+    let inspection = WorktreeCloseInspection(
+      uncommittedChanges: .absent, ignoredFiles: .absent, branchStashes: stashes,
+      unpushedCommits: .absent, branchMerge: review.safety.report.inspection.branchMerge)
+
+    #expect(review.removalWarnings(for: inspection).isEmpty)
+  }
+
+  @Test("stash の警告は ignored の後、未push の前に出す")
+  func ordersStashWarningAfterIgnoredFiles() async throws {
+    let review = try await review(
+      CloseGit(
+        status: "# branch.oid abc\0# branch.head topic\0! .env\0",
+        stashOutput: "On topic: saved\n"))
+
+    // CloseGit は2回の status に同じ出力を返すので、`! .env` は未commit の検査にも当たる。
+    try #require(review.removalWarnings.count == 5, "\(review.removalWarnings)")
+    #expect(review.removalWarnings[0].contains("未commit"))
+    #expect(review.removalWarnings[1].contains("gitignore"))
+    #expect(review.removalWarnings[2].contains("stash が 1 件"))
+    #expect(review.removalWarnings[3].contains("push していない"))
+    #expect(review.removalWarnings[4].contains("マージされていません"))
+  }
+
   @Test("squash merge と判定した branch の削除では、強制削除することを明示して確認を求める")
   func statesForcedDeletionForSquashMerge() async throws {
     let review = try await review(CloseGit(squashMerged: true, upstreamInSync: true))
@@ -234,6 +289,8 @@ private struct CloseGit: ProcessRunning {
   var upstreamInSync = false
   var indexReadFails = false
   var submodulePaths: [String] = []
+  var stashOutput = ""
+  var stashExitCode: Int32 = 0
 
   func run(
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
@@ -255,6 +312,8 @@ private struct CloseGit: ProcessRunning {
       return .init(exitCode: 0, stdout: status, stderr: "")
     case "symbolic-ref":
       return .init(exitCode: 1, stdout: "", stderr: "")
+    case "stash" where command.dropFirst().first == "list":
+      return .init(exitCode: stashExitCode, stdout: stashOutput, stderr: "")
     case "rev-parse":
       return revParse(command.last)
     case "merge-base" where command.dropFirst().first == "--is-ancestor":

@@ -113,9 +113,11 @@ struct GitBranchMergeCacheTests {
     let target = DetectedWorktree(
       identity: try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/topic")),
       worktreePath: "/repo/wt", branch: "topic", isProjectRoot: false)
-    return await GitCloseSafetyInspector(
+    let result = await GitCloseSafetyInspector(
       runner: runner, target: target, squashScanCommitLimit: scanLimit, mergeCache: cache
     ).inspect(projectRootBranch: "main")
+    #expect(result.report.inspection.branchStashes == .absent)
+    return result
   }
 }
 
@@ -150,6 +152,8 @@ private actor MergeJudgementGit: ProcessRunning {
     switch command.first {
     case "status":
       return .init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: "")
+    case "stash" where command == GitReadCommand.stashList().arguments:
+      return .init(exitCode: 0, stdout: "", stderr: "")
     case "symbolic-ref":
       return .init(exitCode: 1, stdout: "", stderr: "")
     case "rev-parse" where command.last == "refs/heads/topic":
@@ -167,18 +171,22 @@ private actor MergeJudgementGit: ProcessRunning {
       return logOutput(command: command)
     case "diff":
       judgementCalls += 1
-      guard !failsDiff else {
-        return .init(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n")
-      }
-      let isBranchChange = command.contains { $0.hasPrefix(String(repeating: "e", count: 40)) }
-      return .init(
-        exitCode: 0,
-        stdout: isBranchChange
-          || (matchesSquash && command.contains { $0.hasSuffix(squashCandidate) })
-          ? "branch-change" : "other-change", stderr: "")
+      return diffOutput(command: command)
     default:
       throw .launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: "")
     }
+  }
+
+  private func diffOutput(command: [String]) -> ProcessRunResult {
+    guard !failsDiff else {
+      return .init(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n")
+    }
+    let isBranchChange = command.contains { $0.hasPrefix(String(repeating: "e", count: 40)) }
+    return .init(
+      exitCode: 0,
+      stdout: isBranchChange
+        || (matchesSquash && command.contains { $0.hasSuffix(squashCandidate) })
+        ? "branch-change" : "other-change", stderr: "")
   }
 
   private func logOutput(command: [String]) -> ProcessRunResult {

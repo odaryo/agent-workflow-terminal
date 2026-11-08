@@ -387,6 +387,7 @@ git 2.50.1で実測)。
 |---|---|
 | 未commit変更 | 対象worktreeに変更またはuntrackedファイルがある |
 | ignoredファイル | 対象worktreeにgitignore済みのファイルがある |
+| stash | 対象branchの名前で作られたstashがある(detached HEADでは対象外) |
 | 未push | 対象branchがupstreamを持たない、またはupstreamより先行している |
 | 未merge | 対象branchがProjectの既定branchへマージされていない |
 
@@ -404,6 +405,16 @@ git 2.50.1で実測)。
 道連れにする**。未commit検査は`git worktree remove`が実際に拒否する唯一の条件であり、ignoredの
 量とは無関係に答えられなければならない。2回のstatusが別時点のworktreeを見ることは許容する
 ——どちらも実行を禁止する条件ではなく警告だからである。
+
+**stashの検査は、`git worktree remove`がstashを消さないのに、消した後はそのworktreeの作業として
+辿れなくなるためである。** stashは全worktreeで共有される(`refs/stash`はcommon dir)ので、linked worktreeで
+stashした後の`worktree remove`はrc=0で、stashは残る(git 2.50.1で実測)。持ち主は`git stash list`の件名
+(`WIP on <branch>: `／`On <branch>: `)から決め、branch名をバイト列として比べる。件名は作った時点の
+branch名しか持たないので、同じbranch名で作られた別の作業のstashも数えうる。警告の文言は
+「この worktreeのstash」ではなく「branch <名前>の名前で作られたstash」とする。detached HEADの
+worktreeは件名から持ち主を決められないので対象外にする。autostash・detachedの間に作ったstash・
+改名したbranchのstashのように件名からbranchを決められないものは、今は数えていない(Issue #640)。
+ignoredと同じく別のgit呼び出しで行い、その失敗を他の検査へ波及させない。
 
 **upstream設定を持ちながら追跡refが存在しない状態は、未pushともpush済みとも別の第三の状態として
 扱う。** git status porcelain v2はこのとき`# branch.upstream`を出しながら`# branch.ab`を出さない

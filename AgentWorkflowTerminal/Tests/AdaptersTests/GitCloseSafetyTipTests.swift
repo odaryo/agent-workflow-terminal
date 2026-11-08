@@ -27,6 +27,8 @@ struct GitCloseSafetyTipTests {
       switch commandArguments(arguments) {
       case GitReadCommand.status().arguments, GitReadCommand.status(includeIgnored: true).arguments:
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:

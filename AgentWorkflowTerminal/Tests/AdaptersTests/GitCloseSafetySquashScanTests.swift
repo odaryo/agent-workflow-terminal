@@ -15,6 +15,8 @@ struct GitCloseSafetySquashScanTests {
       switch commandArguments(arguments) {
       case GitReadCommand.status().arguments, GitReadCommand.status(includeIgnored: true).arguments:
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
@@ -42,6 +44,8 @@ struct GitCloseSafetySquashScanTests {
       switch commandArguments(arguments) {
       case GitReadCommand.status().arguments, GitReadCommand.status(includeIgnored: true).arguments:
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:

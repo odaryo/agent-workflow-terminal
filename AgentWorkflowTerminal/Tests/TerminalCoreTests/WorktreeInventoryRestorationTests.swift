@@ -303,8 +303,8 @@ struct WorktreeInventoryRestorationTests {
 
   // MARK: - 順序
 
-  @Test("検出順のあとに保存だけにあるものを保存順で並べる")
-  func orderingIsDeterministic() throws {
+  @Test("保存にあるworktreeを保存順で先に並べ、保存に無いものを末尾へ足す (設計書 §13)")
+  func savedWorktreesPrecedeNewDetectionsInSavedOrder() throws {
     let alpha = try detected("alpha")
     let beta = try detected("beta")
     let goneOne = try detected("gone1")
@@ -317,8 +317,24 @@ struct WorktreeInventoryRestorationTests {
 
     #expect(
       restored.inventory.taskWorktrees.map(\.identity) == [
-        beta.identity, alpha.identity, goneOne.identity, goneTwo.identity,
+        goneOne.identity, alpha.identity, goneTwo.identity, beta.identity,
       ])
+  }
+
+  @Test("再検出の順が変わっても保存順を維持し、新しいworktreeを末尾へ足す (設計書 §13)")
+  func redetectedWorktreesKeepSavedOrderBeforeNewOnes() throws {
+    let alpha = try detected("alpha")
+    let beta = try detected("beta")
+    let gamma = try detected("gamma")
+
+    let restored = restoreWorktreeInventory(
+      detected: [alpha, beta, gamma],
+      saved: saved([(beta, .active), (alpha, .inactive)])
+    )
+
+    #expect(
+      restored.inventory.taskWorktrees.map(\.identity)
+        == [beta.identity, alpha.identity, gamma.identity])
   }
 
   // MARK: - 観測中の差分計算との接続

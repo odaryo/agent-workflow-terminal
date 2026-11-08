@@ -74,19 +74,12 @@ struct WorktreeCloseReview: Sendable {
 
   /// 選択肢3・4で削除の前に知らせる事項 (§3.4 の表)。
   var removalWarnings: [String] {
-    let inspection = safety.report.inspection
-    var warnings: [String] = []
-    switch inspection.uncommittedChanges {
-    case .present: warnings.append("未commit の変更または untracked ファイルがあります。worktree と一緒に失われます。")
-    case .unknown: warnings.append("未commit の変更があるかを確認できませんでした。")
-    case .absent: break
-    }
-    switch inspection.ignoredFiles {
-    case .present:
-      warnings.append("gitignore 済みのファイル (.env など) があります。git はこれを確認せずに worktree ごと削除します。")
-    case .unknown: warnings.append("gitignore 済みのファイルがあるかを確認できませんでした。")
-    case .absent: break
-    }
+    removalWarnings(for: safety.report.inspection)
+  }
+
+  func removalWarnings(for inspection: WorktreeCloseInspection) -> [String] {
+    var warnings = fileRemovalWarnings(for: inspection)
+    warnings += stashRemovalWarnings(for: inspection.branchStashes)
     switch inspection.unpushedCommits {
     case .present: warnings.append("push していない commit があります (upstream が無いか、upstream より先行しています)。")
     // §3.4: 「追跡先が消えた」と読める文言にしない。未 push のまま upstream だけ設定した場合もここへ来る。
@@ -99,6 +92,37 @@ struct WorktreeCloseReview: Sendable {
     case .unmerged: warnings.append("既定 branch \(defaultBranchName) へマージされていません。")
     case .unknown: warnings.append("既定 branch へマージ済みかを判定できません: \(mergeUnknownReason)")
     case .merged, .notApplicable: break
+    }
+    return warnings
+  }
+
+  private func fileRemovalWarnings(for inspection: WorktreeCloseInspection) -> [String] {
+    var warnings: [String] = []
+    switch inspection.uncommittedChanges {
+    case .present: warnings.append("未commit の変更または untracked ファイルがあります。worktree と一緒に失われます。")
+    case .unknown: warnings.append("未commit の変更があるかを確認できませんでした。")
+    case .absent: break
+    }
+    switch inspection.ignoredFiles {
+    case .present:
+      warnings.append("gitignore 済みのファイル (.env など) があります。git はこれを確認せずに worktree ごと削除します。")
+    case .unknown: warnings.append("gitignore 済みのファイルがあるかを確認できませんでした。")
+    case .absent: break
+    }
+    return warnings
+  }
+
+  private func stashRemovalWarnings(for status: BranchStashStatus) -> [String] {
+    var warnings: [String] = []
+    switch status {
+    case .present(let count):
+      // 件名から branch を決めているので「この worktree の stash」とは書かない (#640)。
+      let owner = target.branch.map { "branch \($0) の名前で作られた " } ?? ""
+      warnings.append(
+        "\(owner)stash が \(count) 件あります。worktree を消しても stash は残りますが、この worktree からは辿れなくなります。"
+      )
+    case .unknown: warnings.append("stash があるかを確認できませんでした。")
+    case .absent, .notApplicable: break
     }
     return warnings
   }

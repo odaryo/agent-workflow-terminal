@@ -106,7 +106,8 @@ public struct ClaudeCodeAdapter: AgentAdapter {
   }
 
   // 入力済みの先頭行は NBSP により会話履歴の `❯ <送信済み>` 行と分けられる
-  // (2.1.259 / 2.1.263 で実測)。半角スペースだけの空欄は旧版の判定も維持する。
+  // (2.1.259 / 2.1.263 で実測)。`❯` + U+0020 だけの行 (tmux が行末の空白を削ると `❯` だけになる) も、
+  // 旧版の正規表現と同じく空欄とする。
   static func inputBoxContent(screen: String, styled: String?) -> InputBoxContent {
     let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
     guard let index = lines.lastIndex(where: { $0.hasPrefix("❯") }) else { return .absent }
@@ -154,10 +155,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     case empty
     /// 文脈サジェスト。利用者の入力ではない。
     case placeholder
+    /// 最後の `❯` の行の下・区切りの上に文字がある場合も含む。そこが入力欄でないとき
+    /// (permission / question のダイアログ、送信済みプロンプトが最後の `❯` の行のとき) にも
+    /// 返るので、「利用者が打った」とは限らない。Idle / Completed へ丸めない向きにだけ使う。
     case typed
     /// 属性が無いため placeholder と typed を分けられない。
     case attributesUnavailable
-    /// 入力欄の行自体が画面に無い (permission / question のダイアログなど)。
+    /// `❯` の行が無い、または最後の `❯` の行が入力欄 (`❯` + NBSP) でなく区切りも無い。
     case absent
   }
 

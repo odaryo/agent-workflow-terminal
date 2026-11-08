@@ -1,0 +1,49 @@
+import SwiftUI
+import TerminalCore
+
+@MainActor
+struct ProjectAgentCommandSheet: View {
+  let project: RegisteredProject
+  @ObservedObject var projects: ProjectsModel
+  @Environment(\.dismiss) private var dismiss
+  @State private var input: String
+  @State private var error: ProjectAgentCommandError?
+
+  init(project: RegisteredProject, projects: ProjectsModel) {
+    self.project = project
+    self.projects = projects
+    _input = State(initialValue: project.agentCommand ?? "")
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      Text("「\(project.displayName)」の Agent 起動コマンド")
+        .font(.headline)
+      Text("hostctl worktree open の応答で Agent へ返します。空にすると未設定に戻ります。")
+      TextField("claude", text: $input)
+        .accessibilityLabel("Agent 起動コマンド")
+      if let error {
+        Text(errorMessage(error))
+          .foregroundStyle(.red)
+      }
+      HStack {
+        Spacer()
+        Button("キャンセル") { dismiss() }
+          .keyboardShortcut(.cancelAction)
+        Button("保存") {
+          error = projects.setAgentCommand(input, of: project.commonDirectory)
+          if error == nil { dismiss() }
+        }
+        .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(24)
+  }
+
+  private func errorMessage(_ error: ProjectAgentCommandError) -> String {
+    switch error {
+    case .containsControlCharacter: "改行や制御文字は使えません"
+    case .tooLong: "150 バイトまでです"
+    }
+  }
+}

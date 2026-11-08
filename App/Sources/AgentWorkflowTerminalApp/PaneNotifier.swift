@@ -94,7 +94,7 @@ final class PaneNotifier {
   /// アプリが前面で、メイン window に表示しているセッション。
   private var showingSession: TerminalSessionKey? {
     guard NSApp.isActive else { return nil }
-    return projects?.selectedModel?.selectedTab
+    return projects?.selectedModel?.displayedSession
   }
 
   private func schedule() {

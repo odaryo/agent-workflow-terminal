@@ -3,7 +3,7 @@ import SwiftUI
 import TerminalCore
 
 @MainActor
-final class TerminalTabClosing: ObservableObject {
+final class TerminalSessionClosing: ObservableObject {
   struct Confirmation {
     let key: TerminalSessionKey
     let title: String

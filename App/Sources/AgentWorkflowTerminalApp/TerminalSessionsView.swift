@@ -4,27 +4,28 @@ import GhosttyRenderer
 import SwiftUI
 import TerminalCore
 
-struct TerminalTabs: View {
+struct TerminalSessionsView: View {
   @ObservedObject var model: AppModel
   @ObservedObject var keyboardFocus: TerminalKeyboardFocus
 
   var body: some View {
     ZStack {
-      ForEach(model.tabKeys, id: \.self) { key in
-        if model.openedTabs.contains(key), let worktree = directory(for: key) {
-          TerminalTabContent(
+      ForEach(model.sessionKeys, id: \.self) { key in
+        if model.openedSessions.contains(key), let worktree = directory(for: key) {
+          TerminalSessionContent(
             key: key,
             worktree: worktree,
             sessions: model.sessions,
-            shouldOpen: { await model.shouldOpenTab(key) },
+            shouldOpen: { await model.shouldOpenSession(key) },
             approveCreation: { model.approveSessionCreation(key) },
-            didPrepare: { model.didPrepareTab(key) },
-            reportWarning: { model.reportTabOpeningFailure($0) },
-            didExit: { await model.handleTabExit(key) },
-            focusRequest: keyboardFocus.focusRequest(isTabSelected: model.selectedTab == key)
+            didPrepare: { model.didPrepareSession(key) },
+            reportWarning: { model.reportSessionWarning($0) },
+            didExit: { await model.handleSessionExit(key) },
+            focusRequest: keyboardFocus.focusRequest(
+              isSessionDisplayed: model.displayedSession == key)
           )
-          .opacity(model.selectedTab == key ? 1 : 0)
-          .allowsHitTesting(model.selectedTab == key)
+          .opacity(model.displayedSession == key ? 1 : 0)
+          .allowsHitTesting(model.displayedSession == key)
         }
       }
     }
@@ -34,11 +35,11 @@ struct TerminalTabs: View {
     if let projectRoot = model.projectRoot, projectRoot.identity == key.identity {
       return projectRoot
     }
-    return model.tabbedWorktrees.first { $0.identity == key.identity }?.detected
+    return model.sessionWorktrees.first { $0.identity == key.identity }?.detected
   }
 }
 
-private struct TerminalTabContent: View {
+private struct TerminalSessionContent: View {
   let key: TerminalSessionKey
   let worktree: DetectedWorktree
   let sessions: TmuxSessionProvisioner?
@@ -126,7 +127,7 @@ private struct TerminalTabContent: View {
       preparation =
         switch result {
         case .success(let attachment): .ready(attachment.command)
-        case .failure(let error): .failed(error.terminalTabDescription)
+        case .failure(let error): .failed(error.terminalSessionDescription)
         }
     }
   }

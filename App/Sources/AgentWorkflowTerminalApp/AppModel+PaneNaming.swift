@@ -3,7 +3,7 @@ import TerminalCore
 extension AppModel {
   func worktreeTitle(of identity: WorktreeIdentity) -> String {
     if projectRoot?.identity == identity { return "Project Root" }
-    return worktrees.first { $0.identity == identity }?.detected.tabName ?? identity.rawValue
+    return worktrees.first { $0.identity == identity }?.detected.directoryName ?? identity.rawValue
   }
 
   /// 登録が今もその pane を指すときだけ返す — `%N` だけで照合すると、server の再起動で振り直された

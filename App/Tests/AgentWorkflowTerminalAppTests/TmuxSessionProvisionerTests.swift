@@ -349,9 +349,9 @@ struct TmuxSessionProvisionerTests {
       let error = TmuxSessionProvisionerError.leftoverBootstrapSession(
         cause: cause, cleanupFailure: cleanupFailure)
       #expect(result == .failure(error))
-      #expect(error.terminalTabDescription.contains(cause.terminalTabDescription))
-      #expect(error.terminalTabDescription.contains(Self.cleanupInstruction))
-      #expect(error.terminalTabDescription.contains("\(cleanupFailure)"))
+      #expect(error.terminalSessionDescription.contains(cause.terminalSessionDescription))
+      #expect(error.terminalSessionDescription.contains(Self.cleanupInstruction))
+      #expect(error.terminalSessionDescription.contains("\(cleanupFailure)"))
     }
     #expect(
       await process.calls.last == ["-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use"])

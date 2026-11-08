@@ -1,7 +1,7 @@
 import SwiftUI
 
-struct TerminalTabClosePanelHost: View {
-  @ObservedObject var closing: TerminalTabClosing
+struct TerminalSessionClosePanelHost: View {
+  @ObservedObject var closing: TerminalSessionClosing
   let confirm: () -> Void
 
   var body: some View {

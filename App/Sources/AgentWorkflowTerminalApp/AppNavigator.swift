@@ -28,7 +28,7 @@ final class AppNavigator: ObservableObject {
     pane: PaneID?, in projects: ProjectsModel
   ) async -> PaneRevealFailure? {
     projects.select(model.project.commonDirectory)
-    if let session, model.tabKeys.contains(session) {
+    if let session, model.sessionKeys.contains(session) {
       model.select(session)
     } else if model.projectRoot?.identity == worktree {
       model.selectProjectRoot()

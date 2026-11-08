@@ -29,7 +29,7 @@ struct AgentWorkflowTerminalApp: App {
     .defaultSize(width: 900, height: 560)
     .commands {
       ProjectNavigationCommands(projects: projects)
-      TabCyclingCommands(projects: projects)
+      SessionCyclingCommands(projects: projects)
       ViewerCommands(projects: projects)
       CommandGroup(after: .toolbar) {
         OverviewMenuItem(navigator: projects.navigator)
@@ -82,7 +82,7 @@ struct ProjectView: View {
         Divider()
       }
       WorktreeClosePanelHost(closing: model.closing)
-      TerminalTabClosePanelHost(closing: model.tabClosing) { model.confirmCloseTab() }
+      TerminalSessionClosePanelHost(closing: model.sessionClosing) { model.confirmCloseSession() }
 
       if let message = model.message ?? model.emptyStateMessage {
         ContentUnavailableView(
@@ -92,17 +92,17 @@ struct ProjectView: View {
         ViewerDrawerView(
           layout: $model.viewerDrawerLayout,
           worktree: model.selectedWorktree,
-          selectedSession: model.selectedTab,
+          selectedSession: model.displayedSession,
           diffModels: model.diffModels,
           mainPanes: model.mainPanes,
           agentPaneStates: { identity in
             let key =
-              model.selectedTab.flatMap { $0.identity == identity ? $0 : nil }
+              model.displayedSession.flatMap { $0.identity == identity ? $0 : nil }
               ?? .primary(identity)
             return model.agentPaneStates(of: key)
           },
           keyboardFocus: keyboardFocus,
-          terminal: { TerminalTabs(model: model, keyboardFocus: keyboardFocus) }
+          terminal: { TerminalSessionsView(model: model, keyboardFocus: keyboardFocus) }
         )
       }
     }
@@ -130,8 +130,8 @@ struct ProjectView: View {
     .onReceive(model.paneObservations.$terminalFocusRequest) { _ in
       keyboardFocus.requestFocus()
     }
-    .onChange(of: model.selectedTab) { _, _ in
-      keyboardFocus.tabSelectionChanged()
+    .onChange(of: model.displayedSession) { _, _ in
+      keyboardFocus.displayedSessionChanged()
     }
     .onChange(of: model.viewerDrawerLayout) { old, new in
       keyboardFocus.drawerLayoutChanged(from: old, to: new)

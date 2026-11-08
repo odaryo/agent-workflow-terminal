@@ -173,7 +173,7 @@ struct DiffWorktreeContext: Equatable {
     if let projectRoot, isSelf(projectRoot) {
       displayName = "Project Root"
     } else if let own = worktrees.first(where: { isSelf($0.detected) }) {
-      displayName = own.detected.tabName
+      displayName = own.detected.directoryName
     } else {
       displayName = worktreeRoot.lastPathComponent
     }
@@ -182,7 +182,7 @@ struct DiffWorktreeContext: Equatable {
         let branch = worktree.detected.branch
       else { return nil }
       return DiffComparisonTask(
-        name: worktree.detected.tabName, branch: branch,
+        name: worktree.detected.directoryName, branch: branch,
         directory: URL(fileURLWithPath: worktree.detected.worktreePath).lastPathComponent)
     }
   }

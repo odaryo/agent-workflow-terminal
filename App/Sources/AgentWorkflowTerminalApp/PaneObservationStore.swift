@@ -81,9 +81,9 @@ final class PaneObservationStore: ObservableObject {
     paneOperations = dependencies.tmuxRunner.map(TmuxPaneOperations.init(runner:))
   }
 
-  func observe(_ inventory: WorktreeInventory, tabs: [TerminalSessionKey]) {
+  func observe(_ inventory: WorktreeInventory, sessions: [TerminalSessionKey]) {
     guard !isStopped, feed != nil else { return }
-    let targets = tabs.filter { inventory.observesPaneStates(of: $0.identity) }
+    let targets = sessions.filter { inventory.observesPaneStates(of: $0.identity) }
     let wanted = Set(targets)
     for session in Array(observations.keys) where !wanted.contains(session) {
       stop(session)
@@ -93,7 +93,7 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
-  /// 登録解除した Project の観測を止める。以後 `observe(_:tabs:)` は何もしない。
+  /// 登録解除した Project の観測を止める。以後 `observe(_:sessions:)` は何もしない。
   func stopAll() {
     isStopped = true
     for session in Array(observations.keys) {

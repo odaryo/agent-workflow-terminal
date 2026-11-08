@@ -6,18 +6,18 @@ import TerminalCore
 @MainActor
 final class AppModel: ObservableObject {
   @Published private(set) var projectRoot: DetectedWorktree? {
-    didSet { paneObservations.observe(inventory, tabs: tabKeys) }
+    didSet { paneObservations.observe(inventory, sessions: sessionKeys) }
   }
   @Published private(set) var worktrees: [TaskWorktree] = [] {
-    didSet { paneObservations.observe(inventory, tabs: tabKeys) }
+    didSet { paneObservations.observe(inventory, sessions: sessionKeys) }
   }
-  @Published var selectedTab: TerminalSessionKey?
-  @Published var openedTabs: Set<TerminalSessionKey> = []
-  @Published private(set) var tabLayout = TerminalTabLayout() {
-    didSet { paneObservations.observe(inventory, tabs: tabKeys) }
+  @Published var displayedSession: TerminalSessionKey?
+  @Published var openedSessions: Set<TerminalSessionKey> = []
+  @Published private(set) var sessionLayout = TerminalTabLayout() {
+    didSet { paneObservations.observe(inventory, sessions: sessionKeys) }
   }
-  var newlyAddedTabs: Set<TerminalSessionKey> = []
-  var restoredTabs: Set<TerminalSessionKey> = []
+  var newlyAddedSessions: Set<TerminalSessionKey> = []
+  var restoredSessions: Set<TerminalSessionKey> = []
 
   @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
     didSet { saveViewerArrangements(replacing: oldValue) }
@@ -43,7 +43,7 @@ final class AppModel: ObservableObject {
   let mainPanes: MainPaneCoordinator
   /// Close の確認と実行 (設計書 §3.4)。
   let closing: WorktreeClosing
-  let tabClosing = TerminalTabClosing()
+  let sessionClosing = TerminalSessionClosing()
   let sessionActivityProbe: TmuxSessionActivityProbe?
   let project: RegisteredProject
   private let projectDirectory: URL
@@ -99,47 +99,47 @@ final class AppModel: ObservableObject {
     WorktreeInventory(projectRoot: projectRoot, taskWorktrees: worktrees)
   }
 
-  var selectedIdentity: WorktreeIdentity? { selectedTab?.identity }
+  var selectedIdentity: WorktreeIdentity? { displayedSession?.identity }
 
-  var tabKeys: [TerminalSessionKey] {
-    tabLayout.tabs(
-      directories: [projectRoot?.identity].compactMap { $0 } + tabbedWorktrees.map(\.identity))
+  var sessionKeys: [TerminalSessionKey] {
+    sessionLayout.tabs(
+      directories: [projectRoot?.identity].compactMap { $0 } + sessionWorktrees.map(\.identity))
   }
 
-  func selectNewTab(in identity: WorktreeIdentity, existingSessionNames: [String]) {
-    guard canOpenTab(in: identity) else { return }
-    guard let key = tabLayout.addTab(in: identity, existingSessionNames: existingSessionNames)
+  func selectNewSession(in identity: WorktreeIdentity, existingSessionNames: [String]) {
+    guard canOpenSession(in: identity) else { return }
+    guard let key = sessionLayout.addTab(in: identity, existingSessionNames: existingSessionNames)
     else {
-      reportTabOpeningFailure("セッション番号の上限 (9999) に達したため、新しいセッションを開けません。")
+      reportSessionWarning("セッション番号の上限 (9999) に達したため、新しいセッションを開けません。")
       return
     }
-    newlyAddedTabs.insert(key)
-    restoredTabs.remove(key)
+    newlyAddedSessions.insert(key)
+    restoredSessions.remove(key)
     select(key)
   }
 
-  func reportTabOpeningFailure(_ detail: String) {
+  func reportSessionWarning(_ detail: String) {
     warning = detail
   }
 
-  func reportTabClosingFailure(_ detail: String) {
+  func reportSessionClosingFailure(_ detail: String) {
     warning = detail
   }
 
-  func removeTab(_ key: TerminalSessionKey) {
-    newlyAddedTabs.remove(key)
-    restoredTabs.remove(key)
-    openedTabs.remove(key)
-    tabLayout.removeTab(key)
+  func removeSession(_ key: TerminalSessionKey) {
+    newlyAddedSessions.remove(key)
+    restoredSessions.remove(key)
+    openedSessions.remove(key)
+    sessionLayout.removeTab(key)
   }
 
-  func removeTabs(in identity: WorktreeIdentity) {
-    newlyAddedTabs = newlyAddedTabs.filter { $0.identity != identity }
-    restoredTabs = restoredTabs.filter { $0.identity != identity }
-    for key in tabLayout.tabs(in: identity) { tabLayout.removeTab(key) }
+  func removeSessions(in identity: WorktreeIdentity) {
+    newlyAddedSessions = newlyAddedSessions.filter { $0.identity != identity }
+    restoredSessions = restoredSessions.filter { $0.identity != identity }
+    for key in sessionLayout.tabs(in: identity) { sessionLayout.removeTab(key) }
   }
   /// Inactive の worktree はセッションの表示対象にしない (設計書 §3.2)。
-  var tabbedWorktrees: [TaskWorktree] { inventory.tabbedTaskWorktrees }
+  var sessionWorktrees: [TaskWorktree] { inventory.tabbedTaskWorktrees }
 
   /// Active 化の導線に並べる worktree。状態は添えない — 添えると Inactive の pane を観測する
   /// ことになり、Inactive を観測対象から外す方針に反する (設計書 §3.2)。
@@ -175,7 +175,7 @@ final class AppModel: ObservableObject {
   /// 登録を解除した Project の再スキャンを止める (Issue #372)。止めないと一覧から外した
   /// Project へ git を撃ち続け、その保存ファイルを書き続ける。
   func stop() {
-    tabClosing.cancel()
+    sessionClosing.cancel()
     rescan.cancel()
     hostControlRescan.stop()
     canSave = false
@@ -281,7 +281,7 @@ final class AppModel: ObservableObject {
       projectRoot = updated.inventory.projectRoot
       worktrees = updated.inventory.taskWorktrees
       // 消えた worktree を選択したままだと描画先が無くなり、端末が空になる (Issue #496)。
-      reconcileTabSelection()
+      reconcileSessionSelection()
       save()
     }
   }
@@ -308,12 +308,12 @@ final class AppModel: ObservableObject {
     projectRoot = result.inventory.projectRoot
     worktrees = result.inventory.taskWorktrees
     if let sessionNames {
-      tabLayout.restore(
+      sessionLayout.restore(
         from: sessionNames,
         identities: [projectRoot?.identity].compactMap { $0 } + worktrees.map(\.identity))
     }
     // 選択後では端末の .task が印より先に走り、確認なしで session を作り得る。
-    restoredTabs = hasSavedInventory ? Set(tabKeys) : []
+    restoredSessions = hasSavedInventory ? Set(sessionKeys) : []
     didCompleteInitialScan = true
     if projectRoot != nil {
       selectProjectRoot()
@@ -347,18 +347,18 @@ final class AppModel: ObservableObject {
     guard worktree.activation != activation else { return }
     worktrees = applyingActivation(activation, of: identity, to: worktrees)
     if activation == .inactive {
-      tabClosing.cancel()
+      sessionClosing.cancel()
       close(identity)
     } else {
-      restoredTabs = restoredTabs.filter { $0.identity != identity }
-      Task { await restoreTabsOnActivation(of: identity) }
+      restoredSessions = restoredSessions.filter { $0.identity != identity }
+      Task { await restoreSessionsOnActivation(of: identity) }
     }
     save()
   }
 
   // 起動時の写しは Inactive の間に古くなり、再起動の有無で復元結果が食い違うため、
   // Active 化のたびに session の一覧を取り直す (Issue #489)。
-  private func restoreTabsOnActivation(of identity: WorktreeIdentity) async {
+  private func restoreSessionsOnActivation(of identity: WorktreeIdentity) async {
     let names: [String]
     do {
       names = try await sessions?.sessionNames() ?? []
@@ -373,11 +373,11 @@ final class AppModel: ObservableObject {
       })
     else { return }
 
-    tabLayout.restore(from: names, identities: [identity])
-    let keys = Set(tabKeys)
-    openedTabs = openedTabs.filter { $0.identity != identity || keys.contains($0) }
-    if let selectedTab, selectedTab.identity == identity, !keys.contains(selectedTab),
-      let first = tabLayout.tabs(in: identity).first
+    sessionLayout.restore(from: names, identities: [identity])
+    let keys = Set(sessionKeys)
+    openedSessions = openedSessions.filter { $0.identity != identity || keys.contains($0) }
+    if let displayedSession, displayedSession.identity == identity,
+      !keys.contains(displayedSession), let first = sessionLayout.tabs(in: identity).first
     {
       select(first)
     }
@@ -387,26 +387,26 @@ final class AppModel: ObservableObject {
   /// responder を持ち続け、打鍵が別 worktree の生きた session へ入る窓が開く。
   /// tmux session 自体は残す (設計書 §3.4)。
   private func close(_ identity: WorktreeIdentity) {
-    openedTabs = openedTabs.filter { $0.identity != identity }
+    openedSessions = openedSessions.filter { $0.identity != identity }
     guard selectedIdentity == identity else { return }
-    selectFallbackTab()
+    selectFallbackSession()
   }
 
-  private func reconcileTabSelection() {
-    let tabs = Set(tabKeys)
-    openedTabs.formIntersection(tabs)
-    guard let selectedTab else { return }
+  private func reconcileSessionSelection() {
+    let sessions = Set(sessionKeys)
+    openedSessions.formIntersection(sessions)
+    guard let displayedSession else { return }
     let isSelectable =
-      if selectedTab.identity == projectRoot?.identity {
+      if displayedSession.identity == projectRoot?.identity {
         projectRoot?.isReachable == true
       } else {
-        inventory.selectableTaskWorktrees.contains { $0.identity == selectedTab.identity }
+        inventory.selectableTaskWorktrees.contains { $0.identity == displayedSession.identity }
       }
-    guard !tabs.contains(selectedTab) || !isSelectable else { return }
-    selectFallbackTab()
+    guard !sessions.contains(displayedSession) || !isSelectable else { return }
+    selectFallbackSession()
   }
 
-  private func selectFallbackTab() {
+  private func selectFallbackSession() {
     // 到達不能な Project Root へは移さない。`selectProjectRoot()` は worktree の選択と違って
     // 到達可能性を見ないので、自動で呼ぶこの経路が「開けない Project Root を勝手に開く」
     // 入口になる (`select(_:)` の doc コメントにある `$HOME` へ落ちる `new-session`)。
@@ -415,7 +415,7 @@ final class AppModel: ObservableObject {
     } else if let next = firstSelectableWorktree {
       select(next)
     } else {
-      selectedTab = nil
+      displayedSession = nil
     }
   }
 

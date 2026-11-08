@@ -302,7 +302,7 @@ private actor TmuxBootstrapGate {
 
 extension TmuxSessionOperationError {
   /// 画面に出す理由。原因ごとにユーザーの次の行動が違うので、1つの文言へ丸めない。
-  var terminalTabDescription: String {
+  var terminalSessionDescription: String {
     switch self {
     case .workingDirectoryUnusable(let path):
       "worktree のディレクトリへ入れないため、session を用意できません: \(path)"
@@ -327,13 +327,13 @@ enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
   case orphanedServer(socketPath: String, TmuxOrphanedServerProbeResult)
   case leftoverBootstrapSession(cause: TmuxSessionOperationError, cleanupFailure: TmuxRunnerError)
 
-  var terminalTabDescription: String {
+  var terminalSessionDescription: String {
     switch self {
-    case .operation(let error): error.terminalTabDescription
+    case .operation(let error): error.terminalSessionDescription
     case .orphanedServer(let socketPath, let result):
       result.orphanedServerExplanation(socketPath: socketPath)
     case .leftoverBootstrapSession(let cause, let cleanupFailure):
-      cause.terminalTabDescription + "\n"
+      cause.terminalSessionDescription + "\n"
         + TmuxSessionProvisioner.bootstrapCleanupWarning + "\n後始末の失敗: \(cleanupFailure)"
     }
   }
@@ -344,7 +344,7 @@ enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
     case .orphanedServer(let socketPath, let result):
       result.orphanedServerExplanation(socketPath: socketPath)
     case .leftoverBootstrapSession:
-      terminalTabDescription
+      terminalSessionDescription
     }
   }
 }

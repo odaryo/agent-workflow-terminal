@@ -1,6 +1,6 @@
 import TerminalCore
 
-enum TabCycle {
+enum SessionCycle {
   static func adjacent(
     in order: [TerminalSessionKey], from current: TerminalSessionKey?, forward: Bool
   ) -> TerminalSessionKey? {

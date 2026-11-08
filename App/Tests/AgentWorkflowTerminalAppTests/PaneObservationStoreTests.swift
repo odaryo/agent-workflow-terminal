@@ -43,7 +43,7 @@ struct PaneObservationStoreTests {
       WorktreeInventory(
         projectRoot: DetectedWorktree(
           identity: identity, worktreePath: "/repo", branch: "main", isProjectRoot: true),
-        taskWorktrees: []), tabs: [session])
+        taskWorktrees: []), sessions: [session])
     let pane = PaneID(rawValue: "%2")
     let firstTurnEnd = Date(timeIntervalSince1970: 10)
     let completed = PaneAgentState(

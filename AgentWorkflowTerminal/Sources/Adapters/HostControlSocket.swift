@@ -169,7 +169,15 @@ private enum SocketIO {
   static func lock(_ path: String) throws(HostControlSocketError) -> Int32 {
     // macOSでは稼働中でもbacklogが満杯ならECONNREFUSEDになるため、接続で生存判定しない。
     let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK
-    let descriptor = Darwin.open(path + ".lock", flags, 0o600)
+    var descriptor = Darwin.open(path + ".lock", flags, 0o600)
+    // 別スレッドが子プロセスを起動している間は、closeしても子が参照を持つのでlockが残る。
+    // 実測では子の起動と並行すると約0.3%で起き、1msで解消した。1回の失敗では稼働中と判定しない。
+    var retries = 0
+    while descriptor < 0, errno == EWOULDBLOCK, retries < 10 {
+      usleep(25_000)
+      retries += 1
+      descriptor = Darwin.open(path + ".lock", flags, 0o600)
+    }
     guard descriptor >= 0 else {
       let code = errno
       if code == EWOULDBLOCK { throw .addressInUse(path) }

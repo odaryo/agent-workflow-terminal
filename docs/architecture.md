@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-08(Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-08(Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -646,9 +646,14 @@ Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
 
 Task Tabには次を圧縮表示する。
 
-**Task Tabの名前は worktree 名で固定する — 確定(2026-11-08)。** 名前は作業ツリーのディレクトリ名とし、checkoutされているbranchでは変えない。branchは`git switch`などで作業中に変わるため、タブの名前にするとタブが動いてしまう。タブ名を動かさないのは、タブを安定した入口として扱うためである(§3.5の安定IDとも揃う)。現在のbranch名は、タブ名ではなく§13のOverviewの副表示で示す。2026-11-08時点のコードはタブ名にbranch名を使っており、この決定に合わせて直す(Issueで扱う)。
+**Task Tabの名前は、そのタブで今作業しているbranch名にする — 確定(2026-11-08)。** 同じ日に決めた「worktree名で固定する」を置き換える。Project Rootのタブも含め、Agentや人がsessionの中で`cd`や`git switch`をすると、タブの名前もそれに合わせて変わる。タブの同一性はこれまでどおり安定IDとsession名(§3.5)で決まり、名前が変わってもタブとsessionは変わらない。
 
-- worktree名
+- 同じ名前のタブが並ぶときは、名前の後ろに`_1`、`_2`を付ける。
+- 名前が長いときは上限で切って`...`を付け、番号はその後ろに付ける(例: `feature/1234-324..._1`)。
+
+細部は現在の推奨とする(2026-11-08、§25)。上限はbranch名の先頭16文字とする。同じ名前の判定は省略した後の文字列で行い、タブ列の順で1枚目は番号なし、2枚目から`_1`とする。番号を付けた結果が別のタブの名前と重なるときは、次の番号へ進む。sessionに複数のpaneがあるときは、そのsessionのactive windowのactive paneのディレクトリでbranchを読む。branchを読めないとき(gitの管理外、detached HEAD、観測の失敗)は、worktreeのディレクトリ名に戻す。Project Rootのタブでは「Project Root」に戻す。
+
+- 今作業しているbranch名(上記)
 - Agent代表状態
 - Git状態を示す小さなマーク
   - uncommitted changes
@@ -947,7 +952,7 @@ Drawer内で比較元を指定してDiffを見る(§1.2)以上、いま何と何
 
 | 項目 | Base Diff | Branch Diff | Commit Diff |
 | --- | --- | --- | --- |
-| 対象 | worktreeの表示名(Task Tabと同じ名前。Project Rootは「Project Root」)、branch名(detached HEADなら「detached」)、HEADの短いOID(commitの無いbranchなら「commit なし」) | 同左 | 同左 |
+| 対象 | worktreeの表示名(checkoutされているbranch名、無ければディレクトリ名。Project Rootは「Project Root」)、branch名(detached HEADなら「detached」)、HEADの短いOID(commitの無いbranchなら「commit なし」) | 同左 | 同左 |
 | 比較元 | base branch名と、それを決めた経路(upstream／origin/HEAD／ユーザーの選択。§9.1.1) | 選んだbranch名 | commitの短いOIDとsubject |
 | 起点 | merge-baseの短いOIDと、merge-base起点であること(§9.1.2) | 同左 | 指定commitの親。親の無いcommitは空tree |
 | 範囲 | §9.1.3の5区分それぞれのファイル数(0件の区分も出す)と、ignoredを含まないこと | 同左 | そのcommitと親の差分であり、未commit変更を含まないこと |
@@ -1539,7 +1544,7 @@ titleより画面を先に見る。titleで絞れない分、文言を含むだ�
 
 ## 13. 全Agent pane Overview
 
-**Overviewの見出しに現在のbranchを副表示する — 確定(2026-11-08)。** worktreeの見出しの行に、その作業ツリーの現在のbranchを出す。セッションやpaneごとには出さない(同じ値が繰り返されるため)。値は新しい取得経路を作らず、既存の定期的なworktreeスキャン(§3.2)が読むbranchをそのまま使う。表記はDiffの比較元と同じ規則に揃える(branch名の`refs/heads/`を剥がす、detachedは「detached」、commitの無いbranchは「commit なし」、bare worktreeは branch を出さない)。この値に§12.2の安定化は掛けない — 確定的な読み取りであり、rebase中の一時的な`detached`も潰さない。観測に失敗した場合は前回の値を保持し、「無し」と断定して出さない(§12.3と同じ理由)。remoteのClientでは、Hostが計算した値を`hostctl`で受け取り、Clientでgitを呼ばない(§20.3)。Overviewに出すbranchは、タブ名の worktree 名と違っていてよい。
+**Overviewの見出しに現在のbranchを副表示する — 確定(2026-11-08)。** worktreeの見出しの行に、その作業ツリーの現在のbranchを出す。セッションやpaneごとには出さない(同じ値が繰り返されるため)。値は新しい取得経路を作らず、既存の定期的なworktreeスキャン(§3.2)が読むbranchをそのまま使う。表記はDiffの比較元と同じ規則に揃える(branch名の`refs/heads/`を剥がす、detachedは「detached」、commitの無いbranchは「commit なし」、bare worktreeは branch を出さない)。この値に§12.2の安定化は掛けない — 確定的な読み取りであり、rebase中の一時的な`detached`も潰さない。観測に失敗した場合は前回の値を保持し、「無し」と断定して出さない(§12.3と同じ理由)。remoteのClientでは、Hostが計算した値を`hostctl`で受け取り、Clientでgitを呼ばない(§20.3)。
 
 **確定(2026-09-07)。** 全Project／Task／Agent paneの概要と状態を一覧表示し、
 Terminalとは独立したウィンドウ、またはメインwindowの左サイドバーで常時確認できる(表示形態は下記、2026-11-02)。従来の「一時的なOverviewに限定する」制約を撤回する。
@@ -2511,6 +2516,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - タブの右クリックの作業概要一覧で、1つのタブにAgent paneが複数あるときの表し方(§5.3。現在の推奨はタブの見出しの行の下にpaneごとの行を並べ、見出しには代表状態を出さない)
 - Project移動とタブ移動のショートカットが両端で循環するか(§5.4。現在の推奨は⌃Tab／⌃⇧Tabと同じく循環させる。既定の割り当て・設定画面での変更・⌘Spaceは§5.4で確定)
 - 設定画面でショートカットに⌘を伴わないキーを割り当てられるようにするか(§5.4)
+- Task Tabの名前の細部(§5.3。現在の推奨は、上限16文字、省略後の文字列で同名を判定、1枚目は番号なし、active paneのディレクトリで読む、読めなければ従来の名前)
 
 ### Agent
 
@@ -2783,7 +2789,8 @@ PR_READY
 - [x] アプリの再起動後は、tmuxに残っている2つ目以降のsessionを命名規則から見つけ直してタブを復元する(2026-11-01)
 - [x] 同じディレクトリに他のタブが残っているタブのsessionが外部から終了したら、そのタブを自動で閉じる。最後の1枚とdetachは再接続の操作を出して残す(2026-11-01)
 - [x] 1つのworktreeに複数のタブがあるとき、各タブの代表状態はそのタブのsessionのpaneだけから求め、Overviewもsessionごとに分けて並べる(2026-11-01)
-- [x] Task Tabの名前は worktree 名で固定し、現在のbranchはOverviewの見出しに副表示する(2026-11-08。コードのタブ名の修正は未実装)
+- [x] Task Tabの名前は、そのタブで今作業しているbranch名にして、`cd`や`git switch`に追従させる。同じ名前には`_1`、`_2`を付け、長い名前は省略する(2026-11-08)
+- [x] 現在のbranchはOverviewの見出しに副表示する(2026-11-08)
 - [x] 新規出現したworktreeは自動でActiveにせず、Inactiveから始める。Active化は人が`Inactive`メニューで選ぶ(2026-11-08で改定。以前は観測中の新規出現を自動Active化していた)
 - [x] Claude Codeからのタブ操作は、このアプリのMCPまたはAPIを通す。新規タブはユーザーが命令したときだけ開き、Claude Codeは通常は自分のタブの中でworktreeを作って移動する(2026-11-08)
 - [x] `+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(2026-11-08)

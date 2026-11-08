@@ -104,7 +104,7 @@ struct OverviewView: View {
   private func reveal(_ model: AppModel, session: TerminalSessionKey, pane: PaneID?) async {
     navigator.overviewNotice = nil
     navigator.overviewNotice = await navigator.reveal(
-      model, worktree: session.identity, session: session, pane: pane, in: projects)
+      model, worktree: session.identity, session: session, pane: pane, in: projects)?.description
   }
 }
 

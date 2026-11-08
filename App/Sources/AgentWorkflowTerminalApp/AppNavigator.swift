@@ -1,3 +1,4 @@
+import Adapters
 import AppKit
 import SwiftUI
 import TerminalCore
@@ -21,11 +22,11 @@ final class AppNavigator: ObservableObject {
   /// Project → タブ → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`
   /// ならタブまで。
   ///
-  /// - Returns: pane へ移れなかった理由。
+  /// - Returns: pane へ移れなかった理由。タブの選択は失敗しても済んでいる。
   func reveal(
     _ model: AppModel, worktree: WorktreeIdentity, session: TerminalSessionKey? = nil,
     pane: PaneID?, in projects: ProjectsModel
-  ) async -> String? {
+  ) async -> PaneRevealFailure? {
     projects.select(model.project.commonDirectory)
     if let session, model.tabKeys.contains(session) {
       model.select(session)
@@ -34,9 +35,9 @@ final class AppNavigator: ObservableObject {
     } else if let task = model.worktrees.first(where: { $0.identity == worktree }) {
       model.select(task)
     }
-    var failure: String?
+    var failure: PaneRevealFailure?
     if let pane, let error = await model.paneObservations.reveal(pane) {
-      failure = "pane \(pane.rawValue) へ移動できません: \(error)"
+      failure = PaneRevealFailure(pane: pane, error: error)
     }
     openWindow?(id: "main")
     NSApp.activate()
@@ -75,5 +76,26 @@ final class AppNavigator: ObservableObject {
     }
     openWindow(id: "main")
     NSApp.activate()
+  }
+}
+
+/// 観測は約2秒遅れるので、観測に残っている pane でも移動の時点で消えていることがある (Issue #402)。
+enum PaneRevealFailure: Equatable, CustomStringConvertible {
+  case paneGone(PaneID)
+  case failed(PaneID, String)
+
+  init(pane: PaneID, error: TmuxPaneOperationError) {
+    if case .paneNotFound = error {
+      self = .paneGone(pane)
+    } else {
+      self = .failed(pane, String(describing: error))
+    }
+  }
+
+  var description: String {
+    switch self {
+    case .paneGone(let pane): "pane \(pane.rawValue) は既に終了しています。"
+    case .failed(let pane, let error): "pane \(pane.rawValue) へ移動できません: \(error)"
+    }
   }
 }

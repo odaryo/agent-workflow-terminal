@@ -80,7 +80,7 @@ case "$AWT_TEST_MODE" in
     ;;
   zsh | fish)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
-      env AWT_TEST_ARGV="$AWT_TEST_DIR/argv" "$AWT_TEST_SHELL" -f -i
+      env AWT_TEST_ARGV="$AWT_TEST_DIR/argv" "$AWT_TEST_SHELL" "$([[ "$AWT_TEST_MODE" == fish ]] && printf -- -N || printf -- -f)" -i
     ;;
   *)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \

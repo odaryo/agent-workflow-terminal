@@ -44,7 +44,7 @@ import sys
 
 data = sys.stdin.buffer.read()
 reason = None
-if not data:
+if not data.strip():
     reason = "空です"
 elif len(data) > 700:
     reason = "700 バイトを超えています"
@@ -168,6 +168,13 @@ if ! pane_pid=$(tmux display-message -p -t "=$session:" '#{pane_pid}') ||
   exit 6
 fi
 
+# 子プロセスの有無では、rc や常駐が残した子を Agent と取り違える。前景のプロセスグループの変化を見る。
+if ! foreground_before=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ') ||
+  [[ ! "$foreground_before" =~ ^[0-9]+$ ]]; then
+  printf 'session=%s pane の前景プロセスを読めません。\n' "$session" >&2
+  exit 6
+fi
+
 if ! tmux send-keys -t "=$session:" -l -- "$line" ||
   ! tmux send-keys -t "=$session:" Enter; then
   printf 'session=%s セッションへの送信に失敗しました。\n' "$session" >&2
@@ -175,7 +182,8 @@ if ! tmux send-keys -t "=$session:" -l -- "$line" ||
 fi
 for ((attempt = 0; attempt < 50; attempt++)); do
   sleep 0.2
-  if pgrep -P "$pane_pid" >/dev/null 2>&1; then
+  foreground_now=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ')
+  if [[ "$foreground_now" =~ ^[0-9]+$ && "$foreground_now" != "$foreground_before" ]]; then
     printf 'session=%s\n' "$session"
     exit 0
   fi

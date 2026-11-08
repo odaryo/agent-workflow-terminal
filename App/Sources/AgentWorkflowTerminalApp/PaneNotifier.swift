@@ -170,7 +170,7 @@ final class PaneNotifier {
       let observed = model.paneObservations.observed[session]
       let paneExists =
         observed?.details[pane] != nil
-        || observed?.paneStates?.contains { $0.id == pane } == true
+        || observed?.latestPaneStates?.contains { $0.id == pane } == true
       let destination =
         paneExists
         ? session
@@ -202,7 +202,7 @@ final class PaneNotifier {
     where session != source && inventory.observesPaneStates(of: session.identity) {
       guard
         observation.details[pane] != nil
-          || observation.paneStates?.contains(where: { $0.id == pane }) == true
+          || observation.latestPaneStates?.contains(where: { $0.id == pane }) == true
       else { continue }
       guard destination == nil else { return nil }
       destination = session

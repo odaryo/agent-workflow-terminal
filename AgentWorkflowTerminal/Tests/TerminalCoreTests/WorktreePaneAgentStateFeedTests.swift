@@ -9,7 +9,6 @@ struct WorktreePaneAgentStateFeedTests {
   func paneAppears() async throws {
     let context = try makeContext(panes: [.success([pane("%1")])])
     var iterator = context.stream.makeAsyncIterator()
-    #expect(await iterator.next() == [])
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
     await context.channel.send(
       observation(.working, adapter: "matched"), to: PaneID(rawValue: "%1"))
@@ -20,7 +19,6 @@ struct WorktreePaneAgentStateFeedTests {
   func paneDisappears() async throws {
     let context = try makeContext(panes: [.success([pane("%1")]), .success([])])
     var iterator = context.stream.makeAsyncIterator()
-    _ = await iterator.next()
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
     await context.channel.send(
       observation(.working, adapter: "matched"), to: PaneID(rawValue: "%1"))
@@ -34,7 +32,6 @@ struct WorktreePaneAgentStateFeedTests {
   func absentCanReturn() async throws {
     let context = try makeContext(panes: [.success([pane("%1")])])
     var iterator = context.stream.makeAsyncIterator()
-    _ = await iterator.next()
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
     await context.channel.send(
       observation(.working, adapter: "matched"), to: PaneID(rawValue: "%1"))
@@ -50,7 +47,6 @@ struct WorktreePaneAgentStateFeedTests {
   func selectsFallback() async throws {
     let context = try makeContext(panes: [.success([pane("%1")])], aliveNames: [])
     var iterator = context.stream.makeAsyncIterator()
-    _ = await iterator.next()
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
     await context.channel.send(
       observation(.unknown, adapter: "fallback"), to: .init(rawValue: "%1"))
@@ -61,7 +57,6 @@ struct WorktreePaneAgentStateFeedTests {
   func selectsMatchingAdapter() async throws {
     let context = try makeContext(panes: [.success([pane("%1")])], aliveNames: ["agent"])
     var iterator = context.stream.makeAsyncIterator()
-    _ = await iterator.next()
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
     await context.channel.send(observation(.working, adapter: "matched"), to: .init(rawValue: "%1"))
     #expect(await iterator.next()?.first?.adapterID == AgentAdapterID(rawValue: "matched"))
@@ -71,10 +66,8 @@ struct WorktreePaneAgentStateFeedTests {
   func retainsOtherPaneObservation() async throws {
     let context = try makeContext(panes: [.success([pane("%2"), pane("%1")])])
     var iterator = context.stream.makeAsyncIterator()
-    _ = await iterator.next()
     await context.channel.waitForSubscribers(2)
     await context.channel.send(observation(.working, adapter: "matched"), to: .init(rawValue: "%2"))
-    _ = await iterator.next()
     await context.channel.send(observation(.idle, adapter: "matched"), to: .init(rawValue: "%1"))
     #expect(await iterator.next()?.map(\.id) == [.init(rawValue: "%2"), .init(rawValue: "%1")])
   }
@@ -98,7 +91,6 @@ struct WorktreePaneAgentStateFeedTests {
         panes: [.success([testCase.initial]), .success([testCase.changed])],
         aliveNames: ["agent", "node"], preferredProcessNames: testCase.preferredNames)
       var iterator = context.stream.makeAsyncIterator()
-      _ = await iterator.next()
       await context.channel.waitForSubscriber(testCase.initial.id)
       await context.channel.send(.working, to: testCase.initial.id)
       #expect(await iterator.next()?.first?.adapterID == AgentAdapterID(rawValue: "matched"))
@@ -122,7 +114,6 @@ struct WorktreePaneAgentStateFeedTests {
     let changed = pane("%1", currentPath: "/other", title: "renamed")
     let context = try makeContext(panes: [.success([initial]), .success([changed])])
     var iterator = context.stream.makeAsyncIterator()
-    _ = await iterator.next()
     await context.channel.waitForSubscriber(initial.id)
     await context.channel.send(.working, to: initial.id)
     _ = await iterator.next()
@@ -149,7 +140,6 @@ struct WorktreePaneAgentStateFeedTests {
     var iterator = pair.stream.makeAsyncIterator()
 
     await coordinator.receive([pane("%1")])
-    _ = await iterator.next()
     await coordinator.receive(
       observation(.working, adapter: "matched"), paneID: paneID, generation: 0)
     _ = await iterator.next()
@@ -189,7 +179,6 @@ struct WorktreePaneAgentStateFeedTests {
     let consumer = Task {
       for await value in context.stream { await recorder.append(value) }
     }
-    await recorder.waitForCount(1)
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
 
     consumer.cancel()
@@ -209,16 +198,15 @@ struct WorktreePaneAgentStateFeedTests {
     let consumer = Task {
       for await value in context.stream { await recorder.append(value) }
     }
-    await recorder.waitForCount(1)
     await context.channel.waitForSubscriber(unchanged.id)
     let value = observation(.working, adapter: "matched")
     await context.channel.send(value, to: unchanged.id)
-    await recorder.waitForCount(2)
+    await recorder.waitForCount(1)
     await context.clock.advance()
     await context.paneSource.waitForCalls(2)
     await context.channel.send(value, to: unchanged.id)
     for _ in 0..<20 { await Task.yield() }
-    #expect(await recorder.count == 2)
+    #expect(await recorder.count == 1)
     consumer.cancel()
   }
 
@@ -228,7 +216,6 @@ struct WorktreePaneAgentStateFeedTests {
     var iterator = context.stream.makeAsyncIterator()
     await context.paneSource.waitForCalls(1)
     await context.clock.advance()
-    #expect(await iterator.next() == [])
     await context.channel.waitForSubscriber(.init(rawValue: "%1"))
     await context.channel.send(observation(.working, adapter: "matched"), to: .init(rawValue: "%1"))
     #expect(await iterator.next()?.first?.id == PaneID(rawValue: "%1"))
@@ -243,21 +230,20 @@ struct WorktreePaneAgentStateFeedTests {
     let consumer = Task {
       for await value in context.stream { await recorder.append(value) }
     }
-    await recorder.waitForCount(1)
     await context.channel.waitForSubscriber(current.id)
     await context.channel.send(.working, to: current.id)
-    await recorder.waitForCount(2)
+    await recorder.waitForCount(1)
 
     await context.clock.advance()
     await context.paneSource.waitForCalls(2)
     for _ in 0..<20 { await Task.yield() }
-    #expect(await recorder.count == 2)
+    #expect(await recorder.count == 1)
     #expect(await context.channel.cancellationCount == 0)
 
     await context.clock.advance()
     await context.paneSource.waitForCalls(3)
     for _ in 0..<20 { await Task.yield() }
-    #expect(await recorder.count == 2)
+    #expect(await recorder.count == 1)
     #expect(await context.channel.cancellationCount == 0)
     consumer.cancel()
   }
@@ -269,8 +255,9 @@ struct WorktreePaneAgentStateFeedTests {
     var stream: AsyncStream<[PaneAgentState]>? = context?.stream
     context = nil
     var iterator: AsyncStream<[PaneAgentState]>.Iterator? = stream?.makeAsyncIterator()
-    _ = await iterator?.next()
     await channel.waitForSubscriber(.init(rawValue: "%1"))
+    await channel.send(.working, to: .init(rawValue: "%1"))
+    _ = await iterator?.next()
     iterator = nil
     stream = nil
     await channel.waitForCancellations(1)

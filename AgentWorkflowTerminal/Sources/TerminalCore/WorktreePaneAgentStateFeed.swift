@@ -11,7 +11,7 @@ extension WorktreePaneSource {
   }
 }
 
-/// `states(of:)` の各配信に、それが揃った観測かどうかを添えたもの。
+/// `snapshots(of:)` では、未観測を Agent 不在と区別するために観測が揃ったかを添える。
 public struct WorktreePaneAgentStates: Sendable, Hashable {
   public let panes: [PaneAgentState]
   /// pane 一覧の全 pane について、adapter の最初の結果 (観測か `.absent`) が届いている。
@@ -49,6 +49,7 @@ public struct WorktreePaneAgentStateFeed: Sendable {
   /// `.absent` の pane は、非 Agent process を代表状態へ昇格させないため出力に含めない
   /// (設計書 §5.2)。空配列は Agent pane が1つも無いことを表し、代表状態の `nil` を Idle 表示へ
   /// 変換する規則は表示層に留める。
+  /// 未観測を Agent 不在と誤認させないため、初回は全 pane の結果が揃うまで配信しない (§13)。
   public func states(
     of session: TerminalSessionKey,
     panes paneSource: any WorktreePaneSource,
@@ -291,6 +292,7 @@ actor WorktreePaneFeedCoordinator {
     let snapshot = WorktreePaneAgentStates(panes: value, isComplete: isComplete)
     switch output {
     case .states(let continuation):
+      guard lastYielded != nil || isComplete else { return }
       guard value != lastYielded?.panes else { return }
       continuation.yield(value)
     case .snapshots(let continuation):

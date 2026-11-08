@@ -1,7 +1,8 @@
 import Foundation
 
-/// Codex 0.152.1 が title に出す spinner / Action Required と画面の実測だけを使う
-/// (Spikes/gate3/README.md §3.2、§4.1、§6.2、§11)。
+/// Codex 0.152.1 が title に出す spinner / Action Required と画面の実測、および
+/// 0.166.0 の trust 画面の実測だけを使う (Spikes/gate3/README.md §3.2、§4.1、§6.2、§11、
+/// Issue #252、設計書 §12.8)。
 public struct CodexAdapter: AgentAdapter {
   public let id = AgentAdapterID(rawValue: "codex")
   public let processNames: Set<String> = ["codex"]
@@ -10,6 +11,13 @@ public struct CodexAdapter: AgentAdapter {
   public func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {
     guard liveness != .absent else { return .absent }
     guard liveness == .alive else { return unknown(signals, reason: .livenessUnavailable) }
+    // Issue #252、設計書 §12.8: 0.166.0 の trust 画面は Action Required を出さないため、
+    // title より画面を優先する。enter continue は更新確認にも出るため根拠にしない。
+    if let screen = signals.screenText,
+      screen.contains("Trust this folder?") || screen.contains("› 1. Trust and continue")
+    {
+      return observation(.permission, signals)
+    }
     if let attention = attentionObservation(signals) {
       return attention
     }

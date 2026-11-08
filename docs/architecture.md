@@ -1266,7 +1266,7 @@ worktreeを開かずにOverviewでも確認できる(§13)。この代表状態�
 - 保持時間を0〜30秒のどの値にしても、`Needs Attention`／`Ready for Review`の遷移時刻は保持なしの場合と一致する。保持時間を延ばしても人の対応が要る通知は遅れない。
 - 数字は記録の250msサンプリング上のもので、**表示遷移の頻度は製品の予測値ではない**。Gate 3 §7.5は250msのpollingが成立しないと結論しており、`AgentObservationIntervals.signals`はこれより粗くなる。中断70件のうち55件が0.77秒以下なので、この粗さはベースライン側を大きく動かす。一方、閾値の根拠であるテール(7.90秒と9.89秒)はサンプリング間隔に対して頑健である。
 - 保持を`Working`からの降格だけに限ると、`Idle`表示中に`Unknown`が一瞬入る往復が残る(5秒未満で入れ替わる`Idle`／`Unknown`表示が9秒保持で28回)。遷移元を問わない形にすると14回へ減る。これが遷移元を限定しない理由である。残る14回の大半は各runの先頭フレームで、画面の変化量を測る比較対象がまだ無く`Unknown`から始まることによる。
-- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.953**、残る誤判定は**`Ready for Review`を先に出す21フレーム(443中4.7%)**だけである。9秒保持を当てた表示では、working真値区間1084.0秒のうち表示が`Working`でない時間は60.0秒(5.5%)、最長の連続は4.0秒(2 poll分)である。250ms pollingではrecall 0.738で、取りこぼしは`Unknown`65・`Ready for Review`44・`Idle`7フレームになる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。**ターン開始直後の検出については、この4.7%を許容する — 確定(2026-11-02、Issue #562)**(判断待ちの検出の偏りは§12.6で確定)。数字は下の最小変化行数(claudeは2)を入れた製品の設定での値で、1行の変化も出力とみなしていた時点の値(recall 0.995、先出し443中0.45%、250msでrecall 0.867)から下の再採点のとおり変わった。待機中の書き換えを`Working`と読む誤り(idle真値区間の78%)を1.2%へ減らす代償として受け入れる。その後、ツールの実行待ちでspinnerの行だけが変わる間に前ターンの完了マーカーで`Ready for Review`を出していた誤判定を、spinnerの行と完了マーカーの位置(最後の送信済みプロンプトより下か)で除いた(Issue #627、`Spikes/gate3/README.md` §6.5)。同じ記録で2.0秒pollingのworking recallは1.000、`Ready for Review`の先出しは0フレームになり、250msではrecall 0.867(取りこぼしは`Unknown`59フレーム)になになった。9秒保持を当てた表示でも、working真値区間1084.0秒のうち表示が`Working`でない時間は0.0秒になった。他の状態の判定は1フレームも変わっていない。
+- ターン開始直後に`Working`を出せるかどうかは、画面テキストではなくpane単位の画面鮮度(Gate 3 §3.4、`Spikes/gate3/README.md`)で決まる。前ターンの完了マーカーは画面に残るため、画面テキストだけでは新しいターンの開始を`Ready for Review`と読んでしまう。実装済み`ClaudeCodeAdapter`を`claude-composite-r1`〜`r5`の生記録へ当てて真値区間と突き合わせると(`replay-swift --score`、真値区間と1.0秒のGUARDは`scripts/analyze.py`と同じ)、製品の`AgentObservationIntervals.signals`が使う2.0秒pollingで**working区間のrecallは0.953**、残る誤判定は**`Ready for Review`を先に出す21フレーム(443中4.7%)**だけである。9秒保持を当てた表示では、working真値区間1084.0秒のうち表示が`Working`でない時間は60.0秒(5.5%)、最長の連続は4.0秒(2 poll分)である。250ms pollingではrecall 0.738で、取りこぼしは`Unknown`65・`Ready for Review`44・`Idle`7フレームになる。`Permission`区間の危険な誤判定はどちらの間隔でも0.000。**ターン開始直後の検出については、この4.7%を許容する — 確定(2026-11-02、Issue #562)**(判断待ちの検出の偏りは§12.6で確定)。数字は下の最小変化行数(claudeは2)を入れた製品の設定での値で、1行の変化も出力とみなしていた時点の値(recall 0.995、先出し443中0.45%、250msでrecall 0.867)から下の再採点のとおり変わった。待機中の書き換えを`Working`と読む誤り(idle真値区間の78%)を1.2%へ減らす代償として受け入れる。その後、ツールの実行待ちでspinnerの行だけが変わる間に前ターンの完了マーカーで`Ready for Review`を出していた誤判定を、spinnerの行と完了マーカーの位置(最後の送信済みプロンプトより下か)で除いた(Issue #627、`Spikes/gate3/README.md` §6.5)。同じ記録で2.0秒pollingのworking recallは1.000、`Ready for Review`の先出しは0フレームになり、250msではrecall 0.867(取りこぼしは`Unknown`59フレーム)になった。9秒保持を当てた表示でも、working真値区間1084.0秒のうち表示が`Working`でない時間は0.0秒になった。他の状態の判定は1フレームも変わっていない。
 - 同じpollingの粗さは、`Working`の検出率を上げる代わりに`Idle`の検出率を下げる。同じ`--score`出力で`Idle`区間のrecallは250msの0.892から2.0秒では0.763へ落ち、455フレーム中98が`Working`になる。さらに製品の`WorktreeRepresentativeStateStabilizer`(保持9秒)を同じidle真値区間へ当てると、GUARDを除いた23.0秒のうち表示が`Working`のままの時間が12.8〜22.5秒を占める(5 run×8位相、2.0秒polling)。
 - 原因は、画面が変化した=出力があった、という仮定が成り立たないことである。250ms分解能で数え直すと、idle真値区間の独立した画面変化は**5 run合計10件で全件が1行**(GUARD 1.0秒。GUARDを外すと14件)であり、周期的な入れ替えではなく**起動直後に一回限りで起きるステータス行の遷移**がrunあたり2件あるだけである。**`completed-left`(ターン後の放置、55秒×5 run)の画面変化は0件**で、放置中の`Ready for Review`は元から正しく表示できていた。
 - **この記録で測れているのは起動後25秒のidle区間だけである。** claudeの`idle`真値区間は各runに1本(25.0秒)しか存在せず、日常の長い待機はGate 3の記録に含まれない。以下の数字をその範囲を超えて一般化しない。
@@ -1469,6 +1469,15 @@ Claude Code／Codexの初回起動時のtrust prompt(作業ディレクトリを
 信号としての採用は§12.5の基準に従う。§12.5は採点済みでない信号の使用を認めないため、両CLIの
 現行版で該当画面をfixture化し、Gate 3の検出率記録を再採点してから採用する必要がある。この作業自体は
 Issue #252で行う。
+
+Issue #252で採用した(2026-11-08、`Spikes/gate3/README.md` §6.6)。Claude Code 2.1.319は
+`Enter to confirm · Esc to cancel`の行と、`Yes, I trust this folder`または
+`Claude Code'll be able to read, edit, and execute files here.`の行(前後の空白を除いた行の一致)、
+Codex 0.166.0は`Trust this folder?`または`› 1. Trust and continue`を見る。Codexのtrust画面は
+pane titleに`Action Required`を出さないので、titleより画面を先に見る。footerの`enter continue`は
+起動時の更新の確認(Issue #639、扱いは未確定)と共有なので使わない。Codex 0.166.0はgitのrepositoryでない
+ディレクトリではtrust画面を出さなかった(task worktreeは常にrepositoryなので影響しない)。Gate 3の記録には
+どちらの画面も含まれず、再採点の数字は変わらない(24本の遷移列が変更前後で一致)。
 
 ## 13. 全Agent pane Overview
 

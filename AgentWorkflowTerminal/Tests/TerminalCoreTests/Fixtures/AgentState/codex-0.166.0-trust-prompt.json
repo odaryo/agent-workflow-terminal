@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "起動時の信頼確認 (Issue #252)。git init したディレクトリで初回起動し、先に出た更新の確認を Esc で飛ばした直後。pane_title は Action Required を含まない。git の repo でないディレクトリでは、0.166.0 はこの画面を出さなかった。 processNames は採取していない。adapter の processNames と同じ最小の値を入れた。",
+  "source": "y252-2 (m252 の採取)",
+  "paneTitle": "codex /p/t/c/-/a/s/m/wx2",
+  "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.166.0",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-08",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "codex"
+  ],
+  "captureCommand": "tmux -L awt252m capture-pane -p -t y252 / capture-pane -e -p -t y252 (160x40)",
+  "screen": "\n  Folder access\n  /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/a8c4c849-4e0b-416b-ab37-a01ad9027a46/scratchpad/m252/wx2\n\n  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings can run code automatically, even without a\n  model request. Continue only if you trust these files. Your trust decision will be saved.\n\n› 1. Trust and continue\n  2. Back to Agent Command Center\n\n  enter continue · esc back\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+  "styledScreen": "\n\u001b[1m  Folder access\u001b[0m\n  \u001b[2m/private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/a8c4c849-4e0b-416b-ab37-a01ad9027a46/scratchpad/m252/wx2                     \u001b[0m\n\n  Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings can run code automatically, even without a\n  model request. Continue only if you trust these files. Your trust decision will be saved.\n\n\u001b[1;7m› 1. Trust and continue\n\u001b[0m  2. Back to Agent Command Center\n\n  \u001b[1menter\u001b[0;2m continue · \u001b[0;1mesc\u001b[0;2m back\u001b[0m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+}

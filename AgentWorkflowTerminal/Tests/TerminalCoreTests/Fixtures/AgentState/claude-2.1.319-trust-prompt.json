@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "起動時の信頼確認 (Issue #252、§12.8 で Permission に含めると確定)。新しいディレクトリで初回起動した直後で、何も入力していない。 processNames は採取していない。adapter の processNames と同じ最小の値を入れた。",
+  "source": "c252-1 (m252 の採取)",
+  "paneTitle": "claude /p/t/c/-/a/s/m/wc",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-08",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "claude"
+  ],
+  "captureCommand": "tmux -L awt252m capture-pane -p -t c252 / capture-pane -e -p -t c252 (160x40)",
+  "screen": "claude\nWelcome to fish, the friendly interactive shell\nType help for instructions on how to use fish\n\n/private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/a8c4c849-4e0b-416b-ab37-a01ad9027a46/scratchpad/m252/wc\n⟩ claude\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n Accessing workspace:\n\n /private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/a8c4c849-4e0b-416b-ab37-a01ad9027a46/scratchpad/m252/wc\n\n Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not,\n take a moment to review what's in this folder first.\n\n Claude Code'll be able to read, edit, and execute files here.\n\n Security guide\n\n ❯ No, exit\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+  "styledScreen": "claude\nWelcome to fish, the friendly interactive shell\nType \u001b[32mhelp\u001b[39m for instructions on how to use fish\n\n\u001b[34m/private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/a8c4c849-4e0b-416b-ab37-a01ad9027a46/scratchpad/m252/wc\u001b[39m\n⟩ claude\n\n\u001b[38;5;220m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m \u001b[1m\u001b[38;5;220mAccessing\u001b[0m \u001b[1m\u001b[38;5;220mworkspace:\u001b[0m\n\n \u001b[1m/private/tmp/claude-501/-Users-odaryo-workspace-sample-agent-workflow-terminal/a8c4c849-4e0b-416b-ab37-a01ad9027a46/scratchpad/m252/wc\u001b[0m\n\n Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not,\n take a moment to review what's in this folder first.\n\n Claude Code'll be able to read, edit, and execute files here.\n\n \u001b[38;5;246m\u001b]8;id=zaxmda;https://code.claude.com/docs/en/security\u001b\\Security guide\u001b[39m\u001b]8;;\u001b\\\n\n \u001b[38;5;153m❯\u001b[39m \u001b[38;5;153mNo,\u001b[39m \u001b[38;5;153mexit\u001b[39m\n   Yes, I trust this folder\n\n \u001b[38;5;246mEnter\u001b[39m \u001b[38;5;246mto\u001b[39m \u001b[38;5;246mconfirm\u001b[39m \u001b[38;5;246m·\u001b[39m \u001b[38;5;246mEsc\u001b[39m \u001b[38;5;246mto\u001b[39m \u001b[38;5;246mcancel\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+}

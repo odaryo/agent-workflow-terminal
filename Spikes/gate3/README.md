@@ -381,9 +381,20 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 ターンの途中で Claude Code の transcript を上へスクロールし、ビューの最後の送信済み `❯` が前のターンの
 プロンプトで、その下に前のターンの `· done` が見える位置で保つと、§6.8 の規則でそのターンの間ずっと
 `completed` になっていた (2.1.319 の実機、hook の [UPS, Stop] の区間 22 秒で、2 秒間隔の観測の約 92%)。
-スクロール中は入力欄の上側の区切り線の直前に `Jump to bottom: fn+↓ to scroll` が出るので、この印がある
-ときは完了行と空の入力欄から判定せず `unknown` にする (fixture `claude-2.1.319-scrolled-running`)。
-spinner が見えていれば今までどおり `working`。印の文字列は 2.1.319 の実測で、版で変わりうる。
+スクロール中は入力欄の上側の区切り線の直前3行の中に印が出るので、この印があるときは完了行と空の入力欄から
+判定せず `unknown` にする (fixture `claude-2.1.319-scrolled-running`、`claude-2.1.319-scrolled-new-message`、
+`claude-2.1.319-scrolled-click`)。印は本文に重ねて描かれ、同じ行の左右に本文が残ることがある。
+2.1.319 の同じ版でも、新着メッセージ・マウスイベント・キー割り当て・端末幅で次のように形が変わる。
+
+- `Jump to bottom: fn+↓ to scroll`
+- `1 new message: fn+↓ to scroll` / `3 new messages: fn+↓ to scroll`
+- `Jump to bottom (click) ↓` / `2 new messages (click) ↓`
+- `Jump to bottom (<key>) ↓` (例: `Jump to bottom (ctrl+end) ↓`)
+- `Jump to bottom ↓`
+- `Jump to bottom` だけ
+
+そのため、印の先頭文言 `Jump to bottom` または `<数字> new message(s)` だけを使い、後ろの部分は問わない。
+この3行の窓の外にある transcript の新着区切りは拾わない。spinner が見えていれば今までどおり `working`。
 この変更で Gate 3 の記録の判定は1フレームも変わっていない (2.0 秒 polling の `--score` が #382 の後と同一)。
 
 ### 6.3 読み取れること

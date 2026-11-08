@@ -4,6 +4,17 @@ import Testing
 
 @Suite("Claude Code のスクロールと画面外プロンプト (Issue #653)")
 struct ClaudeCodeAdapterScrollTests {
+  private static let scrollIndicators = [
+    "Jump to bottom: fn+↓ to scroll",
+    "1 new message: fn+↓ to scroll",
+    "3 new messages: fn+↓ to scroll",
+    "Jump to bottom (click) ↓",
+    "2 new messages (click) ↓",
+    "Jump to bottom (ctrl+end) ↓",
+    "Jump to bottom ↓",
+    "Jump to bottom",
+  ]
+
   @Test("スクロール中の前ターンの完了行は Completed / Idle にせず Unknown (Issue #653)")
   func scrolledRunningIsUnknown() throws {
     let fixture = try #require(
@@ -29,8 +40,7 @@ struct ClaudeCodeAdapterScrollTests {
 
   @Test(
     "入力欄の上側区切り線の1〜3行前の印は、前後の空白と同じ行の本文長によらず Unknown (Issue #653)",
-    arguments: [
-      "Jump to bottom: fn+↓ to scroll",
+    arguments: scrollIndicators + [
       "  短い本文 Jump to bottom: fn+↓ to scroll   ",
       "       100111010と書かれます。さらに本文が続きます。 Jump to bottom: fn+↓ to scroll ",
     ], [0, 1, 2]
@@ -52,6 +62,53 @@ struct ClaudeCodeAdapterScrollTests {
       fixture: fixture, screen: moveIndicator(fixture.screen),
       styled: moveIndicator(#require(fixture.styledScreen)))
     #expect(fixtureState(of: result) == "unknown")
+    guard case .observation(let observation) = result else {
+      Issue.record("absent")
+      return
+    }
+    #expect(observation.unknownReason == .adapterUndetermined)
+  }
+
+  @Test(
+    "印の表記によらず今のターンの spinner があれば Working (Issue #653)",
+    arguments: scrollIndicators
+  )
+  func scrollIndicatorWithCurrentSpinnerIsWorking(indicator: String) throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-scrolled-running").first)
+    let originalIndicator = "Jump to bottom: fn+↓ to scroll"
+    let styled = try #require(fixture.styledScreen)
+    try #require(fixture.screen.contains(originalIndicator))
+    try #require(styled.contains(originalIndicator))
+    try #require(fixture.secondsSinceScreenChange == 2.0)
+    let replacement = "\n✻ Propagating… (5s · ↓ 12 tokens)\n" + indicator
+    let styledScreen = styled.replacingOccurrences(of: originalIndicator, with: replacement)
+    let screen = StyledScreenText(capturedWithEscapeSequences: styledScreen).plainText
+    let result = classify(fixture: fixture, screen: screen, styled: styledScreen)
+    #expect(fixtureState(of: result) == "working")
+  }
+
+  @Test(
+    "区切り線の4行以上前の transcript の新着区切りはスクロール扱いせず Completed (Issue #653)",
+    arguments: [3, 5]
+  )
+  func transcriptNewMessageSeparatorOutsideWindowIsCompleted(blankLines: Int) throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-scrolled-running").first)
+    func replaceIndicator(_ screen: String) throws -> String {
+      var lines = screen.components(separatedBy: "\n")
+      let index = try #require(lines.firstIndex { $0.contains("Jump to bottom: fn+↓ to scroll") })
+      try #require(index + 1 < lines.count)
+      try #require(lines[index + 1].isEmpty)
+      lines.replaceSubrange(
+        index...index + 1,
+        with: ["──── 1 new message ────"] + Array(repeating: "", count: blankLines))
+      return lines.joined(separator: "\n")
+    }
+    let result = try classify(
+      fixture: fixture, screen: replaceIndicator(fixture.screen),
+      styled: replaceIndicator(#require(fixture.styledScreen)))
+    #expect(fixtureState(of: result) == "completed")
   }
 
   @Test("入力欄の区切り線から離れた会話本文の印はスクロール扱いせず Completed (Issue #653)")

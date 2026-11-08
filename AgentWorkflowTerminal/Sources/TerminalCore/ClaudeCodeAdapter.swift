@@ -107,7 +107,8 @@ public struct ClaudeCodeAdapter: AgentAdapter {
 
   // Issue #653: スクロール中は最後の送信済みプロンプトが前のターンのものに見えるため、
   // 完了行や空欄から現ターンを確定できない。本文中の同じ文言を拾わないよう入力欄付近に限る。
-  // この印は Claude Code 2.1.319 の実測値であり、版によって変わりうる。
+  // 2.1.319 では同じ版でも新着メッセージ・マウスイベント・キー割り当て・端末幅で印が変わるため、
+  // 先頭の文言だけを使い、後続の操作案内は問わない。本文に重ねて描かれるので行頭には限定しない。
   private static func hasScrolledTranscript(_ screen: String) -> Bool {
     let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
     guard let promptIndex = lines.lastIndex(where: { $0.hasPrefix("❯") }),
@@ -117,7 +118,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       })
     else { return false }
     return lines[max(0, separatorIndex - 3)..<separatorIndex].contains {
-      $0.contains("Jump to bottom: fn+↓ to scroll")
+      $0.range(of: #"(Jump to bottom|\d+ new messages?)"#, options: .regularExpression) != nil
     }
   }
 

@@ -15,6 +15,33 @@ struct ProjectAgentCommandTests {
   }
 
   @Test(
+    "既定で無視される文字だけなら未設定",
+    arguments: [
+      "\u{FEFF}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FE0F}", "\u{3164}", "\u{00AD}",
+    ])
+  func defaultIgnorableInputIsUnset(input: String) {
+    #expect(ProjectAgentCommand.normalized(input) == .success(nil))
+  }
+
+  @Test("前後の既定で無視される文字を除く", arguments: ["\u{FEFF}claude", "claude\u{200B}"])
+  func trimsSurroundingDefaultIgnorableCharacters(input: String) {
+    #expect(ProjectAgentCommand.normalized(input) == .success("claude"))
+  }
+
+  @Test("結合文字だけでも未設定にしない")
+  func combiningMarkIsNotUnset() {
+    #expect(ProjectAgentCommand.normalized("\u{0301}") == .success("\u{0301}"))
+  }
+
+  @Test("内部の行区切りと段落区切りは拒否する", arguments: ["\u{2028}", "\u{2029}"])
+  func rejectsInternalLineAndParagraphSeparators(separator: String) {
+    #expect(
+      ProjectAgentCommand.normalized("claude\(separator)--model fable")
+        == .failure(.containsControlCharacter)
+    )
+  }
+
+  @Test(
     "前後の空白と改行を除き、内部の空白を保つ",
     arguments: [
       "claude --model fable", "  claude --model fable  ", "\n\tclaude --model fable\r\n",

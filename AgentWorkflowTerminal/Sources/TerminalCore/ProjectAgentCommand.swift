@@ -8,12 +8,20 @@ public enum ProjectAgentCommandError: Error, Sendable, Equatable {
 public enum ProjectAgentCommand {
   public static let maximumUTF8Bytes = 150
 
-  /// 空白だけなら nil (未設定)。前後の空白と改行は除く。
-  /// 除いた後に制御文字 (改行・CR・タブ・NUL を含む、Unicode の Cc) があれば失敗。
+  /// 空白と既定で無視される文字だけなら nil (未設定)。
+  /// 内部の Unicode Cc 制御文字・行区切り・段落区切りは失敗。
   public static func normalized(_ input: String) -> Result<String?, ProjectAgentCommandError> {
-    let command = input.trimmingCharacters(in: .whitespacesAndNewlines)
+    let isTrimmable: (Unicode.Scalar) -> Bool = {
+      $0.properties.isWhitespace || $0.properties.isDefaultIgnorableCodePoint
+    }
+    let scalars = input.unicodeScalars.drop(while: isTrimmable)
+      .reversed().drop(while: isTrimmable).reversed()
+    let command = String(String.UnicodeScalarView(scalars))
     guard !command.isEmpty else { return .success(nil) }
-    guard !command.unicodeScalars.contains(where: { $0.properties.generalCategory == .control })
+    guard
+      !command.unicodeScalars.contains(where: {
+        $0.properties.generalCategory == .control || $0.value == 0x2028 || $0.value == 0x2029
+      })
     else {
       return .failure(.containsControlCharacter)
     }

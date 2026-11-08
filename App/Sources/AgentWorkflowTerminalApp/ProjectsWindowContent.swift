@@ -13,6 +13,7 @@ struct ProjectsWindowContent: View {
     OverviewSidebarPreferences.defaultIsOpen
   @AppStorage(OverviewSidebarPreferences.widthKey) private var sidebarWidth =
     OverviewSidebarPreferences.defaultWidth
+  @State private var pendingAgentCommand: RegisteredProject?
 
   private var isSidebarVisible: Bool {
     OverviewPresentation(storedValue: presentation) == .sidebar && isSidebarOpen
@@ -47,7 +48,7 @@ struct ProjectsWindowContent: View {
     .background { MainWindowCapture(navigator: projects.navigator) }
     .toolbar {
       ToolbarItem(placement: .navigation) {
-        ProjectMenu(projects: projects)
+        ProjectMenu(projects: projects) { pendingAgentCommand = $0 }
       }
     }
     .confirmationDialog(
@@ -65,6 +66,15 @@ struct ProjectsWindowContent: View {
       }
     } message: { review in
       Text(review.message)
+    }
+    .sheet(
+      isPresented: Binding(
+        get: { pendingAgentCommand != nil },
+        set: { if !$0 { pendingAgentCommand = nil } })
+    ) {
+      if let project = pendingAgentCommand {
+        ProjectAgentCommandSheet(project: project, projects: projects)
+      }
     }
     .task { projects.start() }
     .onAppear { projects.navigator.openWindow = openWindow }
@@ -166,6 +176,7 @@ private struct MainWindowCapture: NSViewRepresentable {
 
 private struct ProjectMenu: View {
   @ObservedObject var projects: ProjectsModel
+  let onSetAgentCommand: (RegisteredProject) -> Void
 
   var body: some View {
     Menu {
@@ -177,6 +188,9 @@ private struct ProjectMenu: View {
       }
       Button("Project を追加…") { chooseProjectDirectory(projects) }
       if let selected = projects.selectedProject {
+        Button("「\(selected.displayName)」の Agent 起動コマンド…") {
+          onSetAgentCommand(selected)
+        }
         Button("「\(selected.displayName)」の登録を解除") {
           Task { await projects.requestUnregister(selected.commonDirectory) }
         }

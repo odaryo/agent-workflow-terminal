@@ -105,7 +105,12 @@ extension ProjectsModel {
       else {
         return .failure(code: .notRegistered, message: "利用可能な登録済み Project が見つかりません")
       }
-      return await model.openWorktreeForAgent(directory: directory)
+      let response = await model.openWorktreeForAgent(directory: directory)
+      if case .opened(var opened) = response {
+        opened.agentCommand = registry.project(project.commonDirectory)?.agentCommand
+        return .opened(opened)
+      }
+      return response
     }
   }
 

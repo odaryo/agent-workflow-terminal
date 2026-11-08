@@ -176,6 +176,19 @@ final class ProjectsModel: ObservableObject {
     save()
   }
 
+  func setAgentCommand(
+    _ input: String, of commonDirectory: WorktreeIdentity
+  ) -> ProjectAgentCommandError? {
+    switch ProjectAgentCommand.normalized(input) {
+    case .success(let command):
+      registry.setAgentCommand(command, of: commonDirectory)
+      save()
+      return nil
+    case .failure(let error):
+      return error
+    }
+  }
+
   /// 一覧から外すだけで、repository・tmux session・アプリ内データには触れない (設計書 §16.1)。
   /// その Project の端末は view ごと破棄され、tmux client が detach する。
   func unregister(_ commonDirectory: WorktreeIdentity) {

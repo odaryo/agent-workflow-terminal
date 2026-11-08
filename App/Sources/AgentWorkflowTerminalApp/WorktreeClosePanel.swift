@@ -32,7 +32,7 @@ private struct WorktreeClosePanel: View {
   }
 
   private var title: String {
-    session.target.branch ?? URL(fileURLWithPath: session.target.worktreePath).lastPathComponent
+    session.target.tabName
   }
 
   @ViewBuilder private var content: some View {

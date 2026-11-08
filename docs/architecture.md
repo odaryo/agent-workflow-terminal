@@ -644,7 +644,7 @@ Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
 
 Task Tabには次を圧縮表示する。
 
-**Task Tabの名前は worktree 名で固定する — 確定(2026-11-08)。** 名前は作業ツリーのディレクトリ名とし、checkoutされているbranchでは変えない。branchは`git switch`などで作業中に変わるため、タブの名前にするとタブが動いてしまう。タブ名を動かさないのは、タブを安定した入口として扱うためである(§3.5の安定IDとも揃う)。現在のbranch名は、タブ名ではなく§13のOverviewの副表示で示す。2026-11-08時点のコードはタブ名にbranch名を使っており、この決定に合わせて直す(Issueで扱う)。
+**Task Tabの名前は worktree 名で固定する — 確定(2026-11-08)。** 名前は作業ツリーのディレクトリ名とし、checkoutされているbranchでは変えない。branchは`git switch`などで作業中に変わるため、タブの名前にするとタブが動いてしまう。タブ名を動かさないのは、タブを安定した入口として扱うためである(§3.5の安定IDとも揃う)。現在のbranch名は、タブ名ではなく§13のOverviewの副表示で示す。
 
 - worktree名
 - Agent代表状態
@@ -2781,7 +2781,7 @@ PR_READY
 - [x] アプリの再起動後は、tmuxに残っている2つ目以降のsessionを命名規則から見つけ直してタブを復元する(2026-11-01)
 - [x] 同じディレクトリに他のタブが残っているタブのsessionが外部から終了したら、そのタブを自動で閉じる。最後の1枚とdetachは再接続の操作を出して残す(2026-11-01)
 - [x] 1つのworktreeに複数のタブがあるとき、各タブの代表状態はそのタブのsessionのpaneだけから求め、Overviewもsessionごとに分けて並べる(2026-11-01)
-- [x] Task Tabの名前は worktree 名で固定し、現在のbranchはOverviewの見出しに副表示する(2026-11-08。コードのタブ名の修正は未実装)
+- [x] Task Tabの名前は worktree 名で固定し、現在のbranchはOverviewの見出しに副表示する(2026-11-08)
 - [x] 新規出現したworktreeは自動でActiveにせず、Inactiveから始める。Active化は人が`Inactive`メニューで選ぶ(2026-11-08で改定。以前は観測中の新規出現を自動Active化していた)
 - [x] Claude Codeからのタブ操作は、このアプリのMCPまたはAPIを通す。新規タブはユーザーが命令したときだけ開き、Claude Codeは通常は自分のタブの中でworktreeを作って移動する(2026-11-08)
 - [x] `+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(2026-11-08)

@@ -43,6 +43,8 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   case invalidHistoryLimit(Int)
   /// `new-session -P -F '#{session_id}'` が `$N` 以外を返した。原文を捨てずに載せる。
   case unexpectedSessionIDOutput(String)
+  /// `TmuxListPanes` と同じ規則で復号できない一覧の行。読み違えた名前で session を
+  /// 取り違えないよう、捨てずに原文ごと失敗させる。
   case invalidSessionNameEscape(String)
   /// 想定外の出力を未設定とみなすとユーザーの値を上書きしかねないため、設定せずに失敗させる。
   /// tmux の版数差や形式の変化を診断できるよう、stdout の原文を保持する。
@@ -300,7 +302,11 @@ public struct TmuxSessionOperations: Sendable {
     _ = try await run(["kill-session", "-t", "=\(session.rawValue)"], session: session)
   }
 
-  /// server にある session 名をそのまま返す。
+  /// server にある session を `-t '=<名前>'` で指せる正式名で返す (Issue #296)。
+  ///
+  /// 同じ名前で作った session でも返る文字列は版で違う (実測: `dol$x` は 3.4 で `dol\$x`、
+  /// 3.8 で `dol$x`)。`new-session -s` へ渡すと backslash がさらに倍になった別の session が
+  /// できるので、作成側へ戻さないこと。
   ///
   /// **`awt-` prefix でのフィルタをここで行わない。** ユーザーは同じ prefix の session を自分で
   /// 作れるので、prefix はアプリの管理下であることの証明にならない。どれが管理下かは、安定 ID

@@ -9,22 +9,39 @@ extension AppModel {
 
   func openWorktreeForAgent(directory: String) async -> HostControlResponse {
     await rescanNow()
-    guard let canonicalDirectory = Self.realPath(directory) else {
+    let candidates = worktrees.map {
+      (identity: $0.identity, worktreePath: $0.detected.worktreePath)
+    }
+    let projectRootPath = projectRoot?.worktreePath
+    let paths = await Task.detached {
+      (
+        directory: Self.realPath(directory),
+        projectRoot: projectRootPath.flatMap { Self.realPath($0) },
+        worktrees: candidates.map { (identity: $0.identity, path: Self.realPath($0.worktreePath)) }
+      )
+    }.value
+    guard !Task.isCancelled else {
+      return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+    }
+    guard let canonicalDirectory = paths.directory else {
       return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
     }
-    if let projectRoot, Self.realPath(projectRoot.worktreePath) == canonicalDirectory {
+    if paths.projectRoot == canonicalDirectory {
       return .failure(code: .projectRoot, message: "Project Root は指定できません")
     }
     guard
-      let worktree = worktrees.first(where: {
-        Self.realPath($0.detected.worktreePath) == canonicalDirectory
-      })
+      let identity = paths.worktrees.first(where: { $0.path == canonicalDirectory })?.identity,
+      let worktree = worktrees.first(where: { $0.identity == identity })
     else {
       return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
     }
     guard worktree.detected.isReachable else {
       return .failure(code: .unreachable, message: "worktree へ到達できません")
     }
+    return await openHostControlSession(for: worktree)
+  }
+
+  private func openHostControlSession(for worktree: TaskWorktree) async -> HostControlResponse {
     guard let sessions else {
       return .failure(code: .tmuxFailed, message: "tmux を利用できません")
     }
@@ -34,6 +51,9 @@ extension AppModel {
     } catch {
       return .failure(code: .tmuxFailed, message: "tmux session の一覧を取得できません: \(error)")
     }
+    guard !Task.isCancelled else {
+      return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+    }
     let key: TerminalSessionKey
     let created: Bool
     if let index = TmuxSessionName.indices(of: worktree.identity, in: names).first,
@@ -42,24 +62,54 @@ extension AppModel {
       key = existing
       created = false
     } else {
-      key = .primary(worktree.identity)
-      if case .failure(let error) = await sessions.attachCommand(
-        for: key, workingDirectory: worktree.detected.worktreePath)
+      guard let first = tabLayout.tabs(in: worktree.identity).first else {
+        return .failure(code: .tmuxFailed, message: "worktree のタブが見つかりません")
+      }
+      key = first
+      if let failure = await createHostControlSession(
+        for: key, directory: worktree.detected.worktreePath)
       {
-        return .failure(code: .tmuxFailed, message: "tmux session を作成できません: \(error)")
+        return failure
       }
       created = true
     }
-    if worktree.activation == .inactive {
-      setActivation(.active, of: worktree.identity)
+    guard !Task.isCancelled else {
+      return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+    }
+    guard let currentWorktree = worktrees.first(where: { $0.identity == worktree.identity }) else {
+      return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
+    }
+    if currentWorktree.activation == .inactive {
+      setActivation(.active, of: currentWorktree.identity)
     }
     return .opened(
       HostControlOpenedWorktree(
         session: TmuxSessionName(key: key).rawValue,
-        directory: worktree.detected.worktreePath, created: created, agentCommand: nil))
+        directory: currentWorktree.detected.worktreePath, created: created, agentCommand: nil))
   }
 
-  private static func realPath(_ path: String) -> String? {
+  private func createHostControlSession(
+    for key: TerminalSessionKey, directory: String
+  ) async -> HostControlResponse? {
+    guard let sessions else {
+      return .failure(code: .tmuxFailed, message: "tmux を利用できません")
+    }
+    let result = await sessions.attachCommand(for: key, workingDirectory: directory)
+    guard !Task.isCancelled else {
+      return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+    }
+    switch result {
+    case .success(let attachment):
+      if let detail = attachment.warning {
+        reportTabOpeningFailure([warning, detail].compactMap { $0 }.joined(separator: "\n"))
+      }
+      return nil
+    case .failure(let error):
+      return .failure(code: .tmuxFailed, message: "tmux session を作成できません: \(error)")
+    }
+  }
+
+  nonisolated private static func realPath(_ path: String) -> String? {
     guard let resolved = realpath(path, nil) else { return nil }
     defer { free(resolved) }
     return String(cString: resolved)

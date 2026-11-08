@@ -7,11 +7,13 @@ extension ProjectsModel {
     guard hostControlServer == nil,
       let supportDirectory = dependencies.applicationSupportDirectory
     else { return }
-    let socketPath = supportDirectory.appending(path: "hostctl.sock").path
+    let applicationDirectory = supportDirectory.appending(
+      path: WorktreeInventoryStore.applicationDirectoryName)
+    let socketPath = applicationDirectory.appending(path: "hostctl.sock").path
     let server = HostControlSocketServer(path: socketPath)
     do {
       try FileManager.default.createDirectory(
-        at: supportDirectory, withIntermediateDirectories: true)
+        at: applicationDirectory, withIntermediateDirectories: true)
       try await server.start { [weak self] request in
         guard let self else {
           return .failure(code: .notRegistered, message: "アプリの窓口を利用できません")
@@ -20,7 +22,13 @@ extension ProjectsModel {
       }
       hostControlServer = server
     } catch {
-      warning = [warning, "hostctl の待ち受けを開始できません: \(error)"]
+      let detail: String
+      switch error as? HostControlSocketError {
+      case .addressInUse: detail = "別のアプリがすでに hostctl の窓口を開いています"
+      case .pathTooLong: detail = "socket のパスが長すぎます"
+      default: detail = "hostctl の窓口を開けません"
+      }
+      warning = [warning, detail]
         .compactMap { $0 }.joined(separator: "\n")
       return
     }
@@ -41,10 +49,40 @@ extension ProjectsModel {
     let previous = pendingHostControl
     let task = Task {
       _ = await previous?.value
-      return await handleHostControl(request)
+      return await handleHostControlWithDeadline(request)
     }
     pendingHostControl = task
     return await task.value
+  }
+
+  private func handleHostControlWithDeadline(
+    _ request: HostControlRequest
+  ) async -> HostControlResponse {
+    let timeout = HostControlResponse.failure(
+      code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+    let channel = AsyncStream<HostControlResponse>.makeStream(bufferingPolicy: .bufferingOldest(1))
+    // キャンセルに応答しない処理の終了を待つと、期限を過ぎても後続要求へ進めない。
+    let operation = Task {
+      let response = await handleHostControl(request)
+      channel.continuation.yield(response)
+      channel.continuation.finish()
+    }
+    let timer = Task {
+      do {
+        try await Task.sleep(for: .seconds(25))
+      } catch {
+        return
+      }
+      channel.continuation.yield(timeout)
+      channel.continuation.finish()
+    }
+    defer {
+      operation.cancel()
+      timer.cancel()
+      channel.continuation.finish()
+    }
+    var iterator = channel.stream.makeAsyncIterator()
+    return await iterator.next() ?? timeout
   }
 
   private func handleHostControl(_ request: HostControlRequest) async -> HostControlResponse {
@@ -58,6 +96,9 @@ extension ProjectsModel {
         project = try await resolver.resolve(directory: URL(fileURLWithPath: directory))
       } catch {
         return .failure(code: .notRegistered, message: "登録済みの Project を解決できません")
+      }
+      guard !Task.isCancelled else {
+        return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
       }
       guard registry.project(project.commonDirectory) != nil,
         case .available(let model) = slots[project.commonDirectory]

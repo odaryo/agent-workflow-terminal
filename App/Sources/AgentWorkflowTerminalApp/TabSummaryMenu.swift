@@ -21,7 +21,8 @@ struct TabSummaryMenu: View {
   }
 
   private var summaryItems: [ToolbarContextMenu.Item] {
-    let inputs = model.tabKeys.compactMap { model.worktreeInput($0) }
+    // 初回の配信を待つタブも、見出しの「観測なし」だけで示す (§5.3)。pane の行は出さない。
+    let inputs = model.tabKeys.compactMap { model.worktreeInput($0) }.filter(\.isObserved)
     let summaries = Dictionary(
       uniqueKeysWithValues: makeTabSummaries(inputs).map { ($0.session, $0) })
     return [.separator, .heading(title: "全タブ")]
@@ -56,6 +57,8 @@ struct TabSummaryMenu: View {
         key: key, indentationLevel: 1)
     case .noAgentPane:
       return entry(title: "Agent pane なし", presentation: nil, key: key, indentationLevel: 1)
+    case .notObserved:
+      return entry(title: "観測中…", presentation: nil, key: key, indentationLevel: 1)
     }
   }
 

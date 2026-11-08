@@ -20,7 +20,7 @@ struct PaneNotifierTests {
   func findsUniqueDestination(detailsOnly: Bool) throws {
     let destination = try #require(TerminalSessionKey(identity: task, index: 2))
     let observation = PaneObservationStore.Observed(
-      paneStates: detailsOnly
+      latestPaneStates: detailsOnly
         ? nil : [PaneAgentState(id: pane, state: .idle, lastUpdatedAt: Date())],
       details: detailsOnly ? [pane: OverviewPaneDetail()] : [:])
 

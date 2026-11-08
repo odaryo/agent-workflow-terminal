@@ -67,23 +67,28 @@ public struct OverviewWorktreeInput: Sendable {
   /// 非 Agent pane の概要が混ざってよい。行にするかは `paneStates` だけで決める。
   public var details: [PaneID: OverviewPaneDetail]
   public var mainPane: PaneID?
+  public var isObserved: Bool
 
   public init(
     session: TerminalSessionKey, paneStates: [PaneDisplayState],
-    details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil
+    details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil,
+    isObserved: Bool = true
   ) {
     self.session = session
     self.paneStates = paneStates
     self.details = details
     self.mainPane = mainPane
+    self.isObserved = isObserved
   }
 
   public init(
     worktree: WorktreeIdentity, paneStates: [PaneDisplayState],
-    details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil
+    details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil,
+    isObserved: Bool = true
   ) {
     self.init(
-      session: .primary(worktree), paneStates: paneStates, details: details, mainPane: mainPane)
+      session: .primary(worktree), paneStates: paneStates, details: details, mainPane: mainPane,
+      isObserved: isObserved)
   }
 }
 
@@ -126,6 +131,8 @@ public enum OverviewRow: Sendable, Hashable {
   case pane(OverviewPane)
   /// Agent pane が1つも無い worktree の行。
   case noAgentPane
+  /// 未観測を Agent 不在と誤認させないため、観測済みの空行と区別する (設計書 §13)。
+  case notObserved
 
   public var pane: OverviewPane? {
     guard case .pane(let pane) = self else { return nil }
@@ -136,7 +143,7 @@ public enum OverviewRow: Sendable, Hashable {
 public struct OverviewWorktree: Sendable, Hashable {
   public let session: TerminalSessionKey
   public var worktree: WorktreeIdentity { session.identity }
-  /// 空にならない。Agent pane が無ければ `[.noAgentPane]`。
+  /// 空にならない。未観測は `[.notObserved]`、観測済みで Agent pane が無ければ `[.noAgentPane]`。
   public let rows: [OverviewRow]
 }
 
@@ -182,6 +189,9 @@ public func makeAgentPaneOverview(_ projects: [OverviewProjectInput]) -> [Overvi
 }
 
 private func overviewWorktree(_ input: OverviewWorktreeInput) -> OverviewWorktree {
+  guard input.isObserved else {
+    return OverviewWorktree(session: input.session, rows: [.notObserved])
+  }
   let panes = stableSorted(input.paneStates, by: panePrecedes).map { state in
     OverviewRow.pane(
       OverviewPane(
@@ -196,7 +206,9 @@ private func panePrecedes(_ lhs: PaneDisplayState, _ rhs: PaneDisplayState) -> B
   let lhsAttention = lhs.category == .needsAttention
   let rhsAttention = rhs.category == .needsAttention
   if lhsAttention != rhsAttention { return lhsAttention }
-  return lhs.changedAt > rhs.changedAt
+  guard let lhsChangedAt = lhs.changedAt else { return false }
+  guard let rhsChangedAt = rhs.changedAt else { return true }
+  return lhsChangedAt > rhsChangedAt
 }
 
 private func taskPrecedes(_ lhs: OverviewWorktree, _ rhs: OverviewWorktree) -> Bool {
@@ -206,9 +218,10 @@ private func taskPrecedes(_ lhs: OverviewWorktree, _ rhs: OverviewWorktree) -> B
   let lhsAttention = lhsPanes.contains { $0.display.category == .needsAttention }
   let rhsAttention = rhsPanes.contains { $0.display.category == .needsAttention }
   if lhsAttention != rhsAttention { return lhsAttention }
-  let lhsLatest = lhsPanes.map(\.display.changedAt).max()
-  let rhsLatest = rhsPanes.map(\.display.changedAt).max()
-  guard let lhsLatest, let rhsLatest else { return false }
+  let lhsLatest = lhsPanes.compactMap(\.display.changedAt).max()
+  let rhsLatest = rhsPanes.compactMap(\.display.changedAt).max()
+  guard let lhsLatest else { return false }
+  guard let rhsLatest else { return true }
   return lhsLatest > rhsLatest
 }
 

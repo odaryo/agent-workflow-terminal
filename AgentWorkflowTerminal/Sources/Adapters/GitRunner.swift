@@ -120,6 +120,10 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["worktree", "list", "--porcelain", "-z"])
   }
 
+  public static func stashList() -> Self {
+    Self(arguments: ["stash", "list", "--format=%gs"])
+  }
+
   public static func originHead() -> Self {
     Self(arguments: ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
   }

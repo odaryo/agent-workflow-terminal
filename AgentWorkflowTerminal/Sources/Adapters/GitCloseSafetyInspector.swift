@@ -1,10 +1,30 @@
 import Foundation
 import TerminalCore
 
+enum GitStashList {
+  static func count(output: String, branch: String) -> Int {
+    output.split(separator: "\n").count { line in
+      let subject: Substring
+      if line.hasPrefix("WIP on ") {
+        subject = line.dropFirst("WIP on ".count)
+      } else if line.hasPrefix("On ") {
+        subject = line.dropFirst("On ".count)
+      } else {
+        return false
+      }
+      guard let separator = subject.firstIndex(of: ":"),
+        subject[separator...].hasPrefix(": ")
+      else { return false }
+      return subject[..<separator] == branch
+    }
+  }
+}
+
 public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
   public enum Check: Sendable, Equatable {
     case uncommittedChanges
     case ignoredFiles
+    case branchStashes
     case unpushedCommits
     case branchMerge
   }
@@ -74,8 +94,10 @@ public struct GitCloseSafetyInspector: Sendable {
     let targetBranch = target.branch
     let statusChecks = await inspectStatus(targetBranch: targetBranch)
     let ignoredCheck = await inspectIgnoredStatus()
+    let stashCheck = await inspectBranchStashes(targetBranch: targetBranch)
     failures += statusChecks.failures
     failures += ignoredCheck.failures
+    failures += stashCheck.failures
 
     guard let targetBranch else {
       // detached HEAD では未push・未merge は「問う必要が無い」のではなく**問えない**。
@@ -89,6 +111,7 @@ public struct GitCloseSafetyInspector: Sendable {
           inspection: .init(
             uncommittedChanges: statusChecks.uncommittedChanges,
             ignoredFiles: ignoredCheck.status,
+            branchStashes: stashCheck.status,
             unpushedCommits: statusChecks.unpushedCommits,
             branchMerge: .unknown),
           defaultBranch: .unresolved(reason: .detachedHead)),
@@ -113,6 +136,7 @@ public struct GitCloseSafetyInspector: Sendable {
         inspection: .init(
           uncommittedChanges: statusChecks.uncommittedChanges,
           ignoredFiles: ignoredCheck.status,
+          branchStashes: stashCheck.status,
           unpushedCommits: statusChecks.unpushedCommits,
           branchMerge: branchMerge),
         defaultBranch: defaultBranchResult.resolution),
@@ -177,6 +201,19 @@ public struct GitCloseSafetyInspector: Sendable {
       return false
     }
     return .init(status: hasIgnored ? .present : .absent, failures: [])
+  }
+
+  private func inspectBranchStashes(
+    targetBranch: String?
+  ) async -> (status: BranchStashStatus, failures: [GitCloseSafetyInspectionFailure]) {
+    guard let targetBranch else { return (.notApplicable, []) }
+    do {
+      let output = try await runner.run(.stashList()).stdout
+      let count = GitStashList.count(output: output, branch: targetBranch)
+      return (count > 0 ? .present(count: count) : .absent, [])
+    } catch {
+      return (.unknown, [.init(check: .branchStashes, reason: .git(error))])
+    }
   }
 
   private func inspectUnpushed(

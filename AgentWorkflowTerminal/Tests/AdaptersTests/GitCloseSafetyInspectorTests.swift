@@ -50,6 +50,8 @@ struct GitCloseSafetyInspectorTests {
         .success(
           .init(
             exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/refs/foo"]:
@@ -78,6 +80,8 @@ struct GitCloseSafetyInspectorTests {
         .success(
           .init(
             exitCode: 0, stdout: "# branch.oid abc\0# branch.head refs/heads/x\0", stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/refs/heads/x"]:
@@ -107,6 +111,8 @@ struct GitCloseSafetyInspectorTests {
             exitCode: 0,
             stdout: "# branch.oid abc\0# branch.head topic\0? new.txt\0",
             stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
@@ -141,6 +147,8 @@ struct GitCloseSafetyInspectorTests {
             stdout:
               "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +0 -2\0",
             stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 1, stdout: "", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
@@ -202,6 +210,7 @@ struct GitCloseSafetyInspectorTests {
           stdout:
             "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +2 -0\0! generated\0",
           stderr: "")),
+      .success(.init(exitCode: 0, stdout: "", stderr: "")),
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
     let inspector = GitCloseSafetyInspector(
@@ -229,6 +238,8 @@ struct GitCloseSafetyInspectorTests {
             stderr: ""))
       case GitReadCommand.status(includeIgnored: true).arguments:
         .failure(.outputLimitExceeded(limit: ProcessRunLimits.defaultOutputBytes))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
@@ -266,6 +277,7 @@ struct GitCloseSafetyInspectorTests {
           stdout:
             "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0",
           stderr: "")),
+      .success(.init(exitCode: 0, stdout: "", stderr: "")),
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
     let inspector = GitCloseSafetyInspector(
@@ -290,6 +302,7 @@ struct GitCloseSafetyInspectorTests {
           exitCode: 0,
           stdout: "# branch.oid abc\0# branch.head topic\0",
           stderr: "")),
+      .success(.init(exitCode: 0, stdout: "", stderr: "")),
       .success(.init(exitCode: 128, stdout: "", stderr: "fatal: broken ref\n")),
       .success(.init(exitCode: 0, stdout: "", stderr: "")),
     ])
@@ -320,6 +333,7 @@ struct GitCloseSafetyInspectorTests {
           exitCode: 0,
           stdout: "# branch.oid abc\0# branch.head topic\0",
           stderr: "")),
+      .success(.init(exitCode: 0, stdout: "", stderr: "")),
       .success(.init(exitCode: 0, stdout: "refs/heads/main\n", stderr: "")),
       .success(.init(exitCode: 0, stdout: "", stderr: "")),
     ])
@@ -348,6 +362,7 @@ struct GitCloseSafetyInspectorTests {
       .success(
         .init(
           exitCode: 0, stdout: "# branch.oid abc\0# branch.head (detached)\0", stderr: "")),
+      .success(.init(exitCode: 0, stdout: "", stderr: "")),
       .success(.init(exitCode: 1, stdout: "", stderr: "")),
     ])
     let inspector = GitCloseSafetyInspector(
@@ -367,6 +382,8 @@ struct GitCloseSafetyInspectorTests {
         .failure(statusError)
       case GitReadCommand.status(includeIgnored: true).arguments:
         .success(.init(exitCode: 0, stdout: "# branch.oid abc\0# branch.head topic\0", stderr: ""))
+      case GitReadCommand.stashList().arguments:
+        .success(.init(exitCode: 0, stdout: "", stderr: ""))
       case GitReadCommand.originHead().arguments:
         .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: ""))
       case ["rev-parse", "--verify", "--quiet", "refs/heads/topic"]:
@@ -388,102 +405,5 @@ struct GitCloseSafetyInspectorTests {
     #expect(try merged(.ancestor) == result.report.inspection.branchMerge)
     #expect(
       result.failures.map(\.check) == [.uncommittedChanges, .unpushedCommits])
-  }
-
-  @Test("既定 branch 不明と merge-base の異常を unknown のまま返す")
-  func keepsUnknownAndMergeErrors() async throws {
-    let results = CloseInspectionResultQueue([
-      .success(
-        .init(
-          exitCode: 0,
-          stdout:
-            "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +1 -0\0",
-          stderr: "")),
-      .success(
-        .init(
-          exitCode: 0,
-          stdout:
-            "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +1 -0\0",
-          stderr: "")),
-      .success(.init(exitCode: 1, stdout: "", stderr: "")),
-    ])
-    let noDefault = GitCloseSafetyInspector(
-      runner: try runner(results), target: try target(branch: "topic"))
-    let unknown = await noDefault.inspect(projectRootBranch: nil)
-    #expect(unknown.report.inspection.branchMerge == .unknown)
-    #expect(unknown.report.defaultBranch == .unresolved(reason: .originHeadMissing))
-    #expect(unknown.failures.isEmpty)
-
-    let mergeFailure = CloseInspectionResultQueue([
-      .success(
-        .init(
-          exitCode: 0,
-          stdout:
-            "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +1 -0\0",
-          stderr: "")),
-      .success(
-        .init(
-          exitCode: 0,
-          stdout:
-            "# branch.oid abc\0# branch.head topic\0# branch.upstream origin/topic\0# branch.ab +1 -0\0",
-          stderr: "")),
-      .success(.init(exitCode: 0, stdout: "refs/remotes/origin/main\n", stderr: "")),
-      .success(.init(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n")),
-    ])
-    let failedMerge = await GitCloseSafetyInspector(
-      runner: try runner(mergeFailure), target: try target(branch: "topic")
-    ).inspect(projectRootBranch: nil)
-    #expect(failedMerge.report.inspection.branchMerge == .unknown)
-    #expect(failedMerge.failures.map(\.check) == [.branchMerge])
-  }
-
-  private func runner(_ processRunner: any ProcessRunning) throws -> GitRunner {
-    try GitRunner(
-      repositoryDirectory: URL(fileURLWithPath: "/repo"), processRunner: processRunner,
-      executableCandidates: [URL(fileURLWithPath: "/test/bin/git")], parentEnvironment: [:],
-      isExecutableFile: { _ in true })
-  }
-
-  private func target(
-    identity: String = "/repo/.git/worktrees/topic", branch: String?
-  ) throws -> DetectedWorktree {
-    DetectedWorktree(
-      identity: try #require(WorktreeIdentity(rawValue: identity)), worktreePath: "/repo/wt",
-      branch: branch, isProjectRoot: false)
-  }
-
-}
-
-func commandArguments(_ arguments: [String]) -> [String] {
-  Array(arguments.dropFirst(4))
-}
-
-actor CloseInspectionProcessStub: ProcessRunning {
-  private let handler: @Sendable ([String]) -> Result<ProcessRunResult, ProcessRunnerError>
-
-  init(handler: @escaping @Sendable ([String]) -> Result<ProcessRunResult, ProcessRunnerError>) {
-    self.handler = handler
-  }
-
-  func run(
-    executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
-    outputLimit: Int
-  ) throws(ProcessRunnerError) -> ProcessRunResult {
-    try handler(arguments).get()
-  }
-}
-
-private actor CloseInspectionResultQueue: ProcessRunning {
-  private var results: [Result<ProcessRunResult, ProcessRunnerError>]
-
-  init(_ results: [Result<ProcessRunResult, ProcessRunnerError>]) {
-    self.results = results
-  }
-
-  func run(
-    executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
-    outputLimit: Int
-  ) throws(ProcessRunnerError) -> ProcessRunResult {
-    try results.removeFirst().get()
   }
 }

@@ -38,7 +38,7 @@ Pre-alphaです。現在は次の技術的な成立性を優先して検証し�
 - libghostty
 - tmux CLI
 - git CLI
-- SSH／Mosh(外部CLI)
+- SSH／Mosh(作業用のMacでは外部CLI。モバイルでの扱いは未定)
 - モバイルクライアントの実装技術は未定(iOS／iPadOS／Androidを1つのコードベースで作る案が第一候補)
 - SQLite／GRDB.swift
 - ripgrep

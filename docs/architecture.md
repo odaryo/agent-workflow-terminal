@@ -197,7 +197,7 @@ Agent(または`git worktree add`)が作ったworktreeは、§3.2の自動Active
 - worktreeの最後の1枚を閉じるときだけ、§3.4のClose(4択と拒否条件)を出す。
 - Project Rootのタブは最低1枚残し、最後の1枚は閉じられないようにする(閉じる操作を無効にする)。Project Rootは常設の作業空間であり(§2.3)、Inactiveにできないためである。
 
-**モバイルの`+ New Task`もMacと同じ操作とする — 確定(2026-11-01)。** モバイルアプリ自身はGit worktreeを作らず、Agentも起動しない。Project Rootのディレクトリで新しいsessionを作り、そのsessionへattachする。Macのタブのsessionはモバイルからもそのままattachでき、逆も同じである。作業PCのClient(§20.5)にも同じ扱いを当てはめ、sessionは`hostctl`を通してHostに作らせる(現在の推奨、2026-11-08。§20.3)。
+**モバイルの`+ New Task`もMacと同じ操作とする — 確定(2026-11-01)。** モバイルアプリ自身はGit worktreeを作らず、Agentも起動しない。Project Rootのディレクトリで新しいsessionを作り、そのsessionへattachする。Macのタブのsessionはモバイルからもそのままattachでき、逆も同じである。作業PCのClient(§20.5)にも同じ扱いを当てはめ、モバイルを含むClientのsessionは`hostctl`を通してHostに作らせる(現在の推奨、2026-11-08。§20.3)。
 
 Agentがworktreeを作った後の、`+ New Task`で開いたProject Rootのタブ(中でAgentが動いたままのsession)の扱い — 残してユーザーが閉じるのか、Agentがそのsessionでworktreeへ移って作業を続けてよいのか — は未確定とする(§25)。2つ目以降のsessionの名前とアプリ再起動後の復元は§3.5と§25で扱う。
 
@@ -1904,9 +1904,9 @@ Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提�
 
 - 同じtmux session、同じAgent TUIをそのまま表示する。Claude出力を解析した独自Chat UIには変換しない。
 - Agent専用の操作ボタンではなく、汎用のTerminal補助キーバーを持つ。
-- 最終形はモバイルクライアント内の端末とする(外部の端末アプリは段階的な手段。§20.8)。
 
-外付けキーボードも通常どおり使えるようにする(現在の推奨)。
+次の2点は現在の推奨とする。最終形はモバイルクライアント内の端末とし、外部の端末アプリは段階的な手段とする
+(§20.8)。外付けキーボードも通常どおり使えるようにする。
 
 補助キーバー例:
 

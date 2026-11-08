@@ -1,0 +1,23 @@
+{
+  "expectedState": "completed",
+  "acceptableStates": [
+    "completed"
+  ],
+  "note": "ターンの終わり。Claude Code が sleep をバックグラウンドで実行し直して応答を終えた。完了行は `· done 1:03 PM · 1 shell still running` で、最後の送信済みプロンプトより下にある (Issue #627)。",
+  "source": "claude-2.1.319-completed-background-shell (run1/060、0.25 秒間隔の採取列)",
+  "paneTitle": "✳ OK返信",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-08",
+  "processNames": [
+    "claude",
+    "npx",
+    "node"
+  ],
+  "captureCommand": "tmux -L awt627m capture-pane -p -t m627 / capture-pane -e -p -t m627 (160x40)",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 with high effort · Claude Max\n ▝▝   ▝▝   /…/scratchpad/m627/work · /rc\n\n\n❯ Reply with OK only.\n\n⏺ OK\n\n✻ Crunched for 2s · done 1:02 PM · 1 shell still running\n\n❯ Run the shell command: sleep 25 . After it finishes, reply with DONE only.\n\n  Ran 2 shell commands\n\n⏺ sleep をフォアグラウンドで直接実行しようとしたらブロックされたので、バックグラウンドで実行し直しました。いま実行中で、終わったら DONE と返します。\n\n✻ Churned for 10s · done 1:03 PM · 1 shell still running\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  Opus 5.5 │ ⚡ high │  main\n  Session: 1m │ ctx ▌░░░░░░░░░ 6% │ 5h ██▏░░░░░░░ 22% │ 7d ██ ░░░░░░░ 20%\n  ⏵⏵ auto mode on · 1 shell\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 with high effort · Claude Max\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/…/scratchpad/m627/work · \u001b[38;5;114m\u001b]8;id=qreocn;https://claude.ai/code/session_01PMYcFzJ9ugED8MAZoNHaoM?from=cli\u001b\\/rc\u001b[39m\u001b]8;;\u001b\\\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mReply with OK only.\u001b[39m\n\n\u001b[38;5;231m\u001b[49m⏺\u001b[39m OK\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mCrunched for 2s · done 1:02 PM · 1 shell still running\u001b[39m\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mRun the shell command: sleep 25 . After it finishes, reply with DONE only.\u001b[39m\n\n\u001b[49m  \u001b[38;5;246mRan \u001b[1m2\u001b[0m\u001b[38;5;246m shell commands \u001b[39m\n\n\u001b[38;5;231m⏺\u001b[39m sleep をフォアグラウンドで直接実行しようとしたらブロックされたので、バックグラウンドで実行し直しました。いま実行中で、終わったら DONE と返します。\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mChurned for 10s · done 1:03 PM · 1 shell still running\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m❯ \n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;114mOpus 5.5\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m \u001b[38;5;222m⚡ high\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m \u001b[38;5;116m main\u001b[39m\n  \u001b[38;5;246mSession: 1m \u001b[2m│\u001b[0m\u001b[38;5;246m ctx \u001b[38;5;78m▌░░░░░░░░░ 6%\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m 5h \u001b[38;5;114m██▏░░░░░░░ 22%\u001b[38;5;246m \u001b[2m│\u001b[0m\u001b[38;5;246m 7d \u001b[38;5;114m██ ░░░░░░░ 20%\u001b[39m\n  \u001b[38;5;220m⏵⏵ auto mode on\u001b[38;5;246m · \u001b[38;5;44m1 shell\u001b[39m\n"
+}

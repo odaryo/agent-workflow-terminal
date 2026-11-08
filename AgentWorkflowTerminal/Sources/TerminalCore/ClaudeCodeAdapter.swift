@@ -1,6 +1,6 @@
 import Foundation
 
-/// Claude Code 2.1.259 の画面と出力活動の実測だけを使う
+/// Claude Code 2.1.259 / 2.1.319 の画面と出力活動の実測だけを使う
 /// (Spikes/gate3/README.md §3、§6.1、§11)。title は状態信号として使わない。
 public struct ClaudeCodeAdapter: AgentAdapter {
   // Gate 3 §3.4 の working p90 は 1.01 秒。2 秒へ緩めると permission を working に
@@ -35,30 +35,51 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     let hasEmptyInputPrompt =
       screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
       || inputBox == .placeholder
-    let hasSubmittedPrompt =
-      screen.range(of: #"(?m)^❯[  ]*\S"#, options: .regularExpression) != nil
     if let recentlyActive = recentScreenActivity(signals) {
       return recentlyActive
     }
     guard signals.secondsSinceScreenChange != nil else {
       return unknown(signals, reason: .signalMissing)
     }
-    // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
-    if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
-      && !screen.contains("⏺")
-    {
-      return observation(.idle, signals)
-    }
-    if hasEmptyInputPrompt, hasSubmittedPrompt,
-      screen.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
-    {
-      return observation(.completed, signals)
+    if let state = Self.currentTurnState(screen: screen, hasEmptyInputPrompt: hasEmptyInputPrompt) {
+      return observation(state, signals)
     }
     // 属性が取れていれば定まったかもしれない判定を、adapter の見立て不能へ丸めない (§12.4.4)。
     if inputBox == .attributesUnavailable {
       return unknown(signals, reason: .screenAttributesUnavailable)
     }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  private static func currentTurnState(screen: String, hasEmptyInputPrompt: Bool) -> AgentState? {
+    // Issue #627: 2.1.319 の spinner は列 0 の「記号 + 半角空白 + 語 + …」で、
+    // Gate 3 の 2.1.259 記録にも同じ形がある。経過表示がまだ無いターン開始直後も含む。
+    // 履歴の spinner や前ターンの done を拾わないよう、最後の送信済みプロンプトより下だけを使う。
+    // 送信済みの区切りは U+0020、入力欄は NBSP (2.1.259 / 2.1.263 / 2.1.319 で実測)。
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
+    let lastSubmittedPromptIndex = lines.lastIndex {
+      $0.range(of: #"^❯ +\S"#, options: .regularExpression) != nil
+    }
+    let currentTurnLines = lines.dropFirst(lastSubmittedPromptIndex.map { $0 + 1 } ?? 0)
+    if currentTurnLines.contains(where: {
+      $0.range(of: #"^[·✢✳✶✻✽] [^\s·][^·\n]*…(?: \(.*)?$"#, options: .regularExpression) != nil
+    }) {
+      return .working
+    }
+    // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
+    if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
+      && !screen.contains("⏺")
+    {
+      return .idle
+    }
+    if hasEmptyInputPrompt, lastSubmittedPromptIndex != nil,
+      currentTurnLines.contains(where: {
+        $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+      })
+    {
+      return .completed
+    }
+    return nil
   }
 
   private func recentScreenActivity(_ signals: AgentSignals) -> AgentObservationResult? {

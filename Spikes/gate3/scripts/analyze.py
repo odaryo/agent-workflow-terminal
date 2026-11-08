@@ -201,6 +201,32 @@ def c_screen_dim(rec, agent, ctx):
     return "unknown" if input_box_state(rec) == "typing" else state
 
 
+def c_screen_spinner(rec, agent, ctx):
+    """S2 + spinner と完了行の位置 (Issue #627、設計書 §12.5)。"""
+    state = c_screen(rec, agent, ctx)
+    if agent != "claude" or not agent_alive(rec, agent):
+        return state
+    if state in ("permission", "question", "error"):
+        return state
+    # 2.1.319 で実測し、Gate 3 の 2.1.259 記録でも確認した形。
+    # 前ターンの表示を拾わないよう、NBSP の入力欄と送信済みプロンプトを区別する。
+    lines = (rec.get("screen") or "").split("\n")
+    last_prompt = next(
+        (index for index in range(len(lines) - 1, -1, -1)
+         if re.search(r"^❯ +\S", lines[index])), None
+    )
+    current_turn_lines = lines[last_prompt + 1:] if last_prompt is not None else lines
+    if any(re.search(r"^[·✢✳✶✻✽] [^\s·][^·\n]*…(?: \(.*)?$", line)
+           for line in current_turn_lines):
+        return "working"
+    if state == "completed" and (
+        last_prompt is None
+        or not any(re.search(r"·\s*done\s+\d", line) for line in current_turn_lines)
+    ):
+        return "unknown"
+    return state
+
+
 def c_tier_a(rec, agent, ctx):
     """Tier A の組み合わせ。
 
@@ -249,6 +275,7 @@ CLASSIFIERS = {
     "S5-title": c_title,
     "S2-screen": c_screen,
     "S2-screen-dim": c_screen_dim,
+    "S2-screen-spinner": c_screen_spinner,
     "TierA-combined": c_tier_a,
     "S3-hooks": c_hooks,
 }

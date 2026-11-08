@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 14)
+    #expect(fixtures.count == 18)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -102,9 +102,121 @@ struct ClaudeCodeAdapterTests {
       ),
       liveness: .alive
     )
-    // 画面鮮度が失われたときにこの画面がどう転ぶかは固定しない。現状は残存 done が勝って
-    // completed になるが、それは受け入れた残差 (§12.2) であって仕様ではない。
+    // 残存 done は前ターンのものなので、画面鮮度が失われた場合の Completed の根拠にはしない。
     #expect(fixtureState(of: result) == "working")
+  }
+
+  @Test(
+    "spinner 行があれば画面変化から2秒後も Working (Issue #627)",
+    arguments: [
+      "claude-2.1.319-working-tool-spinner",
+      "claude-2.1.319-working-spinner-no-elapsed",
+    ]
+  )
+  func spinnerWithQuietScreenIsWorking(prefix: String) throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: prefix).first)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: fixture.screen,
+        styledScreenText: fixture.styledScreen, secondsSinceScreenChange: 2.0,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: .alive)
+    #expect(fixtureState(of: result) == "working")
+  }
+
+  @Test(
+    "spinner 行があっても初回観測は Unknown / signalMissing (Issue #627)",
+    arguments: [
+      "claude-2.1.319-working-tool-spinner",
+      "claude-2.1.319-working-spinner-no-elapsed",
+    ]
+  )
+  func spinnerOnInitialObservationIsSignalMissing(prefix: String) throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: prefix).first)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: fixture.screen,
+        styledScreenText: fixture.styledScreen, secondsSinceScreenChange: nil,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: .alive)
+    guard case .observation(let observation) = result else {
+      Issue.record("absent")
+      return
+    }
+    #expect(observation.state == .unknown)
+    #expect(observation.unknownReason == .signalMissing)
+  }
+
+  @Test("spinner 行が消えて前ターンの完了行だけが残れば Unknown (Issue #627)")
+  func removedSpinnerWithStaleDoneMarkerIsUnknown() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-working-tool-spinner").first)
+    let screen = fixture.screen.replacingOccurrences(
+      of: "✻ Propagating… (5s · ↓ 12 tokens)\n", with: "")
+    try #require(screen != fixture.screen)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: 2.0, hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: .alive)
+    #expect(fixtureState(of: result) == "unknown")
+  }
+
+  @Test("前ターンの done が残るターン開始画面は、2秒後も spinner 行で Working、消せば Unknown (Issue #627)")
+  func quietTurnStartWithStaleDoneMarker() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.259-working-turn-start").first)
+    func classify(_ screen: String) -> String {
+      fixtureState(
+        of: ClaudeCodeAdapter().classify(
+          signals: AgentSignals(
+            paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+            secondsSinceScreenChange: 2.0, hasObservedScreenChange: true,
+            observedAt: .distantPast
+          ), liveness: .alive))
+    }
+    let withoutSpinner = fixture.screen.replacingOccurrences(of: "✻ Meandering…\n", with: "")
+    try #require(withoutSpinner != fixture.screen)
+    #expect(classify(fixture.screen) == "working")
+    #expect(classify(withoutSpinner) == "unknown")
+  }
+
+  @Test(
+    "列0から始まらない行やツールの実行表示は spinner と見なさない (Issue #627)",
+    arguments: ["  ✻ Propagating…", "⏺ Running 2 shell commands…"]
+  )
+  func spinnerLikeOutputIsUnknown(replacement: String) throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-working-tool-spinner").first)
+    let screen = fixture.screen.replacingOccurrences(
+      of: "✻ Propagating… (5s · ↓ 12 tokens)", with: replacement)
+    try #require(screen != fixture.screen)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: 2.0, hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: .alive)
+    #expect(fixtureState(of: result) == "unknown")
+  }
+
+  @Test("最後の送信済みプロンプトより上にしか spinner 行が無ければ Unknown (Issue #627)")
+  func spinnerAboveLastSubmittedPromptIsUnknown() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-working-tool-spinner").first)
+    let spinner = "✻ Propagating… (5s · ↓ 12 tokens)\n"
+    let withoutSpinner = fixture.screen.replacingOccurrences(of: spinner, with: "")
+    try #require(withoutSpinner != fixture.screen)
+    let submittedPrompt =
+      "❯ Run the shell command: sleep 25 . After it finishes, reply with DONE only."
+    let screen = withoutSpinner.replacingOccurrences(
+      of: submittedPrompt, with: spinner + submittedPrompt)
+    try #require(screen != withoutSpinner)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: 2.0, hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: .alive)
+    #expect(fixtureState(of: result) == "unknown")
   }
 
   @Test("画面変化から1.0秒までは Working、直後は Unknown")

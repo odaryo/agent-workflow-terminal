@@ -41,8 +41,15 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     guard signals.secondsSinceScreenChange != nil else {
       return unknown(signals, reason: .signalMissing)
     }
-    if let state = Self.currentTurnState(screen: screen, hasEmptyInputPrompt: hasEmptyInputPrompt) {
+    let hasScrolledTranscript = Self.hasScrolledTranscript(screen)
+    if let state = Self.currentTurnState(
+      screen: screen, hasEmptyInputPrompt: hasEmptyInputPrompt,
+      hasScrolledTranscript: hasScrolledTranscript)
+    {
       return observation(state, signals)
+    }
+    if hasScrolledTranscript {
+      return unknown(signals, reason: .adapterUndetermined)
     }
     // 属性が取れていれば定まったかもしれない判定を、adapter の見立て不能へ丸めない (§12.4.4)。
     if inputBox == .attributesUnavailable {
@@ -61,7 +68,9 @@ public struct ClaudeCodeAdapter: AgentAdapter {
         || lines.contains("Claude Code'll be able to read, edit, and execute files here."))
   }
 
-  private static func currentTurnState(screen: String, hasEmptyInputPrompt: Bool) -> AgentState? {
+  private static func currentTurnState(
+    screen: String, hasEmptyInputPrompt: Bool, hasScrolledTranscript: Bool
+  ) -> AgentState? {
     // Issue #627: 2.1.319 の spinner は列 0 の「記号 + 半角空白 + 語 + …」で、
     // Gate 3 の 2.1.259 記録にも同じ形がある。経過表示がまだ無いターン開始直後も含む。
     // 履歴の spinner や前ターンの done を拾わないよう、最後の送信済みプロンプトより下だけを使う。
@@ -76,6 +85,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }) {
       return .working
     }
+    guard !hasScrolledTranscript else { return nil }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
       && !screen.contains("⏺")
@@ -93,6 +103,22 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return .completed
     }
     return nil
+  }
+
+  // Issue #653: スクロール中は最後の送信済みプロンプトが前のターンのものに見えるため、
+  // 完了行や空欄から現ターンを確定できない。本文中の同じ文言を拾わないよう入力欄付近に限る。
+  // この印は Claude Code 2.1.319 の実測値であり、版によって変わりうる。
+  private static func hasScrolledTranscript(_ screen: String) -> Bool {
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
+    guard let promptIndex = lines.lastIndex(where: { $0.hasPrefix("❯") }),
+      let separatorIndex = lines[..<promptIndex].lastIndex(where: {
+        let trimmed = $0.trimmingCharacters(in: .whitespaces)
+        return !trimmed.isEmpty && trimmed.allSatisfy { $0 == "─" }
+      })
+    else { return false }
+    return lines[max(0, separatorIndex - 3)..<separatorIndex].contains {
+      $0.contains("Jump to bottom: fn+↓ to scroll")
+    }
   }
 
   private func recentScreenActivity(_ signals: AgentSignals) -> AgentObservationResult? {

@@ -10,6 +10,7 @@ struct OverviewPaneRow: View {
   let pane: OverviewPane
   @ObservedObject var store: PaneObservationStore
   let showsDisplayedMark: Bool
+  let sessionMenu: OverviewSessionMenu?
   let reveal: () -> Void
 
   @State private var draft = ""
@@ -34,6 +35,9 @@ struct OverviewPaneRow: View {
         .help("この pane へ移動")
         // 記号と Text から label が合成されない (AX 属性に description が無かった、実測)。
         .accessibilityLabel("\(showsDisplayedMark ? "表示中 " : "")\(presentation.label) \(name)")
+        .contextMenu {
+          sessionMenu
+        }
 
         TextField("目的", text: $draft, prompt: Text(pane.detail.title ?? "目的"))
           .textFieldStyle(.roundedBorder)

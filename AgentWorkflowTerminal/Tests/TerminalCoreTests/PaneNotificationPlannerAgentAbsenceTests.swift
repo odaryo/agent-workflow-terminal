@@ -30,6 +30,54 @@ struct PaneNotificationPlannerAgentAbsenceTests: PaneNotificationPlannerTesting 
     #expect(observe(&planner, [pane("%1", .question)]).isEmpty)
   }
 
+  @Test("C1: 移動先で先に届いた Agent 不在で記憶をリセットし、同じ Question を1回通知する")
+  func absenceBeforeSessionAttachmentResetsAttentionMemory() throws {
+    let start = Self.clock.now
+    var planner = baselined([pane("%1", .working)], at: start)
+    let question = complete([pane("%1", .question)])
+    let notified = start.advanced(by: .seconds(1))
+    try #require(
+      planner.observeStates(question, in: worktree, at: notified) == [event("%1", .question)])
+
+    planner.startObserving(other, at: notified)
+    #expect(planner.observeStates(complete([]), in: other, at: notified).isEmpty)
+    #expect(
+      planner.observeStates(absent(), in: other, at: start.advanced(by: .seconds(2))).isEmpty)
+    let attached = planner.observeCompletions(
+      Self.keyed(["%1": .none]), undetermined: [], in: other,
+      at: start.advanced(by: .seconds(3)))
+    #expect(attached.isEmpty)
+
+    let expected = PaneNotification.pane(
+      PaneNotificationEvent(
+        worktree: other, paneID: PaneID(rawValue: "%1"), kind: .question, completion: nil))
+    #expect(
+      planner.observeStates(question, in: other, at: start.advanced(by: .seconds(4)))
+        == [expected])
+    #expect(
+      planner.observeStates(question, in: other, at: start.advanced(by: .seconds(5))).isEmpty)
+  }
+
+  @Test("S1: 猶予内に再開した基準の Agent 不在で記憶をリセットし、同じ Question を1回通知する")
+  func absenceAtResumedBaselineResetsAttentionMemory() throws {
+    let start = Self.clock.now
+    var planner = baselined([pane("%1", .working)], at: start)
+    let question = complete([pane("%1", .question)])
+    try #require(
+      planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(1)))
+        == [event("%1", .question)])
+
+    planner.stopObserving(worktree)
+    let resumed = start.advanced(by: .seconds(2))
+    planner.startObserving(worktree, at: resumed)
+    #expect(planner.observeStates(absent(), in: worktree, at: resumed).isEmpty)
+    #expect(
+      planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(3)))
+        == [event("%1", .question)])
+    #expect(
+      planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(4))).isEmpty)
+  }
+
   @Test("基準の Agent 不在そのものでは通知せず、後の Question は1回通知する")
   func absenceAtBaselineIsSilent() {
     var planner = started()

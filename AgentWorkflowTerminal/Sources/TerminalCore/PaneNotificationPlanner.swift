@@ -267,12 +267,12 @@ public struct PaneNotificationPlanner: Sendable {
     }
     sessions[session] = memory
     var notifications: [PaneNotification] = []
+    for paneID in snapshot.agentAbsentPanes where panes[paneID] != nil {
+      panes[paneID]?.lastKnown = nil
+      panes[paneID]?.isAttentionAnnounced = false
+      panes[paneID]?.isSummaryMember = false
+    }
     for (paneID, pane) in panes where !isBaseline && pane.session == session {
-      if snapshot.agentAbsentPanes.contains(paneID) {
-        panes[paneID]?.lastKnown = nil
-        panes[paneID]?.isAttentionAnnounced = false
-        panes[paneID]?.isSummaryMember = false
-      }
       if !memory.observedPanes.contains(paneID) {
         // 観測が途切れた時間を Unknown の継続に含めない。
         panes[paneID]?.trackUnknown(isPlain: false, at: instant)

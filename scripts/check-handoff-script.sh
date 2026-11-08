@@ -78,6 +78,10 @@ case "$AWT_TEST_MODE" in
   no-prompt)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 /bin/sleep 600
     ;;
+  prompt-command)
+    tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
+      env PS1='handoff> ' PROMPT_COMMAND='/bin/sleep 1' AWT_TEST_ARGV="$AWT_TEST_DIR/argv" /bin/bash --norc --noprofile -i
+    ;;
   zsh | fish)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
       env AWT_TEST_ARGV="$AWT_TEST_DIR/argv" "$AWT_TEST_SHELL" "$([[ "$AWT_TEST_MODE" == fish ]] && printf -- -N || printf -- -f)" -i
@@ -294,6 +298,13 @@ assert pathlib.Path(sys.argv[1]).read_bytes() == b"default-agent\0"
   rm -f "$work_dir/argv"
 done
 unset AWT_TEST_PANE_PATH
+
+AWT_TEST_SESSION='prompt-command'
+AWT_TEST_MODE='prompt-command'
+AWT_TEST_AGENT="$work_dir/no-such-agent"
+sessions+=("$AWT_TEST_SESSION")
+expect_exit 7 'プロンプトの外部コマンドを Agent の起動と取り違えない' --directory "$work_dir" --prompt no-agent
+AWT_TEST_MODE=success
 
 AWT_TEST_SESSION=no-agent
 AWT_TEST_AGENT=true

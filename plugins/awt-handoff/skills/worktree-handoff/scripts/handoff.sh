@@ -180,10 +180,24 @@ if ! tmux send-keys -t "=$session:" -l -- "$line" ||
   printf 'session=%s セッションへの送信に失敗しました。\n' "$session" >&2
   exit 6
 fi
-for ((attempt = 0; attempt < 50; attempt++)); do
+# プロンプトが動かす外部コマンドも前景を一瞬変えるので、同じプロセスグループが3秒続いてはじめて起動とみなす。
+# 10秒以内に現れて3秒続く Agent を見逃さないよう、13秒まで見る。
+foreground_candidate=""
+foreground_samples=0
+for ((attempt = 0; attempt < 65; attempt++)); do
   sleep 0.2
   foreground_now=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ')
-  if [[ "$foreground_now" =~ ^[0-9]+$ && "$foreground_now" != "$foreground_before" ]]; then
+  if [[ ! "$foreground_now" =~ ^[0-9]+$ || "$foreground_now" == "$foreground_before" ]]; then
+    foreground_candidate=""
+    foreground_samples=0
+    continue
+  fi
+  if [[ "$foreground_now" != "$foreground_candidate" ]]; then
+    foreground_candidate="$foreground_now"
+    foreground_samples=0
+  fi
+  foreground_samples=$((foreground_samples + 1))
+  if [[ "$foreground_samples" -ge 15 ]]; then
     printf 'session=%s\n' "$session"
     exit 0
   fi

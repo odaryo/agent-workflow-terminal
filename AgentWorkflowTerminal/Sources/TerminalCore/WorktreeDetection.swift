@@ -84,6 +84,8 @@ public enum WorktreeActivation: Sendable, Hashable {
   case inactive
 }
 
+/// 配列の順を開いた順の記録に使うため、Active にすると末尾へ移す (設計書 §13)。
+/// Active でなくしても位置は変えない。
 public func applyingActivation(
   _ activation: WorktreeActivation,
   of identity: WorktreeIdentity,
@@ -281,8 +283,7 @@ func taskWorktreesInOpenedOrder(
   _ worktrees: [TaskWorktree],
   previousIdentities: [WorktreeIdentity]
 ) -> [TaskWorktree] {
-  var remaining = Dictionary(
-    worktrees.map { ($0.identity, $0) }, uniquingKeysWith: { first, _ in first })
+  var remaining = Dictionary(uniqueKeysWithValues: worktrees.map { ($0.identity, $0) })
   let previous = previousIdentities.compactMap { remaining.removeValue(forKey: $0) }
   return previous + worktrees.filter { remaining[$0.identity] != nil }
 }

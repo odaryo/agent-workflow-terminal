@@ -1,0 +1,11 @@
+{
+  "name": "agent-workflow-terminal",
+  "owner": { "name": "odaryo" },
+  "plugins": [
+    {
+      "name": "awt-handoff",
+      "source": "./plugins/awt-handoff",
+      "description": "worktree の新しいセッションの Agent へ作業を渡す"
+    }
+  ]
+}

@@ -115,6 +115,11 @@ jobs:
         timeout-minutes: 5
         run: "$GITHUB_WORKSPACE/scripts/check-stop-tty-processes.sh"
 
+      - name: Handoff script - checks
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        timeout-minutes: 5
+        run: "$GITHUB_WORKSPACE/scripts/check-handoff-script.sh"
+
       # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは単体テストと
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
       # 統合テストは既定の swift test では `.enabled(if:)` で無効になっており、フラグはこの段と

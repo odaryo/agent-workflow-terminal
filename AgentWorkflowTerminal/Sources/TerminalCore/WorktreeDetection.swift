@@ -84,6 +84,28 @@ public enum WorktreeActivation: Sendable, Hashable {
   case inactive
 }
 
+/// 配列の順を開いた順の記録に使うため、Active にすると末尾へ移す (設計書 §13)。
+/// Active でなくしても位置は変えない。
+public func applyingActivation(
+  _ activation: WorktreeActivation,
+  of identity: WorktreeIdentity,
+  to worktrees: [TaskWorktree]
+) -> [TaskWorktree] {
+  guard let index = worktrees.firstIndex(where: { $0.identity == identity }),
+    worktrees[index].activation != activation
+  else { return worktrees }
+
+  var updated = worktrees
+  let task = TaskWorktree(detected: worktrees[index].detected, activation: activation)
+  if activation == .active {
+    updated.remove(at: index)
+    updated.append(task)
+  } else {
+    updated[index] = task
+  }
+  return updated
+}
+
 public struct TaskWorktree: Sendable, Hashable {
   public let detected: DetectedWorktree
   public let activation: WorktreeActivation
@@ -161,10 +183,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   `detected` にも載っているパスは検出できているので `unobserved` 側を無視する。
 ///   `previous` のどれとも一致しないパスは保持しようが無いので何もしない (UI への通知は
 ///   呼び出し側の責務)。
-/// - Note: 観測失敗として保持した worktree は、検出できた worktree の後ろへ回す。順序の権威は
-///   git の一覧出力であり、そこに載らなかった entry の位置を推定する根拠が無いためで、
-///   `restoreWorktreeInventory` が保存側の残りを末尾へ置くのと同じ規則である。観測が復帰すれば
-///   git の順序へ戻る。
+/// - Note: git の検出順は開いた順を表さないため、観測失敗として保持したものも前回の位置を
+///   維持する (設計書 §13)。前回状態が無い場合と新規の worktree 同士だけは検出順を使う。
 /// - Important: `previous` の `nil` は「前回状態が無い」= 初回スキャンを表し、空の
 ///   `WorktreeInventory` (前回は1件も無かった) とは区別する。初回スキャンでは検出された
 ///   Task worktree をすべて `.inactive` から始め、新規出現として数えない。
@@ -247,6 +267,8 @@ public func reconcileDetectedWorktrees(
     previousIdentities.append(contentsOf: previous.taskWorktrees.map(\.identity))
 
     disappeared = previousIdentities.filter { !retained.contains($0) }
+    taskWorktrees = taskWorktreesInOpenedOrder(
+      taskWorktrees, previousIdentities: previous.taskWorktrees.map(\.identity))
   }
 
   return WorktreeScanResult(
@@ -255,6 +277,15 @@ public func reconcileDetectedWorktrees(
     disappeared: disappeared,
     unobserved: unobservedIdentities
   )
+}
+
+func taskWorktreesInOpenedOrder(
+  _ worktrees: [TaskWorktree],
+  previousIdentities: [WorktreeIdentity]
+) -> [TaskWorktree] {
+  var remaining = Dictionary(uniqueKeysWithValues: worktrees.map { ($0.identity, $0) })
+  let previous = previousIdentities.compactMap { remaining.removeValue(forKey: $0) }
+  return previous + worktrees.filter { remaining[$0.identity] != nil }
 }
 
 /// 観測に失敗した Project Root を前回の値のまま保持する。保持できるのは今回どれも Project Root

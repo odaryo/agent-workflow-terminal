@@ -327,7 +327,7 @@ final class AppModel: ObservableObject {
     // 到達不能な worktree の Active 化は設計書 §3.2 が認めていない (attach 先が実在しない)。
     guard activation != .active || worktree.detected.isReachable else { return }
     guard worktree.activation != activation else { return }
-    worktrees[index] = TaskWorktree(detected: worktree.detected, activation: activation)
+    worktrees = applyingActivation(activation, of: identity, to: worktrees)
     if activation == .inactive {
       tabClosing.cancel()
       close(identity)

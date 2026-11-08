@@ -198,21 +198,46 @@ struct ProjectRegistryTests {
     #expect(registry.projects == [alpha])
   }
 
-  // MARK: - 隣の Project の選択 (設計書 §5.4 / §16.1)
+  // MARK: - 隣の Project の選択 (設計書 §5.4 / §13)
 
   @Test("隣の候補は名前順でなく登録順で返し、一覧と選択は変えない", arguments: [true, false])
   func adjacentSelectionFollowsRegistrationOrder(forward: Bool) throws {
-    let gamma = try project("gamma")
     let alpha = try project("alpha")
+    let gamma = try project("gamma")
     let beta = try project("beta")
-    var registry = self.registry([gamma, alpha, beta])
+    // 名前順 (alpha, beta, gamma) と巡回の向きが逆になる並び。3件では、向きが同じ並びだと
+    // どの Project を選んでも名前順と同じ答えになり、区別できない。
+    var registry = self.registry([alpha, gamma, beta])
     registry.select(alpha.commonDirectory)
     let original = registry
 
     let candidate = registry.adjacentSelection(forward: forward) { _ in true }
 
-    #expect(candidate == (forward ? beta.commonDirectory : gamma.commonDirectory))
+    #expect(candidate == (forward ? gamma.commonDirectory : beta.commonDirectory))
     #expect(registry == original)
+  }
+
+  @Test("2件なら、どちらの向きでももう一方を返す", arguments: [true, false])
+  func adjacentSelectionWithTwoProjects(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    var registry = self.registry([alpha, beta])
+    registry.select(alpha.commonDirectory)
+
+    #expect(registry.adjacentSelection(forward: forward) { _ in true } == beta.commonDirectory)
+  }
+
+  @Test("選べる候補が一番遠い位置にしか無くても返す", arguments: [true, false])
+  func adjacentSelectionReachesFarthestCandidate(forward: Bool) throws {
+    let alpha = try project("alpha")
+    let beta = try project("beta")
+    let gamma = try project("gamma")
+    var registry = self.registry([alpha, beta, gamma])
+    registry.select(beta.commonDirectory)
+    // forward では gamma → alpha、backward では alpha → gamma の順に見るので、2歩目だけが選べる。
+    let only = forward ? alpha.commonDirectory : gamma.commonDirectory
+
+    #expect(registry.adjacentSelection(forward: forward) { $0 == only } == only)
   }
 
   @Test("両端からは反対の端へ循環する", arguments: [true, false])

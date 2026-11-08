@@ -86,7 +86,7 @@ public struct ProjectRegistry: Sendable, Hashable {
     selection = projects.first { selectable($0.commonDirectory) }?.commonDirectory
   }
 
-  /// 設計書 §5.4 / §16.1。選択中以外に選べる候補がなければ nil。
+  /// 設計書 §5.4 / §13 (登録順)。選択中以外に選べる候補がなければ nil。
   public func adjacentSelection(
     forward: Bool, selectable: (WorktreeIdentity) -> Bool
   ) -> WorktreeIdentity? {

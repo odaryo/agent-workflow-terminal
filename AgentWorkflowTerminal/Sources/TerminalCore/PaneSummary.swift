@@ -260,6 +260,7 @@ public struct PaneTaskCompletionTracker: Sendable {
     var lastKnownState: AgentState?
     var dismissed: AgentStampedValue?
     var display = PaneTaskCompletionDisplay.none
+    var needsFreshCompletion = false
   }
 
   private static let turnEndingStates: Set<AgentState> = [.idle, .completed]
@@ -282,6 +283,8 @@ public struct PaneTaskCompletionTracker: Sendable {
       Self.turnEndingStates.contains(previous)
     {
       entry.dismissed = current
+      // #386: 遅れて届いた token がターン N と N+1 のどちらのものか値から区別できないため、解除時に読み直す。
+      entry.needsFreshCompletion = true
     }
     if let agentState, agentState != .unknown {
       entry.lastKnownState = agentState
@@ -303,6 +306,25 @@ public struct PaneTaskCompletionTracker: Sendable {
     case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous): true
     default: false
     }
+  }
+
+  public func needsFreshCompletion(paneID: PaneID) -> Bool {
+    entries[paneID]?.needsFreshCompletion ?? false
+  }
+
+  public mutating func resolveDismissal(
+    paneID: PaneID, freshCompletion: PaneSummaryEntry<AgentStampedValue>
+  ) -> PaneTaskCompletionDisplay {
+    guard var entry = entries[paneID], entry.needsFreshCompletion else {
+      return entries[paneID]?.display ?? .none
+    }
+    entry.needsFreshCompletion = false
+    if !Self.isUndetermined(freshCompletion) {
+      entry.dismissed = freshCompletion.value
+      entry.display = freshCompletion.value.map { .dismissed($0) } ?? .none
+    }
+    entries[paneID] = entry
+    return entry.display
   }
 
   public mutating func forget(paneID: PaneID) {

@@ -33,7 +33,7 @@ struct TabSummaryTests {
     #expect(summary.rows == [.noAgentPane])
   }
 
-  @Test("pane 行は Overview と一致し、Needs Attention を先に各群で新しい順に並べる")
+  @Test("pane 行は Overview と一致し、Needs Attention や最終更新にかかわらず入力順を保つ")
   func rowsMatchOverviewOrder() throws {
     let input = try tab(
       2,
@@ -55,7 +55,7 @@ struct TabSummaryTests {
     #expect(summary.rows == root.rows)
     #expect(
       summary.rows.compactMap(\.pane).map(\.paneID.rawValue)
-        == ["%4", "%2", "%3", "%5", "%1"])
+        == ["%1", "%2", "%3", "%4", "%5"])
   }
 
   @Test("pane 行に表示状態、対応する details または既定値、mainPane の印を渡す")
@@ -76,9 +76,9 @@ struct TabSummaryTests {
     let panes = summary.rows.compactMap(\.pane)
 
     #expect(summary.rows.count == 2)
-    #expect(panes.map(\.display) == [working, idle])
-    #expect(panes.map(\.detail) == [detail, OverviewPaneDetail()])
-    #expect(panes.map(\.isMain) == [false, true])
+    #expect(panes.map(\.display) == [idle, working])
+    #expect(panes.map(\.detail) == [OverviewPaneDetail(), detail])
+    #expect(panes.map(\.isMain) == [true, false])
   }
 
   private func pane(_ id: String, _ state: AgentState, _ seconds: Int) -> PaneDisplayState {

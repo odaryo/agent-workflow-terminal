@@ -1,4 +1,4 @@
-/// Overview (設計書 §13) に出す pane 1つの状態。アイコンと並べ替えの両方がこれを使う。
+/// Overview (設計書 §13) に出す pane 1つの状態。
 public struct PaneDisplayState: Sendable, Hashable {
   public let paneID: PaneID
   public let state: AgentState
@@ -6,7 +6,6 @@ public struct PaneDisplayState: Sendable, Hashable {
   public let category: WorktreeStateCategory
   /// `nil` は基準の観測に在った pane が、注意不要の `.signalMissing` の Unknown から初めて状態が決まる変化を除き、
   /// まだ表示状態を変えていないことを表す。
-  /// 初期表示を Adapter の到着順で並べないため、どの更新時刻よりも古い同順位として扱う (設計書 §13)。
   public let changedAt: ContinuousClock.Instant?
 
   public init(
@@ -22,8 +21,8 @@ public struct PaneDisplayState: Sendable, Hashable {
 
 /// pane ごとに §12.2 の代表状態と同じ安定化 (Idle / Unknown へ入る遷移を保持) を掛ける。
 ///
-/// 生の観測で並べると、§12.2 が記録した `Working`↔`Unknown` の振動のたびに行が入れ替わり、
-/// クリックの直前に別の pane の行が来て誤った pane へ移る (Issue #189)。
+/// 生の観測をそのまま表示すると、§12.2 が記録した `Working`↔`Unknown` の振動が
+/// 表示状態にも現れるため。
 ///
 /// - Important: 保持は自律的に満了しない。上位レイヤは `nextDeadline` に、最後に渡した入力を
 ///   もう一度渡す義務がある (`WorktreeRepresentativeStateStabilizer` と同じ契約)。
@@ -62,7 +61,7 @@ public struct PaneDisplayStateStabilizer: Sendable {
   ) -> [PaneDisplayState] {
     let present = Set(panes.map(\.id))
     let isFirstObservation = lastObservedAt == nil
-    let previous = paneOrder.compactMap { entries[$0]?.shown }
+    let previous = paneOrder
     lastObservedAt = instant
     for paneID in paneOrder {
       guard var entry = entries[paneID] else { continue }
@@ -106,19 +105,11 @@ public struct PaneDisplayStateStabilizer: Sendable {
   }
 
   private func retainingMissingPanes(
-    in inputOrder: [PaneID], previous: [PaneDisplayState]
+    in inputOrder: [PaneID], previous: [PaneID]
   ) -> [PaneID] {
-    // 分類が変わっても Overview の順位が同じなら、消失・復帰で同順位を逆転させない。
-    let retained = previous.filter { old in
-      guard let shown = entries[old.paneID]?.shown else { return false }
-      return (shown.category == .needsAttention) == (old.category == .needsAttention)
-        && shown.changedAt == old.changedAt
-    }
-    // 消失 pane を前回順で次の入力 pane の直前に補い、新規・順位変更は次の据え置き pane の直前へ入れる (次が無ければ末尾)。
-    // 入力中の pane だけを手掛かりにすると、保持中の消失 pane を飛び越えて tmux 順からずれるため。
-    let previousIDs = previous.map(\.paneID).filter { entries[$0] != nil }
-    let fullOrder = inserting(previousIDs, retaining: inputOrder)
-    return inserting(fullOrder, retaining: retained.map(\.paneID))
+    // 消失 pane を末尾へ追加すると、一時的な観測消失だけで行の位置が変わるため。
+    let previousIDs = previous.filter { entries[$0] != nil }
+    return inserting(previousIDs, retaining: inputOrder)
   }
 
   private func inserting(_ inputOrder: [PaneID], retaining retained: [PaneID]) -> [PaneID] {

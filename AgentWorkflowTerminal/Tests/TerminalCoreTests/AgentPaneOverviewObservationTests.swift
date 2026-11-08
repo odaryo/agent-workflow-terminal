@@ -6,8 +6,8 @@ import Testing
 struct AgentPaneOverviewObservationTests {
   private let start = ContinuousClock().now
 
-  @Test("未更新の pane はどの更新時刻より古く、同じ群の未更新どうしは tmux 順になる")
-  func unchangedPanesSortAfterChangedPanes() throws {
+  @Test("pane は未更新か更新済みかや Needs Attention にかかわらず入力順を保つ")
+  func panesKeepInputOrderRegardlessOfChangeTime() throws {
     let input = try task(
       "task",
       [
@@ -21,11 +21,11 @@ struct AgentPaneOverviewObservationTests {
 
     #expect(
       overview.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue)
-        == ["%5", "%4", "%6", "%2", "%1", "%3"])
+        == ["%1", "%2", "%3", "%4", "%5", "%6"])
   }
 
-  @Test("未更新の Task は更新済み Task より古く、未更新どうしは Task Tab 順になる")
-  func unchangedTasksSortAfterChangedTasks() throws {
+  @Test("Task は未更新か更新済みかや Needs Attention にかかわらず入力順を保つ")
+  func tasksKeepInputOrderRegardlessOfChangeTime() throws {
     let first = try task("first", [pane("%1", .working)])
     let second = try task("second", [pane("%2", .idle)])
     let changed = try task("changed", [pane("%3", .working, changedAt: start)])
@@ -39,7 +39,7 @@ struct AgentPaneOverviewObservationTests {
 
     #expect(
       result.tasks.map(\.session)
-        == [changedAttention, attention, mixed, changed, first, second].map(\.session))
+        == [first, second, changed, mixed, attention, changedAttention].map(\.session))
   }
 
   // Adapter の結果の到着のばらつきは、App が最初に揃った観測まで安定化器へ渡さないことで吸収する。
@@ -88,9 +88,9 @@ struct AgentPaneOverviewObservationTests {
   }
 
   @Test(
-    "R8 / R12: 判定不能の Unknown が1時間後に決まると109秒で更新した同じ群の pane より上になる",
+    "判定不能の Unknown が1時間後に決まっても109秒で更新した pane との入力順を保つ",
     arguments: [AgentState.working, .question])
-  func lateUndeterminedResolutionSortsBeforeEarlierChange(_ destination: AgentState) throws {
+  func lateUndeterminedResolutionKeepsInputOrder(_ destination: AgentState) throws {
     var stabilizer = PaneDisplayStateStabilizer()
     _ = stabilizer.observe(
       [observedPane("%1", .unknown, unknownReason: .adapterUndetermined), observedPane("%2")],
@@ -109,11 +109,11 @@ struct AgentPaneOverviewObservationTests {
     #expect(
       states.first { $0.paneID.rawValue == "%2" }?.changedAt
         == start.advanced(by: .seconds(109)))
-    let result = try overview([task("combined", states)])
-    #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ["%1", "%2"])
+    let result = try overview([task("combined", Array(states.reversed()))])
+    #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ["%2", "%1"])
   }
 
-  @Test("未観測の Task は未観測の行1つで、pane の無い Task と同じ群に Task Tab 順で置く")
+  @Test("未観測の Task は未観測の行1つで示し、Agent pane の有無によらず Task の入力順を保つ")
   func unobservedTasksHaveOwnRowAndKeepTabOrder() throws {
     let unseenA = try task("unseenA", [], isObserved: false)
     let emptyA = try task("emptyA", [])
@@ -124,9 +124,9 @@ struct AgentPaneOverviewObservationTests {
     let result = try overview([unseenA, emptyA, active, unseenB, emptyB])
 
     #expect(
-      result.tasks.map(\.session) == [active, unseenA, emptyA, unseenB, emptyB].map(\.session))
+      result.tasks.map(\.session) == [unseenA, emptyA, active, unseenB, emptyB].map(\.session))
     #expect(
-      result.tasks.map(\.rows).dropFirst() == [
+      result.tasks.filter { $0.session != active.session }.map(\.rows) == [
         [.notObserved], [.noAgentPane], [.notObserved], [.noAgentPane],
       ])
   }

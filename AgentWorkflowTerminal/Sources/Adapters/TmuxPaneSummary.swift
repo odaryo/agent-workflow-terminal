@@ -4,7 +4,7 @@ import TerminalCore
 public enum TmuxPaneSummaryOption {
   /// 書き手はハーネス。`<agent-pid> <text>`。
   public static let status = "@awt_status"
-  /// 書き手はハーネス。`<agent-pid> <token>`。token は完了ごとに変える。
+  /// 書き手はハーネス。`<agent-pid> turn=<ターン開始のエポックミリ秒> <token>`。
   public static let completion = "@awt_done"
   /// 書き手はアプリだけ。`<text>`。
   public static let purpose = "@awt_purpose"

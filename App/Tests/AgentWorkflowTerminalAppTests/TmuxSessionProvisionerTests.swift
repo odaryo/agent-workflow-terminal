@@ -193,7 +193,9 @@ struct TmuxSessionProvisionerTests {
         ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
         ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"],
       ])
-    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+    #expect(
+      result
+        == .success(.init(command: ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])))
   }
 
   @Test("Resume で detach-on-destroy の設定に失敗しても attach の argv を返す")
@@ -216,7 +218,9 @@ struct TmuxSessionProvisionerTests {
         ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
         ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"],
       ])
-    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+    #expect(
+      result
+        == .success(.init(command: ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])))
   }
 
   @Test("Resume では既存の window-size を保持する")
@@ -237,7 +241,9 @@ struct TmuxSessionProvisionerTests {
         ["-u", "set-option", "-t", "=\(name):", "detach-on-destroy", "on"],
         ["-u", "show-options", "-w", "-t", "=\(name):", "window-size"],
       ])
-    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+    #expect(
+      result
+        == .success(.init(command: ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])))
   }
 
   @Test(
@@ -263,7 +269,9 @@ struct TmuxSessionProvisionerTests {
         ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"])
     }
     #expect(await process.calls == expectedCalls)
-    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+    #expect(
+      result
+        == .success(.init(command: ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])))
   }
 
   @Test(
@@ -296,7 +304,108 @@ struct TmuxSessionProvisionerTests {
         ["-u", "set-option", "-w", "-t", "=\(name):", "window-size", "smallest"],
         ["-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use"],
       ])
-    #expect(result == .success(["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"]))
+    #expect(
+      result
+        == .success(.init(command: ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])))
+  }
+
+  @Test(
+    "bootstrap の後始末の失敗は、create 成功なら注意、失敗なら元の原因とともに返す",
+    arguments: [true, false],
+    [
+      Result<ProcessRunResult, ProcessRunnerError>.success(
+        .init(exitCode: 1, stdout: "", stderr: "permission denied\n")),
+      .success(
+        .init(
+          exitCode: 2, stdout: "", stderr: "can't find session: awt-bootstrap-server-do-not-use\n")),
+      .success(.init(exitCode: 1, stdout: "", stderr: "can't find session: another-session\n")),
+      .failure(.timedOut(exitCode: nil, stdout: "", stderr: "")),
+      .failure(
+        .launchFailed(executableURL: URL(fileURLWithPath: "/usr/bin/true"), message: "denied")),
+    ])
+  func reportsBootstrapCleanupFailure(
+    createSucceeds: Bool, cleanup: Result<ProcessRunResult, ProcessRunnerError>
+  ) async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let process = bootstrapProcess(name: name, createSucceeds: createSucceeds, cleanup: cleanup)
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+    let cleanupFailure: TmuxRunnerError =
+      switch cleanup {
+      case .success(let output):
+        .commandFailed(exitCode: output.exitCode, stdout: output.stdout, stderr: output.stderr)
+      case .failure(let error): .process(error)
+      }
+
+    if createSucceeds {
+      let attachment = try result.get()
+      #expect(attachment.command == ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])
+      let warning = try #require(attachment.warning)
+      #expect(warning.contains(Self.cleanupInstruction))
+      #expect(!warning.contains("\(cleanupFailure)"))
+    } else {
+      let cause = TmuxSessionOperationError.tmux(
+        .commandFailed(exitCode: 1, stdout: "", stderr: "create denied\n"))
+      let error = TmuxSessionProvisionerError.leftoverBootstrapSession(
+        cause: cause, cleanupFailure: cleanupFailure)
+      #expect(result == .failure(error))
+      #expect(error.terminalTabDescription.contains(cause.terminalTabDescription))
+      #expect(error.terminalTabDescription.contains(Self.cleanupInstruction))
+      #expect(error.terminalTabDescription.contains("\(cleanupFailure)"))
+    }
+    #expect(
+      await process.calls.last == ["-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use"])
+  }
+
+  @Test(
+    "bootstrap の後始末が成功または既に不在なら注意を返さず create の結果を保つ",
+    arguments: [true, false],
+    [
+      ProcessRunResult(exitCode: 0, stdout: "", stderr: ""),
+      .init(
+        exitCode: 1, stdout: "", stderr: "can't find session: awt-bootstrap-server-do-not-use\n"),
+      .init(exitCode: 1, stdout: "", stderr: "no such session: awt-bootstrap-server-do-not-use\n"),
+      .init(exitCode: 1, stdout: "", stderr: "no such window: awt-bootstrap-server-do-not-use\n"),
+      .init(exitCode: 1, stdout: "", stderr: "no server running on /tmp/awt-test\n"),
+      Self.socketMissing,
+    ])
+  func absentBootstrapNeedsNoWarning(createSucceeds: Bool, cleanup: ProcessRunResult) async throws {
+    let key = try makeKey(index: 2)
+    let name = TmuxSessionName(key: key).rawValue
+    let process = bootstrapProcess(
+      name: name, createSucceeds: createSucceeds, cleanup: .success(cleanup))
+
+    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+
+    if createSucceeds {
+      #expect(
+        result
+          == .success(.init(command: ["/usr/bin/true", "-u", "attach-session", "-t", "=\(name)"])))
+    } else {
+      #expect(
+        result
+          == .failure(
+            .operation(.tmux(.commandFailed(exitCode: 1, stdout: "", stderr: "create denied\n")))))
+    }
+  }
+
+  private static let cleanupInstruction =
+    "手で `tmux kill-session -t '=awt-bootstrap-server-do-not-use'` を実行してください"
+
+  private func bootstrapProcess(
+    name: String, createSucceeds: Bool, cleanup: Result<ProcessRunResult, ProcessRunnerError>
+  ) -> TerminationProcessRunner {
+    let success = ProcessRunResult(exitCode: 0, stdout: "", stderr: "")
+    let creation = ProcessRunResult(
+      exitCode: createSucceeds ? 0 : 1, stdout: createSucceeds ? "$1\n" : "",
+      stderr: createSucceeds ? "" : "create denied\n")
+    let results: [ProcessRunResult] =
+      [
+        .init(exitCode: 1, stdout: "", stderr: "no server running on /tmp/awt-test\n"),
+        .init(exitCode: 1, stdout: "", stderr: "can't find session: \(name)\n"),
+        creation,
+      ] + (createSucceeds ? [success] : [])
+    return TerminationProcessRunner(outcomes: results.map { .success($0) } + [cleanup])
   }
 
   private static let socketPath = "/tmp/awt-test/default"
@@ -329,15 +438,19 @@ struct TmuxSessionProvisionerTests {
 
 private actor TerminationProcessRunner: ProcessRunning {
   /// 呼ばれた順に返す。尽きたら最後の結果を返し続ける。
-  let results: [ProcessRunResult]
+  let outcomes: [Result<ProcessRunResult, ProcessRunnerError>]
   private(set) var calls: [[String]] = []
 
   init(result: ProcessRunResult) {
-    self.results = [result]
+    self.outcomes = [.success(result)]
   }
 
   init(results: [ProcessRunResult]) {
-    self.results = results
+    self.outcomes = results.map { .success($0) }
+  }
+
+  init(outcomes: [Result<ProcessRunResult, ProcessRunnerError>]) {
+    self.outcomes = outcomes
   }
 
   func run(
@@ -345,6 +458,6 @@ private actor TerminationProcessRunner: ProcessRunning {
     outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     calls.append(arguments)
-    return results[min(calls.count - 1, results.count - 1)]
+    return try outcomes[min(calls.count - 1, outcomes.count - 1)].get()
   }
 }

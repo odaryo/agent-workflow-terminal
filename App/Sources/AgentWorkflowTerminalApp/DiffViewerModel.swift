@@ -40,7 +40,7 @@ final class DiffViewerModel: ObservableObject {
 
   @Published var kind: Kind = .base
   @Published private(set) var baseBranch: DiffBaseBranch = .undetermined
-  @Published private(set) var selectedBranch: String?
+  @Published private(set) var selectedBranch: GitBranchRef?
   @Published private(set) var selectedCommit: GitCommit?
   @Published private(set) var refNames: GitRefNames?
   @Published private(set) var commits: [GitCommit] = []
@@ -80,7 +80,7 @@ final class DiffViewerModel: ObservableObject {
   private var sendCoalescer: DiffCommentSendCoalescer
 
   /// ユーザーが選び直した base branch。タスクタブごとに覚え、次に開いても再判定しない (§9.1.1)。
-  private var userSelectedBaseBranch: String?
+  private var userSelectedBaseBranch: GitBranchRef?
   private var didLoadContext = false
 
   /// `timeSource` を差し替えられるのは、coalescing の閾値の経過をテストが実時間を待たずに
@@ -110,7 +110,7 @@ final class DiffViewerModel: ObservableObject {
 
   var baseBranchDescription: String {
     switch baseBranch {
-    case .resolved(let branch, let source): "\(branch) (\(source.decisionLabel))"
+    case .resolved(let branch, let source): "\(branch.displayLabel) (\(source.decisionLabel))"
     case .undetermined: "未決定"
     }
   }
@@ -398,13 +398,13 @@ final class DiffViewerModel: ObservableObject {
     }
   }
 
-  func selectBaseBranch(_ branch: String) {
+  func selectBaseBranch(_ branch: GitBranchRef) {
     userSelectedBaseBranch = branch
     baseBranch = DiffBaseBranchResolver.resolve(
       userSelection: branch, upstream: nil, originHead: nil)
   }
 
-  func selectBranch(_ branch: String) {
+  func selectBranch(_ branch: GitBranchRef) {
     selectedBranch = branch
   }
 

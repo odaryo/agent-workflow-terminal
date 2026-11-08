@@ -117,7 +117,7 @@ struct DiffSnapshotTests {
       ]))
     return DiffSnapshot(
       id: snapshotID,
-      subject: .base(branch: "origin/main", mergeBase: "abc"),
+      subject: .base(branch: .remote("origin/main"), mergeBase: "abc"),
       createdAt: Date(timeIntervalSince1970: 0),
       sections: [
         DiffOriginSection(origin: .committed, files: []),

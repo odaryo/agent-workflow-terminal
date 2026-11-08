@@ -62,7 +62,7 @@ struct DiffSnapshotHistoryTests {
       UUID(uuidString: "00000000-0000-0000-0000-0000000000\(String(format: "%02X", id))") ?? UUID()
     return DiffSnapshot(
       id: DiffSnapshotID(rawValue: uuid),
-      subject: .base(branch: "origin/main", mergeBase: "abc"),
+      subject: .base(branch: .remote("origin/main"), mergeBase: "abc"),
       createdAt: Date(timeIntervalSince1970: TimeInterval(id)),
       sections: [
         DiffOriginSection(

@@ -21,8 +21,8 @@ public enum DiffChangeOrigin: Sendable, Equatable, Hashable, CaseIterable {
 public enum DiffSubject: Sendable, Equatable {
   case commit(hash: String)
   /// `mergeBase` は `git merge-base <branch> HEAD` の OID (§9.1.2)。
-  case base(branch: String, mergeBase: String)
-  case branch(name: String, mergeBase: String)
+  case base(branch: GitBranchRef, mergeBase: String)
+  case branch(name: GitBranchRef, mergeBase: String)
 }
 
 public struct DiffOriginSection: Sendable, Equatable {

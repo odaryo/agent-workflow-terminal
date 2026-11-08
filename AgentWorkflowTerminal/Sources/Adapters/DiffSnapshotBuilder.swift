@@ -6,8 +6,8 @@ import TerminalCore
 /// (第一親を Adapter が推測で選ばないため。§9.1.2)。
 public enum DiffRequest: Sendable, Equatable {
   case commit(hash: String, parentHashes: [String])
-  case base(branch: String)
-  case branch(name: String)
+  case base(branch: GitBranchRef)
+  case branch(name: GitBranchRef)
 }
 
 public enum DiffSnapshotBuilderError: Error, Sendable, Equatable {
@@ -17,9 +17,9 @@ public enum DiffSnapshotBuilderError: Error, Sendable, Equatable {
   case unsupportedMergeCommit(parents: [String])
   /// `branch` と HEAD に共通祖先が無く、merge-base 起点の range (§9.1.2) を作れない。
   /// 空 tree や root commit を起点に代えない — それは §9.1.2 と別の範囲になる。
-  case noMergeBase(branch: String)
+  case noMergeBase(branch: GitBranchRef)
   /// merge-base を求められなかったが、共通祖先が無いとは言い切れない (§9.1.4)。
-  case mergeBaseUnresolved(branch: String, reason: DiffMergeBaseUnresolvedReason)
+  case mergeBaseUnresolved(branch: GitBranchRef, reason: DiffMergeBaseUnresolvedReason)
 }
 
 /// `git merge-base` が共通祖先を返さなかったのに、それを「無い」と断定できない理由。
@@ -30,8 +30,9 @@ public enum DiffMergeBaseUnresolvedReason: Sendable, Equatable {
   /// `refs/replace/` か `info/grafts` が親子関係を書き換えていて、置き換え前の履歴には
   /// 共通祖先がありうる。
   case rewrittenHistory
-  /// 終了コード 1 と一緒に stderr へ何か出た。例: 同名の tag と branch があると git は
-  /// tag を選んで warning を出すので、利用者が意図した branch とは別の ref と比べている。
+  /// 終了コード 1 と一緒に stderr へ何か出た。git が何かを知らせている以上、共通祖先が無いとは
+  /// 断定しない。完全名でも、`refs/heads/refs/heads/<name>` のような ref があると git は
+  /// 曖昧さの warning を出す (git 2.50.1 で実測、Issue #391)。
   case gitReported(stderr: String)
   /// 上を見分けるための git の実行が失敗したか、その出力を読めなかった。
   case historyCheckFailed(detail: String)
@@ -68,15 +69,14 @@ public struct DiffSnapshotBuilder: Sendable {
 
   /// upstream と `origin/HEAD` を観測して渡すだけで、優先順位の判断は `DiffBaseBranchResolver`
   /// が持つ。どちらも「無い」ことが正常系なので、解決できない command 失敗はエラーにしない。
-  public func resolveBaseBranch(userSelection: String?) async -> DiffBaseBranch {
-    var upstream: String?
-    if let parsed = try? await status(untrackedFiles: .normal) {
-      upstream = parsed.status.branch?.upstream
-    }
-    var originHead: String?
+  public func resolveBaseBranch(userSelection: GitBranchRef?) async -> DiffBaseBranch {
+    let upstream = (try? await run(.upstream())).flatMap { GitBranchRef(fullName: $0.trimmed) }
     // `origin/HEAD` が無いと `symbolic-ref --quiet` は終了コード 1 で終わる (git 2.50.1 で実測)。
-    if let output = try? await run(.originHead()) {
-      originHead = GitRefNameList.shortenRemoteRef(output)
+    let originHead = (try? await run(.originHead())).flatMap { output -> GitBranchRef? in
+      guard let branch = GitBranchRef(fullName: output.trimmed), case .remote = branch else {
+        return nil
+      }
+      return branch
     }
     return DiffBaseBranchResolver.resolve(
       userSelection: userSelection, upstream: upstream, originHead: originHead)
@@ -185,10 +185,10 @@ public struct DiffSnapshotBuilder: Sendable {
   /// §9.1.3: Base / Branch Diff は commit 済みに加えて staged・unstaged・untracked を含み、
   /// 出所をまたいで hunk をマージしない。
   private func collectWorktree(
-    branch: String,
+    branch: GitBranchRef,
     subject: (String) -> DiffSubject
   ) async throws(DiffSnapshotBuilderError) -> Collected {
-    let base = try revision(branch)
+    let base = try revision(branch.fullName)
     let mergeBase = try await mergeBase(of: base, branch: branch)
     let mergeBaseRevision = try revision(mergeBase)
 
@@ -230,7 +230,7 @@ public struct DiffSnapshotBuilder: Sendable {
   /// 共通祖先が無いときの `git merge-base` は、出力なしの終了コード 1 で終わる。ref が解決
   /// できないときは 128 なので (git 2.50.1 で実測)、終了コードと空出力の両方で区別する。
   private func mergeBase(
-    of base: GitRevision, branch: String
+    of base: GitRevision, branch: GitBranchRef
   ) async throws(DiffSnapshotBuilderError) -> String {
     do {
       return try await runner.run(.mergeBase(base, .head)).stdout.trimmed

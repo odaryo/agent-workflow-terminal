@@ -22,7 +22,7 @@ struct DiffSnapshotBuilderOutputLimitTests {
       executableCandidates: [URL(fileURLWithPath: "/usr/bin/git")])
 
     _ = try await builder.build(
-      .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+      .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
 
     let statusCalls = await spy.calls.filter { $0.arguments.contains("status") }
     try #require(!statusCalls.isEmpty)
@@ -37,7 +37,7 @@ struct DiffSnapshotBuilderOutputLimitTests {
       processRunner: spy,
       executableCandidates: [URL(fileURLWithPath: "/usr/bin/git")])
     _ = try await builder.build(
-      .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+      .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
 
     let calls = await spy.calls
     let patchLimits = calls.filter { $0.arguments.contains("--patch") }.map(\.outputLimit)

@@ -7,12 +7,12 @@ public enum DiffBaseBranchSource: Sendable, Equatable, Hashable {
 }
 
 public enum DiffBaseBranch: Sendable, Equatable {
-  case resolved(branch: String, source: DiffBaseBranchSource)
+  case resolved(branch: GitBranchRef, source: DiffBaseBranchSource)
   /// upstream も `origin/HEAD` も解決できなかった状態。ユーザーが選ぶまで Diff は出せない。
   /// 判定不能を `main` へ丸めない (§9.1.1)。
   case undetermined
 
-  public var branch: String? {
+  public var branch: GitBranchRef? {
     switch self {
     case .resolved(let branch, _): branch
     case .undetermined: nil
@@ -24,9 +24,9 @@ public enum DiffBaseBranchResolver {
   /// 空白だけの値は「解決できなかった」として扱う。`git` の出力が空行になる場合と、
   /// UI の未入力を同じ「無い」へ寄せるため。
   public static func resolve(
-    userSelection: String?,
-    upstream: String?,
-    originHead: String?
+    userSelection: GitBranchRef?,
+    upstream: GitBranchRef?,
+    originHead: GitBranchRef?
   ) -> DiffBaseBranch {
     if let name = normalized(userSelection) {
       return .resolved(branch: name, source: .userSelection)
@@ -36,9 +36,13 @@ public enum DiffBaseBranchResolver {
     return .undetermined
   }
 
-  private static func normalized(_ value: String?) -> String? {
+  private static func normalized(_ value: GitBranchRef?) -> GitBranchRef? {
     guard let value else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+    let trimmed = value.shortName.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    switch value {
+    case .local: return .local(trimmed)
+    case .remote: return .remote(trimmed)
+    }
   }
 }

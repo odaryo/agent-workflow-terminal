@@ -30,7 +30,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       let result = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
       let snapshot = result.snapshot
 
       #expect(result.patchFailures.isEmpty)
@@ -60,7 +60,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       let snapshot = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
       ).snapshot
 
       let staged = try #require(snapshot.file(origin: .staged, path: "both.txt"))
@@ -91,7 +91,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       let result = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
       #expect(result.snapshot.section(.committed)?.files.map(\.path) == ["feature.txt"])
       if case .base(_, let mergeBase) = result.snapshot.subject {
         #expect(mergeBase.count >= 40)
@@ -162,19 +162,21 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       let opened = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
       ).snapshot
       let openedLines = opened.file(origin: .unstaged, path: "a.txt")?.hunks.flatMap(\.lines)
 
       #expect(
         !DiffSnapshotChangeDetection.compare(
-          opened: opened.observation, current: try await builder.observe(.base(branch: "main"))
+          opened: opened.observation,
+          current: try await builder.observe(.base(branch: .local("main")))
         ).hasChanges)
 
       try write("a\nb\nc\n", to: root, "a.txt")
       try write("new\n", to: root, "added.txt")
       let comparison = DiffSnapshotChangeDetection.compare(
-        opened: opened.observation, current: try await builder.observe(.base(branch: "main")))
+        opened: opened.observation,
+        current: try await builder.observe(.base(branch: .local("main"))))
       #expect(comparison.hasChanges)
       #expect(comparison.changedPaths.sorted() == ["a.txt", "added.txt"])
 
@@ -182,7 +184,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       #expect(opened.file(origin: .unstaged, path: "a.txt")?.hunks.flatMap(\.lines) == openedLines)
 
       let refreshed = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
       ).snapshot
       #expect(refreshed.id != opened.id)
       #expect(refreshed.section(.untracked)?.files.map(\.path) == ["added.txt"])
@@ -197,8 +199,8 @@ struct DiffSnapshotBuilderIntegrationTests {
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
       #expect(
-        await builder.resolveBaseBranch(userSelection: "release/1.0")
-          == .resolved(branch: "release/1.0", source: .userSelection))
+        await builder.resolveBaseBranch(userSelection: .local("release/1.0"))
+          == .resolved(branch: .local("release/1.0"), source: .userSelection))
 
       let remote = repository.root.appending(path: "remote.git")
       try await repository.git(["init", "-q", "--bare", "-b", "main", remote.path])
@@ -209,13 +211,13 @@ struct DiffSnapshotBuilderIntegrationTests {
       ])
       #expect(
         await builder.resolveBaseBranch(userSelection: nil)
-          == .resolved(branch: "origin/main", source: .originHead))
+          == .resolved(branch: .remote("origin/main"), source: .originHead))
 
       try await repository.git(["checkout", "-q", "-b", "feature"])
       try await repository.git(["push", "-q", "-u", "origin", "feature"])
       #expect(
         await builder.resolveBaseBranch(userSelection: nil)
-          == .resolved(branch: "origin/feature", source: .upstream))
+          == .resolved(branch: .remote("origin/feature"), source: .upstream))
     }
   }
 
@@ -236,10 +238,10 @@ struct DiffSnapshotBuilderIntegrationTests {
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       try await repository.git(["config", "core.abbrev", "4"])
       let opened = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
       ).snapshot
       try await repository.git(["config", "core.abbrev", "12"])
-      let current = try await builder.observe(.base(branch: "main"))
+      let current = try await builder.observe(.base(branch: .local("main")))
 
       #expect(
         !DiffSnapshotChangeDetection.compare(opened: opened.observation, current: current)
@@ -262,14 +264,14 @@ struct DiffSnapshotBuilderIntegrationTests {
       var history = DiffSnapshotHistory()
       history.append(
         try await builder.build(
-          .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+          .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
         ).snapshot)
       let openedID = try #require(history.latest?.id)
 
       try write("a\nb\nc\n", to: root, "a.txt")
       history.append(
         try await builder.build(
-          .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+          .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
         ).snapshot)
 
       #expect(history.count == 2)
@@ -300,7 +302,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       let opened = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
       ).snapshot
       #expect(
         opened.file(origin: .untracked, path: "nested/")?.content
@@ -309,13 +311,15 @@ struct DiffSnapshotBuilderIntegrationTests {
       try write("y\n", to: nested, "b.txt")
       try write("z\n", to: nested, "c.txt")
       let afterNested = DiffSnapshotChangeDetection.compare(
-        opened: opened.observation, current: try await builder.observe(.base(branch: "main")))
+        opened: opened.observation,
+        current: try await builder.observe(.base(branch: .local("main"))))
       #expect(afterNested.fileChanges.isEmpty)
 
       // 読めている untracked ファイルの変更は検知できる。
       try write("plain changed\n", to: root, "plain.txt")
       let afterPlain = DiffSnapshotChangeDetection.compare(
-        opened: opened.observation, current: try await builder.observe(.base(branch: "main")))
+        opened: opened.observation,
+        current: try await builder.observe(.base(branch: .local("main"))))
       #expect(
         afterPlain.fileChanges == [.modified(origin: .untracked, path: "plain.txt")])
     }
@@ -330,7 +334,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
       let result = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
       let snapshot = result.snapshot
 
       // 主症状の回帰テスト: 汎用の「解析できていません」を出さない。
@@ -362,7 +366,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
       let snapshot = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date()
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
       ).snapshot
 
       // OID の値そのものは固定せず、実体の無い stage が nil であることを固定する。
@@ -385,7 +389,7 @@ struct DiffSnapshotBuilderIntegrationTests {
       for path in Self.conflictedPaths { try write("resolved\n", to: root, path) }
       try await repository.git(["add", "-A"])
       let resolved = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
       #expect(resolved.patchFailures.isEmpty)
       #expect(resolved.snapshot.section(.unmerged)?.files.isEmpty == true)
       for path in Self.conflictedPaths {

@@ -1,5 +1,6 @@
 import Adapters
 import Foundation
+import TerminalCore
 import Testing
 
 // fixture は隔離 repository から git 2.50.1 で採取。
@@ -14,15 +15,9 @@ struct GitRefNamesTests {
         subdirectory: "Fixtures"))
     let names = GitRefNameList.parse(
       output: String(decoding: try Data(contentsOf: url), as: UTF8.self))
-    #expect(names.localBranches == ["feature", "main"])
-    #expect(names.remoteBranches == ["origin/feature", "origin/main"])
+    #expect(names.localBranches == [.local("feature"), .local("main")])
+    #expect(names.remoteBranches == [.remote("origin/feature"), .remote("origin/main")])
     #expect(names.all.count == 4)
   }
 
-  @Test("symbolic-ref の出力を merge-base へ渡せる短縮名にする")
-  func shortensRemoteRef() {
-    #expect(GitRefNameList.shortenRemoteRef("refs/remotes/origin/main\n") == "origin/main")
-    #expect(GitRefNameList.shortenRemoteRef("refs/heads/main\n") == nil)
-    #expect(GitRefNameList.shortenRemoteRef("") == nil)
-  }
 }

@@ -11,7 +11,7 @@ AI Agentの開発ワークフローを、Git worktreeと永続的なTerminal ses
 - worktreeごとに独立したtmux sessionを保持する
 - AI AgentのTerminalを中心に、必要なときだけCode、Diff、Evidenceを確認する
 - Claude CodeやCodexなどをAgent Adapterで抽象化する
-- Macを実行Hostとし、iPhone／iPadから同じ作業へ接続できるようにする
+- メインのMacを実行Hostとし、作業用のMacとiPhone／iPad／AndroidからTailscale上のSSHまたはMoshで同じ作業へ接続できるようにする(Projectとタブまで再現し、セッション一覧・Diff・コメントを使える)
 - Terminal本体とAgent Skillsの責務を分離する
 - OSS公開時の著作権、ライセンス、ブランド境界を明確にする
 
@@ -20,7 +20,7 @@ AI Agentの開発ワークフローを、Git worktreeと永続的なTerminal ses
 Pre-alphaです。現在は次の技術的な成立性を優先して検証します。
 
 1. SwiftUIへのlibghostty組み込みとtmux接続
-2. iPhone／iPadからのSSH接続とTerminal描画
+2. 作業用のMacとiPhone／iPad／AndroidからのSSH／Mosh接続とTerminal描画
 3. Claude Code／Codexの状態を共通化するAgent Adapter
 
 ## Documentation
@@ -38,7 +38,8 @@ Pre-alphaです。現在は次の技術的な成立性を優先して検証し�
 - libghostty
 - tmux CLI
 - git CLI
-- SSH／SwiftNIO SSH
+- SSH／Mosh(外部CLI)
+- モバイルクライアントの実装技術は未定(iOS／iPadOS／Androidを1つのコードベースで作る案が第一候補)
 - SQLite／GRDB.swift
 - ripgrep
 

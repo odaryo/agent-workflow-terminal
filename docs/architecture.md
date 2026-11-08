@@ -197,7 +197,7 @@ Agent(または`git worktree add`)が作ったworktreeは、§3.2の自動Active
 - worktreeの最後の1枚を閉じるときだけ、§3.4のClose(4択と拒否条件)を出す。
 - Project Rootのタブは最低1枚残し、最後の1枚は閉じられないようにする(閉じる操作を無効にする)。Project Rootは常設の作業空間であり(§2.3)、Inactiveにできないためである。
 
-**Client(作業PC・モバイル)の`+ New Task`もHostと同じ操作とする — 確定(2026-11-01。2026-11-08にモバイルからClient全体へ広げた)。** Clientは自分でGit worktreeを作らず、Agentも起動しない。Project Rootのディレクトリで新しいsessionを作り、そのsessionへattachする(sessionの作らせ方は§20.3、現在の推奨)。Hostのタブのsessionは Clientからもそのままattachでき、逆も同じである。
+**モバイルの`+ New Task`もMacと同じ操作とする — 確定(2026-11-01)。** モバイルアプリ自身はGit worktreeを作らず、Agentも起動しない。Project Rootのディレクトリで新しいsessionを作り、そのsessionへattachする。Macのタブのsessionはモバイルからもそのままattachでき、逆も同じである。作業PCのClient(§20.5)にも同じ扱いを当てはめ、sessionは`hostctl`を通してHostに作らせる(現在の推奨、2026-11-08。§20.3)。
 
 Agentがworktreeを作った後の、`+ New Task`で開いたProject Rootのタブ(中でAgentが動いたままのsession)の扱い — 残してユーザーが閉じるのか、Agentがそのsessionでworktreeへ移って作業を続けてよいのか — は未確定とする(§25)。2つ目以降のsessionの名前とアプリ再起動後の復元は§3.5と§25で扱う。
 
@@ -765,7 +765,7 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
   なく作業ツリーの今のファイルを開く。作業ツリーに無い(削除・rename済み)、既定アプリが無いなどで
   開けなかったときは、黙って失敗せずに理由を表示する。
 - アプリ内の別windowやアプリ内レンダリング(Markdownプレビュー、Web Preview)は作らない(§1.2、§18)。
-- Hostのアプリ専用とする。Client(作業PC・モバイル)には設けない(ファイルはHost上にあり、Clientの既定アプリへは渡せないため。§20.1)。
+- Hostのアプリに設ける。モバイルクライアントには設けない(2026-11-01の「iOSクライアントには設けない」をモバイル全体に当てはめる)。作業PCのClient(§20.5)に設けるか — 設けるならファイルの中身を`hostctl`で取り寄せて作業PCの既定アプリへ渡すことになる — は未確定とする(§25)。2026-11-01の確定は「Mac専用」だったが、そのときMacはHostだけだった。
 
 **履歴・過去commit・blameの実装上の決定 — 現在の推奨(Issue #183)。**
 
@@ -1104,16 +1104,16 @@ Agent側がどの場合にネイティブUIではなくfallbackを使うか(§31
 モバイルへのPush通知は、軽量な通知中継をopt-inで利用する方式とする(確定)。中継へ送るpayloadはworktree ID・通知種別などの最小限に留め、コードやTerminal出力を含めない。中継を有効にしない場合は、hostへ接続中のローカル通知のみとなる。
 
 **通知中継の経路 — 未確定(2026-11-08に見直し)。** 2026-10-08に「通知中継はApple CloudKitに担わせ、
-自前の中継サーバは置かない」と確定したが、CloudKitのsubscription通知はAppleの機器にしか届かず、Androidを
-含む利用形態(§20.1)を満たさないため、この確定を取り消す。CloudKitを前提にしていた「同じApple IDでの
+自前の中継サーバは置かない」と確定したが、CloudKitには、アプリが動いていない間のAndroidの機器へ
+通知を届ける経路(FCM等)が無く、Androidを含む利用形態(§20.1)を満たさないため、この確定を取り消す。CloudKitを前提にしていた「同じApple IDでの
 サインインをpairingの代わりにする」も取り消す。次の要求は引き継ぐ。
 
 - opt-inであること。payloadを最小限にすること(worktree ID・通知種別・Mac名だけ。コードやTerminal出力を
   載せない)。
 - 利用者が増えてもPush配信の費用が増えないこと(2026-10-08にCloudKitを選んだ理由)。
 
-モバイルOSがアプリを止めている間にも届けるには、各OSのPush基盤(AppleはAPNs、AndroidはFCM)を通す必要が
-ある。候補は、iOSはCloudKit・Androidは別の経路と分ける案や、両OSへ届く1つの中継を使う案であり、選定は
+モバイルOSがアプリを止めている間にも届けるには、通常は各OSのPush基盤(AppleはAPNs、AndroidはFCM)を通す
+必要がある。候補は、iOSはCloudKit・Androidは別の経路と分ける案や、両OSへ届く1つの中継を使う案であり、選定は
 未確定とする(§25)。導入はClientからの遠隔操作の後とする(§20.8)。
 
 **モバイル初版の利用条件 — 撤回(2026-11-08)。** 2026-09-07に確定した「Mac側アプリを起動したまま、外出先で
@@ -1771,7 +1771,8 @@ Agent状態はタブとOverviewの表示に出ているので、サイドバー�
 
 ### 20.1 利用形態 — 確定(2026-11-08)
 
-2026-11-08にユーザーが示した最終的な利用形態を、この章の前提とする。
+2026-11-08にユーザーが示した最終的な利用形態を、この章の前提とする(メインPCのユーザーの表記は「MacbookStudio」で、
+Mac Studioと解釈した)。
 
 | 役割 | 機器 | 動かすもの |
 |---|---|---|
@@ -1848,16 +1849,21 @@ Client: iPhone / iPad / Android     — モバイルクライアント
   session名の導出(§3.5)とsession作成時のoption(§4.2、§4.4)をHostの1か所に保つためである。作ったタブは
   Hostのタブ列にも現れる。
 - Clientの`+ New Task`がProject Rootのディレクトリで新しいsessionを作ってattachするだけで、worktreeを作らず
-  Agentも起動しないことは、2026-11-01の確定(§3.1)をClient全体へ広げたものである。
+  Agentも起動しないことは、モバイルについては2026-11-01の確定(§3.1)であり、作業PCへ当てはめるのは現在の
+  推奨である。
 - 表示状態(選んでいるタブ、Drawerの開閉など)は機器ごとに独立させる(§19.1)。Hostで選んだタブにClientが
   追随することはしない。Project一覧とタブの集合はHostが正であり、この独立の対象ではない。
 - Hostのアプリが起動していないとき、`hostctl`はそのことを返す。Clientは構造化データを出せない旨を示し、
-  Hostのtmuxにあるsessionのうちこのアプリのsession名の規則(§3.5)に合うものへ、素のattachだけを提供する。
+  縮退した入口として、Hostのtmuxにあるsessionのうちこのアプリのsession名の規則(§3.5)に合うものの一覧と、
+  そこへの素のattachだけを提供する。この一覧はタブ列ではない。上の「Clientはtmuxを走査してタブを組み立て
+  ない」の例外であり、Hostのアプリが応答するようになれば、Clientのタブ列はHostのものに戻る。縮退中の
+  attachはタブとして記録しない。
 
 **Clientから行える操作の範囲 — 現在の推奨(2026-11-08)。** 初版のClientで行えるのは、セッション一覧の表示、
 タブを開いてattachすること、新しいタブを開くこと、Diffの閲覧、Diffへのコメントとその送信である。
 Close(§3.4)、Active／Inactiveの切り替え(§3.2)、Projectの登録と解除(§16.1)はHostでだけ行う。Clientで
-これらを行えるようにするかは未確定とする(§25)。
+これらを行えるようにするかは未確定とする(§25)。§3.1の通常のタブを閉じる操作(最後の1枚以外を閉じて
+sessionを終える)をClientで行えるかも未確定とする(§25)。
 
 ### 20.4 セッション一覧・Diff・コメント
 
@@ -1897,7 +1903,10 @@ Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提�
 **表示の原則 — 確定(維持)。**
 
 - 同じtmux session、同じAgent TUIをそのまま表示する。Claude出力を解析した独自Chat UIには変換しない。
-- Agent専用の操作ボタンではなく、汎用のTerminal補助キーバーを持つ。外付けキーボードも通常どおり使える。
+- Agent専用の操作ボタンではなく、汎用のTerminal補助キーバーを持つ。
+- 最終形はモバイルクライアント内の端末とする(外部の端末アプリは段階的な手段。§20.8)。
+
+外付けキーボードも通常どおり使えるようにする(現在の推奨)。
 
 補助キーバー例:
 
@@ -1938,14 +1947,15 @@ Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提�
 - Tailscale SSH(tailnetの認証で接続し、鍵を要らなくする機能)を使えるかは未検証であり、候補に留める(§25)。
 
 **接続先の同期は撤回する(2026-11-08)。** 2026-10-08に確定した「接続先(host・user・portとMac名)をCloudKitで
-機器間に同期する」は、CloudKitがAndroidに届かないため撤回する。Hostは1台なので、接続先は各機器で1度
+機器間に同期する」は、CloudKitにはアプリが動いていない間のAndroidの機器へ届ける経路が無いため撤回する。Hostは1台なので、接続先は各機器で1度
 入力する(現在の推奨)。鍵と`known_hosts`は従来どおり同期しない。
 
 **配布経路。** iOS／iPadOSアプリは、XcodeからDevelopment署名で実機へ直接インストールし、TestFlight／App Storeでの
 配布とApp Store審査はv1の対象外とする(2026-10-08の確定を維持)。Androidの配布経路は未確定とする(§25)。
 
 **対応OSの初期version。** macOS 14以上、iOS／iPadOS 17以上(2026-10-08の確定を維持。SwiftPM package
-(`AgentWorkflowTerminal/`・`App/`)のplatforms指定と一致させる)。Androidの下限は未確定とする(§25)。
+(`AgentWorkflowTerminal/`・`App/`)のplatforms指定と一致させる。モバイルクライアントをSwift以外で作る場合、
+iOSの下限はその技術の側で同じ値に合わせる)。Androidの下限は未確定とする(§25)。
 
 ### 20.7 複数のClientの同時接続
 
@@ -1955,7 +1965,10 @@ Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提�
 時点で、Hostと作業PCのwindowまでiPhoneの幅へ縮む。Clientが増えたことで、この影響を受ける場面が増えた。
 候補として、モバイルをtmuxのclient flag `ignore-size`付き(`attach-session -f ignore-size`)でattachし、
 モバイルが他のクライアントの大きさに影響しないようにする案がある。tmux 3.8のmanには「the client does not
-affect the size of other clients」とあるが、サポート下限の3.4での挙動は未計測である。代わりにモバイルは
+affect the size of other clients」とあり、tmux 3.8では、200x50のクライアントがattachしている`smallest`の
+sessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindowが200x49のまま変わらないことを計測した
+(flagなしでは40x9に縮んだ。2026-11-08、隔離socket)。flagはtmux 3.2で入ったものだが、サポート下限の3.4での
+挙動は未計測である。代わりにモバイルは
 自分の画面より大きいwindowを見ることになり、はみ出す。どちらを採るかは未確定とし(§25)、Gate 2で測る。
 
 ### 20.8 導入順序 — 現在の推奨(2026-11-08)
@@ -2388,7 +2401,7 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - モバイルでMoshを使う方法(外部の端末アプリへ委ねる／ライセンス方針の例外を認める)(§20.6)
 - 複数のClientが同時にattachしたときの画面サイズ(`smallest`のまま／モバイルを`ignore-size`でattach)(§20.7)
 - `hostctl`のprotocol、versioning、権限、再接続(§21.4)
-- Clientで提供する機能の範囲と時期 — Code Viewer、File Browser、Evidence、Ask Agent、Close、Active／Inactiveの切り替え、Projectの登録と解除(§20.3、§20.4)
+- Clientで提供する機能の範囲と時期 — Code Viewer、File Browser、Evidence、Ask Agent、`.html`／`.md`をOSの既定アプリで開く(作業PC。§7.3)、§3.1の通常のタブを閉じる操作、Close、Active／Inactiveの切り替え、Projectの登録と解除(§20.3、§20.4)
 - 1つのmacOSアプリのプロセスがHostとClientを兼ねるか(作業PCが自分のProjectのHostにもなるか)(§20.5)
 - モバイルへのPush通知の経路(§11.2。2026-11-08にCloudKitの確定を取り消した)
 - Tailscale SSHを鍵の代わりに使えるか(§20.6)
@@ -2633,7 +2646,7 @@ PR_READY
 - [x] タブの右クリックの「新規タブ」は同じディレクトリで新しいsessionを作ってタブとして開き、同じディレクトリのタブ群の末尾に置く。タブ列の`＋`(`+ New Task`)はProject Rootのディレクトリで開く。どちらも選んだ状態で端末にフォーカスを渡し、Agentは起動しない。bare repositoryのProjectでは`＋`だけ無効
 - [x] 同じディレクトリの2つ目以降のsession名は、安定IDからの導出結果に接尾辞を足して区別する(形は未確定)
 - [x] タブは最初からのものと後から足したものを区別しない。最後の1枚以外を閉じるとsessionも終了し(shell以外のプロセスが動いていれば確認)、worktreeの最後の1枚を閉じるときだけCloseの4択を出す
-- [x] Client(作業PC・モバイル)の`+ New Task`もProject Rootのディレクトリで新しいsessionを作ってattachする。Clientはworktreeを作らずAgentも起動しない(2026-11-08にモバイルからClient全体へ広げた)
+- [x] モバイルの`+ New Task`もProject Rootのディレクトリで新しいsessionを作ってattachする。モバイルはworktreeを作らずAgentも起動しない
 - [x] タブの右クリックから選択中のProjectの全タブの作業概要(Overviewと同じ目的と状態)を一覧し、選ぶとそのタブへ切り替える
 - [x] 作業概要の一覧はタブ列と同じ順に並べ、一覧の中では目的を編集させない。Agent paneの無いタブは「Agent paneなし」と出す(2026-11-01)
 - [x] アプリの再起動後は、tmuxに残っている2つ目以降のsessionを命名規則から見つけ直してタブを復元する(2026-11-01)
@@ -2670,7 +2683,7 @@ PR_READY
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Code／Diff／EvidenceはViewer Drawerで開き、別窓は設けない。Diffの比較元の指定はDrawer内で行う
-- [x] Code ViewerとDiffの`.html`／`.md`は、作業ツリーの今のファイルをOSの既定アプリで開ける(Hostのアプリ専用。2026-11-08)。アプリ内レンダリングはしない(2026-11-01)
+- [x] Code ViewerとDiffの`.html`／`.md`は、作業ツリーの今のファイルをOSの既定アプリで開ける(Mac専用。作業PCのClientでの扱いは2026-11-08から未確定)。アプリ内レンダリングはしない(2026-11-01)
 - [x] submodule内のuntrackedファイルはDiffで観測しない(`--ignore-submodules=untracked`を明示)
 - [x] Diffはsnapshot、Refreshで新snapshot
 - [x] Base branchはupstream→`origin/HEAD`の既定branch→ユーザー選択の順で決め、結果をタスクタブごとに記憶する
@@ -2787,6 +2800,7 @@ PR_READY
 - [ ] 初版のClientの操作範囲は一覧・attach・新規タブ・Diff・コメントとし、Close・Active／Inactive・Projectの登録と解除はHostだけで行う(§20.3)
 - [ ] 導入順序は hostctlと作業PCのClient → モバイルクライアント → モバイルへのPush通知(§20.8)
 - [ ] 接続先は各機器で入力し、同期しない(§20.6)
+- [ ] 作業PCのClientの`+ New Task`もモバイルと同じ扱いにし、sessionは`hostctl`を通してHostに作らせる(§3.1、§20.3)
 - [ ] Androidの接続鍵もKeystoreで機器内に生成・保持し、外へ出さない(§20.6)
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
 - [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)

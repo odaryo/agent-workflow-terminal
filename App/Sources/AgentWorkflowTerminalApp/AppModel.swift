@@ -53,6 +53,7 @@ final class AppModel: ObservableObject {
   /// ユーザーが手で復旧できる可能性まで消える。`stop()` の後も `false` (登録解除後に書かない)。
   private var canSave = false
   private let rescan = DetachedOnceTask()
+  let hostControlRescan = HostControlRescan()
   /// `rescan` と分ける。あちらは `run()` の二重起動を防ぐ側で、スキャンが**終わった**ことは
   /// 表さない。空の一覧を「worktree が無い」と読んでよいのは、この印が立った後だけである。
   @Published private(set) var didCompleteInitialScan = false
@@ -176,6 +177,7 @@ final class AppModel: ObservableObject {
   func stop() {
     tabClosing.cancel()
     rescan.cancel()
+    hostControlRescan.stop()
     canSave = false
     paneObservations.stopAll()
   }
@@ -259,13 +261,12 @@ final class AppModel: ObservableObject {
   }
 
   private func observe(with detector: GitWorktreeDetector) async {
-    while !Task.isCancelled {
-      try? await Task.sleep(for: rescanInterval)
+    defer { hostControlRescan.stop() }
+    for await _ in hostControlRescan.events(interval: rescanInterval) {
       guard !Task.isCancelled else { return }
-
-      // スキャンが失敗した回は何もしない。空の一覧や部分的な結果を
-      // `reconcileDetectedWorktrees` へ渡すと、全 worktree が消失扱いになり、次の回に
-      // Inactive にしていた worktree が自動 Active 化される (同関数の doc 参照)。
+      let waiters = hostControlRescan.beginScan()
+      defer { hostControlRescan.complete(waiters) }
+      // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
       guard case .success(let scan) = await scan(with: detector) else { continue }
 
       report(scanFailures: scan.failures)

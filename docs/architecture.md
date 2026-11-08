@@ -208,7 +208,7 @@ Agent(または`git worktree add`)が作ったworktreeは、検出されただ�
 - TerminalはProjectに存在する全worktreeを検出する。
 - OverviewにはProject RootとActive worktreeのセッションを表示する。
 - 既存・過去・別用途のworktreeはInactiveとして保持できる。
-- AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。
+- AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。Agentが`hostctl worktree open`を呼んだときは例外とする(§3.1)。
 - Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
 - 検出できたが作業ツリーへ到達できないworktreeは`到達不能`として保持する。
 
@@ -241,7 +241,7 @@ Active指定が消えることが分かり、それを仕様として受け入�
 
 ### 3.3 Active化とtmux
 
-Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
+Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。Agentが`hostctl worktree open`を呼んだときは、呼び出しそのものを新規作成の指示とみなして確認を挟まない(§3.1)。
 
 **「人に確認する」の範囲 — 確定(2026-11-02、2026-11-08に改定)。** OverviewのProjectの見出しのActive化操作(現在の推奨、§13)からworktreeを選んでActiveにしたときは、確認の画面を挟まずにsessionを作る。選ぶ操作そのものを新規作成の明示操作とみなすためである。新規出現したworktreeは自動でActiveにしないので、この場合は残らない(2026-11-08)。
 

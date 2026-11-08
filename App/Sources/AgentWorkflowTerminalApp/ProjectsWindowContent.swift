@@ -34,6 +34,9 @@ struct ProjectsWindowContent: View {
       }
       mainColumn
     }
+    .modifier(
+      OverviewToolbarBand(isEnabled: OverviewPresentation(storedValue: presentation) == .sidebar)
+    )
     .background {
       if let model = projects.selectedModel {
         ProjectWindowExpansion(model: model, extraWidth: sidebarOccupiedWidth)
@@ -116,6 +119,21 @@ struct ProjectsWindowContent: View {
         "選択できる Project がありません", systemImage: "exclamationmark.triangle",
         description: Text("登録済みの Project にはどれも到達できません。ツールバーのメニューから理由を確認してください。"))
     }
+  }
+}
+
+private struct OverviewToolbarBand: ViewModifier {
+  let isEnabled: Bool
+
+  func body(content: Content) -> some View {
+    // content ごと分岐すると端末の NSView と tmux client が作り直されるため、
+    // modifier の構造は固定し、表示形式は値で切り替える。
+    // 項目の sharedBackgroundVisibility だけでは、sidebar の List 背景や境界線が
+    // titlebar へ延びるのを防げない。内容の描画範囲と帯全体の背景を別々に固定する。
+    content
+      .clipped()
+      .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
+      .toolbarBackground(isEnabled ? .visible : .automatic, for: .windowToolbar)
   }
 }
 

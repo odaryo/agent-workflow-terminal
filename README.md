@@ -1,6 +1,8 @@
-# agent_workflow_terminal
+# Agent Workflow Terminal
 
-AI Agentの開発ワークフローを、Git worktreeと永続的なTerminal sessionを軸に実行・確認・レビューするためのTerminalアプリケーションです。
+開発名は `agent_workflow_terminal` です。
+
+Git worktreeごとにtmuxで動かす複数のAI Agentを、状態と判断待ちを一覧しながら操作・レビューできる端末アプリケーションです。名前のWorkflowは、人がAgentに任せた作業を見て、レビューして返す流れを指します。
 
 > [!IMPORTANT]
 > このプロジェクトは設計および技術検証中です。現在の仕様と技術構成は、PoCの結果により変更される可能性があります。

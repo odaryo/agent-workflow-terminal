@@ -1,10 +1,10 @@
-# AI開発用Terminalアプリ 設計書
+# Agent Workflow Terminal 設計書
 
 > 文書ステータス: 会話で確定した仕様の整理 + 未確定事項の明示
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-08(リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-08(正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -12,7 +12,7 @@
 >
 > 開発名称: `agent_workflow_terminal`
 >
-> 正式プロダクト名: 未決定
+> 正式プロダクト名: Agent Workflow Terminal(確定 2026-11-08。略称AWT。§0、§23.3)
 
 ## 0. この文書の読み方
 
@@ -28,9 +28,11 @@
 特に、次の2領域を混在させない。
 
 - **Part I: Terminalアプリ本体** — Project、worktree、tmux、Viewer、状態検出、リモート接続(作業PC・モバイル)、ローカル保存など。
-- **Part II: Agent Skills／開発フロー** — 要件定義、設計、実装、検証、成果物による引き継ぎなど。
+- **Part II: Agent Skills** — 要件定義、設計、実装、検証、成果物による引き継ぎなど。
 
-TerminalはAgent開発フローの表示・操作・レビューを支援するが、Agent Skillsのオーケストレーターそのものにはしない。
+TerminalはAgent Skillsが進める開発の表示・操作・レビューを支援するが、Agent Skillsのオーケストレーターそのものにはしない。
+
+**製品名のWorkflowが指すもの — 確定(2026-11-08)。** 正式プロダクト名はAgent Workflow Terminalとする。名前のWorkflowは、人が複数のAgentに仕事を任せ、その状態を見て、Diffをレビューし、コメントを返すという作業の流れ(Part I)を指す。Part IIのAgent Skillsのphase構成(§28)の名前ではなく、TerminalがそのphaseをAgentに代わって進めることも意味しない。この文書ではPart IIの対象を「Agent Skills」と呼び、「開発フロー」「workflow」とは呼ばない。リポジトリ自身の開発の進め方(`CLAUDE.md`の「Development pipeline」)もこの名前とは別物である。
 
 ---
 
@@ -2255,7 +2257,7 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 - Ghostty公式アイコンやブランド資産を流用しない。
 - 必要な場合はAbout／Third-Party Noticesで「Terminal rendering powered by libghostty」等の正確なクレジットを行う。
 
-プロダクト名は未決定であり、採用前にGitHub、Homebrew、App Store、商標、ドメイン等の名称衝突を別途確認する。
+プロダクト名はAgent Workflow Terminal(略称AWT)とする — 確定(2026-11-08)。GitHubのリポジトリ検索(`"agent workflow terminal"`)ではこのリポジトリ以外の2件は無関係で、Homebrewに同名は無かった(2026-11-08)。App Store、Google Play、商標、ドメインの衝突は未確認であり、配布の前に確かめる。
 
 ## 24. PoC優先項目
 
@@ -2364,7 +2366,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### Product／scope
 
-- プロダクト名
 - Mac専用から他PC hostへ広げるか
 - v1、v2の正式な機能境界
 - Clone RepositoryによるProject登録の経路(§16.1。既存Local Repositoryの経路を先に実装した)
@@ -2425,9 +2426,9 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ---
 
-# Part II. Agent Skills／AI開発フロー内部設計
+# Part II. Agent Skillsの内部設計
 
-> この部はTerminalアプリの仕様ではなく、アプリとは独立してAgentの中で動く開発フロー(Agent Skills)の設計案であり、このリポジトリ自体の開発ルール(`CLAUDE.md`)でもない。TerminalはAgentを制御せず、ここに書かれた内容に依存しない — 両者の接点はpaneユーザー変数による連携(§12.7)と§32の原則だけである。
+> この部はTerminalアプリの仕様ではなく、アプリとは独立してAgentの中で動くAgent Skills(要件定義から独立レビューまでのphase構成)の設計案であり、製品名のWorkflow(§0)が指すものでもなく、このリポジトリ自体の開発ルール(`CLAUDE.md`)でもない。TerminalはAgentを制御せず、ここに書かれた内容に依存しない — 両者の接点はpaneユーザー変数による連携(§12.7)と§32の原則だけである。
 
 ## 26. Terminal本体との責務分離
 
@@ -2447,7 +2448,7 @@ Agent Skillsの内部設計は、Terminalアプリ本体の仕様とは別に管
 
 Terminalは、Agent Skillsが存在しなくても通常Terminalおよびworktree managerとして動作できることを目標とする。
 
-## 27. Agent開発フローで確認できた意図
+## 27. Agent Skillsで確認できた意図
 
 次はユーザーから提示された方針であり、Agent Skills側の設計入力として扱う。
 
@@ -2754,6 +2755,7 @@ PR_READY
 - [x] Web Preview／DevTools／VNCは作らない
 - [x] 単一ユーザー前提(マルチユーザー／チーム共有は対象外)
 - [x] 本体licenseはMIT
+- [x] 正式プロダクト名はAgent Workflow Terminal(略称AWT)。名前のWorkflowはPart Iの人とAgentの作業の流れを指し、Part IIのAgent Skillsを指さない(2026-11-08)
 - [x] リモート到達性は既存VPNへ委譲、独自リレー／NAT越えは持たない
 - [x] 構造化データ提供はHostのアプリ(Host Core)の起動中のみ、独立daemonは作らない
 - [x] Push通知はopt-inの軽量中継 + 最小payload(コード・出力は載せない)
@@ -2783,7 +2785,7 @@ PR_READY
 - [x] 例外としてタスクタブの切り替えの⌃Tab／⌃⇧Tabはアプリが使う(2026-11-03)
 - [x] 判断待ち(`Question`／`Permission`／`Error`)の検出は取りこぼしを避け、誤検出は1 poll分まで許容する
 - [x] ターン開始直後の`Ready for Review`の先出しは、最小変化行数2の製品の設定での値(2.0秒pollingで443中4.7%、working区間のrecall 0.953)を許容する(2026-11-02)
-- [x] Agent開発フローはReview独立sessionを含む4phase構成
+- [x] Agent SkillsはReview独立sessionを含む4phase構成
 
 # 付録B. 現在の推奨構成チェックリスト
 

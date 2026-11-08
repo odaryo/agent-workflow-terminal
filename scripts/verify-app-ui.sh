@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 使い方: scripts/verify-app-ui.sh <サブコマンド> [引数...]
 
-App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「Agent workflow」の
+App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「Development pipeline」の
 「UI 配線は動かして確認する」で使う。
 
   build                 scripts/build-app.sh で最終バンドルを作る

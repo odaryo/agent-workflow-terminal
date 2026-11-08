@@ -89,8 +89,8 @@ struct PaneDisplayStateRetentionTests {
     #expect(stabilizer.observe(original, at: at(2)) == previous)
   }
 
-  @Test("新規 pane が増えても入力の相対順を保ち、保持中の pane は前回の最も近い入力中の左隣の直後に残す")
-  func missingPanesFollowPreviousSurvivingPredecessorInTheirPreviousOrder() throws {
+  @Test("新規 pane が増えて入力順が変わっても、前後に残る同順位の pane の相対順を保つ")
+  func unchangedTiedPanesKeepRelativeOrderWhenInputChanges() throws {
     var stabilizer = PaneDisplayStateStabilizer()
     let previous = stabilizer.observe(
       [pane("%1", .working), pane("%2", .working), pane("%3", .working), pane("%4", .working)],
@@ -101,13 +101,12 @@ struct PaneDisplayStateRetentionTests {
     let next = stabilizer.observe(
       [pane("%5", .working), pane("%4", .working), pane("%1", .working), pane("%6", .working)],
       at: at(2))
-    #expect(next.map(\.paneID.rawValue) == ["%5", "%4", "%1", "%2", "%3", "%6"])
+    #expect(next.filter { $0.changedAt == nil } == previous)
+    #expect(next.filter { $0.changedAt != nil }.map(\.paneID.rawValue) == ["%5", "%6"])
     #expect(
       next.filter { $0.paneID.rawValue == "%2" || $0.paneID.rawValue == "%3" }
         == Array(previous[1...2]))
-    #expect(
-      stabilizer.observe([], at: at(3)).map(\.paneID.rawValue)
-        == ["%5", "%4", "%1", "%2", "%3", "%6"])
+    #expect(stabilizer.observe([], at: at(3)) == next)
   }
 
   @Test("新規 pane が先頭に増えても、前回の左側に入力中の pane がない保持中の pane は先頭に残す")

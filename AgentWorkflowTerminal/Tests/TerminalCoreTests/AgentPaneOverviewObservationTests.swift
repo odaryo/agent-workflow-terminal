@@ -56,6 +56,36 @@ struct AgentPaneOverviewObservationTests {
     #expect(result.tasks.last?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ["%1", "%2"])
   }
 
+  @Test(
+    "基準観測の3 pane が Unknown から別々の時刻に Idle / Working へ決まっても tmux 順",
+    arguments: [
+      [AgentState.idle, .idle, .idle], [.working, .working, .working], [.idle, .working, .idle],
+    ])
+  func staggeredInitialResolutionKeepsTmuxOrder(_ destinations: [AgentState]) throws {
+    var stabilizer = PaneDisplayStateStabilizer()
+    let ids = ["%1", "%2", "%3"]
+    var input = ids.map { observedPane($0, .unknown) }
+    var states = stabilizer.observe(input, at: start)
+    #expect(states.map(\.changedAt) == [nil, nil, nil])
+
+    for (step, index) in [2, 0, 1].enumerated() {
+      let destination = destinations[index]
+      input[index] = observedPane(ids[index], destination)
+      let instant = start.advanced(by: .seconds((step + 1) * 20))
+      states = stabilizer.observe(input, at: instant)
+      if destination == .idle {
+        let deadline = try #require(stabilizer.nextDeadline)
+        #expect(deadline == instant.advanced(by: .seconds(9)))
+        states = stabilizer.observe(input, at: deadline)
+      }
+      #expect(states[index].state == destination)
+      #expect(states.map(\.changedAt) == [nil, nil, nil])
+      let result = try overview([task("combined", states)])
+      #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ids)
+    }
+    #expect(states.map(\.state) == destinations)
+  }
+
   @Test("未観測の Task は未観測の行1つで、pane の無い Task と同じ群に Task Tab 順で置く")
   func unobservedTasksHaveOwnRowAndKeepTabOrder() throws {
     let unseenA = try task("unseenA", [], isObserved: false)
@@ -110,8 +140,8 @@ struct AgentPaneOverviewObservationTests {
       changedAt: changedAt)
   }
 
-  private func observedPane(_ id: String) -> PaneAgentState {
-    PaneAgentState(id: PaneID(rawValue: id), state: .working, lastUpdatedAt: .distantPast)
+  private func observedPane(_ id: String, _ state: AgentState = .working) -> PaneAgentState {
+    PaneAgentState(id: PaneID(rawValue: id), state: state, lastUpdatedAt: .distantPast)
   }
 
   private func task(

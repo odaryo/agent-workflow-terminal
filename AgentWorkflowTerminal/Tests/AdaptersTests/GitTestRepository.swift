@@ -175,7 +175,7 @@ struct GitTestRepository {
   @discardableResult
   func gitExitCode(
     _ arguments: [String], in worktreeName: String? = nil
-  ) async throws -> (exitCode: Int32, stderr: String) {
+  ) async throws -> ProcessRunResult {
     let directory = worktreeName.map { root.appending(path: $0) } ?? mainWorktree
     let result = try await processRunner.run(
       executableURL: executableURL,
@@ -191,7 +191,7 @@ struct GitTestRepository {
       ],
       timeout: .seconds(30)
     )
-    return (result.exitCode, result.stderr)
+    return result
   }
 }
 

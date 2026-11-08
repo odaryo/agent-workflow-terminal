@@ -51,7 +51,7 @@ struct GitSubmoduleConfigIndependenceTests {
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
 
       let result = try await builder.build(
-        .base(branch: "main"), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
 
       #expect(result.patchFailures.isEmpty)
       #expect(result.statusFailures.isEmpty)

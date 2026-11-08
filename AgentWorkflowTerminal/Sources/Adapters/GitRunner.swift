@@ -124,6 +124,10 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
   }
 
+  public static func upstream() -> Self {
+    Self(arguments: ["rev-parse", "--symbolic-full-name", "@{upstream}"])
+  }
+
   /// `--is-ancestor` は真偽しか返さないので、range を組むための OID はこちらで取る (§9.1.2)。
   public static func mergeBase(_ first: GitRevision, _ second: GitRevision) -> Self {
     Self(arguments: ["merge-base", first.rawValue, second.rawValue])

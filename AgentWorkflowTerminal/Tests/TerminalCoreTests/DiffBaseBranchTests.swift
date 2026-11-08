@@ -8,19 +8,21 @@ struct DiffBaseBranchTests {
   func prefersUserSelection() {
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: "release/1.0", upstream: "origin/feature", originHead: "origin/main")
-        == .resolved(branch: "release/1.0", source: .userSelection))
+        userSelection: .local("release/1.0"), upstream: .remote("origin/feature"),
+        originHead: .remote("origin/main"))
+        == .resolved(branch: .local("release/1.0"), source: .userSelection))
   }
 
   @Test("選択が無ければ upstream、次に origin/HEAD を使う")
   func fallsBackInOrder() {
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: nil, upstream: "origin/feature", originHead: "origin/main")
-        == .resolved(branch: "origin/feature", source: .upstream))
+        userSelection: nil, upstream: .remote("origin/feature"), originHead: .remote("origin/main"))
+        == .resolved(branch: .remote("origin/feature"), source: .upstream))
     #expect(
-      DiffBaseBranchResolver.resolve(userSelection: nil, upstream: nil, originHead: "origin/main")
-        == .resolved(branch: "origin/main", source: .originHead))
+      DiffBaseBranchResolver.resolve(
+        userSelection: nil, upstream: nil, originHead: .remote("origin/main"))
+        == .resolved(branch: .remote("origin/main"), source: .originHead))
   }
 
   @Test("どちらも解決できなければ未決定にする (main へ丸めない)")
@@ -35,17 +37,20 @@ struct DiffBaseBranchTests {
     arguments: ["", " ", "\t"])
   func treatsBlankAsAbsent(blank: String) {
     #expect(
-      DiffBaseBranchResolver.resolve(userSelection: blank, upstream: blank, originHead: blank)
+      DiffBaseBranchResolver.resolve(
+        userSelection: .local(blank), upstream: .remote(blank), originHead: .remote(blank))
         == .undetermined)
     #expect(
-      DiffBaseBranchResolver.resolve(userSelection: blank, upstream: blank, originHead: "origin/x")
-        == .resolved(branch: "origin/x", source: .originHead))
+      DiffBaseBranchResolver.resolve(
+        userSelection: .local(blank), upstream: .remote(blank), originHead: .remote("origin/x"))
+        == .resolved(branch: .remote("origin/x"), source: .originHead))
   }
 
   @Test("解決済みの branch 名だけを取り出せる")
   func exposesBranchName() {
     #expect(
-      DiffBaseBranch.resolved(branch: "origin/main", source: .upstream).branch == "origin/main")
+      DiffBaseBranch.resolved(branch: .remote("origin/main"), source: .upstream).branch
+        == .remote("origin/main"))
     #expect(DiffBaseBranch.undetermined.branch == nil)
   }
 }

@@ -53,7 +53,7 @@ public struct GitWorktreeScanResult: Sendable, Equatable {
 /// - Important: **entry ごとの失敗を黙って除外しない。** `reconcileDetectedWorktrees` は
 ///   渡された一覧を「そのスキャン時点の完全な一覧」として権威的に解釈し、載っていない安定 ID を
 ///   消失とみなす。1件でも黙って落として返すと、その worktree は消失扱いになり、次のスキャンで
-///   復帰したときに**ユーザーが意図して Inactive にしていた worktree が自動 Active 化される**。
+///   復帰したときに新規出現として扱われ、**ユーザーが Active にしていた指定が Inactive に落ちる**。
 ///   検出できない entry は `failures` に残す。ただし bare、到達不能と確認できない
 ///   `prunable`、common dir が別 Project の entry は対象外として除外する (`isScannable` /
 ///   `describe`)。`prunable` だけでは不在の証拠にならない (Issue #496)。除外自体の代償は Issue #137。
@@ -226,7 +226,7 @@ public struct GitWorktreeDetector: Sendable {
   ///   symlink のリンク先まで対象を広げないため、存在と種別の確認には `lstat` を使う。
   ///   `git worktree prune` は書き込み操作であり設計書 §17.2 で Agent へ委譲済み。
   /// - Important: prunable の entry を落とすのは、`GitWorktreeScanResult` の「黙って落とすと
-  ///   Inactive が自動 Active 化される」の例外として受け入れたものである (Issue #496)。
+  ///   Active の指定が失われる」の例外として受け入れたものである (Issue #496)。
   ///   `.git` を消しただけの**入れる**ディレクトリも、作業ツリーが残っていても消失扱いで落とす。
   ///   通すのは、入れないディレクトリと、`lstat` が `EACCES` を返した (祖先の探索権限が無い)
   ///   entry だけである。`ENOENT` 以外を一律に通すと、祖先が通常ファイルに置き換わった

@@ -24,7 +24,7 @@ public enum PaneUserOptionUnreadableReason: String, Sendable, Hashable, Codable 
 public struct PaneSummaryReadings: Sendable, Hashable, Codable {
   /// `@awt_status` (`<agent-pid> <text>`)。
   public let status: PaneUserOptionReading
-  /// `@awt_done` (`<agent-pid> <token>`)。
+  /// `@awt_done` (`<agent-pid> turn=<エポックミリ秒> <token>`)。
   public let completion: PaneUserOptionReading
   /// `@awt_purpose` (`<text>`)。書き手はアプリだけ。
   public let purpose: PaneUserOptionReading
@@ -67,10 +67,16 @@ public enum PaneAgentProcess: Sendable, Hashable, Codable {
 public struct AgentStampedValue: Sendable, Hashable, Codable {
   public let agentProcessID: Int32
   public let text: String
+  public let turnStartedAt: Date?
 
-  public init(agentProcessID: Int32, text: String) {
+  public init(agentProcessID: Int32, text: String, turnStartedAt: Date? = nil) {
     self.agentProcessID = agentProcessID
     self.text = text
+    self.turnStartedAt = turnStartedAt
+  }
+
+  public static func parseCompletion(_ raw: String) -> Parsed {
+    parse(raw, includesTurnStart: true)
   }
 
   public enum Parsed: Sendable, Hashable {
@@ -81,6 +87,10 @@ public struct AgentStampedValue: Sendable, Hashable, Codable {
 
   /// 先頭の ASCII 10進数 + 半角空白 (U+0020) 1個 + 残り。残りは前後の空白も含めて加工しない。
   public static func parse(_ raw: String) -> Parsed {
+    parse(raw, includesTurnStart: false)
+  }
+
+  private static func parse(_ raw: String, includesTurnStart: Bool) -> Parsed {
     if raw.isEmpty { return .unset }
     if raw.allSatisfy(\.isWhitespace) { return .malformed(.blank) }
     let scalars = raw.unicodeScalars
@@ -94,15 +104,34 @@ public struct AgentStampedValue: Sendable, Hashable, Codable {
     else {
       return .malformed(.agentProcessIDOutOfRange)
     }
-    let text = String(scalars[scalars.index(after: digitsEnd)...])
+    var text = String(scalars[scalars.index(after: digitsEnd)...])
+    var turnStartedAt: Date?
+    if includesTurnStart {
+      guard text.hasPrefix("turn=") else { return .malformed(.missingTurnStart) }
+      let turnAndToken = text.unicodeScalars.dropFirst("turn=".unicodeScalars.count)
+      guard let separator = turnAndToken.firstIndex(of: " ") else {
+        return .malformed(.missingSeparator)
+      }
+      let milliseconds = turnAndToken[..<separator]
+      guard !milliseconds.isEmpty,
+        milliseconds.allSatisfy({ ("0"..."9").contains($0) }),
+        let value = Int64(String(milliseconds)), value > 0
+      else {
+        return .malformed(.invalidTurnStart)
+      }
+      turnStartedAt = Date(timeIntervalSince1970: Double(value) / 1000)
+      text = String(turnAndToken[turnAndToken.index(after: separator)...])
+    }
     if let violation = PaneSummaryFormatViolation.textViolation(text) {
       return .malformed(violation == .blank ? .emptyText : violation)
     }
-    return .value(Self(agentProcessID: processID, text: text))
+    return .value(Self(agentProcessID: processID, text: text, turnStartedAt: turnStartedAt))
   }
 }
 
 public enum PaneSummaryFormatViolation: Sendable, Hashable, Codable {
+  case missingTurnStart
+  case invalidTurnStart
   case blank
   case missingAgentProcessID
   case missingSeparator
@@ -186,7 +215,9 @@ public struct PaneSummary: Sendable, Hashable {
       case .accepted(let value): .accepted(value.text)
       case .discarded(let reason): .discarded(reason)
       }
-    self.completion = Self.stamped(from: readings.completion, agentProcess: agentProcess)
+    self.completion = Self.stamped(
+      from: readings.completion, agentProcess: agentProcess,
+      parser: AgentStampedValue.parseCompletion)
   }
 
   private static func purpose(from reading: PaneUserOptionReading) -> PaneSummaryEntry<String> {
@@ -202,7 +233,8 @@ public struct PaneSummary: Sendable, Hashable {
   }
 
   private static func stamped(
-    from reading: PaneUserOptionReading, agentProcess: PaneAgentProcess
+    from reading: PaneUserOptionReading, agentProcess: PaneAgentProcess,
+    parser: (String) -> AgentStampedValue.Parsed = AgentStampedValue.parse
   ) -> PaneSummaryEntry<AgentStampedValue> {
     let raw: String
     switch reading {
@@ -210,7 +242,7 @@ public struct PaneSummary: Sendable, Hashable {
     case .value(let value): raw = value
     }
     let stamped: AgentStampedValue
-    switch AgentStampedValue.parse(raw) {
+    switch parser(raw) {
     case .unset: return .unset
     case .malformed(let violation): return .discarded(.malformed(violation))
     case .value(let value): stamped = value
@@ -231,7 +263,6 @@ public struct PaneSummary: Sendable, Hashable {
 public enum PaneTaskCompletionDisplay: Sendable, Hashable {
   case none
   case completed(AgentStampedValue)
-  /// 同じ token のまま pane が Working になった。token が変わるまでこのまま。
   case dismissed(AgentStampedValue)
 }
 
@@ -249,16 +280,17 @@ public enum PaneTaskCompletionDisplay: Sendable, Hashable {
 /// - Important: 記憶はアプリの寿命だけ持つ。再起動直後は解除の記憶も直前の状態も無いので、
 ///   pane の状態によらず有効な token を完了として扱い、次に応答終了から Working へ入るまで残す
 ///   (§12.7 に受け入れる残存挙動として記録)。
-/// - Important: 現在の Agent プロセスを特定できなかった回 (ps を読めない・候補が複数) は記憶を
-///   一切進めず、直前の表示をそのまま返す。その回の token は分からないので、解除済みの token を
-///   空で上書きすると次の観測で解除済みの完了が復活し、遷移だけを消費すると解除の機会を失う。
-///   表示を `.none` にすると completed → none → completed と揺れ、完了の通知が二重になる。
-/// - Note: 解除済みかどうかは PID と token の組で覚える。同じ token 文字列でも、別の Agent
-///   プロセスが書いたものは別の完了として扱う。
+/// - Important: 応答終了の観測時刻 tL (`observedAt`) は capture を発行する直前の時刻を渡す。
+///   受信時刻だと Completed の capture と次のターン開始の差が数十 ms (実測 64〜77 ms) しかなく、
+///   次のターンの完了まで失う。`@awt_done` の開始時刻はエポックミリ秒で書くこと。
+///   秒へ切り捨ててから 1000 倍すると、同じ秒に始まった次のターンの完了を失う (設計書 §12.7)。
+/// - Note: ターンの途中で誤った Idle / Completed を観測すると、そのターンの完了を失い得る
+///   (設計書 §12.7 の残存挙動)。
 public struct PaneTaskCompletionTracker: Sendable {
   private struct Entry: Sendable {
     var lastKnownState: AgentState?
-    var dismissed: AgentStampedValue?
+    var lastTurnEndObservedAt: Date?
+    var dismissBefore: Date?
     var display = PaneTaskCompletionDisplay.none
   }
 
@@ -271,33 +303,42 @@ public struct PaneTaskCompletionTracker: Sendable {
   /// `agentState` は adapter の観測そのもの (`PaneAgentState.state`) を渡す。`nil` は観測が
   /// まだ無いか Agent が居ないことを表す。
   public mutating func update(
-    paneID: PaneID, completion: PaneSummaryEntry<AgentStampedValue>, agentState: AgentState?
+    paneID: PaneID, completion: PaneSummaryEntry<AgentStampedValue>, agentState: AgentState?,
+    observedAt: Date? = nil
   ) -> PaneTaskCompletionDisplay {
-    if Self.isUndetermined(completion) {
-      return entries[paneID]?.display ?? .none
-    }
     var entry = entries[paneID] ?? Entry()
-    let current = completion.value
     if agentState == .working, let previous = entry.lastKnownState,
-      Self.turnEndingStates.contains(previous)
+      Self.turnEndingStates.contains(previous), let turnEnd = entry.lastTurnEndObservedAt
     {
-      entry.dismissed = current
+      entry.dismissBefore = max(entry.dismissBefore ?? turnEnd, turnEnd)
     }
     if let agentState, agentState != .unknown {
+      if Self.turnEndingStates.contains(agentState), let observedAt {
+        entry.lastTurnEndObservedAt = max(entry.lastTurnEndObservedAt ?? observedAt, observedAt)
+      }
       entry.lastKnownState = agentState
     }
+    if Self.isUndetermined(completion) {
+      entries[paneID] = entry
+      return entry.display
+    }
     entry.display =
-      switch current {
+      switch completion.value {
       case nil: .none
-      case let current? where current == entry.dismissed: .dismissed(current)
-      case let current?: .completed(current)
+      case let current?:
+        if let turnStartedAt = current.turnStartedAt, let dismissBefore = entry.dismissBefore,
+          turnStartedAt < dismissBefore
+        {
+          .dismissed(current)
+        } else {
+          .completed(current)
+        }
       }
     entries[paneID] = entry
     return entry.display
   }
 
-  /// 現在の Agent プロセスを特定できなかった読み取り。`update` はこの回の記憶を進めず直前の表示を
-  /// 返すので、その表示はこの回の token を表していない。
+  /// この回の token を特定できず表示を空にすると、完了通知が二重になるため直前の表示を保つ。
   public static func isUndetermined(_ completion: PaneSummaryEntry<AgentStampedValue>) -> Bool {
     switch completion {
     case .discarded(.agentProcessUnobservable), .discarded(.agentProcessAmbiguous): true

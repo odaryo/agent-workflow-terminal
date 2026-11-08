@@ -21,7 +21,7 @@ Issue 一覧をフェーズで絞り込むためだけに使う (`scripts/wf-mil
 | P1 | 最低限を試せる | worktree ごとのタブを開き、tmux セッションに attach し、タブに代表状態が出る | **完了** (2026-09-07) |
 | P2 | 基本機能を試せる | 日常の開発を1日このアプリで回せる | **完了** (2026-09-10) |
 | P3 | セッション把握と判断待ち | 全Agent paneの目的・現在地と判断待ちを一覧で把握し、対象へ戻れる | **完了** (2026-10-09) |
-| P4 | 作業PCから操作 | 作業PC(MacBook Pro)からメインPC(Mac Studio)のProject・タブ・セッション一覧を再現し、端末を操作し、Diffを見てコメントを送れる | 未着手 |
+| P4 | 作業PCから操作 | 作業PC(MacBook Pro)からメインPC(Mac Studio)のProject・セッション一覧を再現し、端末を操作し、Diffを見てコメントを送れる | 未着手 |
 | P5 | モバイルから操作 | iPhone・iPad・AndroidからP4と同じことができる | 未着手 |
 
 P4 / P5 は 2026-11-08 に差し替えた (Issue #618)。機器と要件はユーザーが示したもの (設計書 §20.1、確定) だが、
@@ -192,14 +192,14 @@ TODO の正本は GitHub Issues / Project とし、このファイルには実�
   P5 の後へ送った (§20.8)。milestone の名前は、Issue を起票し直すときに合わせる。
 - Mac Studio のアプリを Host、MacBook Pro の同じアプリを Client として動かし、Tailscale 上の SSH または Mosh で
   Host の tmux session へ attach する (§20.5)。
-- Client に Host と同じ Project とタブが並び、セッション一覧 (Overview と同じデータ) を見られ、Diff を開いて
+- Client に Host と同じ Project とセッションが並び、Overview の左サイドバーで選択・切り替えができ、Diff を開いて
   コメントを送れる。構造化データは `hostctl` から取る (§20.3、§20.4、§21.4)。Gate 2 の作業PC分と Gate 4 を含む。
 
 ## P5 モバイルから操作
 
 - 対象: なし。旧対象の #34 / #32 → #192 (Gate 2 / Gate 4 を含む) は、2026-11-01 の Issue 整理で一旦 close した
   (P4 と同じ理由)。着手するときに Issue を起票し直す。milestone `P5 モバイル操作` も閉じた。
-- iPhone・iPad・Android のモバイルクライアントから、P4 と同じこと (Project とタブの再現、セッション一覧、
+- iPhone・iPad・Android のモバイルクライアントから、P4 と同じこと (Project とセッションの再現、Overview による切り替え、
   端末の操作、Diff とコメント) ができる。P4 の `hostctl` をそのまま使う。
 - 着手の前に、実装技術 (1つのコードベース／OSごと) を Gate 2 のモバイル分で決める (§20.6)。
 - 実機・Tailscale・複数デバイス同時attach (画面サイズ、§20.7)・アプリ復帰・消失した対象を検証する。

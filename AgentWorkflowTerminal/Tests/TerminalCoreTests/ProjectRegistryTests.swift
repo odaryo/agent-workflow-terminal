@@ -53,9 +53,11 @@ struct ProjectRegistryTests {
   /// (`projects/<common dir の hash>/`) を2つのモデルが書き合う。
   @Test("common dir が同じなら別のパスから追加しても重複させず、既存を選択する")
   func registeringSameCommonDirectorySelectsExisting() throws {
-    let alpha = try project("alpha")
+    var alpha = try project("alpha")
+    alpha.agentCommand = "claude --model fable"
     let beta = try project("beta")
-    let alphaAgain = try project("alpha", directory: "/alpha-elsewhere")
+    var alphaAgain = try project("alpha", directory: "/alpha-elsewhere")
+    alphaAgain.agentCommand = "codex"
     var registry = self.registry([alpha, beta])
 
     let registration = registry.register(alphaAgain)
@@ -63,6 +65,7 @@ struct ProjectRegistryTests {
     #expect(registration == .alreadyRegistered)
     #expect(registry.projects == [alpha, beta])
     #expect(registry.project(alpha.commonDirectory)?.directory == "/alpha")
+    #expect(registry.project(alpha.commonDirectory)?.agentCommand == "claude --model fable")
     #expect(registry.selection == alpha.commonDirectory)
   }
 
@@ -91,13 +94,15 @@ struct ProjectRegistryTests {
 
   @Test("選択中でない Project を外しても選択は動かない")
   func unregisteringUnselectedKeepsSelection() throws {
-    let alpha = try project("alpha")
+    var alpha = try project("alpha")
+    alpha.agentCommand = "codex"
     let beta = try project("beta")
     var registry = self.registry([alpha, beta])
 
     registry.unregister(alpha.commonDirectory)
 
     #expect(registry.projects == [beta])
+    #expect(registry.project(alpha.commonDirectory) == nil)
     #expect(registry.selection == beta.commonDirectory)
   }
 
@@ -456,6 +461,17 @@ struct ProjectRegistryTests {
         == #"{"projects":[{"commonDirectory":"/alpha/.git","directory":"/alpha"}],"#
         + #""schemaVersion":1,"selection":"/alpha/.git"}"#
     )
+  }
+
+  @Test("agentCommand キーの無い既存の JSON は未設定として復元する")
+  func decodingLegacyProjectHasNoAgentCommand() throws {
+    let json =
+      #"{"projects":[{"commonDirectory":"/alpha/.git","directory":"/alpha"}],"#
+      + #""schemaVersion":1,"selection":"/alpha/.git"}"#
+    let persisted = try JSONDecoder().decode(PersistedProjectRegistry.self, from: Data(json.utf8))
+
+    #expect(persisted.projects.first?.agentCommand == nil)
+    #expect(ProjectRegistry(restoring: persisted).projects == [try project("alpha")])
   }
 
   @Test("common dir が絶対パスでない保存は復号に失敗する")

@@ -24,15 +24,15 @@ final class ProjectsModel: ObservableObject {
   /// ユーザーに一瞬「Project を追加」が見える (Issue #237 の M-1 と同じ種類の誤表示)。
   @Published private(set) var didLoad = false
   /// 端末を覆わずに伝える失敗 (保存できない、`--project` を解決できない、追加に失敗した等)。
-  @Published private(set) var warning: String?
+  @Published var warning: String?
 
   /// Overview の行と通知の deep link が共用する移動。
   let navigator = AppNavigator()
   /// `nil` は通知を出さない起動 (bundle の外)。
   let notifier: PaneNotifier?
 
-  private let dependencies: AppDependencies
-  private let resolver = GitProjectResolver(processRunner: FoundationProcessRunner())
+  let dependencies: AppDependencies
+  let resolver = GitProjectResolver(processRunner: FoundationProcessRunner())
   private let store: ProjectRegistryStore?
   /// 保存された一覧を読めなかった起動では `false`。読めなかったファイルを上書きすると、
   /// ユーザーが手で復旧できる可能性まで消える (`AppModel.canSave` と同じ理由)。
@@ -41,6 +41,9 @@ final class ProjectsModel: ObservableObject {
   /// 確認ダイアログの内容。非 `nil` の間だけダイアログを出す。
   @Published private(set) var pendingUnregister: ProjectUnregisterReview?
   private let startup = DetachedOnceTask()
+  var hostControlServer: HostControlSocketServer?
+  var pendingHostControl: Task<HostControlResponse, Never>?
+  let hostControlEnvironment = HostControlEnvironmentTask()
 
   init(dependencies: AppDependencies) {
     self.dependencies = dependencies
@@ -111,6 +114,7 @@ final class ProjectsModel: ObservableObject {
     registry.reselect(selectable: isSelectable)
     didLoad = true
     save()
+    await startHostControl()
   }
 
   nonisolated private static func tmuxVersionWarning(runner: TmuxRunner?) async -> String? {
@@ -170,6 +174,19 @@ final class ProjectsModel: ObservableObject {
     guard isSelectable(commonDirectory) else { return }
     registry.select(commonDirectory)
     save()
+  }
+
+  func setAgentCommand(
+    _ input: String, of commonDirectory: WorktreeIdentity
+  ) -> ProjectAgentCommandError? {
+    switch ProjectAgentCommand.normalized(input) {
+    case .success(let command):
+      registry.setAgentCommand(command, of: commonDirectory)
+      save()
+      return nil
+    case .failure(let error):
+      return error
+    }
   }
 
   /// 一覧から外すだけで、repository・tmux session・アプリ内データには触れない (設計書 §16.1)。

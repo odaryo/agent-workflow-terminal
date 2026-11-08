@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-08(Agentがステータスラインから作業ディレクトリとbranchを公開し、Overviewのセッションの行にbranch名を出すと確定した。Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする。Project Rootという見出しは出さない。以下はそれ以前の履歴。#672: タブ列をなくし、呼称をセッションに統一した。Overviewは既定で表示するメインwindowの左サイドバーだけとし、切り替えと見出しの右クリック操作を集約する。Project内は開いた順に固定し、要対応は印と件数で示す。branch名の表示をやめてAgentの作業ディレクトリ名を出すことにし、全セッションの作業概要の右クリック一覧を廃止した。以下はそれ以前の履歴。Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-09(Agentが公開したbranch名の表示と、Agentが作業中のworktreeを対象とする決定を取り下げた(§5.3)。以下はそれ以前の履歴。Project RootのAgentは実装の指示を受けたらworktreeを作り、`hostctl worktree open`で作らせたworktreeのセッションへ作業を渡して自分は終えると確定した(§3.1)。Agentへの手順はClaude CodeのSkill Pluginで知らせ、Agentの起動コマンドはProjectごとにアプリで設定して`hostctl`の応答で返す。アプリはAgentを起動しない。以下はそれ以前の履歴。Agentがステータスラインから作業ディレクトリとbranchを公開し、Overviewのセッションの行にbranch名を出すと確定した。Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする。Project Rootという見出しは出さない。以下はそれ以前の履歴。#672: タブ列をなくし、呼称をセッションに統一した。Overviewは既定で表示するメインwindowの左サイドバーだけとし、切り替えと見出しの右クリック操作を集約する。Project内は開いた順に固定し、要対応は印と件数で示す。branch名の表示をやめてAgentの作業ディレクトリ名を出すことにし、全セッションの作業概要の右クリック一覧を廃止した。以下はそれ以前の履歴。Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -165,32 +165,33 @@ TerminalがProject Rootで新しいtmux sessionを作り、表示中のセッシ
         ↓
 人がその端末で通常の対話型Agentを起動し、Taskを相談する
         ↓
-AgentがProjectの規則に従ってworktreeを作り、同じsessionの中で移動して作業を続ける
+AgentがProjectの規則に従ってworktreeを作る
         ↓
-セッションはProject Rootに所属したまま、検出されたworktreeはInactiveから始まる
+Agentが`hostctl worktree open`を呼び、Terminalがworktreeをアクティブにしてセッションを作る(表示は切り替えない)
         ↓
-必要なら人がOverviewでInactive worktreeをActiveにする
+AgentがそのセッションのシェルでProjectの起動コマンドを実行し、作業を渡す
         ↓
-worktree専用のtmux sessionが用意され、Overviewで選べるようになる
+Project RootのAgentはここで処理を終える
 ```
 
 **1つのworktreeとProject Rootには複数のセッションを開ける — 確定(2026-11-01、呼称は2026-11-08に改定)。** セッションはtmux sessionと1:1であり、1つのディレクトリにN個の独立したsessionを持てる。同日の「`+ New Task`でProject Rootの常設sessionにwindowを追加する」は撤回した。tmuxは同じsessionへattachした全クライアントで現在のwindowを共有するため、独立したsessionを用いることで、クライアントごとのgrouped session(`new-session -t`)を不要にする。
 
 **新しいセッションの開き方 — 確定(2026-11-01、入口は2026-11-08、Issue #672に改定)。** 新規作成などの操作はOverviewの見出しの右クリックに集約する。割り当ての細部は§13の現在の推奨とする。2026-10-31(Issue #407)の「新しいタスク…」と「既存のProject Rootへ移るだけ」は、新しいsessionを作る操作に置き換える。
 
-- 新しいセッションは選んだ状態で開き、その端末にキーボードフォーカスを渡す。
+- 人の操作で開く新しいセッションは選んだ状態で開き、その端末にキーボードフォーカスを渡す。Agentが`hostctl worktree open`で作らせたセッションは表示を切り替えず、Overviewの行を増やすだけにする(確定、2026-11-08)。入力中に表示が変わると、打鍵が別のセッションへ入るためである。
 - Agentは起動しない。起動コマンドを付けずにsessionを作り、シェルだけを立ち上げる。Agentの起動はユーザーがその端末で行う。
 - session作成時には§4.2の`window-size`、§4.4の`history-limit`も設定する。
 - Project Rootを持たないbare repositoryのProject(§2.3)では、Project Rootでの新規作成を無効にして理由を示す(#407)。worktreeと同じディレクトリでの新規作成は使える。
 
-Agent(または`git worktree add`)が作ったworktreeは、自動ではActiveにならない。§3.2のとおりInactiveから始まり、人がOverviewでActive化を選んだときにセッションを開く。`+ New Task`で開くのはProject Rootのセッションである。
+Agent(または`git worktree add`)が作ったworktreeは、検出されただけではActiveにならない。§3.2のとおりInactiveから始まり、人がOverviewでActive化を選ぶか、Agentが`hostctl worktree open`を呼んだときにセッションを開く。`+ New Task`で開くのはProject Rootのセッションである。
 
-**Claude Codeからのセッション操作 — 確定(2026-11-08)。** Claude Codeは、このアプリが提供するMCPまたはAPIを通して、セッション(新しいsession)を作れる。ただし次の2点を守る。
+**Agentからの引き渡し — 確定(2026-11-08)。** Project RootのAgentは、実装の指示を受けたらProjectの規則でworktreeを作り、新しいworktreeのセッションへ作業を渡して自分は終える。これを既定の流れとする。同日の「Claude Codeは通常、自分のセッションの中でworktreeを作って移動する」「worktreeのためにセッションを開くのはユーザーが命令したときだけ」を置き換える。ユーザーの実装の指示を、セッションを作る命令とみなす。セッションのディレクトリがそのままworktreeになるので、OverviewとViewerの対象が正しく決まる。
 
-- 新規セッションを作るのは、ユーザーが命令したときに限る。Claude Codeが作業の都合で自分からセッションを増やさない。
-- Claude Codeは通常、自分が動いているセッションの中でworktreeを作り、そのままディレクトリを移して作業する。worktreeのためにセッションを開くのは、上の命令があったときだけである。
+- 入口は`hostctl worktree open --directory <worktree>`とする(§21.4)。Host上のAgentのための操作で、Clientの操作には含めない(§20.3)。アプリは`claude`などのAgentの種類を知らない。
+- Agentの起動と作業の受け渡しはAgent側が行う。アプリはAgentを起動せず、上の「新しいセッションの開き方」の「Agentは起動しない」は保つ。
+- Agentへの手順はClaude CodeのSkill Pluginで知らせる(§32の5のとおり、手順はAgent側に置く)。Skill PluginのないAgentや、アプリが起動していないときは、従来どおり自分のセッションの中でworktreeを作って移動してよい(§32の1)。そのときの表示とViewerの対象は、そのセッションのディレクトリのままとする(§5.3)。
 
-提供する形式(MCP・API・CLIのどれにするか、§21.4の`hostctl`との関係、アプリ側で確認を挟むか)は未確定とする(§25)。
+**Agentの起動コマンドはProjectごとにアプリで設定する — 確定(2026-11-08)。** `hostctl worktree open`の応答で返し、Agent側がそのコマンドをセッションのシェルで実行する。設定はアプリのUIからだけ変更し、`hostctl`のリクエストではコマンドを受け取らない。リポジトリ内のファイルには置かない。リポジトリの内容をHostで実行する口になるためである。未設定のときは`null`を返し、Skill Plugin側の既定を使う。人の操作で開くセッションには効かせない。
 
 **セッションを閉じる操作 — 確定(2026-11-01)。** 最初から開いていたセッションと、後から足したセッションは区別しない。
 
@@ -200,14 +201,14 @@ Agent(または`git worktree add`)が作ったworktreeは、自動ではActive�
 
 **モバイルの`+ New Task`もMacと同じ操作とする — 確定(2026-11-01)。** モバイルアプリ自身はGit worktreeを作らず、Agentも起動しない。Project Rootのディレクトリで新しいsessionを作り、そのsessionへattachする。Macのセッションはモバイルからもそのままattachでき、逆も同じである。作業PCのClient(§20.5)にも同じ扱いを当てはめ、モバイルを含むClientのsessionは`hostctl`を通してHostに作らせる(現在の推奨、2026-11-08。§20.3)。
 
-**Agentがworktreeを作った後の、`+ New Task`で開いたProject Rootのセッションの扱い — 確定(2026-11-08)。** セッションは移動しない。Agentはそのsessionの中でworktreeを作り、そのままディレクトリを移して作業を続けてよい。そのセッションはProject Rootのセッションのまま残り、worktreeのセッションは作らない。worktreeのセッションを開くのは、人がOverviewのActive化操作からActiveにしたとき、または人の命令でClaude Codeがセッションを作ったときだけである。2つ目以降のsessionの名前とアプリ再起動後の復元は§3.5と§25で扱う。
+**Agentがworktreeを作った後の、`+ New Task`で開いたProject Rootのセッションの扱い — 確定(2026-11-08)。** セッションは移動しない。Agentはそのsessionの中でworktreeを作り、そのままディレクトリを移して作業を続けてよい。そのセッションはProject Rootのセッションのまま残り、worktreeのセッションは作らない。Agentが`hostctl worktree open`で引き渡すときは、このセッションではAgentの処理が終わる。worktreeのセッションを開くのは、人がOverviewのActive化操作からActiveにしたとき、またはAgentが`hostctl worktree open`を呼んだときだけである。2つ目以降のsessionの名前とアプリ再起動後の復元は§3.5と§25で扱う。
 
 ### 3.2 検出とActive/Inactive
 
 - TerminalはProjectに存在する全worktreeを検出する。
 - OverviewにはProject RootとActive worktreeのセッションを表示する。
 - 既存・過去・別用途のworktreeはInactiveとして保持できる。
-- AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。
+- AgentがInactive worktreeの再利用を提案した場合、Terminalは候補を表示するが、Active化は人が選択する。Agentが`hostctl worktree open`を呼んだときは例外とする(§3.1)。
 - Active/InactiveはGit自体の状態ではなく、Terminalが保持するUI／運用状態である。
 - 検出できたが作業ツリーへ到達できないworktreeは`到達不能`として保持する。
 
@@ -215,7 +216,7 @@ Agent(または`git worktree add`)が作ったworktreeは、自動ではActive�
 
 **検出結果は「worktreeが消えた」と「今回は観測できなかった」を区別できる形で上位へ渡す。** 両者を同一視すると、ボリュームが戻ったときに同じworktreeが新規出現として扱われ、Active指定がInactiveへ落ちる。到達不能の間はTerminalが保持しているActive/Inactiveをそのまま保つ。
 
-**新規出現したworktreeは自動でActiveにしない — 確定(2026-11-08)。** Project登録後の初回スキャンで見つかったworktreeも、観測中に新しく現れたworktreeも、Inactiveから始める。Agentが作ったworktreeも例外ではない。Active化は人がOverviewで選ぶ操作に限り、セッションが増えるのは人の操作によるものだけにする。2026-11-08以前は、観測中に新しく現れたworktreeを自動でActiveにし、Agentが作ったworktreeを自動でセッションにしていた。この変更で、`+ New Task`から作られたworktreeは人が選んでActiveにする手間が増える。
+**新規出現したworktreeは自動でActiveにしない — 確定(2026-11-08)。** Project登録後の初回スキャンで見つかったworktreeも、観測中に新しく現れたworktreeも、Inactiveから始める。Agentが作ったworktreeも例外ではない。Active化は人がOverviewで選ぶ操作と、Agentが`hostctl worktree open`を呼んだとき(§3.1)に限る。検出だけでセッションが増えることはない。2026-11-08以前は、観測中に新しく現れたworktreeを自動でActiveにし、Agentが作ったworktreeを自動でセッションにしていた。この変更で、`+ New Task`から作られたworktreeは人が選んでActiveにする手間が増える。
 
 #### 3.2.1 アプリ停止中の増減
 
@@ -240,7 +241,7 @@ Active指定が消えることが分かり、それを仕様として受け入�
 
 ### 3.3 Active化とtmux
 
-Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。
+Active化するworktreeに既存tmux sessionがあればResumeする。sessionがなければ、Terminalが自動作成せず、新規作成するか人に確認する。Agentが`hostctl worktree open`を呼んだときは、呼び出しそのものを新規作成の指示とみなして確認を挟まない(§3.1)。
 
 **「人に確認する」の範囲 — 確定(2026-11-02、2026-11-08に改定)。** OverviewのProjectの見出しのActive化操作(現在の推奨、§13)からworktreeを選んでActiveにしたときは、確認の画面を挟まずにsessionを作る。選ぶ操作そのものを新規作成の明示操作とみなすためである。新規出現したworktreeは自動でActiveにしないので、この場合は残らない(2026-11-08)。
 
@@ -537,6 +538,37 @@ paneへのテキスト注入方式は**`load-buffer` + `paste-buffer -p`**とす
 
 注入は「送信」であって「実行」ではない。本文の改行をEnterとして実行させる機能はTerminalに持たせず、実行するかどうかはユーザーの明示操作として分離する。方式に伴う制約は§9.2.1にまとめる。
 
+#### アプリが既定serverに対して行うwrite操作
+
+`App/Sources`と`AgentWorkflowTerminal/Sources`の実装にあるtmuxのargvと、`if-shell`へ渡す分岐のコマンド列を
+一覧にする(2026-11-08時点)。接続先は通常起動では既定serverで、開発中のUI確認では上記の専用socketとなる。
+
+| コマンド | 発行する型 | 目的・対象 |
+|---|---|---|
+| `new-session -d` | `TmuxSessionProvisioner` | アプリの環境でserverを起こすため、固定名`awt-bootstrap-server-do-not-use`の起動用sessionを作る |
+| `kill-session` | `TmuxSessionProvisioner` | 起動用sessionを`-t =awt-bootstrap-server-do-not-use`の完全一致で後始末する |
+| `attach-session` | `TmuxSessionProvisioner`がargvを組み、`GhosttyTerminalView`経由でrendererが実行 | 用意済みのsessionへclientを接続する。`-A`によるsession作成はしない |
+| `new-session -d` | `TmuxSessionOperations.create` | §3.5の名前でセッション用のsessionを作る |
+| `set-option` | `TmuxSessionOperations.create` | 作ったsessionの`history-limit`と`detach-on-destroy`、windowの`window-size`を設定する。`-g`は使わない |
+| `new-window -d` / `kill-window` | `TmuxSessionOperations.create` | `history-limit`設定後にwindowを作り直し、最初のpaneにも履歴容量を適用する(§4.4) |
+| `kill-session` | `TmuxSessionOperations.kill` / `cleanUp` | タブ終了やworktree Closeで対象sessionを完全一致の名前で終了し、作成・設定失敗時には作ったsessionをIDまたは完全一致の名前で後始末する |
+| `set-option` | `TmuxSessionOperations.ensureDetachOnDestroy` / `ensureWindowSizeIfUnset` | Resume時に対象sessionの`detach-on-destroy`を入れ直し、current windowの`window-size`が未設定なら補う |
+| `split-window` | `TmuxPaneOperations` | 対象paneを縦・横に分割する |
+| `kill-pane` | `TmuxPaneOperations` | 対象paneを閉じる |
+| `select-pane` / `select-window` | `TmuxPaneOperations` | paneや方向を選択し、別windowのpaneを選ぶときはwindowも切り替える |
+| `resize-pane -Z` | `TmuxPaneOperations` | 対象paneをzoom・zoom解除する。`if-shell -F`の分岐内で、必要に応じて`select-pane`も行う |
+| `set-option -p` / `set-option -p -u` | `TmuxPanePurposeWriter` | 対象paneのユーザーoption `@awt_purpose`を書き込み・解除する |
+| `load-buffer` | `TmuxTextInjection` | 一時ファイルからUUID付きの専用bufferへ注入本文を読み込む |
+| `paste-buffer -p -d` | `TmuxTextInjection` | 対象paneへbracketed pasteで本文を送り、使用したbufferを削除する |
+| `delete-buffer` | `TmuxTextInjection` | 専用bufferを後始末する。また、送信を拒否した分岐では存在しない専用名の削除を試み、失敗を返す |
+| `if-shell -F` | `TmuxPaneOperations` / `TmuxTextInjection` | zoom状態、paneの同一性、copy-mode・入力無効の条件判定と、上記write操作をserver側のコマンド列にまとめる |
+
+起動用sessionの後始末は呼び出し元のキャンセルを継承せず、後始末が終わるまでプロセス共通のゲートを保持する。
+削除成功、対象session不在、server停止・socket欠落は既存のsession操作の後始末と同じく許容する。
+それ以外で削除できなければ、セッションの用意に成功した場合はタブを開いて警告し、用意にも失敗した場合は
+元の原因と後始末の失敗を併記する。いずれも「手で`tmux kill-session -t '=awt-bootstrap-server-do-not-use'`を
+実行してください」と案内する。
+
 ### 4.2 複数端末からの接続
 
 同じtmux sessionをHost(メインPC)、作業PC、iPhone、iPad、Androidから同時に表示・操作できる(§20.7)。独自の`Take Control`や入力排他制御は設けない。
@@ -633,15 +665,7 @@ Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
 
 **タブ列を表示しない — 確定(2026-11-08、Issue #672)。** UIの呼称を「セッション」に統一し、今端末に出しているものは「表示中のセッション」と呼ぶ。切り替えはOverviewの行を選んで行う(§13)。
 
-**branch名はAgentが公開した値をOverviewのセッションの行に出す — 確定(2026-11-08、Issue #679)。** 同日に決めたセッション名のbranch名化(省略、`_1`／`_2`)と、Agentの作業ディレクトリ名を出すという同日の決定を置き換える。ユーザーはProject RootでAgentを起動し、Agentがworktreeを作って移動するが、Claude Codeの`cd`は`claude`本体と`pane_current_path`に現れない(計測2026-11-08、Claude Code 2.1.319)。そこでAgentの側が今のbranchを公開する。公開されていなければ何も出さず、`pane_current_path`やセッションのディレクトリから推測しない。Diffの比較元などGit閲覧に必要なbranchの表記は別とする。
-
-**Claude Codeはステータスラインのコマンドから公開する — 確定(2026-11-08)。** ユーザーのステータスラインはすでにbranchを計算して表示しているので、同じ値をpaneのユーザー変数へ書く。計測(2026-11-08、Claude Code 2.1.319、Issue #672のコメント)では、コマンドが受け取る`cwd`はBashの`cd`と`EnterWorktree`に追従し、取り消された`cd`では元のままだった。`CwdChanged`フックは取り消された`cd`の移動先を通知したまま戻りを通知せず、`EnterWorktree`では発火しなかった。Codexには同じ仕組みが無いので、Codexのセッションでは表示しない。
-
-**公開の形式 — 現在の推奨(2026-11-08、§25)。** `@awt_cwd` = `<agent-pid> <絶対パス>`と`@awt_branch` = `<agent-pid> <branch名>`を`-p`で書き、アプリは§12.7の`@awt_status`と同じPID照合で受理する。detached HEADやrepositoryの外ではbranchを`-u`で消す。
-
-**Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする — 確定(2026-11-08、Issue #681)。** Project RootのセッションでAgentがworktreeへ移ったら、Viewer Drawerはその移動先を表示し、Diffコメントはそのセッションのメインpane(§9.2)へ送る。
-
-**作業中のworktreeの決め方 — 現在の推奨(2026-11-08、§25)。** メインpane(§9.2)のAgentの`@awt_cwd`が、そのProjectの検出済みのworktree(Inactiveを含む)のどれかの内側なら、最も長く一致するものを対象とする。公開が無い・受理されない・どのworktreeの内側でもないときは、セッションのディレクトリを対象とする。
+**Agentが公開したbranch名の表示と、Agentが作業中のworktreeへの追従は行わない — 確定(2026-11-09、Issue #679／#681の決定を取り下げ)。** 2026-11-08のこの2つの決定は、AgentがProject Rootのセッションの中でworktreeへ移動する使い方を前提にしていた。worktreeのセッションへ作業を渡す流れを確定した(§3.1)ので、Agentは最初からworktreeのセッションで動き、追いかける必要がなくなった。Overviewのセッションの行にbranch名は出さず、Code／Diff／EvidenceとDiffコメントはセッションのディレクトリを対象とする。Agentが自分のセッションの中で移動したとき(§3.1)は、表示とViewerの対象はそのセッションのディレクトリのままとする。Claude Codeの`cd`は`claude`本体と`pane_current_path`に現れない(計測2026-11-08、Claude Code 2.1.319)ので、アプリはこの移動を観測しない。Diffの比較元などGit閲覧に必要なbranchの表記は別とする。
 
 **見出しの名前 — 現在の推奨(2026-11-08)。** worktreeのセッションは作業ツリーのディレクトリ名とする。同じディレクトリの2つ目以降は既存の連番(`名前 2`)を使う。Diffの「対象」の表示名も同じにする。Project Rootという見出しは出さず、そのセッションはProjectの見出しの直下に置く — 確定(2026-11-08、Issue #680)。
 
@@ -1223,10 +1247,10 @@ iPhoneをロックし、モバイルアプリを開いていない間にも判�
   通知を失わない。
 - 同じ(Agentプロセス, ターンの開始時刻, token)のタスク完了は、paneが別のセッションへ移っても、上の10秒の
   猶予の長さによらず1回だけ通知する。
-- 完了の変数を読めなかった読み取り(tmuxの出力を解析できなかった回)も、Agentプロセスを特定できなかった
+- 完了の変数を読めなかった読み取り(tmuxの出力を解析できなかった回、値が長すぎる・改行を含むなど)も、Agentプロセスを特定できなかった
   読み取りと同じく、完了の基準にしない。
 - 通知の許可がOSで拒否されているときは、設定画面に許可の状態を表示する。拒否されている間、通知は出ない。
-- **残存挙動**: 基準の時点でAgentプロセスを特定できなかったpaneは、最初に判定できた読み取りを基準として
+- **残存挙動**: 基準の時点でAgentプロセスを特定できなかったか完了の変数を読めなかったpaneは、最初に判定できた読み取りを基準として
   黙って取り込むので、判定できない読み取りが続いている間に書かれた完了は通知されない。アプリの起動前に
   書かれたtokenか起動後に書かれたtokenかを、どの層も区別できないためである(古い完了が鳴る誤りと
   引き換えの取りこぼし)。
@@ -1419,7 +1443,7 @@ process fallbackについては、**process観測だけでは`Working`と`Idle`�
     スナップショットから引く(外部プロセスの起動を増やさない)。1つのpaneの値が他のpaneの観測を壊さない
     よう、変数ごとにtmux側で値を検査し、先頭1文字の旗を付けて出す: 1024バイト超は`X`、LF・CR・
     0x1Fのいずれかを含めば`L`、不正なUTF-8なら`U`、それ以外は`v`+値(backslashを二重化)。
-    読めなかった変数は未設定と同じに扱う。
+    読めなかった変数は未設定と同じに扱う。ただしタスク完了は、読めなかった回は未確定として直前の表示を保つ(§11.2)。
   - 計測で分かった版差と罠: 値のLFは両版とも生で出る(行区切りと区別できない)。0x1Fは3.4が`\037`、
     3.7cが生で出す。CRは3.4が`\r`、3.7cが生で出し、出力の最後の行の最後のフィールドがCRで終わると、
     行末が`\r\n`になって出力末尾の改行判定が外れる(3.7cで偽のparse failureが1件出た)。
@@ -1519,7 +1543,7 @@ process fallbackについては、**process観測だけでは`Working`と`Idle`�
   回は直前の既知の状態を保つ。Claude Codeではユーザーが次のプロンプトを打っている間が`Unknown`になり、
   通常の流れが`Completed`→`Unknown`→`Working`になるためである。`Question`/`Permission`から
   `Working`へ戻るのは同じターンの続きなので解除せず、`Error`からの遷移も直前が応答終了か判定できない
-  ので解除しない。現在のAgentプロセスを特定できなかった回(psを読めない・候補が複数)は表示を
+  ので解除しない。現在のAgentプロセスを特定できなかった回(psを読めない・候補が複数)と完了の変数を読めなかった回は表示を
   直前のまま保つが、状態の記憶と解除の閾値は進める(Issue #386、#395)。信号はどのAgentプロセスが書いたかを識別できる形にし、現在のプロセスと
   異なるものは古い信号として無視する。同じpaneでAgentを起動し直したときに、前のAgentの完了や
   現在地が残るのを防ぐためである。
@@ -1562,13 +1586,13 @@ Project A
     ○ レビュー  検索APIの設計を確認｜応答終了
 ```
 
-最後の行は目的が未入力で、paneのtitle(`✳ 検索APIの設計を確認`)の先頭の記号を剥がし、既定の表示として薄く出している例(§12.7)。Agentがbranch名を公開していれば、セッションの行に副表示する(§5.3)。
+最後の行は目的が未入力で、paneのtitle(`✳ 検索APIの設計を確認`)の先頭の記号を剥がし、既定の表示として薄く出している例(§12.7)。
 
 **選択と操作 — 確定(2026-11-08、Issue #672)。** Overviewの行を選ぶとそのセッションを表示中のセッションにする。別のProjectの行ならProjectも切り替える。paneの行を選ぶと該当paneへ直接移動する。新規セッション、Closeなどの操作はOverviewの見出しの右クリックへ移し、Projectの追加もOverviewの中に置く(`+`ボタンなど)。質問への回答、Agentの停止、PR操作をOverviewから行わないことは変えない。
 
 **見出しの右クリックの割り当て — 現在の推奨(2026-11-08)。**
 
-- Projectの見出し: Project Rootで新規セッション、`Inactive`のworktreeをActiveにする、Projectの登録解除(§16.1)。`+ New Task`はこの新規セッションに相当する。
+- Projectの見出し: Project Rootで新規セッション、`Inactive`のworktreeをActiveにする、Projectの登録解除(§16.1)、Agentの起動コマンドの設定(§3.1)。`+ New Task`はこの新規セッションに相当する。
 - セッションの見出し: 同じディレクトリで新規セッション、セッションを閉じる。worktreeの最後のセッションでは§3.4のCloseを行う。Project Rootは最低1つ残す(§3.1)。
 - 表示中のセッションの行に印を付ける。Agentのいないセッションも選べる行として出す。まだ観測していないセッションを「Agent pane なし」とは表示しない(Issue #387)。
 
@@ -2159,6 +2183,7 @@ Client
   Agent状態の安定化(§12.2)や画面の変化の履歴(§12.4.2)は継続して観測しないと得られないので、`hostctl`が
   呼ばれるたびにtmuxやgitを読み直して代わりに計算することはしない。アプリが起動していなければ、そのことを
   返す(§20.3)。
+- `worktree open --directory <worktree>` — 確定(2026-11-08、§3.1)。Host上のAgent専用で、Clientの操作には含めない。その場でworktreeを再スキャンし、登録済みProjectのworktreeだけを受け付ける(Project Rootは受け付けない)。InactiveならActiveにし、表示を切り替えずにtmux sessionを作って、session名とProjectのAgentの起動コマンドを返す。既にセッションがあるときは作らずにその旨を返す。
 - 提供する操作の候補: Project・セッション・Overviewの行の一覧と変化の購読(stream)、セッションの作成、Diff snapshotの
   作成と取得、コメントの追加と送信の依頼。
 - 1つのSSH接続の中で端末と構造化データのchannelを分けるか、別々の接続にするかはClientの実装に任せる。
@@ -2450,13 +2475,10 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 ### UI
 
 - Project／セッション／Overviewの詳細レイアウト(左サイドバーだけ・既定表示・切り替えと操作の集約は§13で確定)
-- Project Rootのセッションの行の見せ方(見出しを出さないので、branch名が無いセッションの名前をどうするか。現在の推奨: Agentの行だけを出し、Agentがいなければ「シェル」と出す。§5.3)
-- 公開の形式(`@awt_cwd`／`@awt_branch`。§5.3の現在の推奨)
-- 作業中のworktreeの決め方の細部(メインpaneのAgentの`@awt_cwd`で決める。§5.3の現在の推奨)
+- Project Rootのセッションの行の見せ方(見出しを出さないので、そのセッションの名前をどうするか。現在の推奨: Agentの行だけを出し、Agentがいなければ「シェル」と出す。§5.3)
 - ツールバーのProjectメニューを残すか(2026-11-08)
 - Drawerの初期幅、最大幅、split比率
 - スマートフォン上のAgent TUI縮小戦略
-- Claude Codeがこのアプリのセッションを作る経路の形式(§3.1。MCPにするかAPIかCLIか、§21.4の`hostctl`と一つにまとめるか、ユーザーの命令の確認をアプリ側で挟むか)
 - 同じディレクトリの2つ目以降のsession名の接尾辞の形(§3.5。現在の推奨は`-<n>`)
 - Overviewの右クリックの割り当て(現在の推奨: Projectの見出しはProject Rootで新規セッション・InactiveのActive化・登録解除、セッションの見出しは同じディレクトリで新規セッション・閉じる・最後なら§3.4のClose。`+ New Task`はProjectの見出しの新規セッションに相当。§13)
 - 固定する順の範囲(現在の推奨: Project Rootを先に、worktreeはActiveにした順、同じディレクトリは開いた順、paneはtmux上の順。§13)
@@ -2732,8 +2754,7 @@ PR_READY
 - [x] 開発中のUI確認の起動だけは`AWT_TMUX_SOCKET_NAME`の専用socketを使い、不正な値では既定サーバへ倒さない(2026-11-02)
 - [x] 新規セッションは選択して端末にフォーカスを渡し、Agentは起動しない。bare repositoryのProjectではProject Rootでの新規作成を無効にする(§3.1)
 - [x] タブ列をなくし、セッションの切り替えと見出しの右クリック操作をOverviewに集約する。Projectの追加もOverview内に置く。質問回答・Agent停止・PR操作は移さない(2026-11-08、§5.3、§13)
-- [x] Agentが公開したbranch名をOverviewのセッションの行に出す。公開が無ければ何も出さず、推測しない。Claude Codeはステータスラインのコマンドから公開する(2026-11-08、§5.3)
-- [x] Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする(2026-11-08、§5.3)
+- [x] Agentが公開したbranch名の表示と、Agentが作業中のworktreeへの追従は行わない。Overviewにbranch名を出さず、Code／Diff／EvidenceとDiffコメントはセッションのディレクトリを対象とする(2026-11-09、§5.3)
 - [x] OverviewにProject Rootという見出しを出さない(2026-11-08、§5.3)
 - [x] branch名による名前・省略・`_1`／`_2`と見出しへのbranch副表示を取り下げる(2026-11-08、§5.3)
 - [x] 同じディレクトリの2つ目以降のsession名は、安定IDからの導出結果に接尾辞を足して区別する(形は未確定)
@@ -2743,7 +2764,9 @@ PR_READY
 - [x] 同じディレクトリに他のセッションが残っているセッションが外部から終了したら、そのセッションを自動で閉じる。最後の1つとdetachは再接続の操作を出して残す(2026-11-01)
 - [x] 1つのworktreeに複数のセッションがあるとき、各セッションの代表状態はそのセッションのpaneだけから求め、Overviewもsessionごとに分けて並べる(2026-11-01)
 - [x] 新規出現したworktreeは自動でActiveにせず、Inactiveから始める。Active化は人がOverviewで選ぶ(2026-11-08で改定。以前は観測中の新規出現を自動Active化していた)
-- [x] Claude Codeからのセッション操作は、このアプリのMCPまたはAPIを通す。新規セッションはユーザーが命令したときだけ開き、Claude Codeは通常は自分のセッションの中でworktreeを作って移動する(2026-11-08)
+- [x] Project RootのAgentは実装の指示を受けたらworktreeを作り、`hostctl worktree open`で作らせたセッションへ作業を渡して自分は終える。手順はClaude CodeのSkill Pluginで知らせる(2026-11-08、§3.1、§21.4)
+- [x] `hostctl worktree open`はInactiveのworktreeもActiveにする。Host上のAgent専用で、Clientの操作には含めない。作ったセッションへ表示を切り替えない(2026-11-08、§3.1、§3.2)
+- [x] Agentの起動コマンドはProjectごとにアプリで設定して`hostctl`の応答で返す。アプリはAgentを起動しない(2026-11-08、§3.1)
 - [x] `+ New Task`で開いたセッションは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのセッションのまま残す(2026-11-08)
 - [x] Active/Inactiveは再起動を跨いで復元する。停止中に現れたworktreeはInactiveから始め、停止中に消えたworktreeは起動直後の1回目のスキャンでは落とさず到達不能として保持する
 - [x] 起動後のスキャンでもgitの一覧に無いworktreeと、作業ツリーが存在せずgitが`prunable`とするworktreeは、消失として落としActive指定も消える。lock済み・入れないだけの到達不能は保持する(2026-11-02)
@@ -2908,7 +2931,6 @@ PR_READY
 
 - [ ] OverviewのProjectの見出しにProject Rootで新規セッション・InactiveのActive化・登録解除、セッションの見出しに同じディレクトリで新規セッション・閉じる・最後なら§3.4のCloseを割り当てる。`+ New Task`はProjectの見出しの新規セッションに相当(§13、§25)
 - [ ] Project Rootを先に、worktreeはActiveにした順(再起動後も保つ)、同じディレクトリは開いた順、paneはtmux上の順にする(§13、§25)
-- [ ] Agentは`@awt_cwd` = `<agent-pid> <絶対パス>`と`@awt_branch` = `<agent-pid> <branch名>`を公開し、作業中のworktreeはメインpaneの`@awt_cwd`で決める(§5.3、§25)
 - [ ] 表示中のセッションに印を付け、Agentのいないセッションも選べる行として出す(§13、§25)
 - [ ] worktreeのセッションの見出しとDiffの「対象」は作業ツリーのディレクトリ名にし、2つ目以降は既存の`名前 2`を使う(§5.3、§25)
 - [ ] ⌃Tab／⌃⇧Tabと⌘⌥←／⌘⌥→は、固定の順で次／前のセッションへ移動する(§5.4、§25)

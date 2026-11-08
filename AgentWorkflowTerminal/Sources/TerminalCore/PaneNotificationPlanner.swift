@@ -98,9 +98,9 @@ public enum PaneNotification: Sendable, Hashable {
 /// pane の状態と完了表示の列から、出すべき通知を決める (設計書 §11.2)。
 ///
 /// - Important: 判断待ちは「その状態へ入った遷移1回につき1回」。`Unknown` (Needs Attention で
-///   ないもの) と観測なし (Agent が `.absent` で feed の出力から消えた回) は直前の既知の状態を
-///   保つ (`PaneTaskCompletionTracker` と同じ扱い)。保たないと `Question` → `Unknown` →
-///   `Question` のたびに鳴る。
+///   ないもの) と観測なし (pane 一覧に無いか結果が未着) は直前の既知の状態を保つ。
+///   保たないと `Question` → `Unknown` → `Question` のたびに鳴る。Agent の終了 (`agentAbsentPanes`) は
+///   別の Agent の判断待ちを前の続きとみなさないため、基準の後は状態の記憶を捨てる。
 /// - Important: 種別不明の注意状態 (§12.4.3) と種類の分かる判断待ちの行き来は、同じ判断待ちの
 ///   続きとして再通知しない。ただし続きとみなすのは、その判断待ちを**既に知らせた**場合だけ
 ///   (通知を出した、または前面時の抑止で消費した。基準の時点の判断待ちはまとめ通知に数える
@@ -112,10 +112,9 @@ public enum PaneNotification: Sendable, Hashable {
 ///   — feed の最初の yield は adapter の結果が無いので `[]` になり、それを基準にすると次の観測で
 ///   判断待ちの pane が全部個別に鳴る (#387)。完了表示の基準は最初の `observeCompletions` で、
 ///   その時点で有効な token は鳴らさない (再起動のたびに古い完了が鳴るのを防ぐ。アプリ停止中に
-///   書かれた完了は鳴らない)。Agent プロセスを特定できなかった読み取り (`undetermined`) は
-///   完了表示の中身が分からないので基準にせず、基準の時点に在った pane は最初に判定できた
-///   読み取りを基準にする。基準の後に現れた pane には広げない — 現れた直後に書かれた token を
-///   飲み込むため。
+///   書かれた完了は鳴らない)。Agent プロセスか完了の変数を読めない回 (`undetermined`) は基準にせず、
+///   基準の時点に在った pane は最初に判定できた回を基準にする。基準の後に現れた pane には広げない
+///   — 現れた直後に書かれた token を飲み込むため。
 /// - Important: 記憶のある pane は、猶予から戻った確認待ちでなければ基準で `lastKnown` を上書きしない (#494、#517)。
 ///   完了表示の記憶だけでは状態を知ったことにならないため、状態の記憶がない pane の判断待ちは基準で
 ///   個別に鳴らさず、「判断待ちが N 件」1件にまとめる。猶予から戻った pane は状態を観測するまで数えず、
@@ -157,8 +156,7 @@ public struct PaneNotificationPlanner: Sendable {
     var didNotifyUnknown = false
     /// いまの判断待ちを知らせたか。判断待ちを抜けたら下ろす。
     var isAttentionAnnounced = false
-    var notifiedCompletions: Set<AgentStampedValue> = []
-    /// 完了表示の基準の時点に在ったが、Agent プロセスを特定できず基準を取れていない。
+    /// 完了表示の基準の時点に在ったが、Agent プロセスを特定できないか完了の変数を読めず基準を取れていない。
     var awaitsCompletionBaseline = false
     /// 基準の時点で判断待ちだった。猶予中と状態の確認待ちの間は、まとめ通知に数えずに残す。
     var isSummaryMember = false
@@ -184,6 +182,8 @@ public struct PaneNotificationPlanner: Sendable {
 
   private var sessions: [TerminalSessionKey: SessionMemory] = [:]
   private var panes: [PaneID: PaneMemory] = [:]
+  // pane の記憶は猶予で消えるが、移動先で同じ完了を鳴らさないためアプリの寿命だけ保持する (設計書 §11.2)。
+  private var notifiedCompletions: Set<AgentStampedValue> = []
   private var isSummaryGateOpen = false
   private var summaryStartedAt: ContinuousClock.Instant?
   private var lastInstant: ContinuousClock.Instant?
@@ -266,13 +266,16 @@ public struct PaneNotificationPlanner: Sendable {
       memory.hasStatesBaseline = true
     }
     sessions[session] = memory
-
     var notifications: [PaneNotification] = []
     for (paneID, pane) in panes where !isBaseline && pane.session == session {
+      if snapshot.agentAbsentPanes.contains(paneID) {
+        panes[paneID]?.lastKnown = nil
+        panes[paneID]?.isAttentionAnnounced = false
+        panes[paneID]?.isSummaryMember = false
+      }
       if !memory.observedPanes.contains(paneID) {
-        // 観測なし。直前の既知の状態は保ち、Unknown の継続だけ切る。
-        panes[paneID]?.unknownSince = nil
-        panes[paneID]?.didNotifyUnknown = false
+        // 観測が途切れた時間を Unknown の継続に含めない。
+        panes[paneID]?.trackUnknown(isPlain: false, at: instant)
       }
     }
     for pane in snapshot.panes {
@@ -288,8 +291,8 @@ public struct PaneNotificationPlanner: Sendable {
   }
 
   /// `displays` はその session の全 pane (Agent でない pane を含む) の完了表示。ここにも直近の
-  /// 状態の観測にも無く、他の session にも居ない pane は猶予に入れる。`undetermined` はこの回 Agent
-  /// プロセスを特定できなかった pane (`PaneTaskCompletionTracker.isUndetermined`)。
+  /// 状態の観測にも無く、他の session にも居ない pane は猶予に入れる。
+  /// `undetermined` は `PaneTaskCompletionTracker.isUndetermined` で判定し、完了の基準にしない。
   public mutating func observeCompletions(
     _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
     in session: TerminalSessionKey, at instant: ContinuousClock.Instant
@@ -300,7 +303,6 @@ public struct PaneNotificationPlanner: Sendable {
     let isBaseline = !memory.hasCompletionsBaseline
     memory.hasCompletionsBaseline = true
     sessions[session] = memory
-
     var notifications: [PaneNotification] = []
     for (paneID, display) in displays.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
       attach(paneID, to: session)
@@ -318,12 +320,10 @@ public struct PaneNotificationPlanner: Sendable {
       case .none: continue
       case .completed(let completed): value = completed
       case .dismissed(let dismissed):
-        panes[paneID, default: PaneMemory(session: session)].notifiedCompletions.insert(
-          dismissed)
+        notifiedCompletions.insert(dismissed)
         continue
       }
-      let inserted = panes[paneID, default: PaneMemory(session: session)]
-        .notifiedCompletions.insert(value).inserted
+      let inserted = notifiedCompletions.insert(value).inserted
       if inserted, !isSilent, settings.enabledKinds.contains(.taskCompleted) {
         notifications.append(
           .pane(

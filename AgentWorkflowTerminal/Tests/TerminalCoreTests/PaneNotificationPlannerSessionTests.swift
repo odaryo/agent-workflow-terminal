@@ -165,6 +165,7 @@ struct PaneNotificationPlannerSessionTests: PaneNotificationPlannerTesting {
   func completionBaselinesAreIndependent() {
     let start = Self.clock.now
     var planner = PaneNotificationPlanner()
+    let inSessionA = AgentStampedValue(agentProcessID: 999, text: "session-a")
     planner.startObserving(sessionA, at: start)
     #expect(
       planner.observeCompletions(
@@ -178,8 +179,8 @@ struct PaneNotificationPlannerSessionTests: PaneNotificationPlannerTesting {
 
     #expect(
       planner.observeCompletions(
-        Self.keyed(["%1": .completed(Self.first)]), undetermined: [], in: sessionA, at: start
-      ) == [notification(in: sessionA, paneID: "%1", kind: .taskCompleted, completion: Self.first)])
+        Self.keyed(["%1": .completed(inSessionA)]), undetermined: [], in: sessionA, at: start
+      ) == [notification(in: sessionA, paneID: "%1", kind: .taskCompleted, completion: inSessionA)])
     #expect(
       planner.observeCompletions(
         Self.keyed(["%2": .completed(Self.first)]), undetermined: [], in: sessionB, at: start

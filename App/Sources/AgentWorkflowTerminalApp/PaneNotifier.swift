@@ -55,7 +55,7 @@ final class PaneNotifier {
   }
 
   /// `displays` はその session の全 pane の完了表示。`undetermined` は Agent プロセスを
-  /// 特定できなかった pane。
+  /// 特定できなかったか完了の変数を読めなかった pane。
   func completionsObserved(
     _ displays: [PaneID: PaneTaskCompletionDisplay], undetermined: Set<PaneID>,
     in session: TerminalSessionKey

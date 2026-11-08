@@ -14,6 +14,7 @@ extension WorktreePaneSource {
 /// `snapshots(of:)` では、未観測を Agent 不在と区別するために観測が揃ったかを添える。
 public struct WorktreePaneAgentStates: Sendable, Hashable {
   public let panes: [PaneAgentState]
+  public let agentAbsentPanes: Set<PaneID>
   /// pane 一覧の全 pane について、adapter の最初の結果 (観測か `.absent`) が届いている。
   /// pane が無ければ真。後から pane が現れると、その結果が届くまで再び偽になる。
   ///
@@ -22,8 +23,11 @@ public struct WorktreePaneAgentStates: Sendable, Hashable {
   ///   遷移に見える (#387)。
   public let isComplete: Bool
 
-  public init(panes: [PaneAgentState], isComplete: Bool) {
+  public init(
+    panes: [PaneAgentState], isComplete: Bool, agentAbsentPanes: Set<PaneID> = []
+  ) {
     self.panes = panes
+    self.agentAbsentPanes = agentAbsentPanes
     self.isComplete = isComplete
   }
 }
@@ -289,7 +293,9 @@ actor WorktreePaneFeedCoordinator {
       return PaneAgentState(id: paneID, observation: observation)
     }
     let isComplete = paneOrder.allSatisfy { entries[$0]?.result != nil }
-    let snapshot = WorktreePaneAgentStates(panes: value, isComplete: isComplete)
+    let agentAbsentPanes = Set(paneOrder.filter { entries[$0]?.result == .absent })
+    let snapshot = WorktreePaneAgentStates(
+      panes: value, isComplete: isComplete, agentAbsentPanes: agentAbsentPanes)
     switch output {
     case .states(let continuation):
       guard lastYielded != nil || isComplete else { return }

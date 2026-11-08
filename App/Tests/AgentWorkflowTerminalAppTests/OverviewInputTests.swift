@@ -40,10 +40,10 @@ struct OverviewInputTests {
     #expect(makeTabSummaries([input]).first?.rows == [.noAgentPane])
   }
 
-  @Test("初出の時刻と詳細とメイン pane をそのまま渡す")
+  @Test("表示状態と詳細とメイン pane をそのまま渡す")
   func observedPane() throws {
     let display = PaneDisplayState(
-      paneID: pane, state: .working, category: .working, changedAt: nil)
+      paneID: pane, state: .working, category: .working)
     let detail = OverviewPaneDetail(purpose: "実装")
     let input = OverviewWorktreeInput(
       session: .primary(identity),
@@ -57,7 +57,6 @@ struct OverviewInputTests {
     #expect(input.details == [pane: detail])
     #expect(input.mainPane == pane)
     let row = try #require(makeTabSummaries([input]).first?.rows.first?.pane)
-    #expect(row.display.changedAt == nil)
     #expect(row.isMain)
   }
 

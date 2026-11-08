@@ -2,18 +2,18 @@ import Foundation
 import TerminalCore
 import Testing
 
-@Suite("Overview の未更新と未観測 (設計書 §13 / Issue #387)")
+@Suite("Overview の入力順と未観測 (設計書 §13 / Issue #387)")
 struct AgentPaneOverviewObservationTests {
   private let start = ContinuousClock().now
 
-  @Test("pane は未更新か更新済みかや Needs Attention にかかわらず入力順を保つ")
-  func panesKeepInputOrderRegardlessOfChangeTime() throws {
+  @Test("pane は Needs Attention にかかわらず入力順を保つ")
+  func panesKeepInputOrderRegardlessOfState() throws {
     let input = try task(
       "task",
       [
-        pane("%1", .working), pane("%2", .idle, changedAt: start),
+        pane("%1", .working), pane("%2", .idle),
         pane("%3", .completed), pane("%4", .question),
-        pane("%5", .permission, changedAt: start.advanced(by: .seconds(-100))),
+        pane("%5", .permission),
         pane("%6", .error),
       ])
 
@@ -24,16 +24,16 @@ struct AgentPaneOverviewObservationTests {
         == ["%1", "%2", "%3", "%4", "%5", "%6"])
   }
 
-  @Test("Task は未更新か更新済みかや Needs Attention にかかわらず入力順を保つ")
-  func tasksKeepInputOrderRegardlessOfChangeTime() throws {
+  @Test("Task は Needs Attention にかかわらず入力順を保つ")
+  func tasksKeepInputOrderRegardlessOfState() throws {
     let first = try task("first", [pane("%1", .working)])
     let second = try task("second", [pane("%2", .idle)])
-    let changed = try task("changed", [pane("%3", .working, changedAt: start)])
+    let changed = try task("changed", [pane("%3", .working)])
     let mixed = try task(
       "mixed",
-      [pane("%4", .idle), pane("%5", .working, changedAt: start.advanced(by: .seconds(1)))])
+      [pane("%4", .idle), pane("%5", .working)])
     let attention = try task("attention", [pane("%6", .question)])
-    let changedAttention = try task("changedAttention", [pane("%7", .error, changedAt: start)])
+    let changedAttention = try task("changedAttention", [pane("%7", .error)])
 
     let result = try overview([first, second, changed, mixed, attention, changedAttention])
 
@@ -67,7 +67,6 @@ struct AgentPaneOverviewObservationTests {
     let ids = ["%1", "%2", "%3"]
     var input = ids.map { observedPane($0, .unknown, unknownReason: .signalMissing) }
     var states = stabilizer.observe(input, at: start)
-    #expect(states.map(\.changedAt) == [nil, nil, nil])
 
     for (step, index) in [2, 0, 1].enumerated() {
       let destination = destinations[index]
@@ -80,7 +79,6 @@ struct AgentPaneOverviewObservationTests {
         states = stabilizer.observe(input, at: deadline)
       }
       #expect(states[index].state == destination)
-      #expect(states.map(\.changedAt) == [nil, nil, nil])
       let result = try overview([task("combined", states)])
       #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ids)
     }
@@ -105,10 +103,6 @@ struct AgentPaneOverviewObservationTests {
     let resolvedAt = start.advanced(by: .seconds(3600))
     let states = stabilizer.observe(
       [observedPane("%1", destination), observedPane("%2", peerState)], at: resolvedAt)
-    #expect(states.first { $0.paneID.rawValue == "%1" }?.changedAt == resolvedAt)
-    #expect(
-      states.first { $0.paneID.rawValue == "%2" }?.changedAt
-        == start.advanced(by: .seconds(109)))
     let result = try overview([task("combined", Array(states.reversed()))])
     #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ["%2", "%1"])
   }
@@ -160,11 +154,10 @@ struct AgentPaneOverviewObservationTests {
   }
 
   private func pane(
-    _ id: String, _ state: AgentState, changedAt: ContinuousClock.Instant? = nil
+    _ id: String, _ state: AgentState
   ) -> PaneDisplayState {
     PaneDisplayState(
-      paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory,
-      changedAt: changedAt)
+      paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory)
   }
 
   private func observedPane(

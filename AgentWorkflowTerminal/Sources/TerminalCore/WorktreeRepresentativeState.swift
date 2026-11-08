@@ -22,7 +22,7 @@ public struct PaneAgentState: Sendable, Hashable, Identifiable, Codable {
   public var category: WorktreeStateCategory {
     unknownCategoryOverride?.category ?? state.worktreeCategory
   }
-  /// このフィールドが必要なのは、§12.2 が同順位の pane を「最終更新順」で並べるため。
+  /// このフィールドが必要なのは、§12.2 の代表状態を選ぶとき、同順位なら最終更新が新しい pane を優先するため。
   /// 観測した時刻ではなく、状態が変化した時刻を入れる。
   public let lastUpdatedAt: Date
 

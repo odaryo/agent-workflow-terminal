@@ -18,6 +18,7 @@ let package = Package(
   products: [
     .library(name: "TerminalCore", targets: ["TerminalCore"]),
     .library(name: "Adapters", targets: ["Adapters"]),
+    .executable(name: "hostctl", targets: ["hostctl"]),
   ],
   // 依存は TerminalCore ← Adapters の一方向だけに保つ。ビルドシステムは逆向きの依存を
   // 検出しないため、ここを目視で守るしかない (docs/coding-guidelines.md §2.2)。
@@ -29,6 +30,11 @@ let package = Package(
     .target(
       name: "Adapters",
       dependencies: ["TerminalCore"],
+      swiftSettings: commonSwiftSettings
+    ),
+    .executableTarget(
+      name: "hostctl",
+      dependencies: ["TerminalCore", "Adapters"],
       swiftSettings: commonSwiftSettings
     ),
     .testTarget(

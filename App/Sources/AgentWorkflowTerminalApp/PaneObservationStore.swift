@@ -14,8 +14,10 @@ import TerminalCore
 @MainActor
 final class PaneObservationStore: ObservableObject {
   struct Observed: Equatable {
-    /// 生の観測。`nil` はまだ1度も届いていないこと (空配列 = Agent pane が無い、と区別する)。
+    /// 生の観測。`nil` は初回の観測が揃うまで (空配列 = Agent pane が無い、と区別する)。
     var paneStates: [PaneAgentState]?
+    /// 初回完了待ちでも、購読者と完了 tracker には最新の生の状態を渡す。
+    var latestPaneStates: [PaneAgentState]?
     /// Overview に出す、pane ごとに安定化した状態 (§12.2 と同じ保持)。
     var displayStates: [PaneDisplayState] = []
     /// 非 Agent pane の分も含む。
@@ -23,6 +25,12 @@ final class PaneObservationStore: ObservableObject {
     /// `#{pane_pid}`。メイン pane の登録 (`MainPaneRegistration`) が今もその pane を指すかの照合に
     /// 使う — `%N` だけで照合すると、server の再起動で振り直された別の pane に印が付く。
     var processIDs: [PaneID: Int32] = [:]
+
+    mutating func receivePaneStates(_ snapshot: WorktreePaneAgentStates) {
+      latestPaneStates = snapshot.panes
+      guard paneStates != nil || snapshot.isComplete else { return }
+      paneStates = snapshot.panes
+    }
   }
 
   @Published private(set) var observed: [TerminalSessionKey: Observed] = [:]
@@ -104,7 +112,7 @@ final class PaneObservationStore: ObservableObject {
         return
       }
       subscribers[session, default: [:]][token] = continuation
-      if let current = observed[session]?.paneStates {
+      if let current = observed[session]?.latestPaneStates {
         continuation.yield(current)
       }
       continuation.onTermination = { [weak self] _ in
@@ -178,7 +186,7 @@ final class PaneObservationStore: ObservableObject {
   private func receive(_ snapshot: WorktreePaneAgentStates, for session: TerminalSessionKey) {
     let panes = snapshot.panes
     guard var current = observed[session] else { return }
-    current.paneStates = panes
+    current.receivePaneStates(snapshot)
     for pane in panes {
       // 解除の判定は生の状態で行う (§12.7)。安定化した状態で遅らせない。
       let display = completions.update(
@@ -187,7 +195,9 @@ final class PaneObservationStore: ObservableObject {
         display.isCompleted
     }
     observed[session] = current
-    stabilize(session, at: clock.now)
+    if current.paneStates != nil {
+      stabilize(session, at: clock.now)
+    }
     for continuation in subscribers[session]?.values ?? [:].values {
       continuation.yield(panes)
     }
@@ -252,7 +262,8 @@ final class PaneObservationStore: ObservableObject {
     }
     guard !Task.isCancelled, var current = observed[session] else { return }
     let rawStates = Dictionary(
-      (current.paneStates ?? []).map { ($0.id, $0.state) }, uniquingKeysWith: { first, _ in first })
+      (current.latestPaneStates ?? []).map { ($0.id, $0.state) },
+      uniquingKeysWith: { first, _ in first })
     for summary in summaries {
       let display = completions.update(
         paneID: summary.paneID, completion: summary.completion,

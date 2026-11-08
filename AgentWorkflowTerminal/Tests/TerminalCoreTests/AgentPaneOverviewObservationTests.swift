@@ -41,12 +41,11 @@ struct AgentPaneOverviewObservationTests {
         == [changedAttention, attention, mixed, changed, first, second].map(\.session))
   }
 
-  @Test("別々の観測時刻で届いた初出 pane は Overview で tmux 順と Task Tab 順を保つ")
+  // Adapter の結果の到着のばらつきは、App が最初に揃った観測まで安定化器へ渡さないことで吸収する。
+  @Test("最初に揃った観測に在った pane は Overview で tmux 順と Task Tab 順を保つ")
   func adapterArrivalOrderDoesNotDetermineOverviewOrder() throws {
     var stabilizer = PaneDisplayStateStabilizer()
-    _ = stabilizer.observe([observedPane("%2")], at: start)
-    let states = stabilizer.observe(
-      [observedPane("%1"), observedPane("%2")], at: start.advanced(by: .seconds(3)))
+    let states = stabilizer.observe([observedPane("%1"), observedPane("%2")], at: start)
     let combined = try task("combined", states)
     let first = try task("first", Array(states.prefix(1)))
     let second = try task("second", Array(states.suffix(1)))

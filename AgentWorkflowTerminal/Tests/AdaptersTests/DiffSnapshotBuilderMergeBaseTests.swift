@@ -5,8 +5,10 @@ import Testing
 
 @Suite("§9.1.4 merge-base の失敗判定")
 struct DiffSnapshotBuilderMergeBaseTests {
-  @Test("stderr に何か出た終了コード 1 は共通祖先が無いと断定しない")
-  func doesNotAssertMissingMergeBaseWhenGitWarns() async throws {
+  @Test(
+    "stderr に何か出た終了コード 1 は共通祖先が無いと断定せず branch の名前空間を保持する",
+    arguments: [GitBranchRef.local("origin/feature"), .remote("origin/feature")])
+  func doesNotAssertMissingMergeBaseWhenGitWarns(branch: GitBranchRef) async throws {
     let graftFile = FileManager.default.temporaryDirectory
       .appending(path: UUID().uuidString).appending(path: "info/grafts").path
     try #require(!FileManager.default.fileExists(atPath: graftFile))
@@ -17,10 +19,10 @@ struct DiffSnapshotBuilderMergeBaseTests {
 
     await #expect(
       throws: DiffSnapshotBuilderError.mergeBaseUnresolved(
-        branch: "ambiguous", reason: .gitReported(stderr: "warning: something"))
+        branch: branch, reason: .gitReported(stderr: "warning: something"))
     ) {
       try await builder.build(
-        .branch(name: .local("ambiguous")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+        .branch(name: branch), id: DiffSnapshotID(rawValue: UUID()), now: Date())
     }
   }
 }

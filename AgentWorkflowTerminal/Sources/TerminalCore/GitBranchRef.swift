@@ -1,3 +1,5 @@
+import Foundation
+
 public enum GitBranchRef: Sendable, Hashable {
   case local(String)
   case remote(String)
@@ -16,13 +18,15 @@ public enum GitBranchRef: Sendable, Hashable {
   }
 
   public init?(fullName: String) {
+    guard fullName.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) == nil
+    else { return nil }
     if fullName.hasPrefix("refs/heads/") {
       let name = String(fullName.dropFirst("refs/heads/".count))
       guard !name.isEmpty else { return nil }
       self = .local(name)
     } else if fullName.hasPrefix("refs/remotes/") {
       let name = String(fullName.dropFirst("refs/remotes/".count))
-      guard !name.isEmpty, !name.hasSuffix("/HEAD") else { return nil }
+      guard !name.isEmpty, name != "HEAD", !name.hasSuffix("/HEAD") else { return nil }
       self = .remote(name)
     } else {
       return nil

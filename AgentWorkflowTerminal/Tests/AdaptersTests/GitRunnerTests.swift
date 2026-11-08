@@ -33,7 +33,7 @@ struct GitRunnerTests {
     #expect(GitReadCommand.worktreeList().arguments == ["worktree", "list", "--porcelain", "-z"])
     #expect(
       GitReadCommand.upstream().arguments == [
-        "rev-parse", "--symbolic-full-name", "@{upstream}",
+        "rev-parse", "--verify", "--symbolic-full-name", "@{upstream}",
       ])
     #expect(
       GitReadCommand.originHead().arguments == [

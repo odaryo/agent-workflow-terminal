@@ -125,7 +125,7 @@ public struct GitReadCommand: Sendable, Equatable {
   }
 
   public static func upstream() -> Self {
-    Self(arguments: ["rev-parse", "--symbolic-full-name", "@{upstream}"])
+    Self(arguments: ["rev-parse", "--verify", "--symbolic-full-name", "@{upstream}"])
   }
 
   /// `--is-ancestor` は真偽しか返さないので、range を組むための OID はこちらで取る (§9.1.2)。

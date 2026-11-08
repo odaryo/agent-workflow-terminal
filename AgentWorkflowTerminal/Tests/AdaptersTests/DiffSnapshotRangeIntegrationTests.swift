@@ -72,23 +72,28 @@ struct DiffSnapshotRangeIntegrationTests {
 
   /// `git merge-base` は共通祖先が無いと出力なしの終了コード 1、ref が無いと 128 で終わる
   /// (git 2.50.1 で実測)。前者だけを「merge-base が無い」として区別する。
-  @Test("共通祖先の無い branch は merge-base 無しとして失敗する", .timeLimit(.minutes(1)))
-  func reportsMissingMergeBase() async throws {
+  @Test(
+    "共通祖先の無い branch は名前空間を保持して merge-base 無しとして失敗する", .timeLimit(.minutes(1)),
+    arguments: [
+      GitBranchRef.local("unrelated"), .local("origin/unrelated"), .remote("origin/unrelated"),
+    ])
+  func reportsMissingMergeBase(branch: GitBranchRef) async throws {
     try await withGitRepository { repository in
       let root = repository.mainWorktree
       try await repository.git(["checkout", "-q", "--orphan", "unrelated"])
       try await repository.git(["commit", "-q", "--allow-empty", "-m", "orphan"])
+      try await repository.git(["update-ref", branch.fullName, "HEAD"])
       try await repository.git(["checkout", "-q", "main"])
 
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: root, processRunner: FoundationProcessRunner())
-      await #expect(throws: DiffSnapshotBuilderError.noMergeBase(branch: "unrelated")) {
+      await #expect(throws: DiffSnapshotBuilderError.noMergeBase(branch: branch)) {
         try await builder.build(
-          .branch(name: .local("unrelated")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+          .branch(name: branch), id: DiffSnapshotID(rawValue: UUID()), now: Date())
       }
-      await #expect(throws: DiffSnapshotBuilderError.noMergeBase(branch: "unrelated")) {
+      await #expect(throws: DiffSnapshotBuilderError.noMergeBase(branch: branch)) {
         try await builder.build(
-          .base(branch: .local("unrelated")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+          .base(branch: branch), id: DiffSnapshotID(rawValue: UUID()), now: Date())
       }
     }
   }
@@ -127,7 +132,7 @@ struct DiffSnapshotRangeIntegrationTests {
         processRunner: FoundationProcessRunner())
       await #expect(
         throws: DiffSnapshotBuilderError.mergeBaseUnresolved(
-          branch: "origin/feature", reason: .shallowRepository)
+          branch: .remote("origin/feature"), reason: .shallowRepository)
       ) {
         try await builder.build(
           .branch(name: .remote("origin/feature")), id: DiffSnapshotID(rawValue: UUID()),
@@ -146,7 +151,7 @@ struct DiffSnapshotRangeIntegrationTests {
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
       await #expect(
         throws: DiffSnapshotBuilderError.mergeBaseUnresolved(
-          branch: "feature", reason: .rewrittenHistory)
+          branch: .local("feature"), reason: .rewrittenHistory)
       ) {
         try await builder.build(
           .branch(name: .local("feature")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
@@ -172,7 +177,7 @@ struct DiffSnapshotRangeIntegrationTests {
 
       await #expect(
         throws: DiffSnapshotBuilderError.mergeBaseUnresolved(
-          branch: "feature", reason: .rewrittenHistory)
+          branch: .local("feature"), reason: .rewrittenHistory)
       ) {
         try await builder.build(
           .branch(name: .local("feature")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
@@ -287,6 +292,8 @@ struct DiffSnapshotRangeIntegrationTests {
 
       try await repository.git(["update-ref", "-d", upstream.fullName])
       #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
+      try write("", to: repository.mainWorktree, "@{upstream}")
+      #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
     }
   }
 
@@ -296,6 +303,22 @@ struct DiffSnapshotRangeIntegrationTests {
       try await repository.git(["branch", "local-base"])
       try await repository.git(["branch", "--set-upstream-to=local-base"])
       try await repository.git(["checkout", "-q", "--detach"])
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
+    }
+  }
+
+  @Test("origin/HEAD が local branch を指す場合は base として使わない", .timeLimit(.minutes(1)))
+  func rejectsLocalBranchFromOriginHead() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/heads/main"])
+      let originHead = try await repository.gitExitCode([
+        "symbolic-ref", "refs/remotes/origin/HEAD",
+      ])
+      try #require(originHead.exitCode == 0)
+      try #require(originHead.stdout == "refs/heads/main\n")
+
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
       #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)

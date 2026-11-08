@@ -64,6 +64,12 @@ struct TmuxSessionProvisioner: Sendable {
     }
   }
 
+  func setGlobalEnvironment(
+    name: String, value: String
+  ) async throws(TmuxSessionOperationError) {
+    try await operations.setGlobalEnvironment(name: name, value: value)
+  }
+
   func exists(_ key: TerminalSessionKey) async throws(TmuxSessionOperationError) -> Bool {
     try await operations.exists(session: TmuxSessionName(key: key))
   }

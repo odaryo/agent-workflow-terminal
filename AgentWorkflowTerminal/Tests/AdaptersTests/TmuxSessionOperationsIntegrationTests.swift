@@ -14,6 +14,22 @@ private let isTmuxIntegrationEnabled =
 )
 struct TmuxSessionOperationsIntegrationTests {
 
+  @Test("global 環境変数に socket と空白を含む実行ファイルのパスを設定できる")
+  func setsGlobalEnvironment() async throws {
+    try await withServer("hostctl-environment") { runner, workingDirectory in
+      let operations = TmuxSessionOperations(runner: runner)
+      let values = [
+        ("AWT_HOSTCTL_SOCKET", "\(workingDirectory)/hostctl.sock"),
+        ("AWT_HOSTCTL", "\(workingDirectory)/Application Support/hostctl"),
+      ]
+      for (name, value) in values {
+        try await operations.setGlobalEnvironment(name: name, value: value)
+        #expect(
+          try await lines(runner, ["show-environment", "-g", name]) == ["\(name)=\(value)"])
+      }
+    }
+  }
+
   @Test("global が off でも作成した session の detach-on-destroy は on になる")
   func createdSessionOverridesGlobalDetachOnDestroy() async throws {
     try await withServer("session-create-detach") { runner, workingDirectory in

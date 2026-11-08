@@ -42,10 +42,16 @@ BIN_DIR="$(cd "${PACKAGE_DIR}" && swift build -c "${CONFIGURATION}" --show-bin-p
 BIN="${BIN_DIR}/${EXECUTABLE}"
 [ -f "${BIN}" ] || die "実行ファイルがありません: ${BIN}"
 
+(cd "${ROOT_DIR}/AgentWorkflowTerminal" && swift build -c "${CONFIGURATION}" --product hostctl)
+HOSTCTL_BIN_DIR="$(cd "${ROOT_DIR}/AgentWorkflowTerminal" && swift build -c "${CONFIGURATION}" --show-bin-path)"
+HOSTCTL_BIN="${HOSTCTL_BIN_DIR}/hostctl"
+[ -f "${HOSTCTL_BIN}" ] || die "実行ファイルがありません: ${HOSTCTL_BIN}"
+
 info "アプリバンドルを組み立てます: ${APP}"
 rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 cp "${BIN}" "${APP}/Contents/MacOS/${EXECUTABLE}"
+cp "${HOSTCTL_BIN}" "${APP}/Contents/MacOS/hostctl"
 
 # 製品名と配布方法が未確定なため、bundle identifier はローカル用の暫定値。
 PLIST="${APP}/Contents/Info.plist"
@@ -63,5 +69,6 @@ plutil -insert NSPrincipalClass -string "NSApplication" "${PLIST}"
 cp -R "${SHARE_DIR}/ghostty" "${APP}/Contents/Resources/ghostty"
 cp -R "${SHARE_DIR}/terminfo" "${APP}/Contents/Resources/terminfo"
 
+codesign --force --sign - "${APP}/Contents/MacOS/hostctl"
 codesign --force --sign - "${APP}"
 info "完了: ${APP}"

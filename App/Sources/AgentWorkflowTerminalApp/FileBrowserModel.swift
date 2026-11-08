@@ -176,7 +176,7 @@ final class FileBrowserModel: ObservableObject {
       for: path, kind: kind == .directory ? .directory : .file)
   }
 
-  /// 監視できるのは `.git/index` の mtime、タブの活性化、再列挙の3つだけ。作業ツリーの
+  /// 監視できるのは `.git/index` の mtime、セッションの活性化、再列挙の3つだけ。作業ツリーの
   /// ファイルを直接書き換える変更 (agent の編集) は index を触らないので badge は古いままになる。
   /// 検知できないぶんは「更新」ボタンで明示的に取り直す — 黙って最新の顔をさせない (§12.3)。
   func refreshGitState() {

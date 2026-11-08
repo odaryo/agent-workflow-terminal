@@ -6,9 +6,9 @@ import Testing
 @testable import AgentWorkflowTerminalApp
 
 @MainActor
-@Suite("§3.3 復元したタブの session 作成確認")
+@Suite("§3.3 復元したセッションの作成確認")
 struct RestoredTabSessionTests {
-  @Test("保存が読めた起動だけ全タブに印を付ける", arguments: [true, false], [true, false])
+  @Test("保存が読めた起動だけ全セッションに印を付ける", arguments: [true, false], [true, false])
   func marksInitialTabs(hasSavedInventory: Bool, hasSessionNames: Bool) throws {
     let model = try makeModel()
     let root = try #require(WorktreeIdentity(rawValue: "/repo/.git"))
@@ -38,7 +38,7 @@ struct RestoredTabSessionTests {
     #expect(model.selectedTab == .primary(root))
   }
 
-  @Test("復元タブは session が無いか不明なら確認し、存在すれば開く", arguments: [true, false, nil])
+  @Test("復元セッションは tmux session が無いか不明なら確認し、存在すれば開く", arguments: [true, false, nil])
   func restoredOpening(sessionExists: Bool?) async throws {
     let model = try makeModel(sessionExists: sessionExists)
     let key = try #require(model.tabKeys.first)
@@ -81,7 +81,7 @@ struct RestoredTabSessionTests {
     #expect(await model.shouldOpenTab(key) == .open)
   }
 
-  @Test("同じディレクトリに他のタブがあれば、無い session の復元タブを閉じる")
+  @Test("同じディレクトリに他のセッションがあれば、tmux session が無い復元セッションを閉じる")
   func closesMissingTabWithNeighbor() async throws {
     let model = try makeModel()
     let key = try #require(model.tabKeys.first)
@@ -93,10 +93,10 @@ struct RestoredTabSessionTests {
     #expect(!model.tabKeys.contains(key))
     #expect(!model.restoredTabs.contains(key))
     #expect(model.selectedTab == neighbor)
-    #expect(model.warning?.contains("外部で終了していたため、タブを閉じました") == true)
+    #expect(model.warning?.contains("外部で終了していたため、セッションを閉じました") == true)
   }
 
-  @Test("タブ削除は新規と復元の印を両方外す", arguments: [true, false])
+  @Test("セッション削除は新規と復元の印を両方外す", arguments: [true, false])
   func removalClearsMarks(discard: Bool) throws {
     let model = try makeModel()
     let key = try #require(model.tabKeys.first)
@@ -113,7 +113,7 @@ struct RestoredTabSessionTests {
     #expect(!model.newlyAddedTabs.contains(key))
   }
 
-  @Test("ディレクトリのタブ削除は他のディレクトリの印を残す")
+  @Test("ディレクトリのセッション削除は他のディレクトリの印を残す")
   func directoryRemovalClearsOnlyMatchingMarks() throws {
     let model = try makeModel()
     let key = try #require(model.tabKeys.first)

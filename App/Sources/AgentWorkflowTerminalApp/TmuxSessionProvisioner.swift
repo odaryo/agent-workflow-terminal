@@ -12,8 +12,6 @@ struct TmuxSessionAttachment: Sendable, Equatable {
   }
 }
 
-/// タブが端末を出す前に、その worktree の tmux session を用意する経路。
-///
 /// **surface へ `new-session` を渡さない**ための型である。§4.4 の `history-limit` と §4.2 の
 /// `window-size`、`-c` の format escape は `TmuxSessionOperations.create` だけが保証しており、
 /// surface 側で同じ argv を組み直すと同じ判定が2箇所へ分かれる (Issue #235 はそれで
@@ -48,7 +46,7 @@ struct TmuxSessionProvisioner: Sendable {
   }
 
   /// 空配列は「session が無い」ことの確認である。取り残された server が居る場合は `[]` にせず投げる。
-  /// 呼び出し側が空の一覧でタブを刈り込まないため (Issue #500)。
+  /// 呼び出し側が空の一覧でセッションを刈り込まないため。
   func sessionNames() async throws(TmuxSessionProvisionerError) -> [String] {
     do {
       return try await operations.list()
@@ -122,7 +120,7 @@ struct TmuxSessionProvisioner: Sendable {
   /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す。`detach-on-destroy` は
   /// 無条件 (#491)、`window-size` は current window が未設定のときだけ (設計書 §3.3、#322)。
   /// 失敗しても attach を止めない: session 消滅は attach 側で失敗が表示され、それ以外の設定失敗で
-  /// タブを開けなくする方が害が大きい。
+  /// セッションを開けなくする方が害が大きい。
   private func repairResumedSession(_ session: TmuxSessionName) async {
     do {
       try await operations.ensureDetachOnDestroy(session: session)

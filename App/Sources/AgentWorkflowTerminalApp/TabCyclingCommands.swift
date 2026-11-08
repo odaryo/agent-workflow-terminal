@@ -5,16 +5,16 @@ struct TabCyclingCommands: Commands {
 
   var body: some Commands {
     CommandGroup(after: .toolbar) {
-      Button("前のタブ") { projects.selectedModel?.selectPreviousTab() }
+      Button("前のセッション") { projects.selectedModel?.selectPreviousTab() }
         .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
         .disabled(projects.selectedModel == nil)
-      Button("次のタブ") { projects.selectedModel?.selectNextTab() }
+      Button("次のセッション") { projects.selectedModel?.selectNextTab() }
         .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
         .disabled(projects.selectedModel == nil)
-      Button("次のタブ") { projects.selectedModel?.selectNextTab() }
+      Button("次のセッション") { projects.selectedModel?.selectNextTab() }
         .keyboardShortcut(.tab, modifiers: .control)
         .disabled(projects.selectedModel == nil)
-      Button("前のタブ") { projects.selectedModel?.selectPreviousTab() }
+      Button("前のセッション") { projects.selectedModel?.selectPreviousTab() }
         .keyboardShortcut(.tab, modifiers: [.control, .shift])
         .disabled(projects.selectedModel == nil)
     }

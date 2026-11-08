@@ -1,7 +1,6 @@
 import TerminalCore
 
 extension AppModel {
-  /// Task Tab と Overview と通知で同じ見出しを出す。
   func worktreeTitle(of identity: WorktreeIdentity) -> String {
     if projectRoot?.identity == identity { return "Project Root" }
     return worktrees.first { $0.identity == identity }?.detected.tabName ?? identity.rawValue

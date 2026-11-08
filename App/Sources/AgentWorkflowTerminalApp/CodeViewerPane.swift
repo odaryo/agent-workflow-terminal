@@ -31,7 +31,7 @@ struct CodeViewerPane: View {
       .task {
         model.prefersDarkTheme = colorScheme == .dark
         history.prefersDarkTheme = colorScheme == .dark
-        // タブの活性化 = このペインが階層に現れた時。ここで列挙と Git 状態を取り直す。
+        // 非表示の間の変更を反映するため、セッションを表示するたびに列挙と Git 状態を取り直す。
         model.loadRoot()
       }
       .task(id: model.selection) {
@@ -50,7 +50,7 @@ struct CodeViewerPane: View {
         await watchGitIndex()
       }
       .onDisappear {
-        // タブを切り替えるとペインが階層から外れる。走っている git をそこで止める。
+        // 非表示のセッションに対する git の読み取りを続けない。
         history.cancelAll()
       }
   }

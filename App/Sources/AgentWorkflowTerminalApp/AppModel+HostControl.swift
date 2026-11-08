@@ -63,7 +63,7 @@ extension AppModel {
       created = false
     } else {
       guard let first = tabLayout.tabs(in: worktree.identity).first else {
-        return .failure(code: .tmuxFailed, message: "worktree のタブが見つかりません")
+        return .failure(code: .tmuxFailed, message: "worktree のセッションが見つかりません")
       }
       key = first
       if let failure = await createHostControlSession(

@@ -7,7 +7,7 @@ extension AppModel {
     do {
       names = try await sessions.sessionNames()
     } catch {
-      reportTabOpeningFailure("tmux session の一覧を取得できないため、新しいタブを開けません: \(error)")
+      reportTabOpeningFailure("tmux session の一覧を取得できないため、新しいセッションを開けません: \(error)")
       return
     }
     guard !Task.isCancelled, canOpenTab(in: identity) else { return }

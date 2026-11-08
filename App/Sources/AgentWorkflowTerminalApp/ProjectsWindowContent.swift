@@ -104,7 +104,7 @@ struct ProjectsWindowContent: View {
     } else if let model = projects.selectedModel {
       // 選択中の Project の view だけを置く。`.id` で Project ごとに別の view にするので、
       // 切り替えると前の Project の端末は `dismantleNSView` で破棄され、tmux client が detach する
-      // (session は残る)。タブのように opacity で重ねると前の Project の client が attach した
+      // (session は残る)。セッションのように opacity で重ねると前の Project の client が attach した
       // まま残り、戻ったときに同じ session へ2つ目の client が attach する。
       ProjectView(model: model)
         .id(model.project.commonDirectory)

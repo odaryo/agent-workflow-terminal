@@ -19,10 +19,10 @@ final class AppNavigator: ObservableObject {
     return mainWindow.isVisible || mainWindow.isMiniaturized
   }
 
-  /// Project → タブ → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`
-  /// ならタブまで。
+  /// Project → セッション → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`
+  /// ならセッションまで。
   ///
-  /// - Returns: pane へ移れなかった理由。タブの選択は失敗しても済んでいる。
+  /// - Returns: pane へ移れなかった理由。セッションの選択は失敗しても済んでいる。
   func reveal(
     _ model: AppModel, worktree: WorktreeIdentity, session: TerminalSessionKey? = nil,
     pane: PaneID?, in projects: ProjectsModel

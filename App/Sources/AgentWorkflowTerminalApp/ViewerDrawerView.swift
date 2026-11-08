@@ -6,7 +6,7 @@ import TerminalCore
 /// 階層上の1箇所に固定し、幅だけを変える。
 struct ViewerDrawerView<Terminal: View>: View {
   @Binding var layout: ViewerDrawerLayout
-  /// `.code` / `.diff` ペインが起点にする worktree。選択中のタブが無い間は `nil`。
+  /// `.code` / `.diff` ペインが起点にする worktree。選択中のセッションが無い間は `nil`。
   let worktree: DetectedWorktree?
   let selectedSession: TerminalSessionKey?
   /// Drawer の開閉より長く生きる必要がある Diff の状態 (§9.1.1 の base branch 記憶と

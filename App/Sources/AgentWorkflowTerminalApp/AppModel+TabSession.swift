@@ -34,7 +34,7 @@ extension AppModel {
       return .offerCreate
     case .closeTab:
       reportTabClosingFailure(
-        "タブ「\(tabTitle(key))」の tmux session は外部で終了していたため、タブを閉じました。")
+        "セッション「\(tabTitle(key))」は外部で終了していたため、セッションを閉じました。")
       discardTab(key)
       return .close
     }

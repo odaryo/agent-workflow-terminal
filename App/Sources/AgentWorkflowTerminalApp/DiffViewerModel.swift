@@ -79,7 +79,7 @@ final class DiffViewerModel: ObservableObject {
   private var isSendInProgress = false
   private var sendCoalescer: DiffCommentSendCoalescer
 
-  /// ユーザーが選び直した base branch。タスクタブごとに覚え、次に開いても再判定しない (§9.1.1)。
+  /// ユーザーが選び直した base branch。セッションごとに覚え、次に開いても再判定しない (§9.1.1)。
   private var userSelectedBaseBranch: GitBranchRef?
   private var didLoadContext = false
 

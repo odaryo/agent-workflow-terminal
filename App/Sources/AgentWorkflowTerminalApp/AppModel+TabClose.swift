@@ -47,7 +47,7 @@ extension AppModel {
       do {
         try await sessions.terminate(key)
       } catch {
-        reportTabClosingFailure("タブ「\(tabTitle(key))」の session を終了できません: \(error)")
+        reportTabClosingFailure("セッション「\(tabTitle(key))」を終了できません: \(error)")
         return
       }
       discardTab(key)

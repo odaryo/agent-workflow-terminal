@@ -7,15 +7,15 @@ struct TerminalTabClosePanelHost: View {
   var body: some View {
     if let confirmation = closing.confirmation {
       VStack(alignment: .leading, spacing: 8) {
-        Text("タブを閉じる: \(confirmation.title)").font(.headline)
+        Text("セッションを閉じる: \(confirmation.title)").font(.headline)
         Text(
           confirmation.activity == .running
-            ? "このタブの session では shell 以外のプロセスが動いています。閉じるとそのプロセスも終了します。"
-            : "このタブの session で動いているプロセスを確認できませんでした。閉じると、動いているプロセスも終了します。")
+            ? "このセッションでは shell 以外のプロセスが動いています。閉じるとそのプロセスも終了します。"
+            : "このセッションで動いているプロセスを確認できませんでした。閉じると、動いているプロセスも終了します。")
         HStack {
           Spacer()
           Button("キャンセル") { closing.cancel() }
-          Button("タブを閉じる") { confirm() }
+          Button("セッションを閉じる") { confirm() }
         }
       }
       .padding(10)

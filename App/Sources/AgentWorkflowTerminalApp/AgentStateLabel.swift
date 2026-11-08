@@ -17,7 +17,7 @@ extension AgentState {
   }
 }
 
-/// 設計書 §5.3 の記号・色の対応表。Task Tab と Overview はこれだけを使う。
+/// 設計書 §5.3 の記号・色の対応表。セッションと Overview で異なる対応表を持たない。
 ///
 /// 色は補助であり、形だけで状態を区別できるようにする (§5.3)。同じ色の状態どうしも
 /// 形は必ず変える。
@@ -47,7 +47,7 @@ struct AgentStatePresentation: Equatable {
   /// タスク完了 (§12.7) は状態と別の列に出す。pane の状態の記号と重ねない。
   static let taskCompleted = Self("checkmark.seal.fill", .green, "タスク完了")
 
-  /// 到達不能・観測失敗のタブ。状態を観測していないので、状態の記号を流用しない (§12.3)。
+  /// 到達不能・観測失敗のセッション。状態を観測していないので、状態の記号を流用しない (§12.3)。
   static func unobserved(_ label: String) -> Self {
     Self("exclamationmark.triangle", .gray, label)
   }

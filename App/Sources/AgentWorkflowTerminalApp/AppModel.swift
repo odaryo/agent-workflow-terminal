@@ -36,7 +36,7 @@ final class AppModel: ObservableObject {
   let tmuxExecutable: URL?
   /// `nil` は tmux を使えない起動。`tmuxExecutable` が `nil` の起動と同じ集合になる。
   let sessions: TmuxSessionProvisioner?
-  /// pane 観測はここで session ごとに1本だけ回す (Issue #189)。タブ・Drawer・Overview はどれも
+  /// pane 観測はここで session ごとに1本だけ回す。セッション・Drawer・Overview はどれも
   /// これを読み、自分で観測を起こさない。
   let paneObservations: PaneObservationStore
   let diffModels = DiffViewerModelStore()
@@ -110,7 +110,7 @@ final class AppModel: ObservableObject {
     guard canOpenTab(in: identity) else { return }
     guard let key = tabLayout.addTab(in: identity, existingSessionNames: existingSessionNames)
     else {
-      reportTabOpeningFailure("タブ番号の上限 (9999) に達したため、新しいタブを開けません。")
+      reportTabOpeningFailure("セッション番号の上限 (9999) に達したため、新しいセッションを開けません。")
       return
     }
     newlyAddedTabs.insert(key)
@@ -138,11 +138,11 @@ final class AppModel: ObservableObject {
     restoredTabs = restoredTabs.filter { $0.identity != identity }
     for key in tabLayout.tabs(in: identity) { tabLayout.removeTab(key) }
   }
-  /// 通常の Task Tab に並べる worktree (設計書 §3.2)。
+  /// Inactive の worktree はセッションの表示対象にしない (設計書 §3.2)。
   var tabbedWorktrees: [TaskWorktree] { inventory.tabbedTaskWorktrees }
 
   /// Active 化の導線に並べる worktree。状態は添えない — 添えると Inactive の pane を観測する
-  /// ことになり、タブから外した意味が無くなる (Issue #237)。
+  /// ことになり、Inactive を観測対象から外す方針に反する (設計書 §3.2)。
   var inactiveWorktrees: [TaskWorktree] { inventory.inactiveTaskWorktrees }
 
   /// `message` と分ける。あちらは起動時の失敗を載せる保存されたスロットなので、Inactive を
@@ -197,7 +197,7 @@ final class AppModel: ObservableObject {
         do {
           sessionNames = try await sessions?.sessionNames()
         } catch {
-          warning = "tmux の session の一覧を取得できないため、前回のタブを復元できませんでした: \(error)"
+          warning = "tmux の session の一覧を取得できないため、前回のセッションを復元できませんでした: \(error)"
         }
         guard !Task.isCancelled else { return }
         applyInitial(
@@ -324,8 +324,8 @@ final class AppModel: ObservableObject {
     // 消えないままになる (`emptyStateMessage`)。
   }
 
-  /// タブに出ていない worktree を選ばない。Inactive はタブが無いので、選ぶと端末だけが
-  /// 生きたまま残り、切り替える手段が無くなる。
+  /// Inactive の worktree は表示対象でないため、選ぶと端末だけが生きたまま残り、
+  /// 切り替える手段が無くなる。
   private var firstSelectableWorktree: TaskWorktree? {
     inventory.selectableTaskWorktrees.first
   }
@@ -363,8 +363,8 @@ final class AppModel: ObservableObject {
     do {
       names = try await sessions?.sessionNames() ?? []
     } catch {
-      // 空の一覧で並べ直すとタブが全部消える。取得できなかったときは今のタブを残す (Issue #500)。
-      warning = "tmux の session の一覧を取得できないため、タブを復元できませんでした: \(error)"
+      // 空の一覧で並べ直すとセッションが全部消える。取得できなかったときは今のセッションを残す。
+      warning = "tmux の session の一覧を取得できないため、セッションを復元できませんでした: \(error)"
       return
     }
     guard
@@ -383,8 +383,8 @@ final class AppModel: ObservableObject {
     }
   }
 
-  /// タブから外れた worktree の端末を残さない。残すと、表示されていない NSView が first
-  /// responder を持ち続け、打鍵が別 worktree の生きた session へ入る窓が開く (Issue #234)。
+  /// 表示対象から外れた worktree の端末を残さない。残すと、表示されていない NSView が first
+  /// responder を持ち続け、打鍵が別 worktree の生きた session へ入る窓が開く。
   /// tmux session 自体は残す (設計書 §3.4)。
   private func close(_ identity: WorktreeIdentity) {
     openedTabs = openedTabs.filter { $0.identity != identity }
@@ -484,15 +484,15 @@ final class AppModel: ObservableObject {
   }
 
   /// pane の Agent 状態の観測経路。候補一覧の印 (§12.7) と送信可否 (§9.2.2) の両方がこれを見る。
-  /// Project Root も含める — 含めないと Project Root タブで送信が恒久的に不可になる。
+  /// Project Root も含める — 含めないと Project Root セッションで送信が恒久的に不可になる。
   /// `nil` は「観測経路が無い」で、Inactive・到達不能な worktree と tmux を使えない起動が
   /// ここへ入る。
   ///
   /// - Important: 可否の判定は `WorktreeInventory.observesPaneStates(of:)` に任せ、ここでは
-  ///   書き直さない。タブ側とドロワー側がそれぞれ条件を持つと、片方だけが Inactive を外して
-  ///   観測が走り続ける (Issue #237)。
+  ///   書き直さない。セッション側とドロワー側がそれぞれ条件を持つと、片方だけが Inactive を外して
+  ///   観測が走り続ける。
   ///
-  /// 返すのは `paneObservations` の購読で、呼ぶたびに観測を起こすことはない (Issue #189)。
+  /// 返すのは `paneObservations` の購読で、呼ぶたびに観測を起こすことはない。
   func agentPaneStates(of key: TerminalSessionKey) -> AsyncStream<[PaneAgentState]>? {
     guard inventory.observesPaneStates(of: key.identity) else { return nil }
     return paneObservations.paneStates(of: key)

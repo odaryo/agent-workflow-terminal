@@ -5,7 +5,7 @@ import Testing
 
 @testable import AgentWorkflowTerminalApp
 
-@Suite("タブ単位の session 終了 (§3.1)")
+@Suite("セッション単位の終了 (§3.1)")
 struct TmuxSessionProvisionerTests {
   @Test("指定した番号の session を完全一致で確認する", arguments: [1, 3])
   func checksExactSession(index: Int) async throws {

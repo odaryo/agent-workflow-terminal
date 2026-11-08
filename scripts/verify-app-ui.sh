@@ -26,7 +26,7 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「De
                         find した要素の中心を activate してから right-click する
                         (開いたメニューは texts の AXMenuItem で読み、Esc で閉じる)
   expect <文字列> [--exact] [--role AXRole]
-                        find で見つかれば成功、無ければ失敗 (ボタン・タブ・sheet も対象)
+                        find で見つかれば成功、無ければ失敗 (Overview の行・ボタン・sheet も対象)
   type <文字列>          今フォーカスがある所へ打鍵する (改行は拒否する)
   focused               フォーカスを持つ要素の role / description / value を出す
   value <部分文字列>     フォーカス中の要素の値にその文字列があれば成功、無ければ失敗
@@ -213,16 +213,15 @@ tell application "System Events" to tell process "${APP_NAME}"
   set size of w to {1780, 1130}
 end tell
 EOS
-  # ウィンドウが出た直後はタブとメニューがクリックを取りこぼす (実測)。
+  # ウィンドウが出た直後は Overview の行とメニューがクリックを取りこぼす。
   sleep 3
 }
 
 # ハーネス自身が壊れていないことを確かめる最小の導線。Diff を開いて行を1つ選ぶ。
 # 検証用の差分を作るため、リポジトリに untracked のプローブファイルを一時的に置く。
 selftest() {
-  # Project Root タブが指すのは常にリポジトリのメイン作業ツリーで、worktree はタスクタブ側に並ぶ
-  # (実測: worktree のパスを --project に渡しても Project Root はメイン側になる)。タブの選択を
-  # index に頼らず済ませるため、プローブはメイン作業ツリーへ置いて Project Root タブで見る。
+  # Project Root のセッションは常にメイン作業ツリーを指すため、プローブもそこへ置く。
+  # Overview の Agent がいない行は「シェル」、表示中は「表示中 シェル」なので部分一致で選ぶ。
   local main_worktree
   main_worktree=$(git worktree list --porcelain | awk 'NR == 1 { print $2 }')
   [ -n "$main_worktree" ] || die "メイン作業ツリーを特定できませんでした"
@@ -241,8 +240,8 @@ selftest() {
   trap __awt_on_exit EXIT
   printf 'probe line one\nprobe line two\nprobe line three\n' >"$SELFTEST_PROBE"
   app_launch "$main_worktree"
-  # ボタンの順番は UI の変更でずれたため、文言と role で対象を特定する (#414)。
-  app_click_text "Project Root" --exact --role AXButton
+  # ボタンの順番に依存しないよう、文言と role で対象を特定する。
+  app_click_text "シェル" --role AXButton
   app_click_text "Viewer" --exact --role AXMenuButton
   swift "$SCRIPT_DIR/ui-ax.swift" "$APP_NAME" press "Diff" --exact --role AXMenuItem
   sleep 2

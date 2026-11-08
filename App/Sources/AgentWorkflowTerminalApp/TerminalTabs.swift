@@ -72,7 +72,7 @@ private struct TerminalTabContent: View {
           } description: {
             Text(
               """
-              このタブの session は、アプリを止めていた間に終了したか、確かめられませんでした。\
+              このセッションは、アプリを止めていた間に終了したか、確かめられませんでした。\
               中で動いていた Agent は戻りません。\
               新しい session を作るには、下のボタンを押してください。
               """
@@ -143,7 +143,7 @@ private struct TerminalTabContent: View {
         configurationFileURL: terminalConfigurationFileURL,
         focusRequest: focusRequest,
         // プロセスが終わった端末にキーボードを持たせない。`focusRequest` を `nil` に
-        // すり替える形では塞がらない — `nil` は「取りに行かない」だけで、既に別のタブの
+        // すり替える形では塞がらない — `nil` は「取りに行かない」だけで、既に別のセッションの
         // 端末が持っている first responder を誰も降ろさないため、覆いを見ながらの打鍵が
         // 別 worktree の生きた session へ入る (Issue #234)。
         keyboardParticipation: hasExited ? .withdrawn : .normal,
@@ -176,7 +176,7 @@ private struct TerminalTabContent: View {
   ///   ことだけで、`detach` なのか最後の pane での `exit` なのかは区別できない
   ///   (どちらも client の終了状態は 0。隔離ソケットで実測、Issue #234)。前者では session が
   ///   残り、後者では session ごと消える。session が消えていれば、再 attach はこのディレクトリの
-  ///   最後のタブだけ新しい session を作り、それ以外はタブを閉じる。区別できない
+  ///   最後のセッションだけ新しい session を作り、それ以外はセッションを閉じる。区別できない
   ///   ものを断定して見せない (設計書 §12.3 の `Unknown` と同じ理由)。
   private var exitedOverlay: some View {
     VStack(spacing: 10) {
@@ -185,8 +185,8 @@ private struct TerminalTabContent: View {
       Text(
         """
         tmux から detach したか、session が終了しています。再 attach すると、session が残っていれば\
-        同じ session に繋ぎ直します。消えていれば、このディレクトリの最後のタブなら新しい session を作り、\
-        そうでなければタブを閉じます。
+        同じ session に繋ぎ直します。消えていれば、このディレクトリの最後のセッションなら新しい session を作り、\
+        そうでなければセッションを閉じます。
         """
       )
       .foregroundStyle(.secondary)
@@ -195,8 +195,8 @@ private struct TerminalTabContent: View {
         // 世代を上げて `.task` を再走させる。`restart()` (同じ argv の再実行) では復帰しない
         // 場合がある — attach の argv は `-A` を持たないので、session が消えていると
         // `can't find session` で終わる (隔離ソケットで実測、Issue #234)。
-        // 再準備では、session が消えていれば最後のタブだけ provisioner を通して
-        // §4.2 / §4.4 の保証付きで作り直し、それ以外はタブを閉じる。
+        // 再準備では、session が消えていれば最後のセッションだけ provisioner を通して
+        // §4.2 / §4.4 の保証付きで作り直し、それ以外はセッションを閉じる。
         attempt += 1
         preparation = .preparing
       }

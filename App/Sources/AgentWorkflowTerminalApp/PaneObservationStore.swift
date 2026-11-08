@@ -5,8 +5,8 @@ import TerminalCore
 
 /// Project 1件 (`AppModel`) の pane 観測を session ごとに1本だけ回し、その結果を配る (Issue #189)。
 ///
-/// タブの代表状態、Drawer の送信可否、Overview (設計書 §13) はどれもここを読む。view が観測を
-/// 起こすと、view の無い worktree (非選択の Project、描画されていないタブ) が観測されず、view が
+/// セッションの代表状態、Drawer の送信可否、Overview (設計書 §13) はどれもここを読む。view が観測を
+/// 起こすと、view の無い worktree (非選択の Project、描画されていないセッション) が観測されず、view が
 /// 2つあれば同じ session を二重に観測する。
 ///
 /// - Important: 観測してよい worktree の判定は `WorktreeInventory.observesPaneStates(of:)` だけに

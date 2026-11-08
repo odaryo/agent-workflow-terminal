@@ -553,7 +553,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   }
 
   private var configuration: TerminalRendererConfiguration?
-  /// 表示中のタブで、かつ Drawer のテキスト入力がキーボードを主張していないときだけ true。
+  /// 表示中のセッションで、かつ Drawer のテキスト入力がキーボードを主張していないときだけ true。
   /// false の間は自分から first responder を取らない。surface の (再) 生成の経路も
   /// `applyFocusRequest` の経路も、この同じ述語だけを読む (Issue #278)。
   private var wantsKeyboardFocus = false
@@ -651,8 +651,8 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     // 無視しても libghostty 側は壊れない — App/vendor/ghostty/src/apprt/embedded.zig:639 の
     // close() は callback を呼ぶだけで surface を解放しない (解放は同 :254 の closeSurface)。
     // ユーザーが閉じる経路は塞がらない: `.exited` でも window.performClose(nil) と
-    // NSApp.terminate(nil) は機能する (実測)。タブを閉じる操作と、案内文 "Press any key to
-    // close the terminal." との食い違いは Issue #25 のタブ UI が引き取る。
+    // NSApp.terminate(nil) は機能する。案内文 "Press any key to close the terminal." と
+    // 操作の食い違いは、上位レイヤの終了表示で覆う。
   }
 
   override public func setFrameSize(_ newSize: NSSize) {
@@ -676,7 +676,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   ) {
     updateFileDropRegistration(request, participation: participation)
     wantsKeyboardFocus = request?.isTerminalAllowed == true && participation == .normal
-    // 表示中のタブ (`request != nil`) が受け取れないときは、キーボードを端末から外す。
+    // 表示中のセッション (`request != nil`) が受け取れないときは、キーボードを端末から外す。
     // Why not `isTerminalAllowed` も条件にする: それは「テキスト入力が主張しているなら
     // first responder は端末ではない」という、**どこにも保証の無い不変条件**に頼ることに
     // なる。Issue #278 が確立したのは逆向きの乖離 (AppKit 側の grab は SwiftUI の
@@ -688,7 +688,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
       withdrawKeyboardFromTerminals()
     }
     guard let request else {
-      // Why not 覚えたままにする: 覚えたままだと、同じ要求番号のまま選び直されたタブが
+      // Why not 覚えたままにする: 覚えたままだと、同じ要求番号のまま選び直されたセッションが
       // first responder を取り直せない。
       appliedFocusRequest = nil
       return
@@ -703,7 +703,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     window?.makeFirstResponder(self)
   }
 
-  /// Why not 自分だけ降ろす: このアプリで first responder を動かすのは「選ばれたタブが
+  /// Why not 自分だけ降ろす: このアプリで first responder を動かすのは「選ばれたセッションが
   /// 取りに行く」経路だけで、降りる側は誰も resign しない (Issue #233 の実測。`opacity(0)` も
   /// `allowsHitTesting(false)` も first responder を動かさない)。そのため
   /// 「A が `.exited` → B へ切替 → A へ戻す」の後、**隠れた B が first responder のまま**に
@@ -873,8 +873,8 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     updateContentScaleFromWindow()
     updateSurfaceSize()
     updateDisplayID()
-    // Why not 常に取る: 背面のタブの surface が (再) 生成されるたびに first responder を
-    // 奪うと、表示中のタブへの打鍵が背面の端末へ入る (Issue #233 と同じ誤送信)。表示中でも
+    // Why not 常に取る: 背面のセッションの surface が (再) 生成されるたびに first responder を
+    // 奪うと、表示中のセッションへの打鍵が背面の端末へ入る。表示中でも
     // Drawer のテキスト入力が主張している間は取らない — この経路は AppKit 側で走り SwiftUI の
     // `@FocusState` を見ないので、入力側だけで表しても止まらない (Issue #278)。
     if wantsKeyboardFocus { window?.makeFirstResponder(self) }

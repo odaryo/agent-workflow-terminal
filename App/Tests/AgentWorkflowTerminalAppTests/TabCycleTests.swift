@@ -3,7 +3,7 @@ import Testing
 
 @testable import AgentWorkflowTerminalApp
 
-@Suite("タブの巡回")
+@Suite("セッションの巡回")
 struct TabCycleTests {
   private let first = WorktreeIdentity(rawValue: "/repo/.git").map(TerminalSessionKey.primary)
   private let second = WorktreeIdentity(rawValue: "/repo/.git/worktrees/second").map(
@@ -13,7 +13,7 @@ struct TabCycleTests {
   private let missing = WorktreeIdentity(rawValue: "/repo/.git/worktrees/missing").map(
     TerminalSessionKey.primary)
 
-  @Test("前後の隣接タブへ移動する", arguments: [true, false])
+  @Test("前後の隣接セッションへ移動する", arguments: [true, false])
   func adjacent(forward: Bool) throws {
     let order = try [#require(first), #require(second), #require(third)]
     #expect(
@@ -44,7 +44,7 @@ struct TabCycleTests {
     #expect(TabCycle.adjacent(in: [], from: first, forward: forward) == nil)
   }
 
-  @Test("1要素なら現在の選択によらずそのタブを返す", arguments: [true, false])
+  @Test("1要素なら現在の選択によらずそのセッションを返す", arguments: [true, false])
   func single(forward: Bool) throws {
     let identity = try #require(first)
     for current in [nil, first, missing] {

@@ -123,7 +123,7 @@ extension DiffBaseBranchSource {
   }
 }
 
-/// 比較先の候補に出す、同じ Project の他のタスク。`name` はタブと同じ名前で、branch の
+/// 比較先の候補に出す、同じ Project の他のタスク。`name` はセッションと同じ名前で、branch の
 /// あるタスクでは branch 名と同じになる。見分けの手がかりに worktree のディレクトリ名も持つ。
 struct DiffComparisonTask: Equatable, Hashable {
   let name: String

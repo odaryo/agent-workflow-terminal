@@ -537,6 +537,37 @@ paneへのテキスト注入方式は**`load-buffer` + `paste-buffer -p`**とす
 
 注入は「送信」であって「実行」ではない。本文の改行をEnterとして実行させる機能はTerminalに持たせず、実行するかどうかはユーザーの明示操作として分離する。方式に伴う制約は§9.2.1にまとめる。
 
+#### アプリが既定serverに対して行うwrite操作
+
+`App/Sources`と`AgentWorkflowTerminal/Sources`の実装にあるtmuxのargvと、`if-shell`へ渡す分岐のコマンド列を
+一覧にする(2026-11-08時点)。接続先は通常起動では既定serverで、開発中のUI確認では上記の専用socketとなる。
+
+| コマンド | 発行する型 | 目的・対象 |
+|---|---|---|
+| `new-session -d` | `TmuxSessionProvisioner` | アプリの環境でserverを起こすため、固定名`awt-bootstrap-server-do-not-use`の起動用sessionを作る |
+| `kill-session` | `TmuxSessionProvisioner` | 起動用sessionを`-t =awt-bootstrap-server-do-not-use`の完全一致で後始末する |
+| `attach-session` | `TmuxSessionProvisioner`がargvを組み、`GhosttyTerminalView`経由でrendererが実行 | 用意済みのsessionへclientを接続する。`-A`によるsession作成はしない |
+| `new-session -d` | `TmuxSessionOperations.create` | §3.5の名前でセッション用のsessionを作る |
+| `set-option` | `TmuxSessionOperations.create` | 作ったsessionの`history-limit`と`detach-on-destroy`、windowの`window-size`を設定する。`-g`は使わない |
+| `new-window -d` / `kill-window` | `TmuxSessionOperations.create` | `history-limit`設定後にwindowを作り直し、最初のpaneにも履歴容量を適用する(§4.4) |
+| `kill-session` | `TmuxSessionOperations.kill` / `cleanUp` | タブ終了やworktree Closeで対象sessionを完全一致の名前で終了し、作成・設定失敗時には作ったsessionをIDまたは完全一致の名前で後始末する |
+| `set-option` | `TmuxSessionOperations.ensureDetachOnDestroy` / `ensureWindowSizeIfUnset` | Resume時に対象sessionの`detach-on-destroy`を入れ直し、current windowの`window-size`が未設定なら補う |
+| `split-window` | `TmuxPaneOperations` | 対象paneを縦・横に分割する |
+| `kill-pane` | `TmuxPaneOperations` | 対象paneを閉じる |
+| `select-pane` / `select-window` | `TmuxPaneOperations` | paneや方向を選択し、別windowのpaneを選ぶときはwindowも切り替える |
+| `resize-pane -Z` | `TmuxPaneOperations` | 対象paneをzoom・zoom解除する。`if-shell -F`の分岐内で、必要に応じて`select-pane`も行う |
+| `set-option -p` / `set-option -p -u` | `TmuxPanePurposeWriter` | 対象paneのユーザーoption `@awt_purpose`を書き込み・解除する |
+| `load-buffer` | `TmuxTextInjection` | 一時ファイルからUUID付きの専用bufferへ注入本文を読み込む |
+| `paste-buffer -p -d` | `TmuxTextInjection` | 対象paneへbracketed pasteで本文を送り、使用したbufferを削除する |
+| `delete-buffer` | `TmuxTextInjection` | 専用bufferを後始末する。また、送信を拒否した分岐では存在しない専用名の削除を試み、失敗を返す |
+| `if-shell -F` | `TmuxPaneOperations` / `TmuxTextInjection` | zoom状態、paneの同一性、copy-mode・入力無効の条件判定と、上記write操作をserver側のコマンド列にまとめる |
+
+起動用sessionの後始末は呼び出し元のキャンセルを継承せず、後始末が終わるまでプロセス共通のゲートを保持する。
+削除成功、対象session不在、server停止・socket欠落は既存のsession操作の後始末と同じく許容する。
+それ以外で削除できなければ、セッションの用意に成功した場合はタブを開いて警告し、用意にも失敗した場合は
+元の原因と後始末の失敗を併記する。いずれも「手で`tmux kill-session -t =awt-bootstrap-server-do-not-use`を
+実行してください」と案内する。
+
 ### 4.2 複数端末からの接続
 
 同じtmux sessionをHost(メインPC)、作業PC、iPhone、iPad、Androidから同時に表示・操作できる(§20.7)。独自の`Take Control`や入力排他制御は設けない。

@@ -51,7 +51,7 @@ public enum HostControlProtocol {
       }
       return .success(.openWorktree(directory: wire.directory))
     } catch {
-      return .failure(HostControlProtocolError(message: String(describing: error)))
+      return .failure(HostControlProtocolError(message: "要求のJSON形式が不正です"))
     }
   }
 
@@ -76,8 +76,10 @@ public enum HostControlProtocol {
     do {
       let wire = try JSONDecoder().decode(ResponseWire.self, from: Data(line.utf8))
       return .success(wire.response)
+    } catch let error as HostControlProtocolError {
+      return .failure(error)
     } catch {
-      return .failure(HostControlProtocolError(message: String(describing: error)))
+      return .failure(HostControlProtocolError(message: "応答のJSON形式が不正です"))
     }
   }
 

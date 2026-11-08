@@ -86,6 +86,75 @@ struct HostControlSocketTests {
     }
   }
 
+  @Test("socketを削除されてもlockを保持しstop後に次のserverへ渡す")
+  func retainsLockWithoutSocket() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let first = HostControlSocketServer(path: path)
+    let second = HostControlSocketServer(path: path)
+    try await withServer(first) {
+      try FileManager.default.removeItem(atPath: path)
+      do {
+        try await second.start { _ in Self.response }
+        await second.stop()
+        Issue.record("socket削除後に生きたserverのlockを奪った")
+      } catch let error as HostControlSocketError {
+        #expect(error == .addressInUse(path))
+      }
+    }
+    try await withServer(second) {
+      let response = try await HostControlSocketClient.send(
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+      #expect(response == Self.response)
+    }
+    #expect(FileManager.default.fileExists(atPath: path + ".lock"))
+  }
+
+  @Test("ぶら下がったsymlinkは消さずioを返す")
+  func rejectsDanglingSymlink() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    try FileManager.default.createSymbolicLink(atPath: path, withDestinationPath: path + ".missing")
+    let server = HostControlSocketServer(path: path)
+    do {
+      try await server.start { _ in Self.response }
+      Issue.record("ぶら下がったsymlinkで起動できた")
+    } catch {
+      guard case .io = error else {
+        Issue.record("io以外のエラー: \(error)")
+        return
+      }
+    }
+    await server.stop()
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: path) == path + ".missing")
+  }
+
+  @Test("invalid_requestのmessageにDecodingErrorを含めない")
+  func readableInvalidRequest() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    try await withServer(HostControlSocketServer(path: path)) {
+      let line = try await Task.detached { try Self.sendInvalidRequest(to: path) }.value
+      let response = try HostControlProtocol.decodeResponse(line).get()
+      guard case .failure(let code, let message) = response else {
+        Issue.record("不正要求が成功した")
+        return
+      }
+      #expect(code == .invalidRequest)
+      #expect(!message.contains("DecodingError"))
+      #expect(message == "要求のJSON形式が不正です")
+    }
+  }
+
   @Test("104バイト以上のパスをserverとclientが拒否する", arguments: [104, 105, 200])
   func rejectsLongPath(byteCount: Int) async {
     let path = "/private/tmp/" + String(repeating: "x", count: byteCount - 13)
@@ -219,6 +288,27 @@ struct HostControlSocketTests {
       pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
         body($0, socklen_t(MemoryLayout<sockaddr_un>.size))
       }
+    }
+  }
+
+  private static func sendInvalidRequest(to path: String) throws -> String {
+    let descriptor = try makeSocket()
+    defer { Darwin.close(descriptor) }
+    var timeout = timeval(tv_sec: 2, tv_usec: 0)
+    try #require(
+      setsockopt(
+        descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
+        socklen_t(MemoryLayout<timeval>.size)) == 0)
+    try #require(withAddress(path) { Darwin.connect(descriptor, $0, $1) } == 0)
+    let bytes = Array("{}\n".utf8)
+    let sent = bytes.withUnsafeBytes { Darwin.send(descriptor, $0.baseAddress, $0.count, 0) }
+    try #require(sent == bytes.count)
+    var response: [UInt8] = []
+    var byte: UInt8 = 0
+    while true {
+      try #require(Darwin.recv(descriptor, &byte, 1, 0) == 1)
+      if byte == 10 { return String(decoding: response, as: UTF8.self) }
+      response.append(byte)
     }
   }
 

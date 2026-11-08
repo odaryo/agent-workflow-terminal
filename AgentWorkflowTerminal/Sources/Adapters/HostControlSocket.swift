@@ -12,6 +12,7 @@ public enum HostControlSocketError: Error, Sendable, Equatable {
 
 public actor HostControlSocketServer {
   private let path: String
+  private var lockDescriptor: Int32?
   private var stopDescriptor: Int32?
   private var acceptTask: Task<Void, Never>?
   private var connections: [UUID: Task<Void, Never>] = [:]
@@ -24,7 +25,10 @@ public actor HostControlSocketServer {
     if let stopDescriptor { Darwin.close(stopDescriptor) }
     acceptTask?.cancel()
     for task in connections.values { task.cancel() }
-    if stopDescriptor != nil { Darwin.unlink(path) }
+    if let lockDescriptor {
+      Darwin.unlink(path)
+      Darwin.close(lockDescriptor)
+    }
   }
 
   public func start(
@@ -32,9 +36,11 @@ public actor HostControlSocketServer {
   ) throws(HostControlSocketError) {
     guard stopDescriptor == nil else { throw .addressInUse(path) }
     _ = try SocketIO.address(path)
+    let lock = try SocketIO.lock(path)
+    var transferred = false
+    defer { if !transferred { Darwin.close(lock) } }
     try SocketIO.removeStaleSocket(path)
     let listener = try SocketIO.makeSocket()
-    var transferred = false
     defer { if !transferred { Darwin.close(listener) } }
     try SocketIO.bindPrivately(listener, path: path)
     let descriptors: [Int32]
@@ -52,6 +58,7 @@ public actor HostControlSocketServer {
         listener: listener, stopRead: stopRead, continuation: stream.continuation)
     }
     transferred = true
+    lockDescriptor = lock
     stopDescriptor = descriptors[1]
     acceptTask = Task { [weak self] in
       for await descriptor in stream.stream {
@@ -72,6 +79,8 @@ public actor HostControlSocketServer {
     for task in connections.values { task.cancel() }
     connections.removeAll()
     Darwin.unlink(path)
+    if let lockDescriptor { Darwin.close(lockDescriptor) }
+    lockDescriptor = nil
   }
 
   private func accept(
@@ -109,7 +118,7 @@ public enum HostControlSocketClient {
     } catch let error as HostControlSocketError {
       throw error
     } catch {
-      throw .io(String(describing: error))
+      throw .io("Hostとの通信が中断されました")
     }
   }
 }
@@ -131,19 +140,47 @@ private enum SocketIO {
       let result = Darwin.poll(&events, nfds_t(events.count), -1)
       if result < 0 {
         if errno == EINTR { continue }
-        return
+        if waitForStop(stopRead, milliseconds: 100) { return }
+        continue
       }
       if events[1].revents != 0 { return }
-      if events[0].revents & Int16(POLLIN) == 0 { return }
+      if events[0].revents & Int16(POLLIN) == 0 {
+        if waitForStop(stopRead, milliseconds: 100) { return }
+        continue
+      }
       let descriptor = Darwin.accept(listener, nil, nil)
       if descriptor < 0 {
         if errno == EINTR || errno == EAGAIN { continue }
-        return
+        if waitForStop(stopRead, milliseconds: 100) { return }
+        continue
       }
-      if case .terminated = continuation.yield(SocketDescriptor(descriptor)) {
-        return
-      }
+      continuation.yield(SocketDescriptor(descriptor))
     }
+  }
+
+  static func waitForStop(_ descriptor: Int32, milliseconds: Int32) -> Bool {
+    var event = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+    while Darwin.poll(&event, 1, milliseconds) < 0 {
+      if errno != EINTR { return false }
+    }
+    return event.revents != 0
+  }
+
+  static func lock(_ path: String) throws(HostControlSocketError) -> Int32 {
+    // macOSでは稼働中でもbacklogが満杯ならECONNREFUSEDになるため、接続で生存判定しない。
+    let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK
+    let descriptor = Darwin.open(path + ".lock", flags, 0o600)
+    guard descriptor >= 0 else {
+      let code = errno
+      if code == EWOULDBLOCK { throw .addressInUse(path) }
+      throw error(code)
+    }
+    guard Darwin.fchmod(descriptor, 0o600) == 0 else {
+      let failure = error()
+      Darwin.close(descriptor)
+      throw failure
+    }
+    return descriptor
   }
 
   static func error(_ code: Int32 = errno) -> HostControlSocketError {
@@ -218,23 +255,16 @@ private enum SocketIO {
       if errno == ENOENT { return }
       throw error()
     }
-    let descriptor = try makeSocket()
-    defer { Darwin.close(descriptor) }
-    let result = withAddress(try address(path)) { Darwin.connect(descriptor, $0, $1) }
-    let code = errno
-    if result == 0 || code == EINPROGRESS || code == EAGAIN {
-      throw .addressInUse(path)
-    }
-    guard code == ECONNREFUSED else {
-      if code == ENOENT { return }
-      throw error(code)
+    guard status.st_mode & S_IFMT == S_IFSOCK else {
+      throw .io("socket以外のファイルが存在します: \(path)")
     }
     guard Darwin.unlink(path) == 0 || errno == ENOENT else { throw error() }
   }
 
   static func bindPrivately(_ descriptor: Int32, path: String) throws(HostControlSocketError) {
     // bind直後のsocketはumask次第で他ユーザーに開くため、0700の中で0600にしてから公開する。
-    var template = Array("/private/tmp/awt-hc-XXXXXX".utf8CString)
+    let parent = path.lastIndex(of: "/").map { String(path[...$0]) } ?? "./"
+    var template = Array((parent + "awt-hc-XXXXXX").utf8CString)
     guard mkdtemp(&template) != nil else { throw error() }
     let directory = String(cString: template)
     defer { Darwin.rmdir(directory) }
@@ -242,9 +272,8 @@ private enum SocketIO {
     defer { Darwin.unlink(temporaryPath) }
     let result = withAddress(try address(temporaryPath)) { Darwin.bind(descriptor, $0, $1) }
     guard result == 0, Darwin.chmod(temporaryPath, 0o600) == 0,
-      Darwin.listen(descriptor, 16) == 0
+      Darwin.listen(descriptor, 128) == 0
     else { throw error() }
-    // 別の起動が先に公開したsocketを上書きしない。RENAME_EXCLはmacOS/iOS双方で利用できる。
     guard renamex_np(temporaryPath, path, UInt32(RENAME_EXCL)) == 0 else {
       if errno == EEXIST { throw .addressInUse(path) }
       throw error()
@@ -280,21 +309,40 @@ private actor SocketConnection {
   ) async throws -> HostControlResponse {
     defer { close() }
     let deadline = ContinuousClock.now.advanced(by: timeout)
-    let descriptor = try checkedDescriptor(deadline)
-    let result = SocketIO.withAddress(address) { Darwin.connect(descriptor, $0, $1) }
-    if result != 0 {
-      let code = errno
-      if code == ENOENT || code == ECONNREFUSED {
-        throw HostControlSocketError.serverUnavailable(path)
-      }
-      guard code == EINPROGRESS || code == EAGAIN else { throw SocketIO.error(code) }
-      try await finishConnecting(path: path, deadline: deadline)
-    }
+    try await connect(path: path, address: address, deadline: deadline)
     try await writeLine(HostControlProtocol.encode(request), deadline: deadline)
     let line = try await readLine(deadline: deadline)
     switch HostControlProtocol.decodeResponse(line) {
     case .success(let response): return response
     case .failure(let error): throw HostControlSocketError.io(error.message)
+    }
+  }
+
+  private func connect(
+    path: String, address: sockaddr_un, deadline: ContinuousClock.Instant
+  ) async throws {
+    let retryDeadline = ContinuousClock.now.advanced(by: .milliseconds(250))
+    while true {
+      let descriptor = try checkedDescriptor(deadline)
+      let result = SocketIO.withAddress(address) { Darwin.connect(descriptor, $0, $1) }
+      var code: Int32 = result == 0 ? 0 : errno
+      if code == EINPROGRESS || code == EAGAIN {
+        code = try await finishConnecting(deadline: deadline)
+      }
+      if code == 0 { return }
+      if code == ENOENT { throw HostControlSocketError.serverUnavailable(path) }
+      guard code == ECONNREFUSED else { throw SocketIO.error(code) }
+      guard ContinuousClock.now < retryDeadline else {
+        throw HostControlSocketError.serverUnavailable(path)
+      }
+      try await Task.sleep(
+        until: min(deadline, min(retryDeadline, .now.advanced(by: .milliseconds(25)))),
+        clock: .continuous)
+      _ = try checkedDescriptor(deadline)
+      guard ContinuousClock.now < retryDeadline else {
+        throw HostControlSocketError.serverUnavailable(path)
+      }
+      self.descriptor = SocketDescriptor(try SocketIO.makeSocket())
     }
   }
 
@@ -333,7 +381,7 @@ private actor SocketConnection {
       until: min(deadline, ContinuousClock.now.advanced(by: .milliseconds(2))), clock: .continuous)
   }
 
-  private func finishConnecting(path: String, deadline: ContinuousClock.Instant) async throws {
+  private func finishConnecting(deadline: ContinuousClock.Instant) async throws -> Int32 {
     while true {
       let descriptor = try checkedDescriptor(deadline)
       var event = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
@@ -345,11 +393,7 @@ private actor SocketConnection {
         guard getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &code, &length) == 0 else {
           throw SocketIO.error()
         }
-        if code == ENOENT || code == ECONNREFUSED {
-          throw HostControlSocketError.serverUnavailable(path)
-        }
-        guard code == 0 else { throw SocketIO.error(code) }
-        return
+        return code
       }
       try await pause(deadline)
     }

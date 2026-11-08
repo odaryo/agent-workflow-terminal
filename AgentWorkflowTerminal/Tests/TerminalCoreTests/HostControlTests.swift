@@ -113,6 +113,18 @@ struct HostControlTests {
     #expect(try HostControlProtocol.decodeResponse(responseLine).get() == response)
   }
 
+  @Test("不正JSONのエラーにデコーダの内部表現を出さない", arguments: ["{", "{}"])
+  func readableDecodingErrors(line: String) {
+    guard case .failure(let requestError) = HostControlProtocol.decodeRequest(line),
+      case .failure(let responseError) = HostControlProtocol.decodeResponse(line)
+    else {
+      Issue.record("不正JSONを受け付けた")
+      return
+    }
+    #expect(requestError.message == "要求のJSON形式が不正です")
+    #expect(responseError.message == "応答のJSON形式が不正です")
+  }
+
   @Test("必須引数を解釈する")
   func parsesDirectory() throws {
     let result = HostControlCommandLine.parse(["worktree", "open", "--directory", "/two words/日本語"])

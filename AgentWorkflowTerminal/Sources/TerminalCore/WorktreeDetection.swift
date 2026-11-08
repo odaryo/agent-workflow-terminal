@@ -4,7 +4,8 @@
 ///   「作業ツリーへ到達できないと**確かめられた**」観測結果で、admin ディレクトリ側から安定 ID を
 ///   引けている。後者は観測そのものが失敗した状態で、到達可能性も安定 ID も分かっていない
 ///   (git の timeout や EACCES がここへ入る)。潰すと「観測できなかった」と「消えた」の区別が
-///   上位で失われ、§3.2 が禁じる自動 Active 化の事故に戻る。
+///   上位で失われ、同じ worktree が新規出現として扱われて Active 指定が Inactive へ落ちる
+///   (設計書 §3.2)。
 public enum WorktreeObservation: Sendable, Hashable {
   case reachable
   case unreachable
@@ -122,7 +123,8 @@ public struct WorktreeInventory: Sendable, Hashable {
 
 public struct WorktreeScanResult: Sendable, Hashable {
   public let inventory: WorktreeInventory
-  /// 観測中に新しく現れ、到達できた worktree (設計書 §3.2)。初回スキャンでは常に空。
+  /// 観測中に新しく現れた時点で到達できた worktree (設計書 §3.2)。初回スキャンでは常に空。
+  /// 到達不能のまま現れた worktree は、後で到達できても新規出現には数えない。
   public let appeared: [WorktreeIdentity]
   /// 前回状態にあって今回検出されなかった worktree。Project Root も対象に含む。
   /// 観測に失敗しただけの worktree は含めない (`unobserved`)。
@@ -150,7 +152,7 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   「渡されなかった安定 ID は存在しない」と権威的に解釈するため、失敗したスキャンや部分的な
 ///   結果を渡してはならない。渡すと、その回で全 worktree が `disappeared` になり、次の回で
 ///   ユーザーの Active/Inactive 指定を失い、新規出現として `.inactive` から始めてしまう。
-///   これは §3.2 の「到達不能の間は Active/Inactive をそのまま保つ」に反する。
+///   これは設計書 §3.2 の「worktreeが消えた」と「今回は観測できなかった」を区別する規則に反する。
 ///   スキャンが失敗したときは、空の一覧を渡すのではなく、この関数を呼ばずに前回状態を保つ。
 /// - Important: entry 単位で観測に失敗した作業ツリーのパスは `unobserved` へ渡す。これが
 ///   「渡されなかった安定 ID は存在しない」という権威的な解釈の唯一の例外で、渡さないと
@@ -165,8 +167,7 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   git の順序へ戻る。
 /// - Important: `previous` の `nil` は「前回状態が無い」= 初回スキャンを表し、空の
 ///   `WorktreeInventory` (前回は1件も無かった) とは区別する。初回スキャンでは検出された
-///   Task worktree をすべて `.inactive` から始め、新規出現として数えない。Project 登録時点で
-///   既に存在していた過去の worktree が一斉にタブ化する事故を防ぐため。
+///   Task worktree をすべて `.inactive` から始め、新規出現として数えない。
 ///   初回から到達不能な Task worktree も `.inactive` で保持する。安定 ID は観測できているため一覧から
 ///   捨てる理由はなく、利用できないタブを Active にする理由もない。
 /// - Important: **アプリ再起動後の1回目のスキャンにこの関数を使わない。** 保存された状態があるなら
@@ -272,8 +273,9 @@ private func retainedProjectRoot(
   return previousProjectRoot.observing(.observationFailed)
 }
 
-/// 新規出現した worktree は到達可能性によらず Inactive から始める (設計書 §3.2)。
+/// 新規出現した worktree の初期 activation は Inactive とする (設計書 §3.2)。
 /// Active 化は人の操作に限り、既知の identity の指定は保持する。
+/// 新規出現として数えるのは現れた時点で到達できたものだけで、到達不能からの復帰は数えない。
 private func initialActivation(
   of candidate: DetectedWorktree,
   previous: WorktreeInventory?

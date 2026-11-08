@@ -203,13 +203,16 @@ struct WorktreeDetectionTests {
     #expect(result.disappeared.isEmpty)
   }
 
-  @Test("到達不能から復帰してもActive/Inactiveを維持し、新規出現に数えない")
-  func recoveredWorktreeKeepsItsActivation() throws {
+  @Test(
+    "到達不能から復帰してもActive/Inactiveを維持し、新規出現に数えない",
+    arguments: [WorktreeActivation.active, .inactive]
+  )
+  func recoveredWorktreeKeepsItsActivation(activation: WorktreeActivation) throws {
     let reachable = try detected("alpha")
     let unreachable = try detected("alpha", isReachable: false)
     let duringOutage = reconcileDetectedWorktrees(
       detected: [unreachable],
-      previous: inventory([(reachable, .inactive)])
+      previous: inventory([(reachable, activation)])
     )
 
     let recovered = reconcileDetectedWorktrees(
@@ -217,7 +220,7 @@ struct WorktreeDetectionTests {
       previous: duringOutage.inventory
     )
 
-    #expect(recovered.inventory.taskWorktrees.map(\.activation) == [.inactive])
+    #expect(recovered.inventory.taskWorktrees.map(\.activation) == [activation])
     #expect(recovered.inventory.taskWorktrees.map(\.detected.isReachable) == [true])
     #expect(recovered.appeared.isEmpty)
     #expect(recovered.disappeared.isEmpty)

@@ -4,7 +4,7 @@ public struct PaneDisplayState: Sendable, Hashable {
   public let state: AgentState
   /// `state == .unknown` でも `.needsAttention` になり得る (§12.4.3)。`state` から導かない。
   public let category: WorktreeStateCategory
-  /// `nil` は基準の観測に在った pane が、仮の Unknown から初めて状態が決まる変化を除き、
+  /// `nil` は基準の観測に在った pane が、注意不要の `.signalMissing` の Unknown から初めて状態が決まる変化を除き、
   /// まだ表示状態を変えていないことを表す。
   /// 初期表示を Adapter の到着順で並べないため、どの更新時刻よりも古い同順位として扱う (設計書 §13)。
   public let changedAt: ContinuousClock.Instant?
@@ -86,7 +86,8 @@ public struct PaneDisplayStateStabilizer: Sendable {
             paneID: pane.id, state: pane.state, category: pane.category,
             changedAt: isFirstObservation ? nil : instant),
           awaitsInitialResolution: isFirstObservation
-            && pane.state == .unknown && pane.category != .needsAttention)
+            && pane.state == .unknown && pane.category != .needsAttention
+            && pane.unknownReason == .signalMissing)
       entry.removalDeadline = nil
       let stabilized = entry.stabilizer.observe(state: observed, at: instant) ?? observed
       let isInitialResolution =
@@ -107,13 +108,21 @@ public struct PaneDisplayStateStabilizer: Sendable {
   private func retainingMissingPanes(
     in inputOrder: [PaneID], previous: [PaneDisplayState]
   ) -> [PaneID] {
-    // 消失・復帰で同順位を逆転させないため、分類と最終更新が変わらない pane は前回順を保つ。
-    // 新規・順位変更の pane は入力中の次の据え置き pane の直前へ、無ければ末尾へ入力順で挿入する。
+    // 分類が変わっても Overview の順位が同じなら、消失・復帰で同順位を逆転させない。
     let retained = previous.filter { old in
       guard let shown = entries[old.paneID]?.shown else { return false }
-      return shown.category == old.category && shown.changedAt == old.changedAt
+      return (shown.category == .needsAttention) == (old.category == .needsAttention)
+        && shown.changedAt == old.changedAt
     }
-    let retainedIDs = Set(retained.map(\.paneID))
+    // 消失 pane を前回順で次の入力 pane の直前に補い、新規・順位変更は次の据え置き pane の直前へ入れる (次が無ければ末尾)。
+    // 入力中の pane だけを手掛かりにすると、保持中の消失 pane を飛び越えて tmux 順からずれるため。
+    let previousIDs = previous.map(\.paneID).filter { entries[$0] != nil }
+    let fullOrder = inserting(previousIDs, retaining: inputOrder)
+    return inserting(fullOrder, retaining: retained.map(\.paneID))
+  }
+
+  private func inserting(_ inputOrder: [PaneID], retaining retained: [PaneID]) -> [PaneID] {
+    let retainedIDs = Set(retained)
     var preceding: [PaneID: [PaneID]] = [:]
     var pending: [PaneID] = []
     for paneID in inputOrder {
@@ -124,6 +133,6 @@ public struct PaneDisplayStateStabilizer: Sendable {
         pending.append(paneID)
       }
     }
-    return retained.flatMap { (preceding[$0.paneID] ?? []) + [$0.paneID] } + pending
+    return retained.flatMap { (preceding[$0] ?? []) + [$0] } + pending
   }
 }

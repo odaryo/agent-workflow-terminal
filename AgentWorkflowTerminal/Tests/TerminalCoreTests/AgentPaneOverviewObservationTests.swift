@@ -1,3 +1,4 @@
+import Foundation
 import TerminalCore
 import Testing
 
@@ -64,7 +65,7 @@ struct AgentPaneOverviewObservationTests {
   func staggeredInitialResolutionKeepsTmuxOrder(_ destinations: [AgentState]) throws {
     var stabilizer = PaneDisplayStateStabilizer()
     let ids = ["%1", "%2", "%3"]
-    var input = ids.map { observedPane($0, .unknown) }
+    var input = ids.map { observedPane($0, .unknown, unknownReason: .signalMissing) }
     var states = stabilizer.observe(input, at: start)
     #expect(states.map(\.changedAt) == [nil, nil, nil])
 
@@ -84,6 +85,32 @@ struct AgentPaneOverviewObservationTests {
       #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ids)
     }
     #expect(states.map(\.state) == destinations)
+  }
+
+  @Test(
+    "R8 / R12: 判定不能の Unknown が1時間後に決まると109秒で更新した同じ群の pane より上になる",
+    arguments: [AgentState.working, .question])
+  func lateUndeterminedResolutionSortsBeforeEarlierChange(_ destination: AgentState) throws {
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe(
+      [observedPane("%1", .unknown, unknownReason: .adapterUndetermined), observedPane("%2")],
+      at: start)
+    let peerState: AgentState = destination == .working ? .completed : .question
+    _ = stabilizer.observe(
+      [
+        observedPane("%1", .unknown, unknownReason: .adapterUndetermined),
+        observedPane("%2", peerState),
+      ], at: start.advanced(by: .seconds(109)))
+
+    let resolvedAt = start.advanced(by: .seconds(3600))
+    let states = stabilizer.observe(
+      [observedPane("%1", destination), observedPane("%2", peerState)], at: resolvedAt)
+    #expect(states.first { $0.paneID.rawValue == "%1" }?.changedAt == resolvedAt)
+    #expect(
+      states.first { $0.paneID.rawValue == "%2" }?.changedAt
+        == start.advanced(by: .seconds(109)))
+    let result = try overview([task("combined", states)])
+    #expect(result.tasks.first?.rows.compactMap(\.pane).map(\.paneID.rawValue) == ["%1", "%2"])
   }
 
   @Test("未観測の Task は未観測の行1つで、pane の無い Task と同じ群に Task Tab 順で置く")
@@ -140,8 +167,15 @@ struct AgentPaneOverviewObservationTests {
       changedAt: changedAt)
   }
 
-  private func observedPane(_ id: String, _ state: AgentState = .working) -> PaneAgentState {
-    PaneAgentState(id: PaneID(rawValue: id), state: state, lastUpdatedAt: .distantPast)
+  private func observedPane(
+    _ id: String, _ state: AgentState = .working,
+    unknownReason: UnknownReason? = .adapterUndetermined
+  ) -> PaneAgentState {
+    PaneAgentState(
+      id: PaneID(rawValue: id),
+      observation: AgentStateObservation(
+        state: state, adapterID: AgentAdapterID(rawValue: "test"), observedAt: .distantPast,
+        unknownReason: state == .unknown ? unknownReason : nil))
   }
 
   private func task(

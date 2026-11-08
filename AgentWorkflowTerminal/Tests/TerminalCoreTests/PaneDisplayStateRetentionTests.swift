@@ -109,7 +109,8 @@ struct PaneDisplayStateRetentionTests {
     #expect(stabilizer.observe([], at: at(3)) == next)
   }
 
-  @Test("新規 pane が先頭に増えても、前回の左側に入力中の pane がない保持中の pane は先頭に残す")
+  // 時刻を持つ新規 pane と nil の群の前後は Overview が並べ替えるので、ここでは固定しない。
+  @Test("新規 pane が先頭に増えても、保持中の pane を含む同順位の群は前回の順を保つ")
   func missingLeadingPanesStayBeforeNewPanes() throws {
     var stabilizer = PaneDisplayStateStabilizer()
     _ = stabilizer.observe(
@@ -117,7 +118,8 @@ struct PaneDisplayStateRetentionTests {
 
     let shown = stabilizer.observe([pane("%4", .working), pane("%3", .working)], at: at(1))
 
-    #expect(shown.map(\.paneID.rawValue) == ["%1", "%2", "%4", "%3"])
+    #expect(shown.filter { $0.changedAt == nil }.map(\.paneID.rawValue) == ["%1", "%2", "%3"])
+    #expect(shown.first { $0.paneID.rawValue == "%4" }?.changedAt == at(1))
   }
 
   @Test("nextDeadline は状態の保持期限と消失の期限の早い方を返す", arguments: [false, true])

@@ -164,9 +164,10 @@ struct PaneDisplayStateStabilizerTests {
     let start = clock.now
     var stabilizer = PaneDisplayStateStabilizer()
     #expect(
-      stabilizer.observe([pane("%1", .unknown)], at: start)
+      stabilizer.observe([pane("%1", .unknown, unknownReason: .signalMissing)], at: start)
         == [display("%1", .unknown, changedAt: nil)])
-    _ = stabilizer.observe([pane("%1", .unknown)], at: start.advanced(by: .seconds(1)))
+    _ = stabilizer.observe(
+      [pane("%1", .unknown, unknownReason: .signalMissing)], at: start.advanced(by: .seconds(1)))
 
     let resolved = stabilizer.observe(
       [pane("%1", .working)], at: start.advanced(by: .seconds(2)))
@@ -183,7 +184,8 @@ struct PaneDisplayStateStabilizerTests {
   func baselineUnknownBecomesIdleAfterHoldWithoutTimestamp() throws {
     let start = clock.now
     var stabilizer = PaneDisplayStateStabilizer()
-    let initial = stabilizer.observe([pane("%1", .unknown)], at: start)
+    let initial = stabilizer.observe(
+      [pane("%1", .unknown, unknownReason: .signalMissing)], at: start)
     let latest = [pane("%1", .idle)]
     #expect(stabilizer.observe(latest, at: start.advanced(by: .seconds(1))) == initial)
     let deadline = try #require(stabilizer.nextDeadline)
@@ -204,7 +206,7 @@ struct PaneDisplayStateStabilizerTests {
   func attentionUnknownResolvesBaselineOnlyOnce() throws {
     let start = clock.now
     var stabilizer = PaneDisplayStateStabilizer()
-    _ = stabilizer.observe([pane("%1", .unknown)], at: start)
+    _ = stabilizer.observe([pane("%1", .unknown, unknownReason: .signalMissing)], at: start)
     let resolved = try #require(
       stabilizer.observe(
         [attentionUnknown("%1")], at: start.advanced(by: .seconds(1))
@@ -219,11 +221,15 @@ struct PaneDisplayStateStabilizerTests {
         == [display("%1", .question, changedAt: later)])
   }
 
-  @Test("基準観測から Unknown + needsAttention なら確定済みで、次の変化に時刻が入る")
-  func baselineAttentionUnknownIsAlreadyResolved() throws {
+  @Test(
+    "基準観測から Unknown + needsAttention なら理由を問わず確定済みで、次の変化に時刻が入る",
+    arguments: [UnknownReason.signalMissing, .adapterUndetermined])
+  func baselineAttentionUnknownIsAlreadyResolved(_ reason: UnknownReason) throws {
     let start = clock.now
     var stabilizer = PaneDisplayStateStabilizer()
-    #expect(stabilizer.observe([attentionUnknown("%1")], at: start).first?.changedAt == nil)
+    #expect(
+      stabilizer.observe([attentionUnknown("%1", reason: reason)], at: start).first?.changedAt
+        == nil)
     let later = start.advanced(by: .seconds(1))
     #expect(
       stabilizer.observe([pane("%1", .working)], at: later)
@@ -239,7 +245,7 @@ struct PaneDisplayStateStabilizerTests {
     _ = stabilizer.observe([], at: start)
     let appearedAt = start.advanced(by: .seconds(1))
     #expect(
-      stabilizer.observe([pane("%1", .unknown)], at: appearedAt)
+      stabilizer.observe([pane("%1", .unknown, unknownReason: .signalMissing)], at: appearedAt)
         == [display("%1", .unknown, changedAt: appearedAt)])
     let latest = [pane("%1", destination)]
     let observedAt = start.advanced(by: .seconds(2))
@@ -256,16 +262,62 @@ struct PaneDisplayStateStabilizerTests {
     }
   }
 
-  private func pane(_ id: String, _ state: AgentState) -> PaneAgentState {
-    PaneAgentState(id: PaneID(rawValue: id), state: state, lastUpdatedAt: Date())
+  @Test(
+    "signalMissing 以外の基準 Unknown は初回の確定でも最終更新を持つ",
+    arguments: [
+      UnknownReason.adapterUndetermined, .screenUnavailable, .observationFailed,
+      .livenessUnavailable, .screenAttributesUnavailable,
+    ], [AgentState.working, .idle, .question, .permission, .error, .completed])
+  func nonProvisionalUnknownResolutionHasTimestamp(
+    reason: UnknownReason, destination: AgentState
+  ) throws {
+    let start = clock.now
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe([pane("%1", .unknown, unknownReason: reason)], at: start)
+    let latest = [pane("%1", destination)]
+    let observedAt = start.advanced(by: .seconds(3600))
+    let first = stabilizer.observe(latest, at: observedAt)
+    if destination == .idle {
+      #expect(first == [display("%1", .unknown, changedAt: nil)])
+      let deadline = try #require(stabilizer.nextDeadline)
+      #expect(deadline == observedAt.advanced(by: .seconds(9)))
+      #expect(
+        stabilizer.observe(latest, at: deadline)
+          == [display("%1", destination, changedAt: deadline)])
+    } else {
+      #expect(first == [display("%1", destination, changedAt: observedAt)])
+    }
   }
 
-  private func attentionUnknown(_ id: String) -> PaneAgentState {
+  @Test("理由の無い基準 Unknown も仮の Unknown に含めない")
+  func unknownWithoutReasonResolutionHasTimestamp() {
+    let start = clock.now
+    var stabilizer = PaneDisplayStateStabilizer()
+    _ = stabilizer.observe([pane("%1", .unknown, unknownReason: nil)], at: start)
+    let later = start.advanced(by: .seconds(3600))
+    #expect(
+      stabilizer.observe([pane("%1", .working)], at: later)
+        == [display("%1", .working, changedAt: later)])
+  }
+
+  private func pane(
+    _ id: String, _ state: AgentState, unknownReason: UnknownReason? = .adapterUndetermined
+  ) -> PaneAgentState {
+    PaneAgentState(
+      id: PaneID(rawValue: id),
+      observation: AgentStateObservation(
+        state: state, adapterID: AgentAdapterID(rawValue: "test"), observedAt: .distantPast,
+        unknownReason: state == .unknown ? unknownReason : nil))
+  }
+
+  private func attentionUnknown(
+    _ id: String, reason: UnknownReason = .adapterUndetermined
+  ) -> PaneAgentState {
     PaneAgentState(
       id: PaneID(rawValue: id),
       observation: AgentStateObservation(
         state: .unknown, adapterID: AgentAdapterID(rawValue: "codex"), observedAt: Date(),
-        category: .needsAttention, unknownReason: .adapterUndetermined))
+        category: .needsAttention, unknownReason: reason))
   }
 
   private func display(

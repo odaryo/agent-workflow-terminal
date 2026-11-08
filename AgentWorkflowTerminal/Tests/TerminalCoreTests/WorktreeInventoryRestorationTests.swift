@@ -323,7 +323,7 @@ struct WorktreeInventoryRestorationTests {
 
   // MARK: - 観測中の差分計算との接続
 
-  @Test("復元した状態を前回状態として渡すと、以後の新規出現は自動Active化される")
+  @Test("復元した状態を前回状態として渡しても、以後の新規出現はInactiveから始まる")
   func restoredInventoryFeedsIncrementalReconciliation() throws {
     let alpha = try detected("alpha")
     let beta = try detected("beta")
@@ -335,7 +335,7 @@ struct WorktreeInventoryRestorationTests {
     )
 
     #expect(activation(next, of: alpha.identity) == .active)
-    #expect(activation(next, of: beta.identity) == .active)
+    #expect(activation(next, of: beta.identity) == .inactive)
     #expect(next.appeared == [beta.identity])
   }
 

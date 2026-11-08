@@ -47,7 +47,7 @@ struct WorktreeDetectionTests {
     #expect(result.disappeared.isEmpty)
   }
 
-  @Test("初回スキャンと「前回状態が空」は別物で、後者では新規出現として自動Active化する")
+  @Test("初回スキャンも「前回状態が空」もInactiveから始め、後者だけ新規出現に数える")
   func emptyPreviousStateDiffersFromNoPreviousState() throws {
     let alpha = try detected("alpha")
 
@@ -59,7 +59,7 @@ struct WorktreeDetectionTests {
 
     #expect(firstScan.inventory.taskWorktrees.map(\.activation) == [.inactive])
     #expect(firstScan.appeared.isEmpty)
-    #expect(afterEmpty.inventory.taskWorktrees.map(\.activation) == [.active])
+    #expect(afterEmpty.inventory.taskWorktrees.map(\.activation) == [.inactive])
     #expect(afterEmpty.appeared == [alpha.identity])
   }
 
@@ -143,8 +143,8 @@ struct WorktreeDetectionTests {
 
   // MARK: - 2回目以降の差分
 
-  @Test("観測中に新しく現れたworktreeは自動的にActive化する")
-  func newlyAppearedWorktreeIsActivated() throws {
+  @Test("観測中に新しく現れたworktreeはInactiveから始まる")
+  func newlyAppearedWorktreeStartsInactive() throws {
     let alpha = try detected("alpha")
     let beta = try detected("beta")
 
@@ -154,7 +154,7 @@ struct WorktreeDetectionTests {
     )
 
     #expect(result.appeared == [beta.identity])
-    #expect(result.inventory.taskWorktrees.map(\.activation) == [.inactive, .active])
+    #expect(result.inventory.taskWorktrees.map(\.activation) == [.inactive, .inactive])
   }
 
   @Test(

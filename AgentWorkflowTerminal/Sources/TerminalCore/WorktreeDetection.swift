@@ -122,7 +122,7 @@ public struct WorktreeInventory: Sendable, Hashable {
 
 public struct WorktreeScanResult: Sendable, Hashable {
   public let inventory: WorktreeInventory
-  /// 観測中に新しく現れ、自動的に Active 化した worktree (§3.2)。初回スキャンでは常に空。
+  /// 観測中に新しく現れ、到達できた worktree (設計書 §3.2)。初回スキャンでは常に空。
   public let appeared: [WorktreeIdentity]
   /// 前回状態にあって今回検出されなかった worktree。Project Root も対象に含む。
   /// 観測に失敗しただけの worktree は含めない (`unobserved`)。
@@ -148,9 +148,9 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///
 /// - Important: `detected` は**そのスキャン時点の完全な一覧**でなければならない。この関数は
 ///   「渡されなかった安定 ID は存在しない」と権威的に解釈するため、失敗したスキャンや部分的な
-///   結果を渡してはならない。渡すと、その回で全 worktree が `disappeared` になり、**次の回で
-///   ユーザーが意図して Inactive にしていた worktree が `.active` + `appeared` として復帰する**。
-///   これは §3.2 の「自動 Active 化の対象は観測中に新しく現れた worktree に限る」に反する。
+///   結果を渡してはならない。渡すと、その回で全 worktree が `disappeared` になり、次の回で
+///   ユーザーの Active/Inactive 指定を失い、新規出現として `.inactive` から始めてしまう。
+///   これは §3.2 の「到達不能の間は Active/Inactive をそのまま保つ」に反する。
 ///   スキャンが失敗したときは、空の一覧を渡すのではなく、この関数を呼ばずに前回状態を保つ。
 /// - Important: entry 単位で観測に失敗した作業ツリーのパスは `unobserved` へ渡す。これが
 ///   「渡されなかった安定 ID は存在しない」という権威的な解釈の唯一の例外で、渡さないと
@@ -173,15 +173,14 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   `restoreWorktreeInventory(detected:saved:)` を使う。「渡されなかった安定 ID は存在しない」という
 ///   解釈が権威的なのは観測が途切れていない間だけで、アプリが止まっていた間の増減には成り立たない
 ///   (削除と一時的な不可視を区別できない)。保存を `previous` として渡すと、停止中に消えていた
-///   worktree が `disappeared` になり、停止中に現れた worktree が観測中の新規出現として
-///   自動 Active 化される。
+///   worktree が `disappeared` になり、ユーザーの Active/Inactive 指定を失う。
 /// - Note: 同じ安定 ID が複数回渡された場合は最初の1件だけを採る。git の一覧出力の順序が
 ///   安定であることに合わせ、結果を決定的にするための規則であり、後勝ちにする理由が無い。
 ///   `isProjectRoot` が複数あった場合も最初の1件だけを Project Root とし、残りは捨てる
 ///   (Task worktree へ格下げすると §2.3 が禁じる状態を作ってしまうため)。
 /// - Note: 前回 Project Root だった安定 ID が Task worktree として現れた場合は、既知の ID
-///   なので新規出現とせず `.inactive` から始める。自動 Active 化の対象は「観測中に新しく
-///   現れた worktree」に限るため。
+///   なので新規出現とせず `.inactive` から始める。Project Root は Active/Inactive を持たず
+///   (§2.3)、引き継ぐ指定が無いため。
 public func reconcileDetectedWorktrees(
   detected: [DetectedWorktree],
   previous: WorktreeInventory?,
@@ -273,9 +272,8 @@ private func retainedProjectRoot(
   return previousProjectRoot.observing(.observationFailed)
 }
 
-/// 自動 Active 化の対象を「観測中に新しく現れ、かつ到達できた worktree」に限る規則
-/// (設計書 §3.2)。到達不能なまま初めて現れた worktree を Active にしないのは、開けないタブを
-/// Active にする理由が無いためで、復帰しても既知の ID なので新規出現には数え直さない。
+/// 新規出現した worktree は到達可能性によらず Inactive から始める (設計書 §3.2)。
+/// Active 化は人の操作に限り、既知の identity の指定は保持する。
 private func initialActivation(
   of candidate: DetectedWorktree,
   previous: WorktreeInventory?
@@ -287,5 +285,5 @@ private func initialActivation(
   if previous.projectRoot?.identity == candidate.identity {
     return (.inactive, false)
   }
-  return candidate.isReachable ? (.active, true) : (.inactive, false)
+  return (.inactive, candidate.isReachable)
 }

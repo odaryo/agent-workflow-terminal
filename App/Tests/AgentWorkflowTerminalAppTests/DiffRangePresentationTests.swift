@@ -243,9 +243,9 @@ struct DiffWorktreeContextTests {
       worktreeRoot: URL(fileURLWithPath: "/p/wt/a"), projectRoot: try projectRoot(),
       worktrees: worktrees)
 
-    #expect(context.displayName == "feat/a")
+    #expect(context.displayName == "a")
     #expect(
-      context.otherTasks == [DiffComparisonTask(name: "feat/b", branch: "feat/b", directory: "b")])
+      context.otherTasks == [DiffComparisonTask(name: "b", branch: "feat/b", directory: "b")])
   }
 
   @Test("Project Root は「Project Root」と表示し、すべての Active task を候補にする")

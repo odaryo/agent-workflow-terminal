@@ -9,6 +9,7 @@ import TerminalCore
 struct OverviewPaneRow: View {
   let pane: OverviewPane
   @ObservedObject var store: PaneObservationStore
+  let showsDisplayedMark: Bool
   let reveal: () -> Void
 
   @State private var draft = ""
@@ -23,6 +24,7 @@ struct OverviewPaneRow: View {
       HStack(spacing: 8) {
         Button(action: reveal) {
           HStack(spacing: 6) {
+            Image(systemName: "chevron.right").opacity(showsDisplayedMark ? 1 : 0)
             AgentStateIcon(presentation: presentation)
             Text(name).monospacedDigit()
           }
@@ -31,7 +33,7 @@ struct OverviewPaneRow: View {
         .buttonStyle(.plain)
         .help("この pane へ移動")
         // 記号と Text から label が合成されない (AX 属性に description が無かった、実測)。
-        .accessibilityLabel("\(presentation.label) \(name)")
+        .accessibilityLabel("\(showsDisplayedMark ? "表示中 " : "")\(presentation.label) \(name)")
 
         TextField("目的", text: $draft, prompt: Text(pane.detail.title ?? "目的"))
           .textFieldStyle(.roundedBorder)

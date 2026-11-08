@@ -36,6 +36,7 @@ struct OverviewView: View {
           ForEach(projects.availableModels, id: \.project.commonDirectory) { model in
             OverviewProjectSection(
               model: model, store: model.paneObservations, mainPanes: model.mainPanes,
+              isSelectedProject: projects.registry.selection == model.project.commonDirectory,
               reveal: { session, pane in
                 Task { await reveal(model, session: session, pane: pane) }
               })
@@ -61,6 +62,7 @@ private struct OverviewProjectSection: View {
   @ObservedObject var mainPanes: MainPaneCoordinator
   @AppStorage(OverviewProjectPreferences.collapsedProjectsKey) private var collapsedProjectsJSON =
     "[]"
+  let isSelectedProject: Bool
   let reveal: (TerminalSessionKey, PaneID?) -> Void
 
   var body: some View {
@@ -69,7 +71,7 @@ private struct OverviewProjectSection: View {
     let showsAttentionCount = !isExpanded.wrappedValue && attentionCount > 0
     Section(isExpanded: isExpanded) {
       ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
-        worktreeRows(projectRoot, title: model.sessionTitle(projectRoot.session))
+        worktreeRows(projectRoot, title: nil)
       }
       ForEach(overview?.tasks ?? [], id: \.session) { task in
         worktreeRows(task, title: model.sessionTitle(task.session))
@@ -120,21 +122,45 @@ private struct OverviewProjectSection: View {
   }
 
   @ViewBuilder
-  private func worktreeRows(_ worktree: OverviewWorktree, title: String) -> some View {
-    Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(.secondary)
+  private func worktreeRows(_ worktree: OverviewWorktree, title: String?) -> some View {
+    let isDisplayed = isSelectedProject && model.selectedTab == worktree.session
+    if let title {
+      Button {
+        reveal(worktree.session, nil)
+      } label: {
+        HStack {
+          Image(systemName: "chevron.right").opacity(isDisplayed ? 1 : 0)
+          Text(title)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(isDisplayed ? .primary : .secondary)
+      }
+      .buttonStyle(.plain)
+      .help("このセッションを表示")
+      .accessibilityLabel(isDisplayed ? "表示中 \(title)" : title)
+    }
     ForEach(worktree.rows, id: \.rowID) { row in
+      let showsDisplayedMark = title == nil && isDisplayed && row == worktree.rows.first
       switch row {
       case .pane(let pane):
-        OverviewPaneRow(pane: pane, store: store) { reveal(worktree.session, pane.paneID) }
+        OverviewPaneRow(pane: pane, store: store, showsDisplayedMark: showsDisplayedMark) {
+          reveal(worktree.session, pane.paneID)
+        }
       case .noAgentPane, .notObserved:
+        let shellTitle = worktree.session.index > 1 ? "シェル \(worktree.session.index)" : "シェル"
+        let rowTitle = row == .notObserved ? "観測中…" : (title == nil ? shellTitle : "Agent pane なし")
         Button {
           reveal(worktree.session, nil)
         } label: {
-          Text(row == .notObserved ? "観測中…" : "Agent pane なし")
-            .foregroundStyle(.secondary).padding(.leading, 12)
-            .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
+          HStack(spacing: 6) {
+            Image(systemName: "chevron.right").opacity(showsDisplayedMark ? 1 : 0)
+            Text(rowTitle)
+          }
+          .foregroundStyle(.secondary).padding(.leading, 12)
+          .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(showsDisplayedMark ? "表示中 \(rowTitle)" : rowTitle)
       }
     }
   }
@@ -151,10 +177,9 @@ private struct OverviewProjectSection: View {
 }
 
 extension DetectedWorktree {
-  /// Task Tab と Overview の見出しで同じ名前を出す。食い違うと、Overview の行がどのタブか
-  /// 見分けられない。
+  /// セッションのディレクトリを識別できるよう、branch 名ではなくディレクトリ名を使う (設計書 §5.3)。
   var tabName: String {
-    branch ?? URL(fileURLWithPath: worktreePath).lastPathComponent
+    URL(fileURLWithPath: worktreePath).lastPathComponent
   }
 }
 

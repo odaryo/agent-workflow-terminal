@@ -86,7 +86,7 @@ Merging is squash-only, with commit title `<PR title> (#N)` — so PR titles fol
 
 ## The product in one line
 
-A macOS terminal app that runs multiple AI agents in parallel, one per Git worktree, each backed by its own persistent tmux session, with iPhone/iPad acting as thin remote clients to the same Mac host.
+A macOS terminal app that runs multiple AI agents in parallel, one per Git worktree, each backed by its own persistent tmux session, hosted on the main Mac (Mac Studio); a work Mac (MacBook Pro) and iPhone/iPad/Android connect to it over Tailscale (SSH or Mosh) as remote clients that reproduce its projects and tabs.
 
 ## Architecture constraints that shape all future code
 
@@ -99,18 +99,18 @@ These are recorded as **確定** (decided) in `docs/architecture.md` and should 
 - **Git is read-heavy, write-free.** Viewing (file browser, code viewer, diff, history/blame) is rich; commit/merge/rebase/worktree-creation is delegated to the agent or a plain shell. Worktree creation belongs to the agent because naming/placement rules are project-specific.
 - **Agent-agnostic via `AgentAdapter`** (`ClaudeCodeAdapter`, `CodexAdapter`, process-detection fallback). Never build a Claude-Code-only feature. Normalized states are `Working / Question / Permission / Completed(Ready for Review) / Error / Idle / Unknown`, with tab priority `Needs Attention > Ready for Review > Working > Idle`.
 - **`Unknown` is a first-class state.** When an adapter cannot determine state, never round it to `Working` or `Idle`.
-- **Mac/PC is the only execution host.** No repositories, agent processes, or Docker on iOS devices; mobile connects over SSH and attaches to the same tmux session. Multiple devices may attach simultaneously with no input-exclusion mechanism.
+- **The main Mac is the only execution host; everything else is a client** (§20, decided 2026-11-08). No repositories, agent processes, or Docker on the work Mac or on mobile devices. Clients attach to the host's tmux sessions over SSH or Mosh and reproduce the host's projects and tabs, not just sessions; the session list, the Diff of an open session, and Diff comments work from every client. The host app owns projects, tabs, Diff snapshots, and comments, and judges whether a comment may be sent. Multiple devices may attach simultaneously with no input-exclusion mechanism.
 - **Terminal core and Agent Skills stay decoupled.** The terminal must work as a plain terminal + worktree manager with no Agent Skills present, and must not invent phase state it cannot observe. Agent Skills must run without any terminal-specific API.
 - **Single-user product.** One developer, their own Mac host, their own devices. No multi-user/team sharing, accounts, or permissions.
-- **Remote reachability is delegated to the user's VPN** (e.g. Tailscale); the app only speaks SSH and ships no relay/NAT-traversal infrastructure. Structured data (agent state, diff, evidence) is available to mobile only while the Mac app (Host Core) is running — no standalone daemon; bare SSH + tmux attach still works without it.
-- **Push notifications** are opt-in and relayed through **CloudKit** (the user's own iCloud private DB + subscription) — no self-hosted relay server, no APNs key, no device-token exchange; pairing is the shared Apple ID (§11.2, decided 2026-10-08). Minimal payload (worktree ID + notification kind + Mac name; never code or terminal output). Without the relay, only local notifications while connected.
+- **Remote reachability is delegated to Tailscale**; the app ships no relay/NAT-traversal infrastructure. Mosh carries only the terminal, so structured data (projects, tabs, agent state, diff, comments) always goes over SSH through `hostctl`, which asks the running host app — available only while the host app (Host Core) is running, no standalone daemon; bare SSH + tmux attach still works without it. The work-Mac client is the same macOS app running `ssh`/`mosh` as external CLIs inside libghostty surfaces; the mobile client's technology (one codebase vs per-OS) is 未確定.
+- **Push notifications to mobile** are opt-in with a minimal payload (worktree ID + notification kind + Mac name; never code or terminal output). The relay is 未確定: the 2026-10-08 CloudKit decision was withdrawn on 2026-11-08 because CloudKit cannot reach Android (§11.2), and mobile push now comes after remote operation (§20.8). Without the relay, only local notifications while connected.
 - **Diff review comments are sent to the implementation agent pane** (not the consultation pane). The consultation feature (`Ask Agent`, renamed from "Ask Claude") stays separate.
 - **Agent Skills flow is a 4-phase pipeline** (requirements → design → implementation → independent review session, each with fresh context) as the final goal; per-phase details remain open.
 - **Explicit non-goals:** full code editor/IDE, full Git client, GitHub PR review client, CI dashboard, tmux GUI replacement, web preview/DevTools, VNC, a custom chat UI built by parsing Claude Code output, a custom remote-terminal protocol, and any credential/SSH-key management (Git auth is fully delegated to the host environment).
 
 ## Planned stack (candidate, PoC-gated)
 
-Swift 6 + SwiftUI, libghostty behind a `TerminalRenderer` protocol, tmux CLI, git CLI, SwiftNIO SSH for iOS, SQLite + GRDB (metadata only; large blobs on the filesystem), ripgrep CLI, and a small `hostctl` JSON-Lines CLI over separate SSH channels for structured data.
+Swift 6 + SwiftUI, libghostty behind a `TerminalRenderer` protocol, tmux CLI, git CLI, a mobile client whose technology is still open (one cross-platform codebase is the leading candidate; §20.6), SQLite + GRDB (metadata only; large blobs on the filesystem), ripgrep CLI, and a small `hostctl` JSON-Lines CLI, called over SSH, that fronts the running host app for structured data.
 
 Everything in `docs/architecture.md` §21–22 is **現在の推奨** (leading candidate), not adopted — including Swift 6 / SwiftUI, so the SwiftPM scaffolding under `AgentWorkflowTerminal/` follows the recommendation and does not by itself make it 確定. The one exception is §21.5: Gate 1 passed on 2026-08-31 and libghostty for the **macOS** `TerminalRenderer` is now 確定 (the iOS renderer is not). Gates 2–5 in §24 are still unrun.
 
@@ -466,7 +466,7 @@ Views: `Board` (Status グループ) / `決定待ち` (`label:"設計判断" -st
 
 ## License policy
 
-The app itself is MIT (decided; matches `LICENSE`). Dependencies: permissive only (MIT/BSD/ISC/Apache-2.0). GPL/LGPL/AGPL and unknown licenses are rejected by default — this is why Mosh is not embedded and tmux/ripgrep are used as external CLIs rather than vendored source. Do not copy code from other projects "for reference"; depend on it properly or implement clean-room. Avoid branding that implies an official Ghostty derivative.
+The app itself is MIT (decided; matches `LICENSE`). Dependencies: permissive only (MIT/BSD/ISC/Apache-2.0). GPL/LGPL/AGPL and unknown licenses are rejected by default — this is why Mosh is not embedded (the work-Mac client calls it as an external CLI; mobile Mosh is 未確定) and tmux/ripgrep are used as external CLIs rather than vendored source. Do not copy code from other projects "for reference"; depend on it properly or implement clean-room. Avoid branding that implies an official Ghostty derivative.
 
 ## Project slash commands
 

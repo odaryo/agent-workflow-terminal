@@ -4,12 +4,14 @@ public struct PaneDisplayState: Sendable, Hashable {
   public let state: AgentState
   /// `state == .unknown` でも `.needsAttention` になり得る (§12.4.3)。`state` から導かない。
   public let category: WorktreeStateCategory
-  /// 表示する (`state`, `category`) が最後に変わった時刻。§13 の「最終更新順」の鍵。
-  public let changedAt: ContinuousClock.Instant
+  /// `nil` は基準の観測に在った pane が、注意不要の `.signalMissing` の Unknown から初めて状態が決まる変化を除き、
+  /// まだ表示状態を変えていないことを表す。
+  /// 初期表示を Adapter の到着順で並べないため、どの更新時刻よりも古い同順位として扱う (設計書 §13)。
+  public let changedAt: ContinuousClock.Instant?
 
   public init(
     paneID: PaneID, state: AgentState, category: WorktreeStateCategory,
-    changedAt: ContinuousClock.Instant
+    changedAt: ContinuousClock.Instant?
   ) {
     self.paneID = paneID
     self.state = state
@@ -31,27 +33,49 @@ public struct PaneDisplayStateStabilizer: Sendable {
   private struct Entry: Sendable {
     var stabilizer: WorktreeRepresentativeStateStabilizer
     var shown: PaneDisplayState
+    var awaitsInitialResolution: Bool
+    var removalDeadline: ContinuousClock.Instant?
   }
 
   private let holdDuration: Duration
   private var entries: [PaneID: Entry] = [:]
+  private var paneOrder: [PaneID] = []
+  private var lastObservedAt: ContinuousClock.Instant?
 
   public init(holdDuration: Duration = .seconds(9)) {
     self.holdDuration = holdDuration
   }
 
   public var nextDeadline: ContinuousClock.Instant? {
-    entries.values.compactMap(\.stabilizer.pendingTransitionDeadline).min()
+    entries.values.flatMap { entry in
+      [entry.stabilizer.pendingTransitionDeadline, entry.removalDeadline].compactMap { $0 }
+    }.filter { deadline in
+      // 消失中は表示を固定するため、過ぎた状態遷移期限で再観測を繰り返させない。
+      lastObservedAt.map { deadline > $0 } ?? true
+    }.min()
   }
 
-  /// `panes` は Agent pane だけ (`.absent` を除いた観測)。入力から消えた pane は保持せずに外す —
-  /// Agent が居なくなった pane を、居たときの状態のまま 9 秒並べない。
+  /// `panes` は Agent pane だけ (`.absent` を除いた観測)。一時的な観測消失で行と最終更新が
+  /// 跳ねないよう、消失中は最後の表示を `holdDuration` の間保つ (設計書 §13)。
   public mutating func observe(
     _ panes: [PaneAgentState], at instant: ContinuousClock.Instant
   ) -> [PaneDisplayState] {
     let present = Set(panes.map(\.id))
-    entries = entries.filter { present.contains($0.key) }
-    return panes.map { pane in
+    let isFirstObservation = lastObservedAt == nil
+    let previous = paneOrder.compactMap { entries[$0]?.shown }
+    lastObservedAt = instant
+    for paneID in paneOrder {
+      guard var entry = entries[paneID] else { continue }
+      if !present.contains(paneID), entry.removalDeadline == nil {
+        entry.removalDeadline = instant.advanced(by: holdDuration)
+      }
+      if let deadline = entry.removalDeadline, instant >= deadline {
+        entries.removeValue(forKey: paneID)
+      } else {
+        entries[paneID] = entry
+      }
+    }
+    for pane in panes {
       let observed = WorktreeRepresentativeState(
         category: pane.category, state: pane.state, paneID: pane.id)
       var entry =
@@ -59,15 +83,56 @@ public struct PaneDisplayStateStabilizer: Sendable {
         ?? Entry(
           stabilizer: WorktreeRepresentativeStateStabilizer(holdDuration: holdDuration),
           shown: PaneDisplayState(
-            paneID: pane.id, state: pane.state, category: pane.category, changedAt: instant))
+            paneID: pane.id, state: pane.state, category: pane.category,
+            changedAt: isFirstObservation ? nil : instant),
+          awaitsInitialResolution: isFirstObservation
+            && pane.state == .unknown && pane.category != .needsAttention
+            && pane.unknownReason == .signalMissing)
+      entry.removalDeadline = nil
       let stabilized = entry.stabilizer.observe(state: observed, at: instant) ?? observed
+      let isInitialResolution =
+        entry.awaitsInitialResolution
+        && (stabilized.state != .unknown || stabilized.category == .needsAttention)
       if stabilized.state != entry.shown.state || stabilized.category != entry.shown.category {
         entry.shown = PaneDisplayState(
           paneID: pane.id, state: stabilized.state, category: stabilized.category,
-          changedAt: instant)
+          changedAt: entry.awaitsInitialResolution ? nil : instant)
       }
+      if isInitialResolution { entry.awaitsInitialResolution = false }
       entries[pane.id] = entry
-      return entry.shown
     }
+    paneOrder = retainingMissingPanes(in: panes.map(\.id), previous: previous)
+    return paneOrder.compactMap { entries[$0]?.shown }
+  }
+
+  private func retainingMissingPanes(
+    in inputOrder: [PaneID], previous: [PaneDisplayState]
+  ) -> [PaneID] {
+    // 分類が変わっても Overview の順位が同じなら、消失・復帰で同順位を逆転させない。
+    let retained = previous.filter { old in
+      guard let shown = entries[old.paneID]?.shown else { return false }
+      return (shown.category == .needsAttention) == (old.category == .needsAttention)
+        && shown.changedAt == old.changedAt
+    }
+    // 消失 pane を前回順で次の入力 pane の直前に補い、新規・順位変更は次の据え置き pane の直前へ入れる (次が無ければ末尾)。
+    // 入力中の pane だけを手掛かりにすると、保持中の消失 pane を飛び越えて tmux 順からずれるため。
+    let previousIDs = previous.map(\.paneID).filter { entries[$0] != nil }
+    let fullOrder = inserting(previousIDs, retaining: inputOrder)
+    return inserting(fullOrder, retaining: retained.map(\.paneID))
+  }
+
+  private func inserting(_ inputOrder: [PaneID], retaining retained: [PaneID]) -> [PaneID] {
+    let retainedIDs = Set(retained)
+    var preceding: [PaneID: [PaneID]] = [:]
+    var pending: [PaneID] = []
+    for paneID in inputOrder {
+      if retainedIDs.contains(paneID) {
+        preceding[paneID] = pending
+        pending = []
+      } else {
+        pending.append(paneID)
+      }
+    }
+    return retained.flatMap { (preceding[$0] ?? []) + [$0] } + pending
   }
 }

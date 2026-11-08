@@ -7,11 +7,21 @@ extension AppModel {
   }
 
   func worktreeInput(_ key: TerminalSessionKey) -> OverviewWorktreeInput? {
-    guard inventory.observesPaneStates(of: key.identity),
-      let observed = paneObservations.observed[key]
-    else { return nil }
+    guard inventory.observesPaneStates(of: key.identity) else { return nil }
     return OverviewWorktreeInput(
-      session: key, paneStates: observed.displayStates, details: observed.details,
+      session: key, observation: paneObservations.observed[key],
       mainPane: mainPane(of: key.identity))
+  }
+}
+
+extension OverviewWorktreeInput {
+  @MainActor
+  init(
+    session: TerminalSessionKey, observation: PaneObservationStore.Observed?, mainPane: PaneID?
+  ) {
+    self.init(
+      session: session, paneStates: observation?.displayStates ?? [],
+      details: observation?.details ?? [:], mainPane: mainPane,
+      isObserved: observation?.paneStates != nil)
   }
 }

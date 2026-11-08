@@ -179,11 +179,12 @@ private struct OverviewProjectSection: View {
       switch row {
       case .pane(let pane):
         OverviewPaneRow(pane: pane, store: store) { reveal(worktree.session, pane.paneID) }
-      case .noAgentPane:
+      case .noAgentPane, .notObserved:
         Button {
           reveal(worktree.session, nil)
         } label: {
-          Text("Agent pane なし").foregroundStyle(.secondary).padding(.leading, 12)
+          Text(row == .notObserved ? "観測中…" : "Agent pane なし")
+            .foregroundStyle(.secondary).padding(.leading, 12)
             .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
         }
         .buttonStyle(.plain)
@@ -191,8 +192,7 @@ private struct OverviewProjectSection: View {
     }
   }
 
-  /// Q6 (Issue #189): 観測していない worktree (Inactive・到達不能・観測失敗) は出さない。
-  /// 状態を持たない行を並べると、観測できていないものを「Agent pane なし」と断定して見せる。
+  /// 初回配信待ちを除外すると、観測対象の Task が Overview から一時的に消える。
   private var input: OverviewProjectInput {
     OverviewProjectInput(
       project: model.project.commonDirectory,
@@ -218,6 +218,7 @@ extension OverviewRow {
     switch self {
     case .pane(let pane): pane.paneID.rawValue
     case .noAgentPane: "none"
+    case .notObserved: "notObserved"
     }
   }
 }

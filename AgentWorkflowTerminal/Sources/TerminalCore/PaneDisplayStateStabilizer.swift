@@ -4,12 +4,13 @@ public struct PaneDisplayState: Sendable, Hashable {
   public let state: AgentState
   /// `state == .unknown` でも `.needsAttention` になり得る (§12.4.3)。`state` から導かない。
   public let category: WorktreeStateCategory
-  /// 表示する (`state`, `category`) が最後に変わった時刻。§13 の「最終更新順」の鍵。
-  public let changedAt: ContinuousClock.Instant
+  /// `nil` は初出から表示状態がまだ変わっていないことを表す。初出に観測時刻を使うと
+  /// Adapter の到着順で並ぶため、どの更新時刻よりも古い同順位として扱う (設計書 §13)。
+  public let changedAt: ContinuousClock.Instant?
 
   public init(
     paneID: PaneID, state: AgentState, category: WorktreeStateCategory,
-    changedAt: ContinuousClock.Instant
+    changedAt: ContinuousClock.Instant?
   ) {
     self.paneID = paneID
     self.state = state
@@ -31,27 +32,47 @@ public struct PaneDisplayStateStabilizer: Sendable {
   private struct Entry: Sendable {
     var stabilizer: WorktreeRepresentativeStateStabilizer
     var shown: PaneDisplayState
+    var removalDeadline: ContinuousClock.Instant?
   }
 
   private let holdDuration: Duration
   private var entries: [PaneID: Entry] = [:]
+  private var paneOrder: [PaneID] = []
+  private var lastObservedAt: ContinuousClock.Instant?
 
   public init(holdDuration: Duration = .seconds(9)) {
     self.holdDuration = holdDuration
   }
 
   public var nextDeadline: ContinuousClock.Instant? {
-    entries.values.compactMap(\.stabilizer.pendingTransitionDeadline).min()
+    entries.values.flatMap { entry in
+      [entry.stabilizer.pendingTransitionDeadline, entry.removalDeadline].compactMap { $0 }
+    }.filter { deadline in
+      // 消失中は表示を固定するため、過ぎた状態遷移期限で再観測を繰り返させない。
+      lastObservedAt.map { deadline > $0 } ?? true
+    }.min()
   }
 
-  /// `panes` は Agent pane だけ (`.absent` を除いた観測)。入力から消えた pane は保持せずに外す —
-  /// Agent が居なくなった pane を、居たときの状態のまま 9 秒並べない。
+  /// `panes` は Agent pane だけ (`.absent` を除いた観測)。一時的な観測消失で行と最終更新が
+  /// 跳ねないよう、消失中は最後の表示を `holdDuration` の間保つ (設計書 §13)。
   public mutating func observe(
     _ panes: [PaneAgentState], at instant: ContinuousClock.Instant
   ) -> [PaneDisplayState] {
     let present = Set(panes.map(\.id))
-    entries = entries.filter { present.contains($0.key) }
-    return panes.map { pane in
+    lastObservedAt = instant
+    for paneID in paneOrder {
+      guard var entry = entries[paneID] else { continue }
+      if !present.contains(paneID), entry.removalDeadline == nil {
+        entry.removalDeadline = instant.advanced(by: holdDuration)
+      }
+      if let deadline = entry.removalDeadline, instant >= deadline {
+        entries.removeValue(forKey: paneID)
+      } else {
+        entries[paneID] = entry
+      }
+    }
+    let missing = paneOrder.filter { !present.contains($0) && entries[$0] != nil }
+    let shown = panes.map { pane in
       let observed = WorktreeRepresentativeState(
         category: pane.category, state: pane.state, paneID: pane.id)
       var entry =
@@ -59,7 +80,8 @@ public struct PaneDisplayStateStabilizer: Sendable {
         ?? Entry(
           stabilizer: WorktreeRepresentativeStateStabilizer(holdDuration: holdDuration),
           shown: PaneDisplayState(
-            paneID: pane.id, state: pane.state, category: pane.category, changedAt: instant))
+            paneID: pane.id, state: pane.state, category: pane.category, changedAt: nil))
+      entry.removalDeadline = nil
       let stabilized = entry.stabilizer.observe(state: observed, at: instant) ?? observed
       if stabilized.state != entry.shown.state || stabilized.category != entry.shown.category {
         entry.shown = PaneDisplayState(
@@ -69,5 +91,7 @@ public struct PaneDisplayStateStabilizer: Sendable {
       entries[pane.id] = entry
       return entry.shown
     }
+    paneOrder = panes.map(\.id) + missing
+    return shown + missing.compactMap { entries[$0]?.shown }
   }
 }

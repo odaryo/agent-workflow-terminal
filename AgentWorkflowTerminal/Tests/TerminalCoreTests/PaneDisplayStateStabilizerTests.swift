@@ -6,14 +6,14 @@ import Testing
 struct PaneDisplayStateStabilizerTests {
   private let clock = ContinuousClock()
 
-  @Test("初めて見た pane は即時に表示し、最終更新はその観測時刻になる")
+  @Test("初めて見た pane は即時に表示し、最終更新はまだ変わっていない値になる")
   func firstObservationIsImmediate() throws {
     let now = clock.now
     var stabilizer = PaneDisplayStateStabilizer()
 
     let shown = stabilizer.observe([pane("%1", .working)], at: now)
 
-    #expect(shown == [display("%1", .working, changedAt: now)])
+    #expect(shown == [display("%1", .working, changedAt: nil)])
     #expect(stabilizer.nextDeadline == nil)
   }
 
@@ -26,7 +26,7 @@ struct PaneDisplayStateStabilizerTests {
     let held = stabilizer.observe(
       [pane("%1", .unknown)], at: start.advanced(by: .seconds(1)))
 
-    #expect(held == [display("%1", .working, changedAt: start)])
+    #expect(held == [display("%1", .working, changedAt: nil)])
     #expect(stabilizer.nextDeadline == start.advanced(by: .seconds(10)))
   }
 
@@ -94,7 +94,7 @@ struct PaneDisplayStateStabilizerTests {
 
     let shown = stabilizer.observe([pane("%1", .working)], at: start.advanced(by: .seconds(5)))
 
-    #expect(shown == [display("%1", .working, changedAt: start)])
+    #expect(shown == [display("%1", .working, changedAt: nil)])
   }
 
   @Test("pane ごとに独立して保持し、出力は入力の順を保つ")
@@ -109,7 +109,7 @@ struct PaneDisplayStateStabilizerTests {
     #expect(
       shown == [
         display("%2", .question, changedAt: later),
-        display("%1", .working, changedAt: start),
+        display("%1", .working, changedAt: nil),
       ])
   }
 
@@ -126,20 +126,27 @@ struct PaneDisplayStateStabilizerTests {
     #expect(stabilizer.nextDeadline == start.advanced(by: .seconds(12)))
   }
 
-  @Test("入力から消えた pane は保持せずに外し、再び現れたら初めての pane として扱う")
-  func removedPaneIsForgotten() throws {
+  @Test("入力から消えた pane は9秒保持し、その間の再出現は元の状態と保持期限を引き継ぐ")
+  func removedPaneRetainsPendingTransition() throws {
     let start = clock.now
     var stabilizer = PaneDisplayStateStabilizer()
     _ = stabilizer.observe([pane("%1", .working)], at: start)
-    _ = stabilizer.observe([pane("%1", .idle)], at: start.advanced(by: .seconds(1)))
+    _ = stabilizer.observe([pane("%1", .question)], at: start.advanced(by: .seconds(1)))
+    _ = stabilizer.observe([pane("%1", .idle)], at: start.advanced(by: .seconds(2)))
+    let previous = display("%1", .question, changedAt: start.advanced(by: .seconds(1)))
 
-    let removed = stabilizer.observe([], at: start.advanced(by: .seconds(2)))
-    #expect(removed.isEmpty)
-    #expect(stabilizer.nextDeadline == nil)
+    let removed = stabilizer.observe([], at: start.advanced(by: .seconds(3)))
+    #expect(removed == [previous])
+    #expect(stabilizer.nextDeadline == start.advanced(by: .seconds(11)))
 
-    let back = start.advanced(by: .seconds(3))
-    let shown = stabilizer.observe([pane("%1", .idle)], at: back)
-    #expect(shown == [display("%1", .idle, changedAt: back)])
+    let shown = stabilizer.observe([pane("%1", .idle)], at: start.advanced(by: .seconds(4)))
+    #expect(shown == [previous])
+    #expect(stabilizer.nextDeadline == start.advanced(by: .seconds(11)))
+
+    let deadline = start.advanced(by: .seconds(11))
+    #expect(
+      stabilizer.observe([pane("%1", .idle)], at: deadline)
+        == [display("%1", .idle, changedAt: deadline)])
   }
 
   @Test("保持時間は差し替えられる")
@@ -165,7 +172,7 @@ struct PaneDisplayStateStabilizerTests {
   }
 
   private func display(
-    _ id: String, _ state: AgentState, changedAt: ContinuousClock.Instant
+    _ id: String, _ state: AgentState, changedAt: ContinuousClock.Instant?
   ) -> PaneDisplayState {
     PaneDisplayState(
       paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory,

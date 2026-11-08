@@ -6,6 +6,13 @@ usage_error() {
   exit 2
 }
 
+for dependency in python3 tmux; do
+  if ! command -v "$dependency" >/dev/null 2>&1; then
+    printf '引き渡しの窓口が使えません: %s がありません。\n' "$dependency" >&2
+    exit 69
+  fi
+done
+
 directory=""
 prompt=""
 check=0
@@ -31,9 +38,34 @@ else
       *) usage_error ;;
     esac
   done
-  [[ -n "$directory" && -n "$prompt" ]] || usage_error
-  [[ "$prompt" != *$'\n'* && "$prompt" != *$'\r'* ]] || usage_error
-  [[ $(printf '%s' "$prompt" | wc -c) -le 700 ]] || usage_error
+  [[ -n "$directory" && "$prompt_set" -eq 1 ]] || usage_error
+  printf '%s' "$prompt" | python3 -I -c '
+import sys
+
+data = sys.stdin.buffer.read()
+reason = None
+if not data:
+    reason = "空です"
+elif len(data) > 700:
+    reason = "700 バイトを超えています"
+else:
+    try:
+        data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        reason = "不正な UTF-8 です"
+    if reason is None:
+        if any(byte < 0x20 or byte == 0x7f for byte in data):
+            reason = "制御文字を含んでいます"
+        elif b"\\" in data:
+            reason = "backslash を含んでいます"
+        elif data.startswith(b"-"):
+            reason = "- で始まっています"
+if reason is not None:
+    print(f"指示が不正です: {reason}。", file=sys.stderr)
+    sys.exit(2)
+'
+  rc=$?
+  [[ "$rc" -eq 0 ]] || exit "$rc"
 fi
 
 resolve_environment() {
@@ -56,7 +88,8 @@ fi
 response=$("$hostctl" worktree open --directory "$directory" --socket "$socket")
 rc=$?
 if [[ "$rc" -ne 0 ]]; then
-  printf '%s\n' "$response" >&2
+  [[ -z "$response" ]] || printf '%s\n' "$response" >&2
+  [[ "$rc" -ne 2 ]] || rc=1
   exit "$rc"
 fi
 
@@ -64,32 +97,40 @@ parsed=$(printf '%s' "$response" | python3 -I -c '
 import json
 import sys
 
+session = None
 try:
     response = json.load(sys.stdin)
     session = response["session"]
-    created = response["created"]
     if not isinstance(session, str) or not session or any(c in session for c in "\r\n\0"):
+        session = None
         raise ValueError("session が不正です")
+    created = response["created"]
     if not isinstance(created, bool):
         raise ValueError("created が不正です")
     if not created:
-        print(f"既にセッションがあります: {session}", file=sys.stderr)
+        print(f"session={session} 既にセッションがあります。", file=sys.stderr)
         sys.exit(3)
     command = response["agentCommand"]
     if command is None:
         command = "claude"
     if not isinstance(command, str):
         raise ValueError("agentCommand が不正です")
+    if any(byte < 0x20 or byte == 0x7f for byte in command.encode("utf-8")):
+        print(f"session={session} agentCommand が制御文字を含んでいます。", file=sys.stderr)
+        sys.exit(4)
+    if not command.strip():
+        command = "claude"
     quote = chr(39)
     escaped = sys.argv[1].replace(quote, quote + "\\" + quote + quote)
     line = command + " " + quote + escaped + quote
     if len(line.encode("utf-8")) > 900:
-        print("送信するコマンドが 900 バイトを超えています。", file=sys.stderr)
+        print(f"session={session} 送信するコマンドが 900 バイトを超えています。", file=sys.stderr)
         sys.exit(4)
     print(session)
     print(line)
 except (ValueError, KeyError, TypeError) as error:
-    print(f"hostctl の応答を読めません: {error}", file=sys.stderr)
+    context = f"session={session} " if session is not None else ""
+    print(f"{context}hostctl の応答を読めません: {error}", file=sys.stderr)
     sys.exit(1)
 ' "$prompt")
 rc=$?
@@ -117,13 +158,27 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
   fi
 done
 if [[ "$ready" -eq 0 ]]; then
-  printf 'シェルのプロンプトを15秒以内に確認できませんでした: %s\n' "$session" >&2
+  printf 'session=%s シェルのプロンプトを15秒以内に確認できませんでした。\n' "$session" >&2
   exit 5
+fi
+
+if ! pane_pid=$(tmux display-message -p -t "=$session:" '#{pane_pid}') ||
+  [[ ! "$pane_pid" =~ ^[0-9]+$ ]]; then
+  printf 'session=%s pane の PID を読めません。\n' "$session" >&2
+  exit 6
 fi
 
 if ! tmux send-keys -t "=$session:" -l -- "$line" ||
   ! tmux send-keys -t "=$session:" Enter; then
-  printf 'セッションへの送信に失敗しました: %s\n' "$session" >&2
+  printf 'session=%s セッションへの送信に失敗しました。\n' "$session" >&2
   exit 6
 fi
-printf 'session=%s\n' "$session"
+for ((attempt = 0; attempt < 50; attempt++)); do
+  sleep 0.2
+  if pgrep -P "$pane_pid" >/dev/null 2>&1; then
+    printf 'session=%s\n' "$session"
+    exit 0
+  fi
+done
+printf 'session=%s Agent の起動を確認できません。\n' "$session" >&2
+exit 7

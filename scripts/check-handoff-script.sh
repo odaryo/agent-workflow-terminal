@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib.sh"
 [[ $# -eq 0 ]] || die "引数は指定できません"
 require_cmd tmux
 require_cmd python3
+require_cmd rg
 
 HANDOFF="$SCRIPT_DIR/../plugins/awt-handoff/skills/worktree-handoff/scripts/handoff.sh"
 STOP="$SCRIPT_DIR/stop-tty-processes.sh"
@@ -34,6 +35,9 @@ cleanup() {
       fi
     fi
   done
+  if ! T list-sessions >/dev/null 2>&1; then
+    rm -f "${TMUX_TMPDIR:-/private/tmp}/tmux-$(id -u)/$SOCK"
+  fi
   rm -rf "$work_dir"
   return "$cleanup_rc"
 }
@@ -51,6 +55,7 @@ cat >"$work_dir/agent" <<'AGENT'
 #!/usr/bin/env bash
 set -eu
 printf '%s\0' "$@" >"$AWT_TEST_ARGV"
+sleep 30
 AGENT
 
 cat >"$work_dir/hostctl" <<'HOSTCTL'
@@ -60,8 +65,12 @@ printf 'called\n' >>"$AWT_TEST_DIR/calls"
 [[ $# -eq 6 && "$1" == worktree && "$2" == open && "$3" == --directory &&
   "$4" == "$AWT_TEST_DIR" && "$5" == --socket && "$6" == test-socket ]] || exit 2
 if [[ "$AWT_TEST_MODE" == unavailable ]]; then
-  printf '%s\n' '{"ok":false,"version":1,"code":"unavailable","message":"app is not running"}'
+  printf '%s\n' '{"ok":false,"version":1,"code":"unavailable","message":"app is not running"}' >&2
   exit 69
+fi
+if [[ "$AWT_TEST_MODE" == argument-error ]]; then
+  printf '%s\n' 'invalid arguments' >&2
+  exit 2
 fi
 created=true
 case "$AWT_TEST_MODE" in
@@ -69,9 +78,13 @@ case "$AWT_TEST_MODE" in
   no-prompt)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 /bin/sleep 600
     ;;
+  zsh | fish)
+    tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
+      env AWT_TEST_ARGV="$AWT_TEST_DIR/argv" "$AWT_TEST_SHELL" -f -i
+    ;;
   *)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
-      env PS1='handoff> ' AWT_TEST_ARGV="$AWT_TEST_DIR/argv" /bin/bash --norc --noprofile -i
+      env PATH="${AWT_TEST_PANE_PATH:-$PATH}" PS1='handoff> ' AWT_TEST_ARGV="$AWT_TEST_DIR/argv" /bin/bash --norc --noprofile -i
     ;;
 esac
 python3 -I -c '
@@ -95,7 +108,7 @@ export AWT_TEST_SESSION=success
 export AWT_TEST_AGENT="$work_dir/agent"
 
 H() {
-  env TMUX="$socket_path,0,0" AWT_HOSTCTL= AWT_HOSTCTL_SOCKET= "$HANDOFF" "$@"
+  env TMUX="$socket_path,0,0" AWT_HOSTCTL=/missing/hostctl AWT_HOSTCTL_SOCKET=wrong-socket "$HANDOFF" "$@"
 }
 
 ng() {
@@ -108,6 +121,12 @@ expect_exit() {
   shift 2
   checked=$((checked + 1))
   H "$@" >"$work_dir/stdout" 2>"$work_dir/stderr" || rc=$?
+  if [[ "$want" == 3 || "$want" == 4 || "$want" == 5 || "$want" == 6 || "$want" == 7 ]]; then
+    checked=$((checked + 1))
+    if ! rg -q -F "session=$AWT_TEST_SESSION" "$work_dir/stderr"; then
+      ng "$label: stderr に session= がありません"
+    fi
+  fi
   if [[ "$rc" -eq "$want" ]]; then
     info "OK (exit $rc): $label"
   else
@@ -126,6 +145,15 @@ expect_no_call() {
   fi
 }
 
+wait_for_argv() {
+  local attempt
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    [[ -s "$work_dir/argv" ]] && return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 expect_unsent() {
   local name="$1"
   checked=$((checked + 1))
@@ -137,17 +165,14 @@ expect_unsent() {
   fi
 }
 
-expect_exit 0 '--check が使える' --check
+expect_exit 0 '環境変数と異なる tmux global の窓口で --check が使える' --check
 expect_no_call '--check'
 
 sessions+=(success)
 # shellcheck disable=SC2016 # 展開されずにそのまま Agent へ届くことを検査する
-prompt='指示 '\''quoted'\'' $HOME `printf expanded` # end'
+prompt="指示 'quoted'"' $HOME `printf expanded` # end'
 expect_exit 0 '特殊文字を含む指示を渡す' --directory "$work_dir" --prompt "$prompt"
-for _ in $(seq 1 50); do
-  [[ -f "$work_dir/argv" ]] && break
-  sleep 0.1
-done
+wait_for_argv || true
 checked=$((checked + 1))
 if python3 -I -c '
 import pathlib
@@ -165,7 +190,7 @@ before=$(T capture-pane -p -t '=success:')
 AWT_TEST_MODE=existing
 expect_exit 3 '既存セッションには送らない' --directory "$work_dir" --prompt existing
 checked=$((checked + 1))
-if [[ ! -s "$work_dir/stdout" ]] && rg -q success "$work_dir/stderr"; then
+if [[ ! -s "$work_dir/stdout" ]] && rg -q session=success "$work_dir/stderr"; then
   info 'OK: 既存セッション名を stderr に出した'
 else
   ng '既存セッション名が stderr にありません'
@@ -181,6 +206,15 @@ else
   ng 'hostctl の失敗応答が stderr にありません'
 fi
 
+AWT_TEST_MODE=argument-error
+expect_exit 1 'hostctl exit 2 を exit 1 にする' --directory "$work_dir" --prompt arguments
+checked=$((checked + 1))
+if [[ ! -s "$work_dir/stdout" && "$(cat "$work_dir/stderr")" == 'invalid arguments' ]]; then
+  info 'OK: 空の stdout に空行を足さない'
+else
+  ng 'hostctl の失敗時の出力が期待と異なります'
+fi
+
 rm -f "$work_dir/calls"
 expect_exit 2 '改行を拒否する' --directory "$work_dir" --prompt $'first\nsecond'
 expect_no_call '改行'
@@ -191,6 +225,11 @@ expect_no_call '空の指示'
 long_prompt=$(python3 -I -c 'print("あ" * 234, end="")')
 expect_exit 2 '700 バイト超を拒否する' --directory "$work_dir" --prompt "$long_prompt"
 expect_no_call '700 バイト超'
+
+for invalid_prompt in $'foo\\' 'a\\b' $'a\tb' $'a\x03b' $'a\x15b' $'a\x7fb' $'a\xffb' '-option'; do
+  expect_exit 2 '危険な指示を拒否する' --directory "$work_dir" --prompt "$invalid_prompt"
+  expect_no_call '危険な指示'
+done
 
 T set-environment -gu AWT_HOSTCTL
 expect_exit 69 'AWT_HOSTCTL が無い' --directory "$work_dir" --prompt missing
@@ -218,12 +257,80 @@ else
   ng '長すぎる LINE が送信されています'
 fi
 
+rm -f "$work_dir/argv"
+AWT_TEST_SESSION=control-command
+AWT_TEST_AGENT=$'echo\nunsafe'
+sessions+=(control-command)
+expect_exit 4 'agentCommand の制御文字を拒否する' --directory "$work_dir" --prompt short
+checked=$((checked + 1))
+if [[ ! -e "$work_dir/argv" ]] &&
+  [[ "$(T capture-pane -p -t '=control-command:')" != *short* ]]; then
+  info 'OK: 制御文字を含む agentCommand は送っていない'
+else
+  ng '制御文字を含む agentCommand が送信されています'
+fi
+
+mkdir "$work_dir/bin"
+cp "$work_dir/agent" "$work_dir/bin/claude"
+# pane の PATH は tmux の global environment ではなく起動元の PATH から決まるので、pane へ明示的に渡す。
+# 渡せないと本物の claude が起動する。
+export AWT_TEST_PANE_PATH="$work_dir/bin:$PATH"
+for command_kind in empty whitespace; do
+  AWT_TEST_SESSION="default-$command_kind"
+  AWT_TEST_AGENT=''
+  [[ "$command_kind" != whitespace ]] || AWT_TEST_AGENT='   '
+  sessions+=("$AWT_TEST_SESSION")
+  expect_exit 0 '空の agentCommand は claude を使う' --directory "$work_dir" --prompt default-agent
+  checked=$((checked + 1))
+  if wait_for_argv && python3 -I -c '
+import pathlib
+import sys
+assert pathlib.Path(sys.argv[1]).read_bytes() == b"default-agent\0"
+' "$work_dir/argv"; then
+    info 'OK: 偽の claude へ指示が届いた'
+  else
+    ng '偽の claude へ指示が届いていません'
+  fi
+  rm -f "$work_dir/argv"
+done
+unset AWT_TEST_PANE_PATH
+
+AWT_TEST_SESSION=no-agent
+AWT_TEST_AGENT=true
+sessions+=(no-agent)
+expect_exit 7 '即座に終わるコマンドは Agent 起動を確認できない' --directory "$work_dir" --prompt short
+
+for shell_name in zsh fish; do
+  if ! command -v "$shell_name" >/dev/null 2>&1; then
+    info "SKIP: $shell_name がありません"
+    continue
+  fi
+  export AWT_TEST_SHELL
+  AWT_TEST_SHELL=$(command -v "$shell_name")
+  AWT_TEST_MODE="$shell_name"
+  AWT_TEST_SESSION="$shell_name"
+  AWT_TEST_AGENT="$work_dir/agent"
+  sessions+=("$shell_name")
+  expect_exit 0 "$shell_name の pane へ送信する" --directory "$work_dir" --prompt "$prompt"
+  checked=$((checked + 1))
+  if wait_for_argv && python3 -I -c '
+import pathlib
+import sys
+assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
+' "$work_dir/argv" "$prompt"; then
+    info "OK: $shell_name でも argv がそのまま届いた"
+  else
+    ng "$shell_name の argv が期待と異なります"
+  fi
+  rm -f "$work_dir/argv"
+done
+
 AWT_TEST_MODE=no-prompt
 AWT_TEST_SESSION=no-prompt
 AWT_TEST_AGENT="$work_dir/agent"
 sessions+=(no-prompt)
 expect_exit 5 'cursor が動かない pane はタイムアウトする' --directory "$work_dir" --prompt waiting
-before=$(T capture-pane -p -t '=anchor:')
+before=$(T capture-pane -p -t '=no-prompt:')
 expect_unsent no-prompt
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"

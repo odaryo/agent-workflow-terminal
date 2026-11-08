@@ -34,9 +34,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     // プレースホルダ (文脈サジェスト) が出ている入力欄は、利用者が何も打っていないので
     // 空欄と同じに扱う。plain text では入力済みテキストと区別できず、dim 属性だけが手掛かりである
     // (Issue #217 の実測: 区切りはどちらも NBSP で、サジェストに固定接頭辞は無い)。
-    let hasEmptyInputPrompt =
-      screen.range(of: #"(?m)^❯[  ]*$"#, options: .regularExpression) != nil
-      || inputBox == .placeholder
+    let hasEmptyInputPrompt = inputBox == .empty || inputBox == .placeholder
     if let recentlyActive = recentScreenActivity(signals) {
       return recentlyActive
     }
@@ -107,16 +105,29 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     return observation(.working, signals)
   }
 
-  /// 入力欄の行を dim で分類する。
-  ///
-  /// - Important: 入力欄の行は `❯` の直後が NBSP であることで会話履歴の
-  ///   `❯ <送信済み>` 行 (区切りは半角スペース) と分けられる (2.1.259 / 2.1.263 で実測)。
-  ///   見つからなければ `.absent` を返し、呼び出し側は従来の plain ルールだけで判定する。
+  // 入力済みの先頭行は NBSP により会話履歴の `❯ <送信済み>` 行と分けられる
+  // (2.1.259 / 2.1.263 で実測)。`❯` + U+0020 だけの行 (tmux が行末の空白を削ると `❯` だけになる) も、
+  // 旧版の正規表現と同じく空欄とする。
   static func inputBoxContent(screen: String, styled: String?) -> InputBoxContent {
     let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
-    guard let index = lines.lastIndex(where: { $0.hasPrefix("❯ ") }) else { return .absent }
+    guard let index = lines.lastIndex(where: { $0.hasPrefix("❯") }) else { return .absent }
+    let followingLines = lines.dropFirst(index + 1)
+    // Issue #270: 2.1.319 の \ + Enter の継続行は ❯ の下・区切りの上に出るため、
+    // 先頭行が空でも空欄とは限らない。継続行の dim は実測が無いため入力済みとして扱う。
+    if let separatorIndex = followingLines.firstIndex(where: {
+      let trimmed = $0.trimmingCharacters(in: .whitespaces)
+      return !trimmed.isEmpty && trimmed.allSatisfy { $0 == "─" }
+    }),
+      followingLines[..<separatorIndex].contains(where: {
+        !$0.trimmingCharacters(in: .whitespaces).isEmpty
+      })
+    {
+      return .typed
+    }
+    // 区切りの見えない狭い画面や旧版では継続行と出力を区別できないため、先頭行だけで決める。
     let content = lines[index].dropFirst().drop { $0 == " " || $0 == " " }
     guard !content.isEmpty else { return .empty }
+    guard lines[index].hasPrefix("❯ ") else { return .absent }
     guard let styled else { return .attributesUnavailable }
     let parsed = StyledScreenText(capturedWithEscapeSequences: styled)
     guard parsed.containsAnyStyling, index < parsed.lines.count,
@@ -144,10 +155,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     case empty
     /// 文脈サジェスト。利用者の入力ではない。
     case placeholder
+    /// 最後の `❯` の行の下・区切りの上に文字がある場合も含む。そこが入力欄でないとき
+    /// (permission / question のダイアログ、送信済みプロンプトが最後の `❯` の行のとき) にも
+    /// 返るので、「利用者が打った」とは限らない。Idle / Completed へ丸めない向きにだけ使う。
     case typed
     /// 属性が無いため placeholder と typed を分けられない。
     case attributesUnavailable
-    /// 入力欄の行自体が画面に無い (permission / question のダイアログなど)。
+    /// `❯` の行が無い、または最後の `❯` の行が入力欄 (`❯` + NBSP) でなく区切りも無い。
     case absent
   }
 

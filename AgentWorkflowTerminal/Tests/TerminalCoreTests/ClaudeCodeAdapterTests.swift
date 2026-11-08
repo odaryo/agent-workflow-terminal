@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 19)
+    #expect(fixtures.count == 20)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -38,6 +38,54 @@ struct ClaudeCodeAdapterTests {
         secondsSinceScreenChange: elapsed, hasObservedScreenChange: true, observedAt: .distantPast
       ), liveness: .alive)
     #expect(fixtureState(of: result) == "permission")
+  }
+
+  @Test("継続行が空白だけなら空の入力欄として Completed (Issue #270)")
+  func whitespaceOnlyContinuationIsCompleted() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-typing-multiline-empty-first").first)
+    let screen = fixture.screen.replacingOccurrences(of: "  second line\n", with: "  \n")
+    try #require(screen != fixture.screen)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "completed")
+  }
+
+  @Test("先頭行が空でも3行の入力の途中は Unknown (Issue #270)")
+  func threeLineInputWithEmptyFirstLineIsUnknown() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-typing-multiline-empty-first").first)
+    let screen = fixture.screen.replacingOccurrences(
+      of: "  second line\n", with: "  second line\n  third line\n")
+    try #require(screen != fixture.screen)
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "unknown")
+  }
+
+  @Test("区切りが無ければ入力欄の先頭行だけで判定して Completed (Issue #270)")
+  func multilineInputWithoutSeparatorsUsesFirstLine() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "claude-2.1.319-typing-multiline-empty-first").first)
+    let screen = fixture.screen.replacingOccurrences(
+      of: "(?m)^─+\n", with: "", options: .regularExpression)
+    try #require(screen != fixture.screen)
+    try #require(!screen.contains("─"))
+    let result = ClaudeCodeAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
+        observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "completed")
   }
 
   @Test("入力欄のサジェストが dim なら空欄として扱う")

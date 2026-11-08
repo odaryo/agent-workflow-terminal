@@ -181,7 +181,7 @@ struct DiffViewerPane: View {
       }
     case .branch:
       HStack {
-        Text("比較先: \(model.selectedBranch ?? "未選択")")
+        Text("比較先: \(model.selectedBranch?.displayLabel ?? "未選択")")
           .font(.caption)
           .lineLimit(1)
           .truncationMode(.tail)
@@ -216,7 +216,7 @@ struct DiffViewerPane: View {
     }
   }
 
-  private func branchMenu(title: String, action: @escaping (String) -> Void) -> some View {
+  private func branchMenu(title: String, action: @escaping (GitBranchRef) -> Void) -> some View {
     DiffRefPicker(
       title: title,
       tasks: { [model] in model.worktreeContext().otherTasks },

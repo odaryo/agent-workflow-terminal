@@ -49,11 +49,11 @@ struct DiffRangeSummary: Equatable {
     switch snapshot.subject {
     case .base(let branch, let mergeBase):
       let source = context.baseSource.map { " (\($0.decisionLabel))" } ?? ""
-      comparison = "base \(branch)\(source)"
+      comparison = "base \(branch.displayLabel)\(source)"
       origin = Self.mergeBaseLabel(mergeBase)
       contents = Self.worktreeContents(snapshot)
     case .branch(let name, let mergeBase):
-      comparison = "branch \(name)"
+      comparison = "branch \(name.displayLabel)"
       origin = Self.mergeBaseLabel(mergeBase)
       contents = Self.worktreeContents(snapshot)
     case .commit(let hash):
@@ -94,6 +94,15 @@ struct DiffRangeSummary: Equatable {
   }
 }
 
+extension GitBranchRef {
+  var displayLabel: String {
+    switch self {
+    case .local: shortName
+    case .remote: "remotes/" + shortName
+    }
+  }
+}
+
 extension DiffChangeOrigin {
   fileprivate var shortLabel: String {
     switch self {
@@ -125,8 +134,8 @@ struct DiffComparisonTask: Equatable, Hashable {
 /// Base / Branch の比較先メニューの区画 (他のタスク → local → remote)。
 struct DiffComparisonCandidates: Equatable {
   let tasks: [DiffComparisonTask]
-  let localBranches: [String]
-  let remoteBranches: [String]
+  let localBranches: [GitBranchRef]
+  let remoteBranches: [GitBranchRef]
 
   /// 他のタスクの branch は local branch でもあるので、local の区画には重ねて出さない。
   init(tasks: [DiffComparisonTask], refNames: GitRefNames?, query: String) {
@@ -134,12 +143,12 @@ struct DiffComparisonCandidates: Equatable {
     func matches(_ values: String...) -> Bool {
       needle.isEmpty || values.contains { $0.localizedCaseInsensitiveContains(needle) }
     }
-    let taskBranches = Set(tasks.map(\.branch))
+    let taskBranches = Set(tasks.map { GitBranchRef.local($0.branch) })
     self.tasks = tasks.filter { matches($0.name, $0.branch, $0.directory) }
     localBranches = (refNames?.localBranches ?? []).filter {
-      !taskBranches.contains($0) && matches($0)
+      !taskBranches.contains($0) && matches($0.shortName)
     }
-    remoteBranches = (refNames?.remoteBranches ?? []).filter { matches($0) }
+    remoteBranches = (refNames?.remoteBranches ?? []).filter { matches($0.shortName) }
   }
 
   var isEmpty: Bool { tasks.isEmpty && localBranches.isEmpty && remoteBranches.isEmpty }

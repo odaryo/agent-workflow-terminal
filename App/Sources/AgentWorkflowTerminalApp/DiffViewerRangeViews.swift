@@ -43,7 +43,7 @@ struct DiffRefPicker: View {
   let tasks: () -> [DiffComparisonTask]
   let refNames: GitRefNames?
   let keyboardFocus: TerminalKeyboardFocus
-  let choose: (String) -> Void
+  let choose: (GitBranchRef) -> Void
 
   @State private var isPresented = false
 
@@ -64,7 +64,7 @@ private struct DiffRefPickerList: View {
   let tasks: [DiffComparisonTask]
   let refNames: GitRefNames?
   let keyboardFocus: TerminalKeyboardFocus
-  let choose: (String) -> Void
+  let choose: (GitBranchRef) -> Void
 
   @State private var query = ""
   @FocusState private var isFieldFocused: Bool
@@ -81,21 +81,21 @@ private struct DiffRefPickerList: View {
         if !candidates.tasks.isEmpty {
           Section("他のタスク") {
             ForEach(candidates.tasks, id: \.self) { task in
-              row(task.branch) { taskLabel(task) }
+              row(.local(task.branch)) { taskLabel(task) }
             }
           }
         }
         if !candidates.localBranches.isEmpty {
           Section("local branch") {
             ForEach(candidates.localBranches, id: \.self) { name in
-              row(name) { Text(name) }
+              row(name) { Text(name.shortName) }
             }
           }
         }
         if !candidates.remoteBranches.isEmpty {
           Section("remote branch") {
             ForEach(candidates.remoteBranches, id: \.self) { name in
-              row(name) { Text(name) }
+              row(name) { Text(name.shortName) }
             }
           }
         }
@@ -116,7 +116,7 @@ private struct DiffRefPickerList: View {
   }
 
   // Why not onTapGesture: Section を持つ List では行の tap が拾われない (`DiffFileList` と同じ実測)。
-  private func row(_ branch: String, @ViewBuilder label: () -> some View) -> some View {
+  private func row(_ branch: GitBranchRef, @ViewBuilder label: () -> some View) -> some View {
     Button {
       choose(branch)
     } label: {

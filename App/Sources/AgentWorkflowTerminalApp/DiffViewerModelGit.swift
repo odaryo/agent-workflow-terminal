@@ -17,7 +17,7 @@ extension DiffViewerModel {
   /// Why not `Task.detached`: `WorktreeSearchModel` と同じ理由で、キャンセルを繋いだまま
   /// MainActor から降りるために `nonisolated` な async 関数を使う。
   nonisolated static func readContext(
-    worktreeRoot: URL, userSelection: String?
+    worktreeRoot: URL, userSelection: GitBranchRef?
   ) async -> Result<Context, DiffViewerFailure> {
     let builder: DiffSnapshotBuilder
     do {
@@ -96,10 +96,10 @@ extension DiffViewerModel {
       "merge commit の Diff は未対応です (親 \(parents.count) 件)"
     case .noMergeBase(let branch):
       // 空 tree や root commit を起点に代えない (§9.1.2)。
-      "\(branch) と HEAD に共通祖先 (merge-base) が無いため、merge-base 起点の Diff を作れません"
+      "\(branch.displayLabel) と HEAD に共通祖先 (merge-base) が無いため、merge-base 起点の Diff を作れません"
     case .mergeBaseUnresolved(let branch, let reason):
       // 「共通祖先が無い」と断定しない (§9.1.4)。
-      "\(branch) と HEAD の merge-base を求められませんでした (共通祖先が無いとは限りません): "
+      "\(branch.displayLabel) と HEAD の merge-base を求められませんでした (共通祖先が無いとは限りません): "
         + reason.explanation
     case .invalidRevision(let value):
       "revision を解決できません: \(value)"

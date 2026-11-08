@@ -13,7 +13,7 @@ struct DiffRangeSummaryTests {
   @Test("Base Diff は対象・決めた経路・merge-base 起点・出所ごとの件数を出す")
   func describesBaseDiff() {
     let snapshot = snapshot(
-      subject: .base(branch: "origin/main", mergeBase: mergeBase),
+      subject: .base(branch: .remote("origin/main"), mergeBase: mergeBase),
       head: DiffSnapshotHead(branch: "feat/x", commit: head),
       counts: [.committed: 2, .staged: 1, .unstaged: 3, .untracked: 1])
     let summary = DiffRangeSummary(
@@ -22,7 +22,7 @@ struct DiffRangeSummaryTests {
         worktreeName: "feat/x", baseSource: .upstream, commit: nil))
 
     #expect(summary.target == "feat/x — branch feat/x @ fedcba9")
-    #expect(summary.comparison == "base origin/main (upstream で決定)")
+    #expect(summary.comparison == "base remotes/origin/main (upstream で決定)")
     #expect(summary.origin == "merge-base 0123456 起点")
     #expect(
       summary.contents
@@ -38,7 +38,7 @@ struct DiffRangeSummaryTests {
     ])
   func distinguishesBaseSource(source: DiffBaseBranchSource, expected: String) {
     let summary = DiffRangeSummary(
-      snapshot: snapshot(subject: .base(branch: "main", mergeBase: mergeBase), head: nil),
+      snapshot: snapshot(subject: .base(branch: .local("main"), mergeBase: mergeBase), head: nil),
       context: DiffSnapshotRangeContext(worktreeName: "t", baseSource: source, commit: nil))
     #expect(summary.comparison == expected)
   }
@@ -47,7 +47,7 @@ struct DiffRangeSummaryTests {
   func describesBranchDiffOnDetachedHead() {
     let summary = DiffRangeSummary(
       snapshot: snapshot(
-        subject: .branch(name: "feat/other", mergeBase: mergeBase),
+        subject: .branch(name: .local("feat/other"), mergeBase: mergeBase),
         head: DiffSnapshotHead(branch: nil, commit: head)),
       context: DiffSnapshotRangeContext(
         worktreeName: "Project Root", baseSource: nil, commit: nil))
@@ -57,10 +57,23 @@ struct DiffRangeSummaryTests {
     #expect(summary.origin == "merge-base 0123456 起点")
   }
 
+  @Test(
+    "Branch Diff は同じ短縮名でも local と remote を区別する",
+    arguments: [
+      (GitBranchRef.local("origin/feature"), "branch origin/feature"),
+      (.remote("origin/feature"), "branch remotes/origin/feature"),
+    ])
+  func distinguishesBranchKind(branch: GitBranchRef, expected: String) {
+    let summary = DiffRangeSummary(
+      snapshot: snapshot(subject: .branch(name: branch, mergeBase: mergeBase), head: nil),
+      context: DiffSnapshotRangeContext(worktreeName: "t", baseSource: nil, commit: nil))
+    #expect(summary.comparison == expected)
+  }
+
   @Test("HEAD を観測できなかったことを黙って空にしない")
   func statesUnobservedHead() {
     let summary = DiffRangeSummary(
-      snapshot: snapshot(subject: .branch(name: "b", mergeBase: mergeBase), head: nil),
+      snapshot: snapshot(subject: .branch(name: .local("b"), mergeBase: mergeBase), head: nil),
       context: DiffSnapshotRangeContext(worktreeName: "t", baseSource: nil, commit: nil))
     #expect(summary.target == "t — HEAD を観測できませんでした")
   }
@@ -126,15 +139,30 @@ struct DiffMergeBaseMessageTests {
   @Test("共通祖先が無いと断定できないときは「無い」と言わず、理由を添える")
   func doesNotAssertMissingMergeBase() {
     let message = DiffViewerModel.message(
-      for: .mergeBaseUnresolved(branch: "origin/feature", reason: .shallowRepository))
+      for: .mergeBaseUnresolved(branch: .remote("origin/feature"), reason: .shallowRepository))
     #expect(!message.contains("共通祖先 (merge-base) が無いため"))
     #expect(message.contains("共通祖先が無いとは限りません"))
     #expect(message.contains("shallow clone"))
   }
 
+  @Test(
+    "共通祖先のエラーは同じ短縮名でも local と remote を区別する",
+    arguments: [
+      (GitBranchRef.local("origin/feature"), "origin/feature"),
+      (.remote("origin/feature"), "remotes/origin/feature"),
+    ])
+  func distinguishesBranchKind(branch: GitBranchRef, expected: String) {
+    #expect(
+      DiffViewerModel.message(for: .noMergeBase(branch: branch))
+        == "\(expected) と HEAD に共通祖先 (merge-base) が無いため、merge-base 起点の Diff を作れません")
+    #expect(
+      DiffViewerModel.message(for: .mergeBaseUnresolved(branch: branch, reason: .shallowRepository))
+        .hasPrefix("\(expected) と HEAD の merge-base を求められませんでした"))
+  }
+
   @Test("断定できるときだけ共通祖先が無いと言う")
   func assertsMissingMergeBase() {
-    let message = DiffViewerModel.message(for: .noMergeBase(branch: "unrelated"))
+    let message = DiffViewerModel.message(for: .noMergeBase(branch: .local("unrelated")))
     #expect(message.contains("共通祖先 (merge-base) が無いため"))
   }
 }
@@ -155,8 +183,8 @@ struct DiffComparisonCandidatesTests {
   func putsOtherTasksFirst() {
     let candidates = DiffComparisonCandidates(tasks: tasks, refNames: refs, query: "")
     #expect(candidates.tasks == tasks)
-    #expect(candidates.localBranches == ["main", "spike"])
-    #expect(candidates.remoteBranches == ["origin/main", "origin/feat/a"])
+    #expect(candidates.localBranches == [.local("main"), .local("spike")])
+    #expect(candidates.remoteBranches == [.remote("origin/main"), .remote("origin/feat/a")])
   }
 
   @Test("検索は branch 名・タスク名・ディレクトリ名の部分一致で、大文字小文字を区別しない")
@@ -168,14 +196,29 @@ struct DiffComparisonCandidatesTests {
 
     let byBranch = DiffComparisonCandidates(tasks: tasks, refNames: refs, query: " main ")
     #expect(byBranch.tasks.isEmpty)
-    #expect(byBranch.localBranches == ["main"])
-    #expect(byBranch.remoteBranches == ["origin/main"])
+    #expect(byBranch.localBranches == [.local("main")])
+    #expect(byBranch.remoteBranches == [.remote("origin/main")])
     #expect(!byBranch.isEmpty)
 
     let byDirectory = DiffComparisonCandidates(tasks: tasks, refNames: refs, query: "wt-a")
     #expect(byDirectory.tasks.map(\.branch) == ["feat/a"])
 
     #expect(DiffComparisonCandidates(tasks: tasks, refNames: refs, query: "zzz").isEmpty)
+  }
+
+  @Test("他のタスクと同じ短縮名の local は除き、remote は残す")
+  func keepsRemoteWithTaskBranchName() {
+    let refs = GitRefNameList.parse(
+      output: "refs/heads/origin/feature\nrefs/remotes/origin/feature")
+    let tasks = [
+      DiffComparisonTask(name: "origin/feature", branch: "origin/feature", directory: "wt-feature")
+    ]
+    let candidates = DiffComparisonCandidates(tasks: tasks, refNames: refs, query: "origin/feature")
+    #expect(candidates.tasks == tasks)
+    #expect(candidates.localBranches.isEmpty)
+    #expect(candidates.remoteBranches == [.remote("origin/feature")])
+    #expect(DiffComparisonCandidates(tasks: [], refNames: refs, query: "refs/").isEmpty)
+    #expect(DiffComparisonCandidates(tasks: [], refNames: refs, query: "remotes/").isEmpty)
   }
 
   @Test("ref 一覧を読めていなくても他のタスクの branch は選べる")

@@ -5,7 +5,7 @@ model: sonnet
 tools: Bash, Read
 ---
 
-あなたは CLAUDE.md の **Agent workflow** 節に定義された **Gate runner** です。実装役 (Codex) の sandbox では `swift build` / `swift test` が動かないため、その代わりに GREEN のコマンドを実行します。
+あなたは CLAUDE.md の **Development pipeline** 節に定義された **Gate runner** です。実装役 (Codex) の sandbox では `swift build` / `swift test` が動かないため、その代わりに GREEN のコマンドを実行します。
 
 ## 手順
 

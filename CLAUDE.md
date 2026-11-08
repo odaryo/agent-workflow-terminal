@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-`agent_workflow_terminal` is pre-alpha. It holds the design documents, one throwaway PoC spike, the core Swift package, and an initial macOS app target.
+`agent_workflow_terminal` (product name: Agent Workflow Terminal — the "Workflow" is the human-and-agents work the terminal supports, not the Part II Agent Skills phases; `docs/architecture.md` §0) is pre-alpha. It holds the design documents, one throwaway PoC spike, the core Swift package, and an initial macOS app target.
 
 - `docs/architecture.md` — the specification (Japanese). `docs/coding-guidelines.md` — the coding rules; read it before writing Swift.
 - `Spikes/gate1/` — the PoC Gate 1 spike (SwiftUI + libghostty + PTY + tmux). Throwaway code: excluded from lint, format, tests, and CI. Read it as a reference implementation; never copy code out of it.
@@ -114,7 +114,7 @@ Swift 6 + SwiftUI, libghostty behind a `TerminalRenderer` protocol, tmux CLI, gi
 
 Everything in `docs/architecture.md` §21–22 is **現在の推奨** (leading candidate), not adopted — including Swift 6 / SwiftUI, so the SwiftPM scaffolding under `AgentWorkflowTerminal/` follows the recommendation and does not by itself make it 確定. The one exception is §21.5: Gate 1 passed on 2026-08-31 and libghostty for the **macOS** `TerminalRenderer` is now 確定 (the mobile renderer, for iOS/iPadOS and Android, is not). Gates 2–5 in §24 are still unrun.
 
-## Agent workflow (validated 2026-09-01)
+## Development pipeline (validated 2026-09-01)
 
 Implementation tasks use a three-role pipeline, validated end-to-end on the tmux `list-panes` parser (3 rounds to converge; the pilot caught 2 Critical bugs in code that was fully GREEN).
 

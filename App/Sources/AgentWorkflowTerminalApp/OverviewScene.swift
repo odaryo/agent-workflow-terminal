@@ -17,7 +17,9 @@ struct OverviewScene: Scene {
     }
     .defaultSize(width: 640, height: 480)
     .commands {
+      ProjectNavigationCommands(projects: projects)
       TabCyclingCommands(projects: projects)
+      ViewerCommands(projects: projects)
       CommandGroup(after: .toolbar) {
         OverviewMenuItem(navigator: projects.navigator)
       }
@@ -35,7 +37,12 @@ private struct OverviewMenuItem: View {
     // 端末より先にメニューへ届く (§5.4)。
     Button("Overview を表示") {
       switch OverviewPresentation.current() {
-      case .window: openWindow(id: "overview")
+      case .window:
+        if navigator.isOverviewWindowOpen {
+          navigator.overviewWindow?.close()
+        } else {
+          openWindow(id: "overview")
+        }
       case .sidebar: navigator.toggleOverviewSidebar(openWindow: openWindow)
       }
     }
@@ -61,10 +68,36 @@ private struct OverviewWindowContent: View {
         OverviewView(projects: projects, navigator: projects.navigator)
       }
     }
+    .background { OverviewWindowCapture(navigator: projects.navigator) }
     .onChange(of: presentation, initial: true) {
       if OverviewPresentation(storedValue: presentation) == .sidebar {
         dismissWindow(id: "overview")
       }
+    }
+  }
+}
+
+private struct OverviewWindowCapture: NSViewRepresentable {
+  let navigator: AppNavigator
+
+  func makeNSView(context: Context) -> CaptureView { CaptureView() }
+
+  func updateNSView(_ view: CaptureView, context: Context) {
+    view.navigator = navigator
+    view.capture()
+  }
+
+  @MainActor
+  final class CaptureView: NSView {
+    weak var navigator: AppNavigator?
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      capture()
+    }
+
+    func capture() {
+      if let window { navigator?.overviewWindow = window }
     }
   }
 }

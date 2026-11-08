@@ -12,10 +12,16 @@ final class AppNavigator: ObservableObject {
   var openWindow: OpenWindowAction?
   /// メイン window が閉じているかの判定用。`openWindow(id:)` は開いているかを返さない。
   weak var mainWindow: NSWindow?
+  weak var overviewWindow: NSWindow?
 
   var isMainWindowOpen: Bool {
     guard let mainWindow else { return false }
     return mainWindow.isVisible || mainWindow.isMiniaturized
+  }
+
+  var isOverviewWindowOpen: Bool {
+    guard let overviewWindow else { return false }
+    return overviewWindow.isVisible || overviewWindow.isMiniaturized
   }
 
   /// Project → タブ → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`

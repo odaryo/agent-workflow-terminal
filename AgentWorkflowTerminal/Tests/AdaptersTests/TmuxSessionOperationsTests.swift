@@ -133,7 +133,7 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
     #expect(try await operations.list() == ["awt-feature-a-0badcafe", "user-plain", "0"])
     #expect(
       await stub.invocations.first?.arguments
-        == prefix + ["list-sessions", "-F", "#{session_name}"])
+        == prefix + ["list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#])
   }
 
   @Test("server が動いていない場合の一覧は空になる")

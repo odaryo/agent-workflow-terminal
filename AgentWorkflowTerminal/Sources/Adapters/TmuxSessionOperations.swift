@@ -43,6 +43,7 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   case invalidHistoryLimit(Int)
   /// `new-session -P -F '#{session_id}'` が `$N` 以外を返した。原文を捨てずに載せる。
   case unexpectedSessionIDOutput(String)
+  case invalidSessionNameEscape(String)
   /// 想定外の出力を未設定とみなすとユーザーの値を上書きしかねないため、設定せずに失敗させる。
   /// tmux の版数差や形式の変化を診断できるよう、stdout の原文を保持する。
   case unexpectedShowOptionsOutput(String)
@@ -311,14 +312,29 @@ public struct TmuxSessionOperations: Sendable {
   ///   server を probe できない (Issue #500)。
   public func list() async throws(TmuxSessionOperationError) -> [String] {
     do {
-      let result = try await run(["list-sessions", "-F", "#{session_name}"], session: nil)
-      return result.stdout.split(separator: "\n").map(String.init)
+      let result = try await run(
+        ["list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#], session: nil)
+      return try Self.parseSessionNames(output: result.stdout)
     } catch {
       switch error {
       case .serverNotRunning: return []
       default: throw error
       }
     }
+  }
+
+  static func parseSessionNames(
+    output: String
+  ) throws(TmuxSessionOperationError) -> [String] {
+    var names: [String] = []
+    for line in output.split(separator: "\n") {
+      do {
+        names.append(try TmuxListPanes.decodeSessionName(String(line)))
+      } catch {
+        throw .invalidSessionNameEscape(String(line))
+      }
+    }
+    return names
   }
 
   private enum SessionPresence: Sendable, Equatable {

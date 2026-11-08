@@ -274,6 +274,29 @@ struct TmuxSessionOperationsIntegrationTests {
     }
   }
 
+  @Test("一覧で復号した $ と backslash を含む正式名は完全一致の存否確認に使える")
+  func listedHostileSessionNamesRoundTrip() async throws {
+    try await withServer("session-list-escape") { runner, _ in
+      let requestedNames = ["dol$x", #"user\back"#, #"a\$b"#, #"two\\bs"#, "x$"]
+      for name in requestedNames {
+        _ = try await runner.run(arguments: ["new-session", "-d", "-s", name])
+      }
+
+      let names = try await TmuxSessionOperations(runner: runner).list()
+      let hostileNames = names.filter { $0 != "awt-operations" }
+      #expect(hostileNames.count == requestedNames.count)
+      #expect(hostileNames.contains { $0.contains("$") })
+      #expect(hostileNames.contains { $0.contains("\\") })
+
+      // TmuxSessionName はアプリの安定 ID からしか作れないため、外部 session の正式名は
+      // exists と同じ argv で照合する。生成時の入力は tmux 内で加工され得るので使わない。
+      for name in hostileNames {
+        let result = try await runner.run(arguments: ["has-session", "-t", "=\(name)"])
+        #expect(result.exitCode == 0)
+      }
+    }
+  }
+
   // MARK: - server が動いていない状態
 
   /// `IsolatedTmuxServer` は常に生きた server を用意するので、この経路はそちらでは通らない。

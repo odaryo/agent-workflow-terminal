@@ -89,7 +89,7 @@ struct WorktreeCloseExecutorTests {
 
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(expectedSessionName)"],
       ])
   }
@@ -422,7 +422,7 @@ extension WorktreeCloseExecutorTests {
       outcome == WorktreeCloseOutcome(completed: [.terminateSession], failure: nil, skipped: []))
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)"],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-2"],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-3"],
@@ -439,7 +439,7 @@ extension WorktreeCloseExecutorTests {
       outcome == WorktreeCloseOutcome(completed: [.terminateSession], failure: nil, skipped: []))
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=awt-feature-a-219261c3"],
       ])
   }
@@ -464,7 +464,7 @@ extension WorktreeCloseExecutorTests {
     #expect(await harness.git.repositoryInvocations.isEmpty)
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"]
+        ["-u", "-L", "awt-test", "list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#]
       ])
   }
 
@@ -492,7 +492,7 @@ extension WorktreeCloseExecutorTests {
     #expect(await harness.git.repositoryInvocations.isEmpty)
     #expect(
       await harness.tmux.invocations.map(\.arguments) == [
-        ["-u", "-L", "awt-test", "list-sessions", "-F", "#{session_name}"],
+        ["-u", "-L", "awt-test", "list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)"],
         ["-u", "-L", "awt-test", "kill-session", "-t", "=\(base)-2"],
       ])

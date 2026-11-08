@@ -353,7 +353,7 @@ public enum TmuxListPanes {
     return fields
   }
 
-  private static func decodeSessionName(
+  static func decodeSessionName(
     _ field: String
   ) throws(TmuxListPanesParseError) -> String {
     let bytes = Array(field.utf8)

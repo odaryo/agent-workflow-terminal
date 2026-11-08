@@ -9,7 +9,8 @@ struct WorktreeClosePlanTests {
     let report = WorktreeCloseInspectionReport(
       target: target,
       inspection: WorktreeCloseInspection(
-        uncommittedChanges: .absent, ignoredFiles: .absent, unpushedCommits: .absent,
+        uncommittedChanges: .absent, ignoredFiles: .absent, branchStashes: .absent,
+        unpushedCommits: .absent,
         branchMerge: .unmerged),
       defaultBranch: .originHead(branch: "main"))
 
@@ -22,7 +23,8 @@ struct WorktreeClosePlanTests {
     let report = WorktreeCloseInspectionReport(
       target: target,
       inspection: WorktreeCloseInspection(
-        uncommittedChanges: .absent, ignoredFiles: .absent, unpushedCommits: .absent,
+        uncommittedChanges: .absent, ignoredFiles: .absent, branchStashes: .absent,
+        unpushedCommits: .absent,
         branchMerge: .unmerged),
       defaultBranch: .originHead(branch: "main"))
 
@@ -474,7 +476,8 @@ struct WorktreeClosePlanTests {
     let report = WorktreeCloseInspectionReport(
       target: worktree,
       inspection: WorktreeCloseInspection(
-        uncommittedChanges: uncommitted, ignoredFiles: ignored, unpushedCommits: .absent,
+        uncommittedChanges: uncommitted, ignoredFiles: ignored, branchStashes: .absent,
+        unpushedCommits: .absent,
         branchMerge: merge),
       defaultBranch: defaultBranch)
     return WorktreeRemovalConfirmation(report: report, continuation: continuation)

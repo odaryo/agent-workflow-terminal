@@ -142,7 +142,7 @@ public struct WorktreeCloseInspection: Sendable, Hashable {
   public init(
     uncommittedChanges: UncommittedChangesStatus,
     ignoredFiles: IgnoredFilesStatus,
-    branchStashes: BranchStashStatus = .absent,
+    branchStashes: BranchStashStatus,
     unpushedCommits: UnpushedCommitsStatus,
     branchMerge: BranchMergeStatus
   ) {

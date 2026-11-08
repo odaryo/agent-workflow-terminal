@@ -106,7 +106,8 @@ struct WorktreeClosePlanRemovalObstaclesTests {
     let report = WorktreeCloseInspectionReport(
       target: worktree,
       inspection: WorktreeCloseInspection(
-        uncommittedChanges: uncommitted, ignoredFiles: ignored, unpushedCommits: .absent,
+        uncommittedChanges: uncommitted, ignoredFiles: ignored, branchStashes: .absent,
+        unpushedCommits: .absent,
         branchMerge: merge),
       defaultBranch: defaultBranch)
     return WorktreeRemovalConfirmation(report: report, continuation: continuation)

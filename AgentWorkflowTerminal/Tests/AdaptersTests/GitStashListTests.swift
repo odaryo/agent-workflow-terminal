@@ -46,6 +46,29 @@ struct GitStashListTests {
     #expect(GitStashList.count(output: "", branch: "feature/x") == 0)
   }
 
+  @Test(
+    "メッセージや branch 名が結合文字で始まっても数える",
+    arguments: [
+      ("On feature/x: \u{301}note", "feature/x"),
+      ("WIP on feature/x: \u{301}note", "feature/x"),
+      ("On \u{301}x: note", "\u{301}x"),
+      ("WIP on \u{301}x: note", "\u{301}x"),
+    ])
+  func countsSubjectsStartingWithCombiningMark(output: String, branch: String) {
+    #expect(GitStashList.count(output: output, branch: branch) == 1)
+  }
+
+  @Test(
+    "正準等価でも UTF-8 が異なる branch の stash は数えない",
+    arguments: [
+      ("caf\u{E9}", "cafe\u{301}"),
+      ("cafe\u{301}", "caf\u{E9}"),
+    ])
+  func distinguishesCanonicalEquivalentBranches(stashedBranch: String, branch: String) {
+    #expect(GitStashList.count(output: "On \(stashedBranch): note", branch: branch) == 0)
+    #expect(GitStashList.count(output: "WIP on \(stashedBranch): note", branch: branch) == 0)
+  }
+
   private func fixture(_ name: String) throws -> String {
     let url = try #require(
       Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures"))

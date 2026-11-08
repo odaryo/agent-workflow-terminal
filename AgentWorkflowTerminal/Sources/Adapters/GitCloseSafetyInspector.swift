@@ -3,19 +3,16 @@ import TerminalCore
 
 enum GitStashList {
   static func count(output: String, branch: String) -> Int {
-    output.split(separator: "\n").count { line in
-      let subject: Substring
-      if line.hasPrefix("WIP on ") {
-        subject = line.dropFirst("WIP on ".count)
-      } else if line.hasPrefix("On ") {
-        subject = line.dropFirst("On ".count)
-      } else {
+    // git は branch 名をバイト列で区別する。Character 境界や String の正準等価比較は使わない。
+    output.utf8.split(separator: 0x0A).count { line in
+      guard let prefix = ["WIP on ", "On "].first(where: { line.starts(with: $0.utf8) }) else {
         return false
       }
-      guard let separator = subject.firstIndex(of: ":"),
-        subject[separator...].hasPrefix(": ")
+      let subject = line.dropFirst(prefix.utf8.count)
+      guard let separator = subject.firstIndex(of: 0x3A),
+        subject[separator...].starts(with: ": ".utf8)
       else { return false }
-      return subject[..<separator] == branch
+      return subject[..<separator].elementsEqual(branch.utf8)
     }
   }
 }

@@ -287,7 +287,13 @@ if [[ "$current_branch" == "$pr_head" ]]; then
   # 別の作業ツリーが checkout したままで、`git branch -f` は拒否される (Issue #131)。
   # 事前に判定せず試すのは、上記の通り porcelain の出力が使用中を取りこぼすため。
   # 拒否されても ref は動かない (実測) ので、失敗を検出手段として使ってよい。
-  if branch_force_error=$(git branch -f main origin/main 2>&1); then
+  # `git branch -f` はローカル main の未 push コミットを rc=0 のまま到達不能にする (Issue #134)。
+  # 別の作業ツリー側の `merge --ff-only` が同じ状況を拒否するのと揃え、先に祖先かを確かめる。
+  if git show-ref --verify --quiet refs/heads/main \
+    && ! git merge-base --is-ancestor refs/heads/main origin/main; then
+    info "警告: ローカル main に origin/main に無いコミットがあるため、main を origin/main へ合わせませんでした。git log origin/main..main で確かめてから手動で更新してください"
+    info "この作業ツリーは '$current_branch' を checkout したままです。用が済んだらメイン作業ツリー ('$main_worktree_path') へ移動してから scripts/wf-worktree-remove.sh '$current_branch' を実行してください"
+  elif branch_force_error=$(git branch -f main origin/main 2>&1); then
     # 陳腐化したローカル main へ直接 checkout すると、PR が変更したファイルに
     # 作業ツリーの未コミット差分がある場合に中断する (Issue #37)。先に main を
     # origin/main へ合わせれば、マージ済み内容と作業ツリーの間に差は生じない。

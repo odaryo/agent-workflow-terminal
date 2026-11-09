@@ -38,7 +38,7 @@ struct ViewerDrawerMetricsTests {
   }
 
   struct MinimumCase: Sendable {
-    let content: ViewerContent
+    let content: ViewerContent?
     let arrangement: ViewerContentArrangement?
     let width: CGFloat
   }
@@ -50,7 +50,7 @@ struct ViewerDrawerMetricsTests {
       MinimumCase(content: .code, arrangement: .stacked, width: 240),
       MinimumCase(content: .diff, arrangement: .sideBySide, width: 702),
       MinimumCase(content: .diff, arrangement: .stacked, width: 240),
-      MinimumCase(content: .evidence, arrangement: nil, width: 240),
+      MinimumCase(content: nil, arrangement: nil, width: 240),
     ])
   func minimumWidths(values: MinimumCase) {
     #expect(

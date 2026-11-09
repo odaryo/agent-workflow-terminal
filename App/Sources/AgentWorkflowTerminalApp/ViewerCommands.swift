@@ -12,9 +12,6 @@ struct ViewerCommands: Commands {
       Button("Diff Viewer") { projects.selectedModel?.viewerDrawerLayout.toggle(.diff) }
         .keyboardShortcut(shortcuts.shortcut(for: .toggleDiffViewer))
         .disabled(projects.selectedModel == nil)
-      Button("Evidence Viewer") { projects.selectedModel?.viewerDrawerLayout.toggle(.evidence) }
-        .keyboardShortcut(shortcuts.shortcut(for: .toggleEvidenceViewer))
-        .disabled(projects.selectedModel == nil)
     }
   }
 }

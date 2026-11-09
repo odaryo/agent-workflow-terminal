@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-09(セッション移動をProjectをまたいで行うようにした(§5.4)。セッション移動の既定のショートカットを⌘↑／⌘↓に変更した(§5.4)。⌘Spaceの切り替えと表示先を確定した(§5.4)。Gate 3の記録に写っていない画面の信号の採用条件を確定した(§12.5)。実装に合わせて§3.4、§3.5、§12.5、§12.7、§13、§21.4の記述を補った。Closeのbranchを決められないstashの扱いを確定した(§3.4)。ツールバーのProjectメニューの廃止、⌘を伴わない割り当ての禁止、Codexの更新の確認のPermission化、導入順序を確定した(§5.4、§12.8、§20.8)。以下はそれ以前の履歴。Agentが公開したbranch名の表示と、Agentが作業中のworktreeを対象とする決定を取り下げた(§5.3)。以下はそれ以前の履歴。Project RootのAgentは実装の指示を受けたらworktreeを作り、`hostctl worktree open`で作らせたworktreeのセッションへ作業を渡して自分は終えると確定した(§3.1)。Agentへの手順はClaude CodeのSkill Pluginで知らせ、Agentの起動コマンドはProjectごとにアプリで設定して`hostctl`の応答で返す。アプリはAgentを起動しない。以下はそれ以前の履歴。Agentがステータスラインから作業ディレクトリとbranchを公開し、Overviewのセッションの行にbranch名を出すと確定した。Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする。Project Rootという見出しは出さない。以下はそれ以前の履歴。#672: タブ列をなくし、呼称をセッションに統一した。Overviewは既定で表示するメインwindowの左サイドバーだけとし、切り替えと見出しの右クリック操作を集約する。Project内は開いた順に固定し、要対応は印と件数で示す。branch名の表示をやめてAgentの作業ディレクトリ名を出すことにし、全セッションの作業概要の右クリック一覧を廃止した。以下はそれ以前の履歴。Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-10(モバイルクライアントの検討を作り直し、作業PCより先にiPadを優先して作る順序、OSごとのネイティブ実装、SSHでの接続、CodeとDiffの提供、無料の署名を確定した(§20.1、§20.4〜§20.8)。以下はそれ以前の履歴。セッション移動をProjectをまたいで行うようにした(§5.4)。セッション移動の既定のショートカットを⌘↑／⌘↓に変更した(§5.4)。⌘Spaceの切り替えと表示先を確定した(§5.4)。Gate 3の記録に写っていない画面の信号の採用条件を確定した(§12.5)。実装に合わせて§3.4、§3.5、§12.5、§12.7、§13、§21.4の記述を補った。Closeのbranchを決められないstashの扱いを確定した(§3.4)。ツールバーのProjectメニューの廃止、⌘を伴わない割り当ての禁止、Codexの更新の確認のPermission化、導入順序を確定した(§5.4、§12.8、§20.8)。以下はそれ以前の履歴。Agentが公開したbranch名の表示と、Agentが作業中のworktreeを対象とする決定を取り下げた(§5.3)。以下はそれ以前の履歴。Project RootのAgentは実装の指示を受けたらworktreeを作り、`hostctl worktree open`で作らせたworktreeのセッションへ作業を渡して自分は終えると確定した(§3.1)。Agentへの手順はClaude CodeのSkill Pluginで知らせ、Agentの起動コマンドはProjectごとにアプリで設定して`hostctl`の応答で返す。アプリはAgentを起動しない。以下はそれ以前の履歴。Agentがステータスラインから作業ディレクトリとbranchを公開し、Overviewのセッションの行にbranch名を出すと確定した。Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする。Project Rootという見出しは出さない。以下はそれ以前の履歴。#672: タブ列をなくし、呼称をセッションに統一した。Overviewは既定で表示するメインwindowの左サイドバーだけとし、切り替えと見出しの右クリック操作を集約する。Project内は開いた順に固定し、要対応は印と件数で示す。branch名の表示をやめてAgentの作業ディレクトリ名を出すことにし、全セッションの作業概要の右クリック一覧を廃止した。以下はそれ以前の履歴。Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -594,7 +594,7 @@ Gate 1で3方式を実測した(137x39のクライアントと199x56のクライ
 
 iPhone/iPadとMacの同時attachで**全クライアントが全内容を見られるのは`smallest`だけ**であり、大きい側の余白は許容する。既定の`latest`は「小さい端末を1回触るとMac側がその場で縮む」挙動になるため採らない。
 
-Clientが増えたことで、`smallest`の影響を受ける場面も増えた。モバイルをtmuxのclient flag `ignore-size`でattachする案を、未確定として検討している(§20.7、§25)。
+Clientが増えても`smallest`を維持する(現在の推奨、2026-11-10。§20.7)。
 
 ### 4.3 サポートするtmux版数
 
@@ -775,7 +775,7 @@ Code、Diff、Evidenceは常設せず、必要時にViewer Drawerとして開く
 └──────────────────────┴──────────────────┘
 ```
 
-- macOSのアプリ(HostとClient)ではDrawerを端末の右にだけ置く。iPadの配置はモバイルクライアントを作る段階で決め(§20.6)、この節では扱わない。
+- macOSのアプリ(HostとClient)ではDrawerを端末の右にだけ置く。iPadの配置は§20.6で扱う。
 - **Drawerは常にAgent領域を縮めて並べて表示する。Agent上へのOverlayと、ViewerだけのFullscreen表示は設けない — 確定(2026-11-01、Issue #430)。** それまでの「必要ならOverlayに切り替えられる」「ViewerだけをFullscreen表示できる」「閉じた時点がOverlayなら次回もOverlayで開く」を撤回する。QAで、表示方法は並べて表示だけでよいとユーザーが判断した。
 - **Drawerの中身(Code／Diff)の並びは、CodeとDiffで別々に「左右」か「上下」から選べる — 確定(2026-11-01、Issue #430)。** Codeはファイル一覧と本文、Diffはファイル一覧・差分・コメントの並びである。既定はCodeが「左右」、Diffが「上下」。Diffの幅による自動の切り替え(#420)はやめ、選んだ並びに固定する。選んだ並びは、Drawerの開閉、CodeとDiffの切り替え、アプリの再起動をまたいで保つ。「上下」のときは区切りをドラッグして高さを変えられる。これは1つの中身の内部の並びであり、下の「Drawer内部を分割しない」(別の中身を並べない)とは別の話である。
 - **選んだ並びが収まる幅を、Drawerの最小幅にする — 確定(2026-11-01、Issue #430)。** 「左右」を選んでいる間は、Drawerをその並びの最小幅より狭められず、代わりに端末が狭くなる。「上下」なら最小幅は従来のまま(240pt)。自動の切り替えをやめても、狭いDrawerで中身がはみ出さないためである。
@@ -1954,15 +1954,16 @@ Mac Studioと解釈した)。
 | 役割 | 機器 | 動かすもの |
 |---|---|---|
 | Host | メインPC(Mac Studio) | このアプリ(Host)。repository・worktree・tmux session・Agentはすべてここにある |
-| Client | 作業PC(MacBook Pro) | このアプリ(Client。§20.5) |
+| Client | 作業PC(MacBook Pro) | このアプリ(Client。§20.5)。後回しにする(§20.8) |
 | Client | iPhone、iPad、Android | モバイルクライアント(§20.6) |
 
 - **メインPCで動かしているこのアプリを正とする。** Clientはメインを遠隔から操作する手段であり、Clientに
   実行環境を置かない。
-- **作業PCとモバイルからは、Tailscale上のSSHまたはMoshでHostへ接続して操作する。**
+- **作業PCとモバイルからは、Tailscale上でHostへ接続して操作する。** モバイルの接続はSSHとする(Androidを含む。§20.6、確定 2026-11-10)。作業PCの接続はSSHまたはMoshとする(§20.5)。
 - **ClientはtmuxのsessionだけでなくProjectとセッションまで再現する**(§20.3)。
 - **Clientでは、セッション一覧の表示、開いているセッションのコード差分(Diff)の確認、Diffへのコメントが
   できる**(§20.4)。
+- **モバイルでは、コードの閲覧(Code Viewer)もできる**(§20.4、確定 2026-11-10)。
 
 この節は、2026-10-08までに確定していた「Mac host + iPhone/iPad client」の構成を置き換える。その構成は
 Androidと作業PCを扱っておらず、iOSアプリ・CloudKitによる通知中継と接続先の同期・Appleの署名を前提に
@@ -2036,19 +2037,20 @@ Client: iPhone / iPad / Android     — モバイルクライアント
   ない」の例外であり、Hostのアプリが応答するようになれば、ClientのOverviewはHostのものに戻る。縮退中の
   attachはアプリが管理するセッションとして記録しない。
 
-**Clientから行える操作の範囲 — 現在の推奨(2026-11-08)。** 初版のClientで行えるのは、セッション一覧の表示、
-セッションを開いてattachすること、新しいセッションを開くこと、Diffの閲覧、Diffへのコメントとその送信である。
+**Clientから行える操作の範囲 — 現在の推奨(2026-11-10)。** 初版のClientで行えるのは、セッション一覧の表示、
+セッションを開いてattachすること、新しいセッションを開くこと、コードの閲覧(モバイル)、Diffの閲覧、Diffへのコメントとその送信である。
 Close(§3.4)、Active／Inactiveの切り替え(§3.2)、Projectの登録と解除(§16.1)はHostでだけ行う。Clientで
 これらを行えるようにするかは未確定とする(§25)。§3.1の通常のセッションを閉じる操作(最後の1つ以外を閉じて
 sessionを終える)をClientで行えるかも未確定とする(§25)。
 
-### 20.4 セッション一覧・Diff・コメント
+### 20.4 セッション一覧・Code・Diff・コメント
 
-**この節の3つの機能は、2026-11-08にユーザーが要件として示した — 確定。** 実現方法は現在の推奨である。
+**セッション一覧・Diff・コメントは2026-11-08に、モバイルのCodeは2026-11-10に、ユーザーが要件として示した — 確定。** 実現方法は現在の推奨である。
 
 - **セッション一覧**: Overview(§13)と同じデータ — 全Project、Project Rootとタスク、セッション、pane、目的、
   状態 — をClientに出す。並び順と状態の安定化(§12.2)はHostで計算したものをそのまま使い、Clientで
   計算し直さない。同じ瞬間にHostとClientで並びや色が食い違うのを防ぐためである(§5.3と同じ理由)。
+- **Code**: ファイル一覧、本文、検索はHostが読み、Clientはその結果を受け取って表示する。モバイルの初版はファイル一覧・本文・検索とし、履歴とblameは次の段階とする(現在の推奨、2026-11-10)。
 - **Diff**: base branchと範囲の決定(§9.1)とsnapshotの作成(§9.3)はHostが行い、Clientはその結果を受け取って
   表示する。
 - **snapshotとコメントはHostが持つ。** Clientで書いたコメントはHost上のsnapshotに付き、HostのDrawerや
@@ -2058,10 +2060,12 @@ sessionを終える)をClientで行えるかも未確定とする(§25)。
   §9.2.1の注入を行う。§9.2.2の「許可集合を1箇所で定義し、UIと送信経路で別々に判定しない」を、Clientまで
   含めて守るためである。Clientの送信ボタンの有効・無効は、Hostから受け取った判定を表示するだけとする。
 
-Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提供するかと、その時期は未確定とする
-(§25)。
+Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのClientでCode ViewerとFile Browserを提供するかは
+未確定とする(§25)。
 
 ### 20.5 作業PC(MacBook Pro)のClient — 現在の推奨(2026-11-08)
+
+**作業PCのClientは後回しとし、着手の時期は決めない — 確定(2026-11-10、§20.8)。** 以下は着手するときの現在の推奨である。
 
 - 同じmacOSアプリを、Hostではなく**Client**として動かす。HostとClientのどちらで動くかは起動時の設定で選ぶ。
   1つのプロセスがHostとClientを兼ねるか(作業PCが自分のProjectのHostにもなるか)は未確定とする(§25)。
@@ -2075,15 +2079,52 @@ Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提�
 - セッションの数だけSSH接続が要る。接続の多重化(`ControlMaster`)を使うかはユーザーの`~/.ssh/config`に委ねる。
 - Moshを通したときに失われる端末機能(色・クリップボード・リンク・マウスなど)は未計測であり、Gate 2で測る。
 
-### 20.6 モバイルクライアント(iPhone、iPad、Android)
+### 20.6 モバイルクライアント(iPad、iPhone、Android)
+
+2026-11-08までのモバイルの検討は、その後のアプリの変更に合わなくなったので、2026-11-10に取り下げ、その時点のコードを基準に作り直した(Issue #788)。
+
+**目的 — 確定(2026-11-10)。** モバイルの主目的は、PCと同等のターミナル操作ができることである。CodeとDiffを見られることも利点の一つであり、機能に含める。モバイルの中ではiPadを優先する(§20.8)。
 
 **表示の原則 — 確定(維持)。**
 
 - 同じtmux session、同じAgent TUIをそのまま表示する。Claude出力を解析した独自Chat UIには変換しない。
 - Agent専用の操作ボタンではなく、汎用のTerminal補助キーバーを持つ。
 
-次の2点は現在の推奨とする。最終形はモバイルクライアント内の端末とし、外部の端末アプリは段階的な手段とする
-(§20.8)。外付けキーボードも通常どおり使えるようにする。
+**実装の形 — 確定(2026-11-10)。**
+
+- iOS／iPadOSとAndroidはネイティブで別々に実装する。1つのコードベースで作る案は取り下げる。
+- 接続はTailscale上のSSHで進める。AndroidもTailscaleを使う。
+- Moshは、運用してSSHの接続性が悪ければ検討する。Moshの実装をアプリへ取り込むとGPL系のコードが§23と衝突するので、検討するときは方法から決める。
+
+**配布 — 確定(2026-11-10。直接インストールとv1の配布対象は2026-10-08の確定を維持)。** iOS／iPadOSアプリは、XcodeからDevelopment署名で実機へ直接インストールし、TestFlight／App Storeでの配布とApp Store審査はv1の対象外とする。当面はApple Developer Programに加入せず、無料のPersonal Teamで署名する。Personal Teamのprofileは7日で切れ、Push通知の機能も使えないとされる(どちらも二次情報で、Gate 2で確かめる)。切れたらMacから入れ直す。加入するかは、Push通知(§20.8)に着手するときに改めて決める。
+
+**接続鍵 — iOSは2026-10-08の確定を維持し、Androidにも同じ線引きを当てはめる(Androidは現在の推奨)。**
+
+- 鍵は機器で生成し、機器の外へ出さない。機器ごとに鍵を1つ生成し、OSの鍵の保管場所(iOSはKeychainの
+  この機器限り(ThisDeviceOnly)、AndroidはKeystore)に保持する。秘密鍵の取り込み・書き出しや、複数の鍵を
+  扱う機能は作らない(§1.3)。アプリは公開鍵を表示するだけで、Hostの`authorized_keys`への登録は利用者が行う。
+- 接続先は各機器で1度入力する(現在の推奨)。鍵と`known_hosts`は同期しない。
+- Tailscale SSH(tailnetの認証で接続し、鍵を要らなくする機能)を使えるかは未検証であり、候補に留める(§25)。
+
+**対応OSの初期version。** iOS／iPadOS 17以上(2026-10-08の確定を維持。`AgentWorkflowTerminal/`のplatforms指定と一致させる)。Androidの下限は未確定とする(§25)。
+
+**実現方法 — 現在の推奨(2026-11-10)。**
+
+| 項目 | 現在の推奨 | 補足 |
+|---|---|---|
+| iOS／iPadOSのUI | SwiftUI | `TerminalCore`の型を使える |
+| AndroidのUI | Kotlin | Android着手時に部品と合わせて確かめる |
+| iOS／iPadOSの端末部品 | SwiftTerm | MIT。`UITextInput`のmarked textの実装があることをソースで確認した(2026-11-10)。実機の品質はGate 2で測る |
+| iOS／iPadOSのSSH | Citadel。不足ならSwiftNIO SSH | CitadelはMIT、SwiftNIO SSHはApache-2.0 |
+| Androidの端末部品とSSH | connectbot/termlib と cbssh | どちらもApache-2.0。termlibは採用例が少なくIMEの記載が無いので、Android着手時に再評価する |
+| CodeとDiffの表示 | `hostctl`のJSONを各OSのネイティブ画面で表示する | HostにHTTPを開かず、認証をSSHに一本化する。`DiffViewerModel`などの一部はiPadへ流用できる(Gitの取得部分は置き換える) |
+| 再接続 | 前面に戻ったら自動で再接続し、同じsessionへattachし直す | sessionはtmuxが保つ。モバイルOSはバックグラウンドのアプリの通信を止める |
+| iPadの配置 | 左にOverview、中央に端末、右にViewer。狭い分割表示ではsheetで開く | Overviewは閉じて端末を広くできる |
+| スマートフォンの配置 | Overview、端末、Viewerを全画面で切り替える。Diffは1列で、コメントは行をタップして入力する | §6のFullscreen sheet |
+| キー入力 | 外付けキーボードはPCと同じショートカット。画面にはEsc、Ctrl、Tab、矢印の補助キーバーを出す | 補助キーバーの例は下記 |
+| Tailscaleの自動接続 | iOSはVPN On Demandで`*.ts.net`への接続時に接続する | Hostは`ts.net`の名前で指定する |
+| HostのSSH | macOSの通常のSSHサーバー | |
+| Androidの配布と下限 | APKの直接インストール。下限は手持ちの機器に合わせ、仮にAndroid 12以上とする | 正式には§25 |
 
 補助キーバー例:
 
@@ -2091,75 +2132,37 @@ Code Viewer、File Browser、Evidence、Ask Agent(Consultation)をClientで提�
 [Esc] [Ctrl] [Alt] [Tab] [↑] [↓] [←] [→] [...]
 ```
 
-- スマートフォン(iPhone、Android)では、Viewer Drawer(§6)を基本的に全画面のsheetとして開く。iPadの配置は
-  モバイルクライアントを作る段階で決める。
-- モバイルクライアントのTerminal描画方式は、macOS版と共通であることを要求しない(§21.5の確定)。
+**「PCと同等」の範囲 — 現在の推奨(2026-11-10)。** 2026-11-10時点のmacOSのアプリの機能を基準にする。
 
-**実装技術 — 未確定(2026-11-08)。** iOS／iPadOSとAndroidの両方に要るので、次の2案から選ぶ。
+| 区分 | 機能 |
+|---|---|
+| モバイルへ移す | Overviewとセッション・Projectの切り替え、ショートカット、日本語IME、マウス・トラックパッド、スクロール、コピー・貼り付け、URLを開く、CodeとDiffの開閉、Diffコメントの送信 |
+| モバイルでは不要 | ⌘Spaceの前面化、Macのファイルをドロップしてパスを送る操作 |
+| macOSのアプリにも無い | アプリからのpane分割・ズーム(tmuxのキー操作でそのまま使える)、端末内検索、画像の添付 |
 
-| 案 | 長所 | 短所 |
-|---|---|---|
-| 1つのコードベースで3種の機器向けに作る(Flutter等) | 1人で3種の機器を保てる。UIの実装が1つで済む | 端末の描画・日本語IME・書記素幅の品質が、各OSのネイティブの部品より劣る可能性がある |
-| iOS／iPadOS(SwiftUI)とAndroid(Kotlin)を別々に作る | 各OSの端末部品とIMEをそのまま使える | UIを2回作り、2つを保ち続ける |
-
-現在の推奨は1つのコードベースで作る案であり、Gate 2で端末の品質(日本語IME、書記素幅、Agent TUIの表示)が
-足りなければOSごとの案へ移る。Clientは表示と入力だけを持ち、状態の判定・Diffの計算・送信の判定はHostに
-ある(§20.3、§20.4)ので、`TerminalCore`をClientで使う必要が無く、Swiftで書くことはClientの条件ではない。
-
-**端末の経路 — 現在の推奨／未確定(2026-11-08)。**
-
-- アプリ内の端末はSSHで接続する。
-- Moshをモバイルアプリへ組み込むと、GPL系のMoshの実装をアプリへ取り込むことになり、ライセンス方針(§23。
-  GPL系は既定で不採用)と衝突する。モバイルでMoshを使う方法 — 外部の端末アプリ(Moshに対応したもの)へ
-  委ねるか、方針の例外を認めるか — は未確定とする(§25)。
-- Tailscale上では、Wi-Fiとモバイル回線を切り替えても、Hostと機器のtailnetのアドレスは変わらない。ただし
-  モバイルOSはバックグラウンドのアプリの通信を止めるので、アプリは前面に戻ったときに自動で再接続し、同じ
-  sessionへattachし直す(sessionはtmuxが保つ)。これでMoshの代わりが務まるかはGate 2で測る。
-
-**接続鍵 — iOSは2026-10-08の確定を維持し、Androidにも同じ線引きを当てはめる(Androidは現在の推奨)。**
-
-- 鍵は機器で生成し、機器の外へ出さない。機器ごとに鍵を1つ生成し、OSの鍵の保管場所(iOSはKeychainの
-  この機器限り(ThisDeviceOnly)、AndroidはKeystore)に保持する。秘密鍵の取り込み・書き出しや、複数の鍵を
-  扱う機能は作らない(§1.3)。アプリは公開鍵を表示するだけで、Hostの`authorized_keys`への登録は利用者が行う。
-- Tailscale SSH(tailnetの認証で接続し、鍵を要らなくする機能)を使えるかは未検証であり、候補に留める(§25)。
-
-**接続先の同期は撤回する(2026-11-08)。** 2026-10-08に確定した「接続先(host・user・portとMac名)をCloudKitで
-機器間に同期する」は、CloudKitにはアプリが動いていない間のAndroidの機器へ届ける経路が無いため撤回する。Hostは1台なので、接続先は各機器で1度
-入力する(現在の推奨)。鍵と`known_hosts`は従来どおり同期しない。
-
-**配布経路。** iOS／iPadOSアプリは、XcodeからDevelopment署名で実機へ直接インストールし、TestFlight／App Storeでの
-配布とApp Store審査はv1の対象外とする(2026-10-08の確定を維持)。Androidの配布経路は未確定とする(§25)。
-
-**対応OSの初期version。** macOS 14以上、iOS／iPadOS 17以上(2026-10-08の確定を維持。SwiftPM package
-(`AgentWorkflowTerminal/`・`App/`)のplatforms指定と一致させる。モバイルクライアントをSwift以外で作る場合、
-iOSの下限はその技術の側で同じ値に合わせる)。Androidの下限は未確定とする(§25)。
+モバイルクライアントのTerminal描画方式は、macOS版と共通であることを要求しない(§21.5の確定)。
 
 ### 20.7 複数のClientの同時接続
 
 同じsessionを、Host・作業PC・モバイルから同時に表示・操作できる。入力の排他制御は設けない(§4.2の確定を維持)。
 
-**画面サイズ — 未確定(2026-11-08)。** §4.2で確定した`window-size smallest`のままでは、iPhoneがattachした
-時点で、Hostと作業PCのwindowまでiPhoneの幅へ縮む。Clientが増えたことで、この影響を受ける場面が増えた。
-候補として、モバイルをtmuxのclient flag `ignore-size`付き(`attach-session -f ignore-size`)でattachし、
-モバイルが他のクライアントの大きさに影響しないようにする案がある。tmux 3.8のmanには「the client does not
-affect the size of other clients」とあり、tmux 3.8では、200x50のクライアントがattachしている`smallest`の
-sessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindowが200x49のまま変わらないことを計測した
-(flagなしでは40x9に縮んだ。2026-11-08、隔離socket)。flagはtmux 3.2で入ったものだが、サポート下限の3.4での
-挙動は未計測である。代わりにモバイルは
-自分の画面より大きいwindowを見ることになり、はみ出す。どちらを採るかは未確定とし(§25)、Gate 2で測る。
+**画面サイズ — 現在の推奨(2026-11-10)。** §4.2で確定した`window-size smallest`を維持し、モバイルはアプリが裏へ回ったらdetachする。`smallest`ならiPadで全内容が見える。iPadの接続中はHostのwindowも縮むが、detachすれば元の大きさへ戻る。
 
-### 20.8 導入順序 — 確定(2026-11-09)
+`attach-session -f ignore-size`は採らない。tmux 3.8で、200x50のクライアントがattachしている`smallest`のsessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindowが200x49のまま変わらないことを計測した(flagなしでは40x9に縮んだ。2026-11-08、隔離socket)。この場合モバイルは自分の画面より大きいwindowを見ることになり、はみ出す。サポート下限の3.4での挙動と実機での見え方はGate 2で測る。
 
-2026-09-07に確定した「通知を先、遠隔操作を後」と「モバイル初版の利用条件はロック中の判断待ち・タスク完了の
-通知」は撤回する。2026-11-08の要件(§20.1)は、遠隔からの操作(セッション一覧、端末、Diffとコメント)を中心に
-置いているためである。
+### 20.8 導入順序 — 確定(2026-11-10)
+
+2026-11-09に確定した「`hostctl`と作業PCのClient、モバイル、Push通知」の順序は撤回する。今のHostはメインPCだけであり、
+よく使う機器はiPadだからである。2026-09-07に確定した「通知を先、遠隔操作を後」とモバイル初版の通知の利用条件も、撤回したままとする。
 
 新しい順序は次のとおりとする。
 
-1. `hostctl`と作業PCのClient。端末の描画はGate 1を通ったlibghosttyをそのまま使えるので、HostとClientの
-   分担(§20.3、§20.4)を最初に確かめられる。
-2. モバイルクライアント(iPhone、iPad、Android)。1の`hostctl`をそのまま使う。
-3. モバイルへのPush通知。経路は未確定である(§11.2)。
+1. iPad。
+2. iPhone。
+3. Android。
+4. モバイルへのPush通知。経路は未確定である(§11.2)。
+
+作業PCのClient(§20.5)は後回しとし、着手の時期は決めない。`hostctl`の拡張(§21.4)は、モバイルのOverviewとViewerに合わせて進める。
 
 初期段階では、外部の端末アプリからSSHまたはMoshでHostへ接続し、tmuxへattachする使い方をいつでも利用できる。
 
@@ -2174,12 +2177,12 @@ sessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindow�
 | 言語 | Swift 6 |
 | UI | SwiftUI + 必要最小限のAppKit／UIKit |
 | Terminal core (macOS) | libghostty C API(完全版)。採用は**確定**(Gate 1通過、§21.5) |
-| Terminal core (モバイル) | 未確定。libghostty(完全版)への依存は要求しない(制約自体は**確定**、§21.5)。実装技術(§20.6)と合わせて選ぶ |
+| Terminal core (モバイル) | iOS／iPadOSはSwiftTerm。AndroidはAndroid着手時に再評価する(§20.6)。libghostty(完全版)への依存は要求しない(制約自体は**確定**、§21.5) |
 | Terminal abstraction | `TerminalRenderer` protocolでrenderer依存を隔離し、platformごとに実装を差し替える |
 | Multiplexer | tmux CLIを外部processとして操作 |
 | Git | git CLIを外部processとして操作 |
-| Remote terminal | Tailscale上のSSHまたはMosh(§20.3)。作業PCのClientは`ssh`／`mosh`の外部CLIをlibghosttyのsurfaceで起動する(§20.5)。モバイルはアプリ内のSSHで、Moshの扱いは未確定(§20.6) |
-| モバイルクライアントの実装技術 | 未確定。1つのコードベース(Flutter等)が第一候補、OSごと(SwiftUI／Kotlin)が次点(§20.6)。SSHの実装はこれに従う(Swiftで作るならSwiftNIO SSH) |
+| Remote terminal | モバイルはTailscale上のアプリ内のSSH(**確定**、§20.6)。作業PCのClientは`ssh`／`mosh`の外部CLIをlibghosttyのsurfaceで起動する(§20.5) |
+| モバイルクライアントの実装技術 | iOS／iPadOSとAndroidをネイティブで別々に作る(**確定**、§20.6)。部品は§20.6の表のとおり |
 | Local DB | SQLite + GRDB.swift |
 | Large binary storage | filesystem |
 | Search | ripgrep CLI |
@@ -2221,11 +2224,11 @@ sessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindow�
                ┌────────────┴─────────────────┐
                ▼                              ▼
 ┌───────────────────────────┐  ┌───────────────────────────┐
-│ Work PC (MacBook Pro)     │  │ iPhone / iPad / Android   │
-│ same macOS app (Client)   │  │ mobile client (tech TBD)  │
-│ ├─ libghostty             │  │ ├─ renderer (TBD)         │
+│ Work PC (MacBook Pro)     │  │ iPad / iPhone / Android   │
+│ same macOS app (Client)   │  │ native app per OS         │
+│ ├─ libghostty             │  │ ├─ renderer (per OS)      │
 │ │  └─ ssh / mosh attach   │  │ ├─ SSH                    │
-│ ├─ session list / Diff    │  │ ├─ session list / Diff    │
+│ ├─ session list / Diff    │  │ ├─ list / Code / Diff     │
 │ └─ device-local UI state  │  │ └─ device-local UI state  │
 └───────────────────────────┘  └───────────────────────────┘
 ```
@@ -2260,7 +2263,8 @@ Client
 - `worktree open --directory <worktree>` — 確定(2026-11-08、§3.1)。Host上のAgent専用で、Clientの操作には含めない。その場でworktreeを再スキャンし、登録済みProjectのworktreeだけを受け付ける(Project Rootは受け付けない)。InactiveならActiveにし、表示を切り替えずにtmux sessionを作って、session名とProjectのAgentの起動コマンドを返す。既にセッションがあるときは作らずにその旨を返す。
 - `hostctl`の接続先のsocketは`--socket <path>`、無ければ環境変数`AWT_HOSTCTL_SOCKET`で渡す。どちらも無ければexit 2で終わる。Hostのアプリはtmuxのglobal環境へ`AWT_HOSTCTL_SOCKET`と、バンドル内の実行ファイルがあれば`AWT_HOSTCTL`(`hostctl`のパス)を設定する。
 - 提供する操作の候補: Project・セッション・Overviewの行の一覧と変化の購読(stream)、セッションの作成、Diff snapshotの
-  作成と取得、コメントの追加と送信の依頼。
+  作成と取得、コメントの追加と送信の依頼、ファイル一覧・本文・検索(モバイルのCode。§20.4)。
+- 今の接続先はHostのアプリがtmuxのglobal環境へ渡しているので、SSHのコマンド実行から呼ぶときの接続先の解決は別に決める(Gate 4)。Diff snapshotとコメントは今は`DiffViewerModel`のメモリにあり、Host Coreへ移す必要がある(§20.4)。
 - 1つのSSH接続の中で端末と構造化データのchannelを分けるか、別々の接続にするかはClientの実装に任せる。
 - protocol、versioning、権限(登録済みProjectの外へ出ない境界)、再接続とcursorは未確定であり、Gate 4で検証する。
 
@@ -2285,26 +2289,16 @@ Client
 ```text
 TerminalRenderer
 ├─ GhosttyRenderer            # macOS、確定(Gate 1通過)
-└─ MobileRenderer             # モバイルクライアント、未確定
+└─ iOS／iPadOSのrenderer      # 現在の推奨はSwiftTerm(§20.6)
 ```
 
-モバイルクライアントをSwift以外で作る場合(§20.6)、`TerminalRenderer` protocolはmacOSのアプリの中の境界に留まり、モバイル側はその技術の中で同じ隔離を行う。
+AndroidはSwiftで作らない(§20.6)ので、`TerminalRenderer` protocolはSwiftの側の境界に留まり、Android側はその技術の中で同じ隔離を行う。
 
 **確定(2026-10-08)**: libghosttyは`App/ghostty-ref`に記したtag(現在`v1.3.1`)へ固定し、upstreamへ自動では
 追随しない。事前ビルドした`GhosttyKit.xcframework`をGitHub Release assetとして配布し、`App/ghostty-kit.sha256`で
 照合してから使う(`scripts/fetch-ghostty.sh`)。版数を上げるときは、ref更新担当者が`App/ghostty-ref`を書き換え、
 `scripts/build-ghostty.sh` → `scripts/wf-ghostty-publish.sh` → 更新されたsha256を含むPR、の順で進める。
 Gate 1を通過した版数から黙ってずれないこと、CIがxcframeworkを自前ビルドしないことを優先した結果である。
-
-モバイル側rendererの**候補**(列挙のみ。選定は未確定、§25):
-
-| 候補 | 概要 | 補足 |
-|---|---|---|
-| `libghostty-vt` + 自前描画層 | iOSで利用可能なVTパーサの上に描画・入力を自前実装 | 描画・IME・selectionをすべて自作する負荷が大きい |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm)等の既存Swift renderer | permissive licenseの既存端末エミュレータを利用。iOS／iPadOSを別に作る案(§20.6)で使う | SwiftTermは2026-08-31時点でMIT(GitHub license metadataで確認)。採用時は固定versionで再監査する |
-| Flutter向けの既存renderer([xterm.dart](https://github.com/TerminalStudio/xterm.dart)等) | 1つのコードベースの案(§20.6)で使う | ライセンスと日本語IMEの品質は未確認。採用時に固定versionで監査する |
-| Termuxの端末部品(`terminal-view`／`terminal-emulator`) | Androidを別に作る案(§20.6)で使う | ライセンスは未確認(Termuxアプリ本体とは別に確かめる)。採用時に固定versionで監査する |
-| 外部SSHアプリ連携 | 当面は外部の端末アプリへ委譲(§20.8) | 専用アプリ内Terminalの最終形とは別の段階的手段 |
 
 ### 21.6 端末設定ファイルの経路
 
@@ -2337,7 +2331,8 @@ macOS版の端末設定は`${XDG_CONFIG_HOME:-$HOME/.config}/agent-workflow-term
 | libgit2 | v1不採用 | 実Gitとの挙動差と依存増を避ける |
 | 独自Remote Terminal protocol | 不採用 | SSH + tmuxで代替できる |
 | ブラウザで開くWeb端末(WebSocket等で端末を運ぶClient) | 不採用 | 端末をSSH／Mosh以外の独自の経路で運ぶことになり、独自Remote Terminal protocolの不採用(§1.3)と、SSHまたはMoshで接続するという要件(§20.1)に反する |
-| Moshの組み込み | 回避(モバイルは未確定) | copyleftの実装をアプリへ取り込まない。作業PCのClientは外部CLIとして呼ぶ(§20.5)。モバイルでMoshを使う方法は§20.6と§25 |
+| Moshの組み込み | 回避(モバイルはSSHで進める) | copyleftの実装をアプリへ取り込まない。作業PCのClientは外部CLIとして呼ぶ(§20.5)。モバイルは運用してSSHの接続性が悪ければ検討する(§20.6) |
+| 1つのコードベースのモバイルクライアント(Flutter等) | 取り下げ(2026-11-10) | OSごとのネイティブ実装を確定した(§20.6)。端末の品質を優先し、UIを2回作ることは許容する |
 | Tree-sitter | v1不採用 | read-only Code Viewerに対して初期スコープが大きい。言語ごとにC依存を個別に足すことになり、§7.3の「v1でEditor engineを作らない」に対して過剰 |
 | 独立Host Core daemon(launchd常駐) | 不採用 | Host Coreはアプリプロセス内に置く。構造化データ提供はHostのアプリの起動中のみで十分とし(§20.2)、プロセス間通信の複雑さを避ける。`hostctl`はアプリへ問い合わせるだけの窓口で、常駐しない(§21.4) |
 
@@ -2415,15 +2410,15 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 | Component | 2026-08-31時点で確認したlicense | 方針 |
 |---|---|---|
 | [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | macOS版で採用(確定、§21.5)。iOSの完全版は対象外。固定commit／配布物の依存も再監査 |
-| [libghostty-vt](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT(Ghostty本体と同一repository) | モバイルrenderer候補の一つ。VTパーサのみで描画層を含まない |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | モバイルrenderer候補の一つ。採用時は固定versionで再確認 |
+| [libghostty-vt](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT(Ghostty本体と同一repository) | SwiftTermが不成立のときの候補。VTパーサのみで描画層を含まない |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | iOS／iPadOSのrendererの現在の推奨(§20.6)。採用時は固定versionで再確認 |
 | [tmux](https://github.com/tmux/tmux) | ISC | source組込みではなく外部CLIとして利用 |
-| [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | モバイルクライアントをSwiftで作る場合のSSH候補(§20.6) |
+| [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | iOS／iPadOSのSSHの候補(§20.6)。CitadelはMIT(2026-11-10確認) |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | MIT | SQLite access候補 |
 | [ripgrep](https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#how-is-ripgrep-licensed) | MIT または Unlicense | 外部CLI候補。プロジェクトではMIT条件を採用する案 |
 | [highlight.js](https://github.com/highlightjs/highlight.js/blob/main/LICENSE) | BSD-3-Clause | macOSのSyntax highlightingで採用(確定、§21)。11.11.1を`App/Resources/highlight-js/`にLICENSEごと同梱する |
 | [Tree-sitter core](https://github.com/tree-sitter/tree-sitter/blob/master/LICENSE) | MIT | 将来候補。各言語grammarは個別確認 |
-| [Mosh](https://github.com/mobile-shell/mosh) | GPL-3.0系。iOS向け追加文書あり | アプリへ組み込まない。作業PCのClientは外部CLIとして呼ぶ(§20.5)。モバイルでの扱いは未確定(§20.6) |
+| [Mosh](https://github.com/mobile-shell/mosh) | GPL-3.0系。iOS向け追加文書あり | アプリへ組み込まない。作業PCのClientは外部CLIとして呼ぶ(§20.5)。モバイルはSSHで進める(§20.6) |
 
 ### 23.3 branding
 
@@ -2474,22 +2469,22 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 - セッションを多数開いたときのSSH接続数と`ControlMaster`の効果
 - Hostのセッションとの同時attach
 
-**モバイル(§20.6)**: `SSH → tmux attach → 選定したrenderer描画`を、iPhone、iPad、Androidの実機で確認する。
-
-前提: モバイル側rendererはmacOS版と共通である必要がない(**確定**、§21.5)。libghostty(完全版)はiOS対象外のため、Gate 2は実装技術(1つのコードベース／OSごと)とrenderer候補の比較から始める。
+**モバイル(§20.6)**: iPadの実機で`SSH → tmux attach → SwiftTerm`を確認し、iPhone、Androidへ広げる。
 
 確認事項:
 
-- 実装技術とrenderer候補の比較(§21.5の表)
-- 選定rendererのVT互換性、日本語IME、絵文字のgrapheme width、selection
+- 日本語IME(ソフトウェアキーボードと外付けキーボード)
+- VT互換性、絵文字のgrapheme width、selection、スクロール
+- 外付けキーボードのEsc、Ctrl、矢印、⌘の組み合わせ
 - host key verification
 - 機器で生成した鍵による公開鍵認証(§20.6)と、Tailscale SSHを使えるか
 - connection lossと再接続、app background／foregroundの後の自動再attach
-- Wi-Fiとモバイル回線の切り替え(Tailscale上でMoshの代わりが務まるか、§20.6)
-- software keyboard、IME、補助キーバー
+- Wi-Fiとモバイル回線の切り替え(SSHで足りるか。§20.6)
+- software keyboardと補助キーバー
 - スマートフォンの狭い幅でAgent TUIが実用になるか
-- iPad multi-window／external keyboard
-- 同一tmux sessionへのHost＋作業PC＋モバイルの同時attachと、`smallest`／`ignore-size`の比較(§20.7。tmux 3.4と最新版の両方で)
+- iPad multi-window
+- 同一tmux sessionへのHost＋モバイルの同時attachと`smallest`の見え方(§20.7。tmux 3.4と最新版の両方で)
+- 無料のPersonal Teamの署名の期限と入れ直しの手間(§20.6)
 
 ### Gate 3: Agent Adapter
 
@@ -2538,7 +2533,7 @@ SSHで呼んだ`hostctl`(§21.4)から、Project一覧・セッション・Overv
 
 ### PoC後の判断
 
-Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価する必要はない(§21.5で確定)。Gate 2のモバイルが不成立でも、作業PCのClientを先行し、モバイルは外部の端末アプリからのSSH／Mosh接続で段階提供できる。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
+Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価する必要はない(§21.5で確定)。Gate 2のモバイルが不成立なら、端末部品を次の候補(`libghostty-vt`と自前の描画など)へ替えて測り直す。その間も外部の端末アプリからのSSH／Mosh接続は使える。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
 
 ## 25. Terminal本体の未確定事項一覧
 
@@ -2580,11 +2575,8 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 
 ### リモート(Client)
 
-- モバイルクライアントの実装技術(1つのコードベース／OSごと)とTerminal rendererの選定(§20.6、§21.5)
-- モバイルでMoshを使う方法(外部の端末アプリへ委ねる／ライセンス方針の例外を認める)(§20.6)
-- 複数のClientが同時にattachしたときの画面サイズ(`smallest`のまま／モバイルを`ignore-size`でattach)(§20.7)
 - `hostctl`のprotocol、versioning、権限、再接続(§21.4)
-- Clientで提供する機能の範囲と時期 — Code Viewer、File Browser、Evidence、Ask Agent、`.html`／`.md`をOSの既定アプリで開く(作業PC。§7.3)、§3.1の通常のセッションを閉じる操作、Close、Active／Inactiveの切り替え、Projectの登録と解除(§20.3、§20.4)
+- Clientで提供する機能の範囲と時期 — 作業PCのCode ViewerとFile Browser、Evidence、Ask Agent、`.html`／`.md`をOSの既定アプリで開く(作業PC。§7.3)、§3.1の通常のセッションを閉じる操作、Close、Active／Inactiveの切り替え、Projectの登録と解除(§20.3、§20.4)
 - 1つのmacOSアプリのプロセスがHostとClientを兼ねるか(作業PCが自分のProjectのHostにもなるか)(§20.5)
 - モバイルへのPush通知の経路(§11.2。2026-11-08にCloudKitの確定を取り消した)
 - Tailscale SSHを鍵の代わりに使えるか(§20.6)
@@ -2896,7 +2888,7 @@ PR_READY
 - [x] 画面の変化の履歴はAgentのプロセスごとに持つ。paneが移っても同じプロセスなら引き継ぎ、プロセスが変われば最初の採取を`Unknown`とする
 - [x] 状態観測は種別不明でも大分類だけを伝えられる(AgentStateの7状態語彙は変えない)
 - [x] `Unknown`の理由は列挙型で持ち、表示専用の文字列と分ける
-- [x] HostはメインPC(Mac Studio)のこのアプリ、Clientは作業PC(MacBook Pro)とiPhone・iPad・Android。ClientはTailscale上のSSHまたはMoshでHostへ接続して操作する(2026-11-08)
+- [x] HostはメインPC(Mac Studio)のこのアプリ、Clientは作業PC(MacBook Pro)とiPhone・iPad・Android。ClientはTailscale上でHostへ接続して操作する(2026-11-08)。モバイルの接続はSSH(2026-11-10)
 - [x] ClientはtmuxのsessionだけでなくProjectとセッションまで再現し、セッション一覧の表示・開いているセッションのDiffの確認・Diffへのコメントができる(2026-11-08)
 - [x] 同一tmux sessionへ複数deviceからattach、入力排他なし
 - [x] 複数device同時attach時の`window-size`は`smallest`、自分の作ったwindowごとに設定(`-g`は使わない)
@@ -2986,13 +2978,19 @@ PR_READY
 - [x] 復号できないtmux session名の行はその行だけ飛ばして警告する(2026-11-09、§3.5)
 - [x] Claude Codeの中断の後と履歴へ書くコマンドの後は、空の入力欄を確認して`Idle`とする。実行中とバックグラウンドの実行中は`Idle`としない(2026-11-09、§12.6)
 - [x] 改行だけが残ったClaude Codeの入力欄は空欄とみなさない(2026-11-09、§12.6)
-- [x] 導入順序は hostctlと作業PCのClient → モバイルクライアント → モバイルへのPush通知(2026-11-09、§20.8)
+- [x] 導入順序は iPad → iPhone → Android → モバイルへのPush通知。作業PCのClientは後回し(2026-11-10、§20.8)
+- [x] モバイルの主目的はPCと同等のターミナル操作で、CodeとDiffを見られることも機能に含める(2026-11-10、§20.4、§20.6)
+- [x] iOS／iPadOSとAndroidはネイティブで別々に実装する(2026-11-10、§20.6)
+- [x] モバイルの接続はTailscale上のSSH(Androidを含む)。Moshは運用してSSHの接続性が悪ければ検討する(2026-11-10、§20.6)
+- [x] 当面はApple Developer Programに加入せず、無料のPersonal Teamで署名する(2026-11-10、§20.6)
 - [x] macOSのSyntax highlightingはHighlighterSwiftをやめ、同梱のhighlight.jsをJavaScriptCoreで直接呼ぶ(2026-11-09、§21、Issue #751)
 
 # 付録B. 現在の推奨構成チェックリスト
 
 - [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
-- [ ] モバイルクライアントを1つのコードベースで作り、Terminal rendererを選定する — 候補比較とGate 2 PoC待ち(§20.6、§25)
+- [ ] iOS／iPadOSはSwiftUI + SwiftTerm + Citadel、AndroidはKotlin + termlib + cbsshで作る — Gate 2 PoC待ち(§20.6)
+- [ ] モバイルのCodeとDiffは`hostctl`のJSONを各OSのネイティブ画面で表示する(§20.6)
+- [ ] `window-size smallest`を維持し、モバイルは裏へ回ったらdetachする — Gate 2待ち(§20.7)
 - [ ] tmux CLI Adapterを正式採用 — version検証待ち
 - [ ] git CLI Adapterを正式採用 — output parsing設計待ち
 - [ ] SQLite + GRDBを正式採用 — schema設計待ち
@@ -3001,7 +2999,7 @@ PR_READY
 - [ ] 端末と構造化データを別の経路にし、構造化データは常にSSHで`hostctl`から取る(§20.3)
 - [ ] Project一覧・セッション・Overview・Diff snapshot・コメントをHostが持ち、Clientは`hostctl`で読み書きする。送信の可否はHostが判定する(§20.3、§20.4)
 - [ ] 作業PCのClientは同じmacOSアプリで、libghosttyのsurfaceから`ssh`／`mosh`の外部CLIでattachする(§20.5)
-- [ ] 初版のClientの操作範囲は一覧・attach・新規セッション・Diff・コメントとし、Close・Active／Inactive・Projectの登録と解除はHostだけで行う(§20.3)
+- [ ] 初版のClientの操作範囲は一覧・attach・新規セッション・Code(モバイル)・Diff・コメントとし、Close・Active／Inactive・Projectの登録と解除はHostだけで行う(§20.3)
 - [ ] 接続先は各機器で入力し、同期しない(§20.6)
 - [ ] 作業PCのClientの`+ New Task`もモバイルと同じ扱いにし、sessionは`hostctl`を通してHostに作らせる(§3.1、§20.3)
 - [ ] Androidの接続鍵もKeystoreで機器内に生成・保持し、外へ出さない(§20.6)

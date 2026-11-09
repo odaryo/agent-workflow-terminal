@@ -28,6 +28,46 @@ struct HighlightJSMarkupTests {
         ])
   }
 
+  @Test("#756 深さ256の span を解釈できる")
+  func acceptsNestingAtDepthLimit() throws {
+    let html =
+      String(repeating: "<span class=\"hljs-string\">", count: 256)
+      + "x" + String(repeating: "</span>", count: 256)
+    let runs = try #require(HighlightJSMarkup.parse(html))
+    #expect(
+      runs == [
+        HighlightJSRun(text: "x", scopes: Array(repeating: ["hljs-string"], count: 256))
+      ])
+  }
+
+  @Test("#756 深さ257の span は結果全体を nil にする")
+  func rejectsNestingBeyondDepthLimit() {
+    let html =
+      String(repeating: "<span class=\"hljs-string\">", count: 257)
+      + "x" + String(repeating: "</span>", count: 257)
+    #expect(HighlightJSMarkup.parse(html) == nil)
+  }
+
+  @Test("#756 span の総数が257を超えても閉じた後に深さ256へ戻れる")
+  func acceptsRepeatedNestingAtDepthLimit() throws {
+    let html =
+      String(repeating: "<span class=\"outer\">", count: 255)
+      + "<span class=\"inner\">a</span>"
+      + "<span class=\"inner\">b</span>"
+      + "<span class=\"inner\">c</span>"
+      + String(repeating: "</span>", count: 255)
+      + "after"
+    let runs = try #require(HighlightJSMarkup.parse(html))
+    let scopes = Array(repeating: ["outer"], count: 255) + [["inner"]]
+    #expect(
+      runs == [
+        HighlightJSRun(text: "a", scopes: scopes),
+        HighlightJSRun(text: "b", scopes: scopes),
+        HighlightJSRun(text: "c", scopes: scopes),
+        HighlightJSRun(text: "after", scopes: []),
+      ])
+  }
+
   @Test(
     "空の文字列や空の span から run を生成しない",
     arguments: [

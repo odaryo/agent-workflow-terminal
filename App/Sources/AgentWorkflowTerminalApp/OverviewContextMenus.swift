@@ -1,6 +1,19 @@
 import SwiftUI
 import TerminalCore
 
+struct OverviewPaneIDItems: View {
+  let panes: [OverviewPane]
+
+  var body: some View {
+    ForEach(panes, id: \.paneID) { pane in
+      Button(
+        paneIDMenuTitle(paneID: pane.paneID, isMain: pane.isMain, location: pane.detail.location)
+      ) {}
+      .disabled(true)
+    }
+  }
+}
+
 struct OverviewSessionMenu: View {
   @ObservedObject var model: AppModel
   let key: TerminalSessionKey

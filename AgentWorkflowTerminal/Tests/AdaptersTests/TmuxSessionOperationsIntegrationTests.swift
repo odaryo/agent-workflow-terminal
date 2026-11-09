@@ -290,13 +290,24 @@ struct TmuxSessionOperationsIntegrationTests {
     }
   }
 
-  @Test("一覧で復号した $ と backslash を含む正式名は完全一致の存否確認に使える")
+  @Test("一覧で復号した $ と backslash を含む正式名は作成時と同じ session ID を指す")
   func listedHostileSessionNamesRoundTrip() async throws {
     try await withServer("session-list-escape") { runner, _ in
+      let initialIDs = try await lines(runner, ["list-sessions", "-F", "#{session_id}"])
       let requestedNames = ["dol$x", #"user\back"#, #"a\$b"#, #"two\\bs"#, "x$"]
+      var createdIDs: [String] = []
       for name in requestedNames {
-        _ = try await runner.run(arguments: ["new-session", "-d", "-s", name])
+        let result = try await runner.run(
+          arguments: ["new-session", "-d", "-P", "-F", "#{session_id}", "-s", name])
+        try #require(result.exitCode == 0)
+        let ids = result.stdout.split(separator: "\n").map(String.init)
+        try #require(ids.count == 1)
+        createdIDs.append(try #require(ids.first))
       }
+
+      let listedIDs = try await lines(runner, ["list-sessions", "-F", "#{session_id}"])
+      #expect(listedIDs.count == initialIDs.count + createdIDs.count)
+      #expect(Set(listedIDs) == Set(initialIDs + createdIDs))
 
       let names = try await TmuxSessionOperations(runner: runner).list()
       let hostileNames = names.filter { $0 != "awt-operations" }
@@ -306,10 +317,20 @@ struct TmuxSessionOperationsIntegrationTests {
 
       // TmuxSessionName はアプリの安定 ID からしか作れないため、外部 session の正式名は
       // exists と同じ argv で照合する。生成時の入力は tmux 内で加工され得るので使わない。
+      // has-session の成功だけでは別 session への誤復号を検出できない。
+      var resolvedIDs: [String] = []
       for name in hostileNames {
         let result = try await runner.run(arguments: ["has-session", "-t", "=\(name)"])
         #expect(result.exitCode == 0)
+        let display = try await runner.run(
+          arguments: ["display-message", "-p", "-t", "=\(name):", "#{session_id}"])
+        try #require(display.exitCode == 0)
+        let ids = display.stdout.split(separator: "\n").map(String.init)
+        try #require(ids.count == 1)
+        resolvedIDs.append(try #require(ids.first))
       }
+      #expect(resolvedIDs.count == createdIDs.count)
+      #expect(Set(resolvedIDs) == Set(createdIDs))
     }
   }
 

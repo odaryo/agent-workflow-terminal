@@ -100,17 +100,15 @@ extension ProjectsModel {
       guard !Task.isCancelled else {
         return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
       }
-      guard registry.project(project.commonDirectory) != nil,
+      guard let registeredProject = registry.project(project.commonDirectory),
         case .available(let model) = slots[project.commonDirectory]
       else {
         return .failure(code: .notRegistered, message: "利用可能な登録済み Project が見つかりません")
       }
-      let response = await model.openWorktreeForAgent(directory: directory)
-      if case .opened(var opened) = response {
-        opened.agentCommand = registry.project(project.commonDirectory)?.agentCommand
-        return .opened(opened)
-      }
-      return response
+      return await openWorktreeWithValidatedAgentCommand(
+        agentCommand: registeredProject.agentCommand,
+        open: { await model.openWorktreeForAgent(directory: directory) },
+        isRegistered: { self.registry.project(project.commonDirectory) != nil })
     }
   }
 
@@ -134,6 +132,27 @@ extension ProjectsModel {
       }
     }
   }
+}
+
+@MainActor
+func openWorktreeWithValidatedAgentCommand(
+  agentCommand: String?, open: @MainActor () async -> HostControlResponse,
+  isRegistered: @MainActor () -> Bool
+) async -> HostControlResponse {
+  guard case .success(let command) = ProjectAgentCommand.normalized(agentCommand ?? "") else {
+    return .failure(
+      code: .invalidRequest,
+      message: "保存された Agent 起動コマンドが不正です。Project の設定で直してください")
+  }
+  let response = await open()
+  guard isRegistered() else {
+    return .failure(code: .notRegistered, message: "処理中に Project の登録が解除されました")
+  }
+  if case .opened(var opened) = response {
+    opened.agentCommand = command
+    return .opened(opened)
+  }
+  return response
 }
 
 @MainActor

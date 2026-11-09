@@ -9,7 +9,7 @@ struct ProjectsWindowContent: View {
     OverviewSidebarPreferences.defaultIsOpen
   @AppStorage(OverviewSidebarPreferences.widthKey) private var sidebarWidth =
     OverviewSidebarPreferences.defaultWidth
-  @State private var pendingAgentCommand: RegisteredProject?
+  @State private var pendingAgentCommand: AgentCommandSheetItem?
 
   private var sidebarOccupiedWidth: CGFloat {
     OverviewSidebarPreferences.occupiedWidth(isVisible: isSidebarOpen, width: sidebarWidth)
@@ -52,14 +52,8 @@ struct ProjectsWindowContent: View {
     } message: { review in
       Text(review.message)
     }
-    .sheet(
-      isPresented: Binding(
-        get: { pendingAgentCommand != nil },
-        set: { if !$0 { pendingAgentCommand = nil } })
-    ) {
-      if let project = pendingAgentCommand {
-        ProjectAgentCommandSheet(project: project, projects: projects)
-      }
+    .sheet(item: $pendingAgentCommand) { item in
+      ProjectAgentCommandSheet(project: item.project, projects: projects)
     }
     .task { projects.start() }
     .onAppear { projects.navigator.openWindow = openWindow }
@@ -78,8 +72,10 @@ struct ProjectsWindowContent: View {
 
   private var sidebar: some View {
     HStack(spacing: 0) {
-      OverviewView(projects: projects, navigator: projects.navigator) { pendingAgentCommand = $0 }
-        .frame(width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)))
+      OverviewView(projects: projects, navigator: projects.navigator) {
+        pendingAgentCommand = AgentCommandSheetItem(project: $0)
+      }
+      .frame(width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)))
       DrawerResizeHandle(
         width: CGFloat(OverviewSidebarPreferences.clamped(sidebarWidth)),
         growsRightward: true,
@@ -116,6 +112,11 @@ struct ProjectsWindowContent: View {
         description: Text("登録済みの Project にはどれも到達できません。設定画面の「Project」から理由を確認してください。"))
     }
   }
+}
+
+private struct AgentCommandSheetItem: Identifiable {
+  let project: RegisteredProject
+  var id: WorktreeIdentity { project.commonDirectory }
 }
 
 private struct OverviewToolbarBand: ViewModifier {

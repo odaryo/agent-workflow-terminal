@@ -1399,7 +1399,7 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 
 ### 12.6 状態遷移の未確定事項
 
-- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーはClaude Code 2.1.319の`⏺ API Error:`の形で出るものだけ検出でき、`⎿`だけの失敗と他のAgentは検出できないことを含む)
+- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーはClaude Code 2.1.319の実測した接頭辞と完了行の組み合わせ(§12.8)で検出し、それ以外の文言と他のAgentは検出できないことを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
 
@@ -1601,6 +1601,18 @@ Codex 0.166.0では、前後の空白を除いた行で`Update available ·`で�
 始まらない行も、`Worked for `で始まる行も無いときだけPermissionとする。trustと同じ位置の条件で、
 応答本文に引用された更新の確認を除外する。trustの判定の次、titleより先に見る。
 Gate 3の記録にはこの画面は含まれない(`Spikes/gate3/README.md` §6.11)。
+
+Claude Code 2.1.319のターン中のAPIエラーは、最後の送信済みプロンプトより下で、次のどちらかを満たし、
+該当行より下に完了行(`·\s*done\s+\d`)があるときに`Error`とする(Issue #632、#725)。
+
+- 最後の`⏺ `で始まる行が、`⏺ API Error:`、`⏺ Please run /login · API Error:`、
+  `⏺ There's an issue with the selected model (`のいずれかで始まる。
+- `^  ⎿[ \x{00A0}]+(Not logged in · |Request timed out \(|Credit balance too low · |Prompt is too long · )`
+  に一致する最後の行があり、その下に`⏺ `で始まる行が無い。列2に固定して深いインデントの引用を除く。
+
+Agentの本文が同じ文言で始まる画面は本物と区別できない(SGRも同じ)。Gate 3の記録には
+Issue #725のこれらの画面は無いため、§12.5に従った再採点は後退の確認だけであり、検出の確認は
+実画面のfixtureで行う(`Spikes/gate3/README.md` §6.12)。
 
 ## 13. 全Agent pane Overview
 

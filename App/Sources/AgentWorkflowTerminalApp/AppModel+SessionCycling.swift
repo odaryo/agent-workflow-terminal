@@ -2,12 +2,35 @@ import TerminalCore
 
 extension AppModel {
   var sessionCycleOrder: [TerminalSessionKey] {
-    let selectableWorktrees = sessionWorktrees.filter {
-      $0.activation == .active && $0.detected.isReachable
+    sessionKeys.filter { canOpenSession(in: $0.identity) }
+  }
+
+  func reconcileSessionSelection() {
+    let sessions = Set(sessionKeys)
+    openedSessions.formIntersection(sessions)
+    guard let displayedSession else {
+      selectFallbackSession()
+      return
     }
-    return sessionKeys.filter { key in
-      key.identity == projectRoot?.identity
-        || selectableWorktrees.contains { $0.identity == key.identity }
+    let isSelectable =
+      if displayedSession.identity == projectRoot?.identity {
+        projectRoot?.isReachable == true
+      } else {
+        inventory.selectableTaskWorktrees.contains { $0.identity == displayedSession.identity }
+      }
+    guard !sessions.contains(displayedSession) || !isSelectable else { return }
+    selectFallbackSession()
+  }
+
+  func selectFallbackSession() {
+    // 到達を確認できない Project Root の選択は何も変更しないため、先に判定しないと
+    // 到達可能な Task へのフォールバックまで進まない。
+    if projectRoot?.isReachable == true {
+      selectProjectRoot()
+    } else if let next = inventory.selectableTaskWorktrees.first {
+      select(next)
+    } else {
+      displayedSession = nil
     }
   }
 }

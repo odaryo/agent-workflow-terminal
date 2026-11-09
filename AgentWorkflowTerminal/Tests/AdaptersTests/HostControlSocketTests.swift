@@ -1,8 +1,9 @@
-import Adapters
 import Darwin
 import Foundation
 import TerminalCore
 import Testing
+
+@testable import Adapters
 
 @Suite("hostctl のローカルsocket §21.4")
 struct HostControlSocketTests {
@@ -351,6 +352,76 @@ struct HostControlSocketTests {
 }
 
 extension HostControlSocketTests {
+  @Test("キャンセルに応じないhandlerも期限でfailureを返して接続を閉じる")
+  func expiresUncooperativeHandler() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let gate = AsyncStream<Void>.makeStream()
+    let finished = AsyncStream<Bool>.makeStream()
+    defer { gate.continuation.finish() }
+    let server = HostControlSocketServer(path: path)
+    try await withServer(
+      server, handlerTimeout: .milliseconds(20),
+      handler: { _ in
+        await withCheckedContinuation { continuation in
+          Task.detached {
+            for await _ in gate.stream {}
+            continuation.resume()
+          }
+        }
+        finished.continuation.yield(Task.isCancelled)
+        finished.continuation.finish()
+        return Self.response
+      },
+      body: {
+        let bytes = Array(
+          (HostControlProtocol.encode(.openWorktree(directory: "/path")) + "\n").utf8)
+        let line = try await Self.offPool {
+          try Self.sendRequest(bytes, to: path, expectClosed: true)
+        }
+        #expect(
+          try HostControlProtocol.decodeResponse(line).get()
+            == .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした"))
+        gate.continuation.finish()
+        var iterator = finished.stream.makeAsyncIterator()
+        #expect(await iterator.next() == true)
+      })
+  }
+
+  @Test("lockの実ファイルの差し替えと削除をinodeで判別する")
+  func detectsReplacedLock() throws {
+    let path = uniquePath()
+    defer { try? FileManager.default.removeItem(atPath: path + ".lock") }
+    let descriptor = try SocketIO.lock(path)
+    defer { Darwin.close(descriptor) }
+    #expect(try SocketIO.isCurrentLock(descriptor, path: path))
+    try FileManager.default.removeItem(atPath: path + ".lock")
+    #expect(try !SocketIO.isCurrentLock(descriptor, path: path))
+    let replacement = try SocketIO.lock(path)
+    defer { Darwin.close(replacement) }
+    #expect(try !SocketIO.isCurrentLock(descriptor, path: path))
+    #expect(try SocketIO.isCurrentLock(replacement, path: path))
+  }
+
+  @Test("basenameが8文字で最終パスが103バイトのsocketをbindできる")
+  func bindsAtPathLimit() async throws {
+    let directory = "/private/tmp/" + UUID().uuidString + String(repeating: "x", count: 45)
+    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: false)
+    defer { try? FileManager.default.removeItem(atPath: directory) }
+    let path = directory + "/12345678"
+    try #require(path.utf8.count == 103)
+    try await withServer(HostControlSocketServer(path: path)) {
+      let response = try await HostControlSocketClient.send(
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+      #expect(response == Self.response)
+    }
+  }
+}
+
+extension HostControlSocketTests {
   private static let response = HostControlResponse.opened(
     HostControlOpenedWorktree(
       session: "awt-x-12345678", directory: "/path", created: true, agentCommand: nil))
@@ -361,13 +432,14 @@ extension HostControlSocketTests {
 
   private func withServer(
     _ server: HostControlSocketServer,
+    handlerTimeout: Duration = .seconds(35),
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse = { _ in
       Self.response
     },
     body: () async throws -> Void
   ) async throws {
     do {
-      try await server.start(handler: handler)
+      try await server.start(handlerTimeout: handlerTimeout, handler: handler)
       try await body()
       await server.stop()
     } catch {
@@ -408,7 +480,9 @@ extension HostControlSocketTests {
     }
   }
 
-  private static func sendRequest(_ bytes: [UInt8], to path: String) throws -> String {
+  private static func sendRequest(
+    _ bytes: [UInt8], to path: String, expectClosed: Bool = false
+  ) throws -> String {
     let descriptor = try makeSocket()
     defer { Darwin.close(descriptor) }
     var timeout = timeval(tv_sec: 2, tv_usec: 0)
@@ -424,7 +498,10 @@ extension HostControlSocketTests {
     while true {
       let received = Darwin.recv(descriptor, &byte, 1, 0)
       try #require(received == 1, "recv=\(received) errno=\(errno) bytes=\(response.count)")
-      if byte == 10 { return String(decoding: response, as: UTF8.self) }
+      if byte == 10 {
+        if expectClosed { #expect(Darwin.recv(descriptor, &byte, 1, 0) == 0) }
+        return String(decoding: response, as: UTF8.self)
+      }
       response.append(byte)
     }
   }
@@ -470,4 +547,6 @@ extension HostControlSocketTests {
     let receiveError = errno
     #expect(received == 0 || (received == -1 && receiveError == ECONNRESET))
   }
+  // 回帰テストの追加先が指定されているため、別ファイルへの分割はしない。
+  // swiftlint:disable:next file_length
 }

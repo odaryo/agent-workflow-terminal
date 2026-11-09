@@ -22,7 +22,8 @@ func writeLine(_ line: String, to descriptor: Int32) -> Bool {
 }
 
 func fail(_ message: String, code: Int32) -> Never {
-  exit(writeLine(message, to: STDERR_FILENO) ? code : 74)
+  _ = writeLine(message, to: STDERR_FILENO)
+  exit(code)
 }
 
 func absoluteDirectory(_ directory: String) -> String {

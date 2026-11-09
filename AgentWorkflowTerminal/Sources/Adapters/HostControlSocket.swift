@@ -32,6 +32,7 @@ public actor HostControlSocketServer {
   }
 
   public func start(
+    handlerTimeout: Duration = .seconds(35),
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) throws(HostControlSocketError) {
     guard stopDescriptor == nil else { throw .addressInUse(path) }
@@ -65,7 +66,7 @@ public actor HostControlSocketServer {
         guard !Task.isCancelled, let self else {
           continue
         }
-        await self.accept(descriptor, handler: handler)
+        await self.accept(descriptor, handlerTimeout: handlerTimeout, handler: handler)
       }
     }
   }
@@ -84,7 +85,7 @@ public actor HostControlSocketServer {
   }
 
   private func accept(
-    _ descriptor: SocketDescriptor,
+    _ descriptor: SocketDescriptor, handlerTimeout: Duration,
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) {
     guard stopDescriptor != nil, !Task.isCancelled else {
@@ -93,7 +94,7 @@ public actor HostControlSocketServer {
     let identifier = UUID()
     let connection = SocketConnection(descriptor: descriptor)
     connections[identifier] = Task { [weak self] in
-      await connection.serve(handler: handler)
+      await connection.serve(handlerTimeout: handlerTimeout, handler: handler)
       await self?.finished(identifier)
     }
   }
@@ -123,8 +124,8 @@ public enum HostControlSocketClient {
   }
 }
 
-private enum SocketIO {
-  static func acceptConnections(
+enum SocketIO {
+  fileprivate static func acceptConnections(
     listener: Int32, stopRead: Int32, continuation: AsyncStream<SocketDescriptor>.Continuation
   ) {
     defer {
@@ -169,26 +170,40 @@ private enum SocketIO {
   static func lock(_ path: String) throws(HostControlSocketError) -> Int32 {
     // macOSでは稼働中でもbacklogが満杯ならECONNREFUSEDになるため、接続で生存判定しない。
     let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK | O_NOFOLLOW
-    var descriptor = Darwin.open(path + ".lock", flags, 0o600)
-    // 別スレッドが子プロセスを起動している間は、closeしても子が参照を持つのでlockが残る。
-    // 実測では子の起動と並行すると約0.3%で起き、1msで解消した。1回の失敗では稼働中と判定しない。
-    var retries = 0
-    while descriptor < 0, errno == EWOULDBLOCK, retries < 10 {
-      usleep(25_000)
-      retries += 1
-      descriptor = Darwin.open(path + ".lock", flags, 0o600)
+    // 別スレッドの子起動でlockが一時的に残る場合と、open中の差し替えで再試行の上限を共用する。
+    for attempt in 0...10 {
+      let descriptor = Darwin.open(path + ".lock", flags, 0o600)
+      if descriptor >= 0 {
+        do throws(HostControlSocketError) {
+          if try isCurrentLock(descriptor, path: path) {
+            guard Darwin.fchmod(descriptor, 0o600) == 0 else { throw error() }
+            return descriptor
+          }
+        } catch {
+          Darwin.close(descriptor)
+          throw error
+        }
+        Darwin.close(descriptor)
+      } else if errno != EWOULDBLOCK {
+        throw error()
+      }
+      if attempt < 10 { usleep(25_000) }
     }
-    guard descriptor >= 0 else {
-      let code = errno
-      if code == EWOULDBLOCK { throw .addressInUse(path) }
-      throw error(code)
+    throw .addressInUse(path)
+  }
+
+  static func isCurrentLock(
+    _ descriptor: Int32, path: String
+  ) throws(HostControlSocketError) -> Bool {
+    // 外部からunlinkされると、生きた保持者との排他はinode比較でも守れない。
+    var opened = stat()
+    guard Darwin.fstat(descriptor, &opened) == 0 else { throw error() }
+    var current = stat()
+    guard Darwin.lstat(path + ".lock", &current) == 0 else {
+      if errno == ENOENT { return false }
+      throw error()
     }
-    guard Darwin.fchmod(descriptor, 0o600) == 0 else {
-      let failure = error()
-      Darwin.close(descriptor)
-      throw failure
-    }
-    return descriptor
+    return opened.st_ino == current.st_ino && opened.st_dev == current.st_dev
   }
 
   static func error(_ code: Int32 = errno) -> HostControlSocketError {
@@ -248,6 +263,8 @@ private enum SocketIO {
   }
 
   static func configure(_ descriptor: Int32) throws(HostControlSocketError) {
+    // macOSにはaccept4がなく、acceptからfcntlまでの継承の窓はユーザー空間では閉じられない。
+    // Foundation.Processの子にはFD_CLOEXECなし (flags 0) でもNOT_INHERITEDだった (2026-11-09)。libghosttyの子は未計測。
     var noSignal: Int32 = 1
     guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0,
       fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0,
@@ -272,7 +289,7 @@ private enum SocketIO {
   static func bindPrivately(_ descriptor: Int32, path: String) throws(HostControlSocketError) {
     // bind直後のsocketはumask次第で他ユーザーに開くため、0700の中で0600にしてから公開する。
     let parent = path.lastIndex(of: "/").map { String(path[...$0]) } ?? "./"
-    var template = Array((parent + "awt-hc-XXXXXX").utf8CString)
+    var template = Array((parent + "XXXXXX").utf8CString)
     guard mkdtemp(&template) != nil else { throw error() }
     let directory = String(cString: template)
     defer { Darwin.rmdir(directory) }
@@ -303,6 +320,7 @@ private final class SocketDescriptor: Sendable {
 
 private actor SocketConnection {
   private var descriptor: SocketDescriptor?
+  private var pauseMilliseconds = 2
 
   init(descriptor: SocketDescriptor) {
     self.descriptor = descriptor
@@ -330,7 +348,7 @@ private actor SocketConnection {
   private func connect(
     path: String, address: sockaddr_un, deadline: ContinuousClock.Instant
   ) async throws {
-    let retryDeadline = ContinuousClock.now.advanced(by: .milliseconds(250))
+    let retryDeadline = ContinuousClock.now.advanced(by: .seconds(1))
     while true {
       let descriptor = try checkedDescriptor(deadline)
       let result = SocketIO.withAddress(address) { Darwin.connect(descriptor, $0, $1) }
@@ -356,6 +374,7 @@ private actor SocketConnection {
   }
 
   func serve(
+    handlerTimeout: Duration,
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) async {
     await withTaskCancellationHandler {
@@ -366,7 +385,8 @@ private actor SocketConnection {
         let response: HostControlResponse
         if let line = String(bytes: bytes, encoding: .utf8) {
           switch HostControlProtocol.decodeRequest(line) {
-          case .success(let request): response = await handler(request)
+          case .success(let request):
+            response = try await Self.handle(request, timeout: handlerTimeout, handler: handler)
           case .failure(let error):
             response = .failure(code: .invalidRequest, message: error.message)
           }
@@ -383,6 +403,33 @@ private actor SocketConnection {
     }
   }
 
+  private static func handle(
+    _ request: HostControlRequest, timeout: Duration,
+    handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
+  ) async throws -> HostControlResponse {
+    // TaskGroupはキャンセルに応じないhandlerの終了まで待つため、接続から独立させる。
+    let stream = AsyncStream<HostControlResponse>.makeStream(bufferingPolicy: .bufferingOldest(1))
+    let deadline = ContinuousClock.now.advanced(by: timeout)
+    let handlerTask = Task {
+      stream.continuation.yield(await handler(request))
+      stream.continuation.finish()
+    }
+    let timer = Task {
+      do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
+      stream.continuation.yield(
+        .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした"))
+      stream.continuation.finish()
+    }
+    defer {
+      handlerTask.cancel()
+      timer.cancel()
+      stream.continuation.finish()
+    }
+    var iterator = stream.stream.makeAsyncIterator()
+    guard let response = await iterator.next() else { throw CancellationError() }
+    return response
+  }
+
   private func checkedDescriptor(_ deadline: ContinuousClock.Instant) throws -> Int32 {
     try Task.checkCancellation()
     guard ContinuousClock.now < deadline else { throw HostControlSocketError.timedOut }
@@ -391,8 +438,11 @@ private actor SocketConnection {
   }
 
   private func pause(_ deadline: ContinuousClock.Instant) async throws {
+    let delay = pauseMilliseconds
+    pauseMilliseconds = min(delay * 2, 50)
     try await Task.sleep(
-      until: min(deadline, ContinuousClock.now.advanced(by: .milliseconds(2))), clock: .continuous)
+      until: min(deadline, ContinuousClock.now.advanced(by: .milliseconds(delay))),
+      clock: .continuous)
   }
 
   private func finishConnecting(deadline: ContinuousClock.Instant) async throws -> Int32 {
@@ -422,6 +472,7 @@ private actor SocketConnection {
       let descriptor = try checkedDescriptor(deadline)
       let count = Darwin.recv(descriptor, &buffer, buffer.count, 0)
       if count > 0 {
+        pauseMilliseconds = 2
         let chunk = buffer.prefix(count)
         let line = chunk.prefix { $0 != 10 }
         guard line.count <= limit - bytes.count else {
@@ -448,6 +499,7 @@ private actor SocketConnection {
         Darwin.send(descriptor, buffer.baseAddress?.advanced(by: offset), bytes.count - offset, 0)
       }
       if count > 0 {
+        pauseMilliseconds = 2
         offset += count
       } else if count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
         try await pause(deadline)
@@ -456,4 +508,6 @@ private actor SocketConnection {
       }
     }
   }
+  // 変更対象が本ファイルに限定されているため、socket処理を別ファイルへ分割しない。
+  // swiftlint:disable:next file_length
 }

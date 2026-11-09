@@ -99,16 +99,16 @@ struct PaneObservationStoreTests {
           activation: .active)
       ])
     var iterator = feeds.stream.makeAsyncIterator()
-    store.observe(inventory, tabs: [rootSession, session])
+    store.observe(inventory, sessions: [rootSession, session])
     let firstFeed = try #require(await iterator.next())
     defer { firstFeed.finish() }
     firstFeed.yield(.init(panes: [paneState], isComplete: true))
     try await waitUntil { store.observed[session]?.paneStates != nil }
     #expect(store.observed[session]?.paneStates == [paneState])
 
-    store.observe(inventory, tabs: [rootSession])
+    store.observe(inventory, sessions: [rootSession])
     #expect(store.observed[session] == nil)
-    store.observe(inventory, tabs: [rootSession, session])
+    store.observe(inventory, sessions: [rootSession, session])
     let restartedFeed = try #require(await iterator.next())
     defer { restartedFeed.finish() }
     #expect(store.observed[session]?.paneStates == nil)

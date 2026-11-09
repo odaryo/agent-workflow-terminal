@@ -7,7 +7,7 @@ struct CodexAdapterTests {
   func fixtures() throws {
     let adapter = CodexAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "codex-")
-    #expect(fixtures.count == 12)
+    #expect(fixtures.count == 14)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)

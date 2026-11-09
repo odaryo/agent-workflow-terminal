@@ -1590,8 +1590,8 @@ Codex 0.166.0はgitのrepositoryでない
 どちらの画面も含まれず、再採点の数字は変わらない(24本の遷移列が変更前後で一致)。
 
 **Codexの起動時の更新の確認(`Update available`)もPermission信号に含める — 確定(2026-11-09、Issue #639)。** 新しい版が出るたびに全paneが人の入力を待って止まるので、`Needs Attention`として知らせる。
-Codex 0.166.0では、前後の空白を除いた行で`Update available · `で始まる行があり、
-`› 1. Update now`または`1. Update now`で始まる最後の行より下に、`› `で始まり`› <数字>. `で
+Codex 0.166.0では、前後の空白を除いた行で`Update available ·`で始まる行(幅が狭いと`·`の直後で折り返す)があり、
+選択肢の行(`1. Update now`、`2. Skip`、`3. Skip until next`で始まる行。先頭の`› `は問わない。高さが低いとカーソルの周りしか見えない)の最後の行より下に、`› `で始まり`› <数字>. `で
 始まらない行も、`Worked for `で始まる行も無いときだけPermissionとする。trustと同じ位置の条件で、
 応答本文に引用された更新の確認を除外する。trustの判定の次、titleより先に見る。
 Gate 3の記録にはこの画面は含まれない(`Spikes/gate3/README.md` §6.11)。

@@ -26,10 +26,9 @@ public struct CodexAdapter: AgentAdapter {
         return observation(.permission, signals)
       }
       // Issue #639、設計書 §12.8: 更新の選択も人の入力を待つため、title によらず判断待ちにする。
-      if lines.contains(where: { $0.hasPrefix("Update available · ") }),
-        let updateIndex = lines.lastIndex(where: {
-          $0.hasPrefix("› 1. Update now") || $0.hasPrefix("1. Update now")
-        }),
+      // 幅が狭いと見出しが `·` の直後で折り返し、高さが低いと選択肢はカーソルの周りしか見えない。
+      if lines.contains(where: { $0.hasPrefix("Update available ·") }),
+        let updateIndex = lines.lastIndex(where: Self.isUpdateChoice),
         !hasInputOrCompletion(in: lines, below: updateIndex)
       {
         return observation(.permission, signals)
@@ -49,6 +48,12 @@ public struct CodexAdapter: AgentAdapter {
     }
     if screen.contains("Ask Codex to do anything") { return observation(.idle, signals) }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  private static func isUpdateChoice(_ line: String) -> Bool {
+    ["1. Update now", "2. Skip", "3. Skip until next"].contains {
+      line.hasPrefix($0) || line.hasPrefix("› \($0)")
+    }
   }
 
   private func hasInputOrCompletion(in lines: [String], below index: Int) -> Bool {

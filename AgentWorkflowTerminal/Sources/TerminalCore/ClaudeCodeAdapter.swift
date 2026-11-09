@@ -162,6 +162,21 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     {
       return .error
     }
+    // Issue #631: 完了行を出さないターンは Unknown のままだと Diff コメントを送れない。
+    if hasEmptyInputPrompt && hasInterruptedTurnEnded(currentTurnLines) {
+      return .idle
+    }
+    if hasEmptyInputPrompt,
+      let lastSubmittedPromptIndex,
+      lines[lastSubmittedPromptIndex].range(of: #"^❯ +/\S"#, options: .regularExpression) != nil,
+      let firstOutputLine = currentTurnLines.first(where: {
+        !$0.trimmingCharacters(in: .whitespaces).isEmpty
+      }),
+      firstOutputLine.trimmingCharacters(in: .whitespaces).hasPrefix("⎿"),
+      !currentTurnLines.contains(where: { $0.hasPrefix("⏺ ") })
+    {
+      return .idle
+    }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
       && !screen.contains("⏺")
@@ -182,6 +197,18 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return .completed
     }
     return nil
+  }
+
+  private static func hasInterruptedTurnEnded(_ lines: ArraySlice<Substring>) -> Bool {
+    guard
+      let interruptedIndex = lines.lastIndex(where: {
+        $0.range(of: #"^\s*⎿\s+Interrupted · "#, options: .regularExpression) != nil
+      })
+    else { return false }
+    return !lines.suffix(from: interruptedIndex + 1).contains(where: {
+      $0.hasPrefix("⏺ ")
+        || $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+    })
   }
 
   // Issue #653: スクロール中は最後の送信済みプロンプトが前のターンのものに見えるため、

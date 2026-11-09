@@ -52,17 +52,20 @@ done
 # `Test run with 744 tests passed after ...` / `... failed after ... with 18 issues.`、
 # ローカルの Swift 6.3.2 は両方とも `in N suites` 付き)。件数だけを必須にする。
 # パイプの終端が tail なので grep の空振りは終了コードに出ない。値の有無で判定する。
-summary=$(grep -E 'Test run with [0-9]+ tests?( in [0-9]+ suites?)? (passed|failed)' "$log" | tail -1 || true)
+summary=$(grep -a -E 'Test run with [0-9]+ tests?( in [0-9]+ suites?)? (passed|failed)' "$log" | tail -1 || true)
 [[ -n "$summary" ]] || die "実行結果の要約行がログにありません: $log"
 
 ran_tests=$(echo "$summary" | sed -E 's/.*Test run with ([0-9]+) tests?.*/\1/')
 
-skipped=$(grep -c ' skipped\.' "$log" || true)
+# 理由付きの skip は `skipped: "理由"` の形で出る (Swift 6.3.2 の実測、release/6.1 のソースも同じ)。
+# ログに NUL があると BSD grep は `Binary file … matches` を返すので -a で読む。
+skip_pattern=' skipped(\.|: ")'
+skipped=$(grep -a -c -E "$skip_pattern" "$log" || true)
 
 failures=0
 if [[ "$skipped" -ne 0 ]]; then
   info "skip されたテストが $skipped 件あります (統合テストのフラグが渡っていない可能性):"
-  grep ' skipped\.' "$log" >&2 || true
+  grep -a -E "$skip_pattern" "$log" >&2 || true
   failures=1
 fi
 if [[ "$ran_tests" -lt "$min_tests" ]]; then

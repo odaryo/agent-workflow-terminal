@@ -45,6 +45,9 @@ run を採点した場合と一致する (README.md §6.4)。
 | completed-left | 1045 | 1.000 | 1.000 | — |
 | idle | 455 | 0.892 | **0.763** (98 フレームが `working`) | — |
 
+上の表は 2026-09-07 の値である。2026-11-09 の Adapter を `--poll 2.0` で採点すると、recall は
+working 1.000、permission 1.000 (危険率 0.000)、completed 0.978、completed-left 1.000、idle 0.976 だった。
+
 製品の `AgentObservationIntervals.signals` は 2.0 秒側。working の recall が粗い polling で
 **上がる**のは、画面鮮度が「前回の観測から画面が変わったか」であり、間隔が広いほど
 変化を捉えやすいため。**同じ理由で idle の recall は下がる**。設計書 §12.2 は working 側の
@@ -54,8 +57,13 @@ run を採点した場合と一致する (README.md §6.4)。
 
 `evidence/runs/` (recorder が落とした 250ms 周期の生信号) は容量のため
 `.gitignore` されており、**記録した Mac にしか無い**。そのままでは第三者が実測を検証できないため、
-Adapter の分類結果だけを `evidence/replay-observations.tsv` (301行) として追跡している。
+Adapter の分類結果だけを `evidence/replay-observations.tsv` (303行) として追跡している。
 保持時間の表はこの TSV だけで再現できる。
+
+**この TSV は #152 (2026-09) の Adapter の出力であり、今の Adapter には追従させない** (Issue #643)。
+§12.2 の保持時間の数字の根拠なので、作り直すと設計書と合わなくなる。今の Adapter の遷移列は
+`--records <生記録> --dump --tsv <出力先>` で別のファイルへ書き出す (`--dump` は `--tsv` が無いと
+失敗し、追跡している TSV を上書きしない)。2026-11-09 の main では 256 行だった。
 
 TSV は状態が変わったフレームだけを持ち、再生時に 250ms 格子へ展開し直す。
 recorder の実際の間隔には揺らぎがあるため、**個々の時刻は最大 1 フレーム (250ms) ずれる**。

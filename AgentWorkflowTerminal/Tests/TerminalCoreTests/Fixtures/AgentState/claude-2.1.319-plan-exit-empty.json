@@ -1,0 +1,22 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "計画ファイルが無いときの plan 承認の画面。`Exit plan mode?` と選択中の番号付き選択肢 (Issue #632)。 本物の claude 2.1.319 を、一時的な HOME と CLAUDE_CONFIG_DIR、ローカルの偽 API (retry は閉じたポート) につないで採取した。ログインしていないので 2 行目は API Usage Billing。",
+  "source": "claude-2.1.319-plan-exit-empty (frames-plan-empty/60、1 秒間隔の採取列)",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude",
+    "caffeinate"
+  ],
+  "captureCommand": "tmux -L awt632c7f capture-pane -p -t =<session>: / capture-pane -e -p -t =<session>: (160x40)",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /…/c632/work-plan\n\n\n❯ Make a short plan.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n   Exit plan mode?\n\n    Claude wants to exit plan mode\n\n    ❯ 1. Yes, and switch to default (ask each time) for this session\n      2. No\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/…/c632/work-plan\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mMake a short plan.\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[38;5;153m\u001b[49m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n\u001b[39m  \u001b[38;5;73m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[39m\n   \u001b[1m\u001b[38;5;153mExit plan mode?\u001b[0m\n\n    Claude wants to exit plan mode\n\n    \u001b[38;5;153m❯\u001b[39m \u001b[38;5;246m1. \u001b[38;5;153mYes, and switch to \u001b[1mdefault (ask each time)\u001b[0m\u001b[38;5;153m for this session\u001b[39m\n      \u001b[38;5;246m2. \u001b[39mNo\n"
+}

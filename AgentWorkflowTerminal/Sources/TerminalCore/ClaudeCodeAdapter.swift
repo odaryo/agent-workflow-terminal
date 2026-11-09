@@ -22,13 +22,8 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     guard let screen = signals.screenText else {
       return unknown(signals, reason: .screenUnavailable)
     }
-    if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend")
-      || Self.hasTrustPrompt(screen)
-    {
-      return observation(.permission, signals)
-    }
-    if screen.contains("Enter to select ·") && screen.contains("Type something.") {
-      return observation(.question, signals)
+    if let state = Self.promptState(screen) {
+      return observation(state, signals)
     }
     let inputBox = Self.inputBoxContent(screen: screen, styled: signals.styledScreenText)
     // プレースホルダ (文脈サジェスト) が出ている入力欄は、利用者が何も打っていないので
@@ -58,6 +53,21 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     return unknown(signals, reason: .adapterUndetermined)
   }
 
+  private static func promptState(_ screen: String) -> AgentState? {
+    if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend")
+      || hasTrustPrompt(screen)
+    {
+      return .permission
+    }
+    if screen.contains("Enter to select ·") && screen.contains("Type something.") {
+      return .question
+    }
+    if hasPlanApprovalPrompt(screen) {
+      return .permission
+    }
+    return nil
+  }
+
   // Issue #252、設計書 §12.8: 2.1.319 で採取した trust 画面は選択肢の移動でも変わるため、
   // 画面変化による Working より優先する。文中の部分一致を避け、採取した行に限定する。
   private static func hasTrustPrompt(_ screen: String) -> Bool {
@@ -66,6 +76,28 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       && (lines.contains("Yes, I trust this folder")
         || lines.contains("❯ Yes, I trust this folder")
         || lines.contains("Claude Code'll be able to read, edit, and execute files here."))
+  }
+
+  // Issue #632: 2.1.319 の plan 承認は選択肢の移動でも画面が変わるため、
+  // 画面変化による Working より優先する。本文の同じ文言だけでは承認待ちとしない。
+  private static func hasPlanApprovalPrompt(_ screen: String) -> Bool {
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
+    let trimmedLines = lines.map { $0.trimmingCharacters(in: .whitespaces) }
+    return lines.indices.contains { index in
+      guard trimmedLines[index].range(of: #"^❯ \d+\. "#, options: .regularExpression) != nil else {
+        return false
+      }
+      let precedingText = trimmedLines[max(0, index - 8)..<index]
+        .filter { !$0.isEmpty }.joined(separator: " ")
+      let followingLines = lines.dropFirst(index + 1)
+      return
+        (precedingText.contains("Would you like to proceed?")
+        || precedingText.contains("Exit plan mode?"))
+        && !followingLines.contains {
+          $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+            || $0.hasPrefix("❯\u{00A0}")
+        }
+    }
   }
 
   private static func currentTurnState(
@@ -85,10 +117,33 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }) {
       return .working
     }
+    // Issue #632: 2.1.319 の retry 待ちもターンが続いており、Idle では入力を送れてしまう。
+    if currentTurnLines.indices.contains(where: { index in
+      currentTurnLines[index].range(
+        of: #"· Retrying in [^·]+ · attempt(?: \d+/\d+)?$"#, options: .regularExpression
+      ) != nil
+        && !currentTurnLines.suffix(from: index + 1).contains(where: {
+          $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+        })
+    }) {
+      return .working
+    }
     guard !hasScrolledTranscript else { return nil }
+    // Issue #632: 2.1.319 では retry が尽きても done が出るため、正常完了と区別する。
+    if let lastResponseIndex = currentTurnLines.lastIndex(where: { $0.hasPrefix("⏺ ") }),
+      currentTurnLines[lastResponseIndex].hasPrefix("⏺ API Error:"),
+      currentTurnLines.suffix(from: lastResponseIndex + 1).contains(where: {
+        $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+      })
+    {
+      return .error
+    }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
       && !screen.contains("⏺")
+      && lastSubmittedPromptIndex.map({
+        lines[$0].range(of: #"^❯ +/"#, options: .regularExpression) != nil
+      }) ?? true
     {
       return .idle
     }

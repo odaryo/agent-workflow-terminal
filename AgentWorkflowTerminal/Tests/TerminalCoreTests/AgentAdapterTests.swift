@@ -62,8 +62,8 @@ struct AgentAdapterTests {
     #expect(resolved.id == CodexAdapter().id)
   }
 
-  @Test("実測 fixture の分類結果は Error を返さない")
-  func fixturesNeverInferError() throws {
+  @Test("Error を許容しない実測 fixture は Error を返さない")
+  func fixturesDisallowingErrorNeverInferError() throws {
     for fixture in try AgentStateFixture.load(prefix: "claude-") {
       let result = ClaudeCodeAdapter().classify(
         signals: fixture.signals, liveness: fixture.liveness
@@ -360,7 +360,7 @@ struct AgentAdapterTests {
     case .absent:
       #expect(fixture.acceptableStates.contains("absent"))
     case .observation(let observation):
-      #expect(observation.state != .error)
+      #expect(observation.state != .error || fixture.acceptableStates.contains("error"))
       #expect(!fixture.acceptableStates.contains("absent"))
     }
   }

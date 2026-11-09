@@ -336,6 +336,90 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 0 になった。長い応答を流している間は spinner 行が出ないので (§6.3-2)、そこは今までどおり画面鮮度で拾う。
 2.1.263 の記録 (§6.4) は記録した Mac に残っていなかったので、再採点していない。
 
+### 6.5.1 API の retry、retry が尽きた後、plan 承認 (Issue #632)
+
+**この記録に3つの画面は写っていない。** よって下の採点で分かるのは、足した信号が既存の区間を壊していないことだけで、3つの画面の検出率は別の採取列で数えた。
+
+採取は本物の Claude Code 2.1.319 (tmux 3.8、macOS 27.0.1、160×40、1 秒間隔) を、一時的な HOME と `CLAUDE_CONFIG_DIR`、ダミーのトークン、ローカルの偽 API につないで行った。retry は閉じたポートへの接続で、plan 承認は偽 API に `Write` と `ExitPlanMode` を返させて出した。fixture は `claude-2.1.319-{api-retrying,api-error-exhausted,plan-approval,plan-exit-empty}.json`。
+
+- ` · Retrying in <待ち時間> · attempt` で終わる行、または続けて `n/m` で終わる行が最後の送信済みプロンプトより下にあり、その行より下に `· done N` が無ければ `working` (待ち時間は `9s` と `1m 0s` を実測。44 列以下では行が割れ、記号と `n/m` が別の行になる)
+- 最後の送信済みプロンプトが `/` で始まらないなら、起動バナーでも `idle` にしない (retry の文言が変わっても `idle` に戻さないため。`/clear`、`/context`、`/model` の後は Agent が待機しているので `idle` のまま)
+- 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
+- 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
+
+**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
+
+採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
+
+**analyze.py の分類器** (`S2-screen-retry-error-plan`、2.1.259 composite r1〜r5): `S2-screen-spinner` との違いは claude の真値 working の 343 フレームが `idle` から `unknown` に変わることだけで (`S2-screen-spinner` が `idle` を返すが送信済みプロンプトがある画面)、他の区間と codex は予測の内訳まで一致した。この分類器は `c_screen` の判定 (`(?i)api error` が先に `error` を返す、など) を継承しているので、製品の Adapter と同じ条件ではない。
+
+**製品の Adapter** (`replay-swift --score --poll 2.0`、製品の観測間隔。`--no-styled` は
+属性を無かったことにして採点する対照):
+
+| 記録 / 入力 | idle | working | permission (危険率) | completed | completed(放置) |
+|---|---|---|---|---|---|
+| 2.1.259 記録 (属性なし) | 0.976 | 0.953 | 1.000 (0.000) | 0.978 | 1.000 |
+| 2.1.263 記録・dim 無視 | 0.978 | 0.955 | 1.000 (0.000) | **0.892** | **0.801** |
+| 2.1.263 記録・dim あり | 0.978 | 0.955 | 1.000 (0.000) | **0.978** | **1.000** |
+
+2.1.259 の行は §13.2 の k=2 行と一致する (この Issue の変更で旧記録の採点は 1 フレームも
+変わっていない。属性を持たない記録では dim ルールが発火しないため)。
+
+2.1.263 で Completed が落ちるのは、ターン完了後の入力欄に文脈サジェストが描かれ
+`^❯[ ]*$` に一致しなくなるためで、取りこぼしは**全て `unknown`** (危険な誤判定は
+増えていない: permission 危険率 0.000 のまま)。dim を空欄として扱うと 2.1.259 と同じ
+水準へ戻る。idle / working / permission は dim の有無で変わらない。
+
+### 6.5 spinner 行と完了行の位置 (Issue #627)
+
+ツールの実行を待つ間、Claude Code の画面で毎フレーム変わるのは spinner の行 (`✻ Propagating… (5s · ↓ 12 tokens)`)
+の1行だけで、§13 の最小変化行数 (claude=2) から外れる。そのとき前のターンの `· done` が画面に残っていると、
+`· done N` の有無だけを見る判定は `completed` を返していた。2.1.319 (tmux 3.8、macOS 27.0.1) の実機で採った
+画面と、この記録の 2.1.259 の画面には、同じ形の spinner 行がある。列 0 から始まり、記号 `·✢✳✶✻✽` の1字・
+半角空白・語・`…` が並び、その後は行末か ` (` である。完了行も `✻` で始まるが `…` を含まない。足した信号は次の2つ。
+
+- spinner 行が最後の送信済みプロンプト (`❯` + U+0020) より下にあれば `working`
+- `· done N` の行が最後の送信済みプロンプトより下にあるときだけ `completed`
+
+**analyze.py の分類器** (`S2-screen-spinner`、2.1.259 composite r1〜r5、working n=443):
+
+| 分類器 | working recall | working の内訳 | 他の状態 |
+|---|---|---|---|
+| `S2-screen` | 0.059 | idle 373 / completed 44 / working 26 | idle・permission・completed・completed(放置) は 1.000、危険率 0.000 |
+| `S2-screen-spinner` (新) | 0.226 | idle 343 / working 100 | 同上 (1 フレームも変わらない) |
+
+**製品の Adapter** (`replay-swift --score`、GUARD 除外後 4,548 フレーム):
+
+| 間隔 | 版 | working | completed | completed(放置) | idle | permission (危険率) |
+|---|---|---|---|---|---|---|
+| 2.0s | 変更前 | 0.953 (completed 21) | 0.978 | 1.000 | 0.976 | 1.000 (0.000) |
+| 2.0s | 変更後 | **1.000** | 0.978 | 1.000 | 0.976 | 1.000 (0.000) |
+| 0.25s | 変更前 | 0.738 (unknown 65 / completed 44 / idle 7) | 1.000 | 1.000 | 1.000 | 1.000 (0.000) |
+| 0.25s | 変更後 | **0.867** (unknown 59) | 1.000 | 1.000 | 1.000 | 1.000 (0.000) |
+
+working 以外の行は、変更の前後で予測の内訳まで一致した。working で `completed` を先に出す誤判定はどちらの間隔でも
+0 になった。長い応答を流している間は spinner 行が出ないので (§6.3-2)、そこは今までどおり画面鮮度で拾う。
+2.1.263 の記録 (§6.4) は記録した Mac に残っていなかったので、再採点していない。
+
+### 6.5.1 API の retry、retry が尽きた後、plan 承認 (Issue #632)
+
+**この記録に3つの画面は写っていない。** よって下の採点で分かるのは、足した信号が既存の区間を壊していないことだけで、3つの画面の検出率は別の採取列で数えた。
+
+採取は本物の Claude Code 2.1.319 (tmux 3.8、macOS 27.0.1、160×40、1 秒間隔) を、一時的な HOME と `CLAUDE_CONFIG_DIR`、ダミーのトークン、ローカルの偽 API につないで行った。retry は閉じたポートへの接続で、plan 承認は偽 API に `Write` と `ExitPlanMode` を返させて出した。fixture は `claude-2.1.319-{api-retrying,api-error-exhausted,plan-approval,plan-exit-empty}.json`。
+
+- ` · Retrying in <待ち時間> · attempt` で終わる行、または続けて `n/m` で終わる行が最後の送信済みプロンプトより下にあり、その行より下に `· done N` が無ければ `working` (待ち時間は `9s` と `1m 0s` を実測。44 列以下では行が割れ、記号と `n/m` が別の行になる)
+- 最後の送信済みプロンプトが `/` で始まらないなら、起動バナーでも `idle` にしない (retry の文言が変わっても `idle` に戻さないため。`/clear`、`/context`、`/model` の後は Agent が待機しているので `idle` のまま)
+- 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
+- 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
+
+**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
+
+採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
+
+**analyze.py の分類器** (`S2-screen-retry-error-plan`、2.1.259 composite r1〜r5): `S2-screen-spinner` と claude・codex の全区間で予測の内訳まで一致した。 ただしこの分類器は `c_screen` の判定 (`(?i)api error` が先に `error` を返す、など) を継承しているので、製品の Adapter と同じ条件ではない。
+
+**製品の Adapter** (`replay-swift --score --poll 2.0`、4,548 フレーム): 変更の前後で出力がバイト単位で一致した。`--poll 0.25` でも同じである (2.0 秒では working 1.000、completed 0.978、completed(放置) 1.000、idle 0.976、permission 1.000 (危険率 0.000))。
+
 ### 6.6 起動時の trust prompt (Issue #252)
 
 §12.8 (設計書) が Permission に含めると決めた起動時の trust 画面を、両 CLI の現行版で採って fixture にした

@@ -118,7 +118,6 @@ extension ShortcutAction {
     case .toggleOverview: "Overview の表示切り替え"
     case .toggleCodeViewer: "Code Viewer の表示切り替え"
     case .toggleDiffViewer: "Diff Viewer の表示切り替え"
-    case .toggleEvidenceViewer: "Evidence Viewer の表示切り替え"
     case .bringAppToFront: "アプリを前面に出す"
     }
   }

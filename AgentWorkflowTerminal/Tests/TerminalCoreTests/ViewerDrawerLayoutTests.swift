@@ -80,6 +80,7 @@ struct ViewerDrawerLayoutTests {
     layout.open(content)
     layout.setArrangement(.stacked, for: .code)
     layout.setArrangement(.sideBySide, for: .diff)
+    #expect(layout.content == content)
     let saved = ViewerContentArrangements(code: .stacked, diff: .sideBySide)
 
     layout.close()

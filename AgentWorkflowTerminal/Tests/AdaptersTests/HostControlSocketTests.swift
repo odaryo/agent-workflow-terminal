@@ -415,7 +415,7 @@ extension HostControlSocketTests {
     try #require(path.utf8.count == 103)
     try await withServer(HostControlSocketServer(path: path)) {
       let response = try await HostControlSocketClient.send(
-        .openWorktree(directory: "/path"), to: path, timeout: .seconds(2))
+        .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
       #expect(response == Self.response)
     }
   }

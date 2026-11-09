@@ -1,0 +1,21 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "前のターンの完了後に入力欄で \\ + Enter を打ち、2行目には何も打っていない実画面 (Issue #648)。❯ + NBSP の下に空行が1つと区切り線がある。入力欄に改行が残っているので空欄とはみなさず Unknown とする。processNames は採取していないため adapter と同じ最小の値を入れた。画面内のマシン固有の scratchpad パスは /private/tmp/sanitized に置き換えた。",
+  "source": "Issue #648 の採取 (nl-newline.txt / nl-newline.ansi / nl-newline.meta、160x40)",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude"
+  ],
+  "captureCommand": "tmux capture-pane -p / tmux capture-pane -e -p (160x40)",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /private/tmp/sanitized\n\n\n❯ hello\n\n⏺ OK\n\n✻ Churned for 0s · done 1:58 PM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                         ctrl+g to edit in Vim\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/private/tmp/sanitized\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mhello\u001b[39m\n\n\u001b[38;5;231m\u001b[49m⏺\u001b[39m OK\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mChurned for 0s · done 1:58 PM\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                         \u001b[38;5;246mctrl+g to edit in Vim\u001b[39m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m❯ \n  \u001b[7m \u001b[0m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on\u001b[39m\n"
+}

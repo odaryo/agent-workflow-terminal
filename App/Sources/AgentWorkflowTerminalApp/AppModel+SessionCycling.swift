@@ -1,26 +1,33 @@
 import TerminalCore
 
 extension AppModel {
-  func selectNextSession() {
-    selectAdjacentSession(forward: true)
-  }
-
-  func selectPreviousSession() {
-    selectAdjacentSession(forward: false)
-  }
-
-  private func selectAdjacentSession(forward: Bool) {
+  var sessionCycleOrder: [TerminalSessionKey] {
     let selectableWorktrees = sessionWorktrees.filter {
       $0.activation == .active && $0.detected.isReachable
     }
-    let order = sessionKeys.filter { key in
+    return sessionKeys.filter { key in
       key.identity == projectRoot?.identity
         || selectableWorktrees.contains { $0.identity == key.identity }
     }
-    guard let next = SessionCycle.adjacent(in: order, from: displayedSession, forward: forward)
+  }
+}
+
+extension ProjectsModel {
+  func selectAdjacentSession(forward: Bool) {
+    let sessions = availableModels.flatMap { model in
+      model.sessionCycleOrder.map { (model: model, key: $0) }
+    }
+    guard
+      let next = SessionCycle.adjacent(
+        in: sessions.map(\.key), from: selectedModel?.displayedSession, forward: forward),
+      let destination = sessions.first(where: { $0.key == next })
     else {
       return
     }
-    select(next)
+    if selectedModel !== destination.model {
+      select(destination.model.project.commonDirectory)
+    }
+    destination.model.select(next)
+    destination.model.paneObservations.requestTerminalFocus()
   }
 }

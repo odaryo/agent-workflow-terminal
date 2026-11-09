@@ -36,6 +36,34 @@ struct GitWorktreeDetectorIntegrationTests {
     }
   }
 
+  // root では chmod 000 が読み取りを妨げないため、この経路は再現しない。
+  @Test("wt2 の locked を読めなければ main と wt1 の部分一覧と一覧失敗を返す")
+  func unreadableLockedFileReturnsPartialListing() async throws {
+    try await withGitRepository { repository in
+      for name in ["wt1", "wt2", "wt3"] {
+        try await repository.git(["worktree", "add", "-q", "-b", name, "../\(name)"])
+      }
+      try await repository.git(["worktree", "lock", "../wt2"])
+      let locked = repository.mainWorktree.appending(path: ".git/worktrees/wt2/locked")
+      let attributes = try FileManager.default.attributesOfItem(atPath: locked.path)
+      let permissions = try #require(attributes[.posixPermissions] as? NSNumber)
+      try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+      defer {
+        try? FileManager.default.setAttributes(
+          [.posixPermissions: permissions], ofItemAtPath: locked.path)
+      }
+
+      let result = try await repository.detector().scan()
+
+      #expect(
+        result.detected.map(\.worktreePath)
+          == [repository.mainWorktree.path, repository.root.appending(path: "wt1").path])
+      #expect(result.detected.map(\.isProjectRoot) == [true, false])
+      #expect(result.listingFailure != nil)
+      #expect(result.failures.isEmpty)
+    }
+  }
+
   @Test("branch を切り替えても安定 ID は変わらない")
   func stableIdentitySurvivesBranchSwitch() async throws {
     try await withGitRepository { repository in

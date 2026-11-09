@@ -151,7 +151,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
   /// 前回状態にあって今回検出されなかった worktree。Project Root も対象に含む。
   /// 観測に失敗しただけの worktree は含めない (`unobserved`)。
   public let disappeared: [WorktreeIdentity]
-  /// 今回の観測に失敗し、前回の値のまま保持した worktree。Project Root も対象に含む。
+  /// 今回の観測に失敗した worktree と、不完全な一覧に無いだけで前回の観測のまま保持した
+  /// worktree。Project Root も対象に含む。
   /// 消失ではないので `disappeared` と排他であり、UI へ「観測できていない」と出すための一覧でもある。
   public let unobserved: [WorktreeIdentity]
 
@@ -253,9 +254,9 @@ public func reconcileDetectedWorktrees(
       // 表示中の session の選択が外れるため、個別の観測失敗とは区別して前回の状態を残す。
       taskWorktrees.append(
         TaskWorktree(
-          detected: isListingComplete ? task.detected.observing(.observationFailed) : task.detected,
-          activation: task.activation
-        ))
+          detected: unobservedPaths.contains(task.detected.worktreePath)
+            ? task.detected.observing(.observationFailed) : task.detected,
+          activation: task.activation))
       unobservedIdentities.append(task.identity)
     }
 
@@ -306,7 +307,8 @@ private func retainedProjectRoot(
     !seen.contains(previousProjectRoot.identity),
     !isListingComplete || unobservedPaths.contains(previousProjectRoot.worktreePath)
   else { return nil }
-  return isListingComplete ? previousProjectRoot.observing(.observationFailed) : previousProjectRoot
+  return unobservedPaths.contains(previousProjectRoot.worktreePath)
+    ? previousProjectRoot.observing(.observationFailed) : previousProjectRoot
 }
 
 /// 新規出現した worktree の初期 activation は Inactive とする (設計書 §3.2)。

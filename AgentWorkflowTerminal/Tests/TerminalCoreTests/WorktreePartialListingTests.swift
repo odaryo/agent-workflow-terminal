@@ -100,6 +100,38 @@ struct WorktreePartialListingTests {
     #expect(explicit.appeared.isEmpty)
   }
 
+  @Test(
+    "部分一覧でも個別の観測失敗は観測失敗に更新し、一覧に無い Task の観測だけを保持する",
+    arguments: [WorktreeActivation.active, .inactive],
+    [WorktreeObservation.reachable, .unreachable, .observationFailed]
+  )
+  func entryFailureOverridesPreviousObservationInPartialListing(
+    activation: WorktreeActivation, observation: WorktreeObservation
+  ) throws {
+    let failed = try detected("failed", branch: "failed-branch", observation: observation)
+    let missing = try detected("missing", branch: "missing-branch", observation: observation)
+    let expectedFailed = try detected(
+      "failed", branch: "failed-branch", observation: .observationFailed)
+    let previous = WorktreeInventory(
+      projectRoot: nil,
+      taskWorktrees: [
+        TaskWorktree(detected: failed, activation: activation),
+        TaskWorktree(detected: missing, activation: activation),
+      ])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [], previous: previous, unobserved: [failed.worktreePath], isListingComplete: false)
+
+    #expect(
+      result.inventory.taskWorktrees == [
+        TaskWorktree(detected: expectedFailed, activation: activation),
+        TaskWorktree(detected: missing, activation: activation),
+      ])
+    #expect(result.unobserved == [failed.identity, missing.identity])
+    #expect(result.appeared.isEmpty)
+    #expect(result.disappeared.isEmpty)
+  }
+
   private func detected(
     _ name: String,
     branch: String? = nil,

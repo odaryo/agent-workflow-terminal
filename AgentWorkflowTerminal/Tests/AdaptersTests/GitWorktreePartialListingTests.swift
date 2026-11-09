@@ -106,6 +106,24 @@ struct GitWorktreePartialListingTests {
     #expect(second.failures.isEmpty)
   }
 
+  @Test("exit 128 の完了済み record に worktree 行が無ければ一覧の解析失敗を throw する")
+  func throwsWhenCompletedPartialRecordIsMalformed() async throws {
+    let output = "worktree /wt/main\0branch refs/heads/main\0\0HEAD abc\0\0worktree /wt/cut\0"
+    let runner = PartialListingProcessStub(listings: [
+      .success(.init(exitCode: 128, stdout: output, stderr: "fatal: incomplete listing\n"))
+    ])
+    let subject = try detector(runner)
+
+    await #expect(
+      throws: GitWorktreeScanError.malformedListOutput([
+        GitWorktreeParseFailure(recordNumber: 2, record: "HEAD abc", error: .missingWorktree)
+      ])
+    ) {
+      try await subject.scan()
+    }
+    #expect(await runner.invocations.count == 1)
+  }
+
   private func fixture(_ failure: String) throws -> String {
     let url = try #require(
       Bundle.module.url(

@@ -16,7 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Build / test / lint
 
 ```shell
-cd AgentWorkflowTerminal && swift build && swift test     # CI 対象の core package
+cd AgentWorkflowTerminal && swift build                   # CI 対象の core package
+cd AgentWorkflowTerminal && swift test --skip AdaptersSerialTimingTests
+cd AgentWorkflowTerminal && swift test --no-parallel --filter AdaptersSerialTimingTests  # 経過時間を測るので分ける
 scripts/fetch-ghostty.sh                                  # CI / 通常開発用の事前ビルド済み libghostty
 scripts/build-ghostty.sh                                  # ref 更新担当者向けの libghostty 自前ビルド
 scripts/build-app.sh                                      # ローカルの macOS app bundle

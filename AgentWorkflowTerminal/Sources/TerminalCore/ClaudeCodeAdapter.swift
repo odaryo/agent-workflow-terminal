@@ -324,7 +324,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     case typed
     /// 属性が無いため placeholder と typed を分けられない。
     case attributesUnavailable
-    /// `❯` の行が無い、または最後の `❯` の行が入力欄 (`❯` + NBSP) でなく区切りも無い。
+    /// `❯` の行が無い、または最後の `❯` の行が入力欄 (`❯` + NBSP) でない。区切りの有無は問わない。
     case absent
   }
 

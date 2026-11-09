@@ -33,6 +33,7 @@ require_cmd swift codesign plutil
 [ -d "${XCFRAMEWORK}" ] || die "先に scripts/fetch-ghostty.sh を実行してください (ghostty の ref を上げる担当者は scripts/build-ghostty.sh)"
 [ -d "${SHARE_DIR}/ghostty" ] || die "ghostty resources がありません"
 [ -d "${SHARE_DIR}/terminfo" ] || die "terminfo resources がありません"
+[ -d "${PACKAGE_DIR}/Resources/highlight-js" ] || die "highlight.js resources がありません"
 
 info "swift build -c ${CONFIGURATION}"
 # --show-bin-path はビルドせずパスを表示するだけ (Swift 6.3.2 で実測)。
@@ -68,6 +69,7 @@ plutil -insert NSPrincipalClass -string "NSApplication" "${PLIST}"
 
 cp -R "${SHARE_DIR}/ghostty" "${APP}/Contents/Resources/ghostty"
 cp -R "${SHARE_DIR}/terminfo" "${APP}/Contents/Resources/terminfo"
+cp -R "${PACKAGE_DIR}/Resources/highlight-js" "${APP}/Contents/Resources/highlight-js"
 
 codesign --force --sign - "${APP}/Contents/MacOS/hostctl"
 codesign --force --sign - "${APP}"

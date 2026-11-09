@@ -1,4 +1,5 @@
 import Adapters
+import Carbon
 import Foundation
 import SwiftUI
 import TerminalCore
@@ -28,6 +29,7 @@ final class ProjectsModel: ObservableObject {
 
   /// Overview の行と通知の deep link が共用する移動。
   let navigator = AppNavigator()
+  let shortcuts = ShortcutSettingsStore()
   /// `nil` は通知を出さない起動 (bundle の外)。
   let notifier: PaneNotifier?
 
@@ -41,6 +43,7 @@ final class ProjectsModel: ObservableObject {
   /// 確認ダイアログの内容。非 `nil` の間だけダイアログを出す。
   @Published private(set) var pendingUnregister: ProjectUnregisterReview?
   private let startup = DetachedOnceTask()
+  private var globalHotKey: GlobalHotKey?
   var hostControlServer: HostControlSocketServer?
   var pendingHostControl: Task<HostControlResponse, Never>?
   let hostControlEnvironment = HostControlEnvironmentTask()
@@ -76,6 +79,43 @@ final class ProjectsModel: ObservableObject {
   /// すぐ返る。`AppModel.run()` と同じく view の `.task` の寿命に乗せない (Issue #238)。
   func start() {
     startup.start { await self.load() }
+  }
+
+  func startGlobalHotKey() {
+    guard globalHotKey == nil else { return }
+    let hotKey = GlobalHotKey { [weak self] in
+      guard let self else { return }
+      navigator.toggleFromGlobalHotKey(selected: selectedModel)
+    }
+    globalHotKey = hotKey
+    shortcuts.registerGlobalHotKey = { [weak self] combination in
+      guard let self else { return nil }
+      return registerGlobalHotKey(combination)
+    }
+    let combination = shortcuts.bindings.combination(for: .bringAppToFront)
+    if let error = registerGlobalHotKey(combination) {
+      shortcuts.showError(error, for: .bringAppToFront)
+      navigator.overviewNotice =
+        "\(ShortcutConversion.display(combination)): \(error)。他のアプリが同じキーを使っている可能性があります。"
+    }
+  }
+
+  private func registerGlobalHotKey(_ combination: KeyCombination) -> String? {
+    guard let mapped = ShortcutConversion.carbon(combination) else {
+      return "このキーはシステム全体のショートカットに使えません"
+    }
+    guard let globalHotKey else { return nil }
+    let status = globalHotKey.register(keyCode: mapped.keyCode, modifiers: mapped.modifiers)
+    guard status != noErr else { return nil }
+    let previous = shortcuts.bindings.combination(for: .bringAppToFront)
+    if previous != combination, let old = ShortcutConversion.carbon(previous) {
+      let restored = globalHotKey.register(keyCode: old.keyCode, modifiers: old.modifiers)
+      if restored != noErr {
+        navigator.overviewNotice =
+          "\(ShortcutConversion.display(previous)) を再登録できませんでした (status \(restored))"
+      }
+    }
+    return "登録できませんでした (status \(status))"
   }
 
   private func load() async {

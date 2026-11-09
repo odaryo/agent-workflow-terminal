@@ -151,7 +151,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
   /// 前回状態にあって今回検出されなかった worktree。Project Root も対象に含む。
   /// 観測に失敗しただけの worktree は含めない (`unobserved`)。
   public let disappeared: [WorktreeIdentity]
-  /// 今回の観測に失敗し、前回の値のまま保持した worktree。Project Root も対象に含む。
+  /// 今回の観測に失敗した worktree と、不完全な一覧に無いだけで前回の観測のまま保持した
+  /// worktree。Project Root も対象に含む。
   /// 消失ではないので `disappeared` と排他であり、UI へ「観測できていない」と出すための一覧でもある。
   public let unobserved: [WorktreeIdentity]
 
@@ -170,14 +171,15 @@ public struct WorktreeScanResult: Sendable, Hashable {
 
 /// 設計書 §3.2 の検出規則。
 ///
-/// - Important: `detected` は**そのスキャン時点の完全な一覧**でなければならない。この関数は
-///   「渡されなかった安定 ID は存在しない」と権威的に解釈するため、失敗したスキャンや部分的な
-///   結果を渡してはならない。渡すと、その回で全 worktree が `disappeared` になり、次の回で
+/// - Important: `isListingComplete` が `true` のとき、`detected` は**そのスキャン時点の完全な一覧**
+///   でなければならない。「渡されなかった安定 ID は存在しない」と権威的に解釈するため、部分的な
+///   結果を渡すと、その回で未検出 worktree が `disappeared` になり、次の回で
 ///   ユーザーの Active/Inactive 指定を失い、新規出現として `.inactive` から始めてしまう。
 ///   これは設計書 §3.2 の「worktreeが消えた」と「今回は観測できなかった」を区別する規則に反する。
-///   スキャンが失敗したときは、空の一覧を渡すのではなく、この関数を呼ばずに前回状態を保つ。
+///   部分的な結果を渡すときは `isListingComplete: false` を指定する。全体のスキャンが失敗した
+///   ときは、空の一覧を渡すのではなく、この関数を呼ばずに前回状態を保つ。
 /// - Important: entry 単位で観測に失敗した作業ツリーのパスは `unobserved` へ渡す。これが
-///   「渡されなかった安定 ID は存在しない」という権威的な解釈の唯一の例外で、渡さないと
+///   完全な一覧でも「渡されなかった安定 ID は存在しない」という権威的な解釈の例外で、渡さないと
 ///   1回の観測失敗がそのまま消失になり、上の事故がそのまま起きる (Issue #243)。安定 ID ではなく
 ///   作業ツリーのパスで渡すのは、観測に失敗した entry からは安定 ID を引けていないためである。
 ///   `detected` にも載っているパスは検出できているので `unobserved` 側を無視する。
@@ -205,7 +207,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
 public func reconcileDetectedWorktrees(
   detected: [DetectedWorktree],
   previous: WorktreeInventory?,
-  unobserved: [String] = []
+  unobserved: [String] = [],
+  isListingComplete: Bool = true
 ) -> WorktreeScanResult {
   var projectRoot: DetectedWorktree?
   var taskWorktrees: [TaskWorktree] = []
@@ -236,7 +239,7 @@ public func reconcileDetectedWorktrees(
 
     if let retainedRoot = retainedProjectRoot(
       previous: previous, detectedProjectRoot: projectRoot, seen: seen,
-      unobservedPaths: unobservedPaths)
+      unobservedPaths: unobservedPaths, isListingComplete: isListingComplete)
     {
       projectRoot = retainedRoot
       unobservedIdentities.append(retainedRoot.identity)
@@ -244,14 +247,16 @@ public func reconcileDetectedWorktrees(
 
     for task in previous.taskWorktrees
     where !seen.contains(task.identity)
-      && unobservedPaths.contains(task.detected.worktreePath)
+      && (!isListingComplete || unobservedPaths.contains(task.detected.worktreePath))
     {
       seen.insert(task.identity)
+      // 不完全な一覧で未検出の worktree を observationFailed にすると、一過性の一覧取得失敗で
+      // 表示中の session の選択が外れるため、個別の観測失敗とは区別して前回の状態を残す。
       taskWorktrees.append(
         TaskWorktree(
-          detected: task.detected.observing(.observationFailed),
-          activation: task.activation
-        ))
+          detected: unobservedPaths.contains(task.detected.worktreePath)
+            ? task.detected.observing(.observationFailed) : task.detected,
+          activation: task.activation))
       unobservedIdentities.append(task.identity)
     }
 
@@ -295,13 +300,15 @@ private func retainedProjectRoot(
   previous: WorktreeInventory,
   detectedProjectRoot: DetectedWorktree?,
   seen: Set<WorktreeIdentity>,
-  unobservedPaths: Set<String>
+  unobservedPaths: Set<String>,
+  isListingComplete: Bool
 ) -> DetectedWorktree? {
   guard let previousProjectRoot = previous.projectRoot, detectedProjectRoot == nil,
     !seen.contains(previousProjectRoot.identity),
-    unobservedPaths.contains(previousProjectRoot.worktreePath)
+    !isListingComplete || unobservedPaths.contains(previousProjectRoot.worktreePath)
   else { return nil }
-  return previousProjectRoot.observing(.observationFailed)
+  return unobservedPaths.contains(previousProjectRoot.worktreePath)
+    ? previousProjectRoot.observing(.observationFailed) : previousProjectRoot
 }
 
 /// 新規出現した worktree の初期 activation は Inactive とする (設計書 §3.2)。

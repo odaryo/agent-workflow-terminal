@@ -54,6 +54,66 @@ struct GitProjectResolverTests {
     #expect(project.directory == barePath)
   }
 
+  @Test("exit 128 の部分一覧でも先頭の完了済み entry で Project を解決し、利用可能にする")
+  func resolvesAndRemainsAvailableWithPartialListing() async throws {
+    let output = try fixture(named: "git-2.50.1-worktree-list-porcelain-z-locked-unreadable.txt")
+    let mainPath = try #require(
+      GitWorktreeList.parseCompletedRecords(output: output).entries.first?.path)
+    let stub = ProcessRunnerStub(
+      revParse: success("\(commonDirectory)\n"),
+      worktreeList: .success(
+        .init(exitCode: 128, stdout: output, stderr: "fatal: unreadable locked file\n")))
+    let resolver = makeResolver(stub)
+    let registeredProject = RegisteredProject(
+      commonDirectory: try #require(WorktreeIdentity(rawValue: commonDirectory)),
+      directory: mainPath)
+
+    let availability = await resolver.availability(of: registeredProject)
+    #expect(availability == .available)
+    let project = try await resolver.resolve(directory: URL(fileURLWithPath: selectedDirectory))
+    #expect(project.directory == mainPath)
+    #expect(project.commonDirectory == registeredProject.commonDirectory)
+  }
+
+  @Test(
+    "exit 128 で完了済み record が無ければ worktreeList の失敗を保持する",
+    arguments: ["", "worktree /repo\0branch refs/heads/main\0", "HEAD abc\0"]
+  )
+  func partialListingWithoutCompletedRecordsFails(output: String) async throws {
+    let stderr = "fatal: incomplete listing\n"
+    let stub = ProcessRunnerStub(
+      revParse: success("\(commonDirectory)\n"),
+      worktreeList: .success(.init(exitCode: 128, stdout: output, stderr: stderr)))
+    let expected = GitProjectResolutionError.worktreeList(
+      .commandFailed(exitCode: 128, stdout: output, stderr: stderr))
+
+    #expect(await resolutionError(makeResolver(stub), directory: selectedDirectory) == expected)
+    #expect(
+      await makeResolver(stub).availability(of: try registered())
+        == .unavailable(.unresolvable(expected)))
+  }
+
+  @Test(
+    "commandFailed 以外は完了済み record があっても worktreeList の失敗を保持する",
+    arguments: [
+      ProcessRunnerError.timedOut(
+        exitCode: 128, stdout: "worktree /repo\0\0", stderr: "timeout"),
+      .cancelled,
+      .launchFailed(executableURL: URL(fileURLWithPath: "/test/bin/git"), message: "unavailable"),
+      .outputLimitExceeded(limit: 1024),
+    ]
+  )
+  func listingProcessFailureIsNotRecovered(error: ProcessRunnerError) async throws {
+    let stub = ProcessRunnerStub(
+      revParse: success("\(commonDirectory)\n"), worktreeList: .failure(error))
+    let expected = GitProjectResolutionError.worktreeList(.process(error))
+
+    #expect(await resolutionError(makeResolver(stub), directory: selectedDirectory) == expected)
+    #expect(
+      await makeResolver(stub).availability(of: try registered())
+        == .unavailable(.unresolvable(expected)))
+  }
+
   // MARK: - 失敗
 
   @Test("ディレクトリとして開けないパスは git を撃たずに失敗する")

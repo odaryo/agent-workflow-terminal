@@ -6,8 +6,8 @@ private enum ShortcutFixtures {
   static let defaults: [(ShortcutAction, KeyCombination)] = [
     (.previousProject, KeyCombination(key: .upArrow, modifiers: [.command, .option])),
     (.nextProject, KeyCombination(key: .downArrow, modifiers: [.command, .option])),
-    (.previousSession, KeyCombination(key: .leftArrow, modifiers: [.command, .option])),
-    (.nextSession, KeyCombination(key: .rightArrow, modifiers: [.command, .option])),
+    (.previousSession, KeyCombination(key: .upArrow, modifiers: [.command])),
+    (.nextSession, KeyCombination(key: .downArrow, modifiers: [.command])),
     (.toggleOverview, KeyCombination(key: .character("o"), modifiers: [.command, .shift])),
     (.toggleCodeViewer, KeyCombination(key: .character("c"), modifiers: [.command, .shift])),
     (.toggleDiffViewer, KeyCombination(key: .character("d"), modifiers: [.command, .shift])),
@@ -233,6 +233,17 @@ struct ShortcutBindingsPersistenceTests {
   @Test("空辞書は破棄数0の既定になる")
   func emptyDictionaryUsesDefaults() throws {
     let result = ShortcutBindings.decoded(from: try ShortcutFixtures.data([:]))
+    #expect(result.bindings == ShortcutBindings())
+    #expect(result.droppedCount == 0)
+  }
+
+  @Test("既定と同じ値の保存は変更なし・破棄0件として読む")
+  func storedDefaultsAreNotOverrides() throws {
+    let data = try ShortcutFixtures.data([
+      "previousSession": KeyCombination(key: .upArrow, modifiers: [.command]),
+      "nextSession": KeyCombination(key: .downArrow, modifiers: [.command]),
+    ])
+    let result = ShortcutBindings.decoded(from: data)
     #expect(result.bindings == ShortcutBindings())
     #expect(result.droppedCount == 0)
   }

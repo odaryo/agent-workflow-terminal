@@ -10,16 +10,16 @@ struct OverviewSessionMenu: View {
     Button("新規セッション") {
       selectProject()
       Task {
-        await model.openNewTab(in: key.identity)
+        await model.openNewSession(in: key.identity)
         model.paneObservations.requestTerminalFocus()
       }
     }
-    .disabled(!model.canOpenTab(in: key.identity))
+    .disabled(!model.canOpenSession(in: key.identity))
     Button("セッションを閉じる") {
       selectProject()
-      model.requestCloseTab(key)
+      model.requestCloseSession(key)
     }
-    .disabled(!model.canCloseTab(key))
+    .disabled(!model.canCloseSession(key))
   }
 }
 
@@ -34,7 +34,7 @@ struct OverviewProjectMenu: View {
       selectProject()
       guard let projectRoot = model.projectRoot else { return }
       Task {
-        await model.openNewTab(in: projectRoot.identity)
+        await model.openNewSession(in: projectRoot.identity)
         model.paneObservations.requestTerminalFocus()
       }
     }
@@ -59,7 +59,7 @@ struct OverviewProjectMenu: View {
   }
 
   private func title(of worktree: TaskWorktree) -> String {
-    let name = worktree.detected.tabName
+    let name = worktree.detected.directoryName
     switch worktree.detected.observation {
     case .reachable: return name
     case .unreachable: return "\(name) (到達不能)"

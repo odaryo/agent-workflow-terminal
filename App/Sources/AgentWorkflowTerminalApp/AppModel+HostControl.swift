@@ -62,8 +62,8 @@ extension AppModel {
       key = existing
       created = false
     } else {
-      guard let first = tabLayout.tabs(in: worktree.identity).first else {
-        return .failure(code: .tmuxFailed, message: "worktree のタブが見つかりません")
+      guard let first = sessionLayout.tabs(in: worktree.identity).first else {
+        return .failure(code: .tmuxFailed, message: "worktree のセッションが見つかりません")
       }
       key = first
       if let failure = await createHostControlSession(
@@ -101,7 +101,7 @@ extension AppModel {
     switch result {
     case .success(let attachment):
       if let detail = attachment.warning {
-        reportTabOpeningFailure([warning, detail].compactMap { $0 }.joined(separator: "\n"))
+        reportSessionWarning([warning, detail].compactMap { $0 }.joined(separator: "\n"))
       }
       return nil
     case .failure(let error):

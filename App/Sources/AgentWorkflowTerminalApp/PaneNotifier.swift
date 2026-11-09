@@ -91,10 +91,10 @@ final class PaneNotifier {
     schedule()
   }
 
-  /// アプリが前面で、メイン window に表示しているタブ。
+  /// アプリが前面で、メイン window に表示しているセッション。
   private var showingSession: TerminalSessionKey? {
     guard NSApp.isActive else { return nil }
-    return projects?.selectedModel?.selectedTab
+    return projects?.selectedModel?.displayedSession
   }
 
   private func schedule() {
@@ -146,7 +146,7 @@ final class PaneNotifier {
 
   /// §11.2 の表のとおり対象 pane まで移る。Question overlay (§11.1) は未実装なので、Question も
   /// pane まで。元の session に pane が無ければ、観測対象の他 session に一意に見つかる場合だけ
-  /// 移動先を開く。それ以外は元のタブを、worktree も無ければ Overview を開き、終了を知らせる。
+  /// 移動先を開く。それ以外は元のセッションを、worktree も無ければ Overview を開き、終了を知らせる。
   ///
   /// 元の session に pane が残っている間は追跡しない。移動の直後は元の観測が古いまま残り、
   /// 観測からは新旧を区別できないため (Issue #537)。複数の session に見える候補 (link-window など)

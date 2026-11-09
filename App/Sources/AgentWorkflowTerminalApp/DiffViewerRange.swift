@@ -123,7 +123,7 @@ extension DiffBaseBranchSource {
   }
 }
 
-/// 比較先の候補に出す、同じ Project の他のタスク。`name` はタブと同じ名前で、branch の
+/// 比較先の候補に出す、同じ Project の他のタスク。`name` はセッションと同じ名前で、branch の
 /// あるタスクでは branch 名と同じになる。見分けの手がかりに worktree のディレクトリ名も持つ。
 struct DiffComparisonTask: Equatable, Hashable {
   let name: String
@@ -173,7 +173,7 @@ struct DiffWorktreeContext: Equatable {
     if let projectRoot, isSelf(projectRoot) {
       displayName = "Project Root"
     } else if let own = worktrees.first(where: { isSelf($0.detected) }) {
-      displayName = own.detected.tabName
+      displayName = own.detected.directoryName
     } else {
       displayName = worktreeRoot.lastPathComponent
     }
@@ -182,7 +182,7 @@ struct DiffWorktreeContext: Equatable {
         let branch = worktree.detected.branch
       else { return nil }
       return DiffComparisonTask(
-        name: worktree.detected.tabName, branch: branch,
+        name: worktree.detected.directoryName, branch: branch,
         directory: URL(fileURLWithPath: worktree.detected.worktreePath).lastPathComponent)
     }
   }

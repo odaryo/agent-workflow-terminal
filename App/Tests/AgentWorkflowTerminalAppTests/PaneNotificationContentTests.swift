@@ -53,7 +53,7 @@ struct PaneNotificationContentTests {
     #expect(NotificationTarget(userInfo: ["project": "relative"]) == .overview)
   }
 
-  @Test("追加タブの session を userInfo に保持する")
+  @Test("追加セッションの識別子を userInfo に保持する")
   func sessionTargetRoundTrip() throws {
     let session = try #require(TerminalSessionKey(identity: worktree, index: 2))
     let target = NotificationTarget.pane(
@@ -61,7 +61,7 @@ struct PaneNotificationContentTests {
     #expect(NotificationTarget(userInfo: target.userInfo) == target)
   }
 
-  @Test("タブ番号のない既存通知は primary に移り、不正な番号は Overview に倒す")
+  @Test("セッション番号のない既存通知は primary に移り、不正な番号は Overview に倒す")
   func legacyAndInvalidSessionTargets() {
     var info = target.userInfo
     info.removeValue(forKey: "sessionIndex")

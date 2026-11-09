@@ -1,10 +1,8 @@
 import SwiftUI
 import TerminalCore
 
-/// Close の確認をタブ列の下に出す。
-///
-/// sheet にしない。検査は未マージの branch で数秒かかり (Issue #366 の実測で 300 commit の走査に
-/// 約 5 秒)、modal にするとその間タブの切り替えも端末への入力もできなくなる。
+/// sheet にしない。検査は未マージの branch で数秒かかり、modal にするとその間セッションの
+/// 切り替えも端末への入力もできなくなる。
 struct WorktreeClosePanelHost: View {
   @ObservedObject var closing: WorktreeClosing
 

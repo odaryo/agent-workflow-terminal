@@ -38,7 +38,7 @@ struct PaneNotifierTests {
         excluding: .primary(root), inventory: inventory()) == nil)
   }
 
-  @Test("同じ worktree の別タブを含む複数 session に見つかれば推測で選ばない")
+  @Test("同じ worktree の別セッションを含む複数 session に見つかれば推測で選ばない")
   func ambiguousDestination() throws {
     let second = try #require(TerminalSessionKey(identity: task, index: 2))
 

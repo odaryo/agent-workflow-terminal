@@ -224,8 +224,8 @@ final class WorktreeCloseSession: ObservableObject {
 
 /// 実行の結果。`details` が空なのは全 step が成功したときだけ。
 struct WorktreeCloseResultText: Sendable {
-  /// この worktree を Inactive にしてタブから外すか。全 step の成功に加え、worktree の削除まで
-  /// 済んだ場合も外す —— 作業ツリーが無いタブを Active のまま残すと、再 attach が
+  /// 途中で失敗しても worktree の削除が済んでいれば Inactive にする。作業ツリーが無い
+  /// セッションを Active のまま残すと、再 attach が
   /// `new-session -c <無いディレクトリ>` で `$HOME` へ黙って落ちる (`AppModel.select(_:)` の
   /// doc コメント)。
   let closedWorktree: Bool

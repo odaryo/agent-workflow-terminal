@@ -12,8 +12,6 @@ struct TmuxSessionAttachment: Sendable, Equatable {
   }
 }
 
-/// タブが端末を出す前に、その worktree の tmux session を用意する経路。
-///
 /// **surface へ `new-session` を渡さない**ための型である。§4.4 の `history-limit` と §4.2 の
 /// `window-size`、`-c` の format escape は `TmuxSessionOperations.create` だけが保証しており、
 /// surface 側で同じ argv を組み直すと同じ判定が2箇所へ分かれる (Issue #235 はそれで
@@ -48,7 +46,7 @@ struct TmuxSessionProvisioner: Sendable {
   }
 
   /// 空配列は「session が無い」ことの確認である。取り残された server が居る場合は `[]` にせず投げる。
-  /// 呼び出し側が空の一覧でタブを刈り込まないため (Issue #500)。
+  /// 呼び出し側が空の一覧でセッションを刈り込まないため。
   func sessionNames() async throws(TmuxSessionProvisionerError) -> [String] {
     do {
       return try await operations.list()
@@ -122,7 +120,7 @@ struct TmuxSessionProvisioner: Sendable {
   /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す。`detach-on-destroy` は
   /// 無条件 (#491)、`window-size` は current window が未設定のときだけ (設計書 §3.3、#322)。
   /// 失敗しても attach を止めない: session 消滅は attach 側で失敗が表示され、それ以外の設定失敗で
-  /// タブを開けなくする方が害が大きい。
+  /// セッションを開けなくする方が害が大きい。
   private func repairResumedSession(_ session: TmuxSessionName) async {
     do {
       try await operations.ensureDetachOnDestroy(session: session)
@@ -304,7 +302,7 @@ private actor TmuxBootstrapGate {
 
 extension TmuxSessionOperationError {
   /// 画面に出す理由。原因ごとにユーザーの次の行動が違うので、1つの文言へ丸めない。
-  var terminalTabDescription: String {
+  var terminalSessionDescription: String {
     switch self {
     case .workingDirectoryUnusable(let path):
       "worktree のディレクトリへ入れないため、session を用意できません: \(path)"
@@ -329,13 +327,13 @@ enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
   case orphanedServer(socketPath: String, TmuxOrphanedServerProbeResult)
   case leftoverBootstrapSession(cause: TmuxSessionOperationError, cleanupFailure: TmuxRunnerError)
 
-  var terminalTabDescription: String {
+  var terminalSessionDescription: String {
     switch self {
-    case .operation(let error): error.terminalTabDescription
+    case .operation(let error): error.terminalSessionDescription
     case .orphanedServer(let socketPath, let result):
       result.orphanedServerExplanation(socketPath: socketPath)
     case .leftoverBootstrapSession(let cause, let cleanupFailure):
-      cause.terminalTabDescription + "\n"
+      cause.terminalSessionDescription + "\n"
         + TmuxSessionProvisioner.bootstrapCleanupWarning + "\n後始末の失敗: \(cleanupFailure)"
     }
   }
@@ -346,7 +344,7 @@ enum TmuxSessionProvisionerError: Error, Equatable, CustomStringConvertible {
     case .orphanedServer(let socketPath, let result):
       result.orphanedServerExplanation(socketPath: socketPath)
     case .leftoverBootstrapSession:
-      terminalTabDescription
+      terminalSessionDescription
     }
   }
 }

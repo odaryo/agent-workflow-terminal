@@ -4,14 +4,14 @@ import TerminalCore
 
 /// キーボードの持ち主 — 端末か Drawer のテキスト入力か — を調停する唯一の場所。
 ///
-/// タブの切り替えは `ZStack` の `opacity` / `allowsHitTesting` で行うが、
+/// セッションの切り替えは `ZStack` の `opacity` / `allowsHitTesting` で行うが、
 /// `allowsHitTesting(false)` は AppKit の first responder を降ろさないため、隠れた端末が
 /// 打鍵を受け続ける (Issue #233 の実測)。SwiftUI 側からその都度 first responder を
 /// 取り直させるための、最小の置き場。
 ///
-/// 端末が取りに行くのは「そのタブが表示中」かつ「テキスト入力が誰も主張していない」の
+/// 端末が取りに行くのは「そのセッションが表示中」かつ「テキスト入力が誰も主張していない」の
 /// 両方が成り立つときだけ。端末側の grab は取り直し要求と surface の (再) 生成の2箇所に
-/// あるが、どちらも `focusRequest(isTabSelected:)` の結果だけを読む — 判定を2つ置くと、
+/// あるが、どちらも `focusRequest(isSessionDisplayed:)` の結果だけを読む — 判定を2つ置くと、
 /// 片方だけ直して残る抜け道 (#233 は要求側だけを直し、再生成側が Issue #278 として残った)
 /// が繰り返される。#240 が送信可否を `DiffCommentSendGate` の1箇所に閉じたのと同じ形。
 ///
@@ -35,10 +35,10 @@ final class TerminalKeyboardFocus: ObservableObject {
     request &+= 1
   }
 
-  /// 端末側の2つの grab が共有する唯一の述語。`nil` は「このタブは表示されていない」だけを
+  /// 端末側の2つの grab が共有する唯一の述語。`nil` は「このセッションは表示されていない」だけを
   /// 意味し、「今は取るな」は `isTerminalAllowed` が別に持つ。
-  func focusRequest(isTabSelected: Bool) -> TerminalFocusRequest? {
-    guard isTabSelected else { return nil }
+  func focusRequest(isSessionDisplayed: Bool) -> TerminalFocusRequest? {
+    guard isSessionDisplayed else { return nil }
     return TerminalFocusRequest(token: request, isTerminalAllowed: textInputClaims.isEmpty)
   }
 
@@ -51,7 +51,7 @@ final class TerminalKeyboardFocus: ObservableObject {
     }
   }
 
-  func tabSelectionChanged() {
+  func displayedSessionChanged() {
     requestFocus()
   }
 

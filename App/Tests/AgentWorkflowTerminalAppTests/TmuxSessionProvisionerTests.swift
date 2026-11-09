@@ -5,7 +5,7 @@ import Testing
 
 @testable import AgentWorkflowTerminalApp
 
-@Suite("タブ単位の session 終了 (§3.1)")
+@Suite("セッション単位の終了 (§3.1)")
 struct TmuxSessionProvisionerTests {
   @Test("指定した番号の session を完全一致で確認する", arguments: [1, 3])
   func checksExactSession(index: Int) async throws {
@@ -349,9 +349,9 @@ struct TmuxSessionProvisionerTests {
       let error = TmuxSessionProvisionerError.leftoverBootstrapSession(
         cause: cause, cleanupFailure: cleanupFailure)
       #expect(result == .failure(error))
-      #expect(error.terminalTabDescription.contains(cause.terminalTabDescription))
-      #expect(error.terminalTabDescription.contains(Self.cleanupInstruction))
-      #expect(error.terminalTabDescription.contains("\(cleanupFailure)"))
+      #expect(error.terminalSessionDescription.contains(cause.terminalSessionDescription))
+      #expect(error.terminalSessionDescription.contains(Self.cleanupInstruction))
+      #expect(error.terminalSessionDescription.contains("\(cleanupFailure)"))
     }
     #expect(
       await process.calls.last == ["-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use"])

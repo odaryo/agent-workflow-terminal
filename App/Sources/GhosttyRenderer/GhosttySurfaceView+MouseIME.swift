@@ -7,8 +7,8 @@ extension GhosttySurfaceView {
     if let trackingAreaReference { removeTrackingArea(trackingAreaReference) }
     let area = NSTrackingArea(
       rect: bounds,
-      // Why not activeAlways: 非 key window へマウスレポートを送ると、複数 worktree タブを
-      // 並べたときに背面のタブの Agent へ入力が届く。上流 Ghostty は activeAlways を選ぶが、
+      // Why not activeAlways: 非 key window へマウスレポートを送ると、複数 worktree セッションを
+      // 並べたときに背面のセッションの Agent へ入力が届く。上流 Ghostty は activeAlways を選ぶが、
       // あちらは 1 window = 1 ターミナルであり前提が違う (設計書 §4.2)。
       options: [
         .mouseEnteredAndExited, .mouseMoved, .inVisibleRect,
@@ -22,7 +22,7 @@ extension GhosttySurfaceView {
 
   // Why not local event monitor: 上流はフォーカス移譲のクリックが terminal へ届く前に
   // 捨てるため、responder chain の外で先回りする必要がある。こちらでフォーカスが他所に
-  // ある状況は Drawer / 別タブ / 別ウィンドウのいずれかで、どれも mouseDown 自体はこの view
+  // ある状況は Drawer / 別セッション / 別ウィンドウのいずれかで、どれも mouseDown 自体はこの view
   // へ届くため、同じ判断をここで行えば足りる。判断の内容 (自分が first responder でなければ
   // 移譲し、アプリと window が既に前面ならそのクリックは端末へ渡さない) は上流に揃えた。
   // 出典: App/vendor/ghostty/macos/Sources/Ghostty/Surface View/SurfaceView_AppKit.swift:653-688

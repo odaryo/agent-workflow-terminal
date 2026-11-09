@@ -148,7 +148,7 @@ private struct OverviewProjectSection: View {
 
   @ViewBuilder
   private func worktreeRows(_ worktree: OverviewWorktree, title: String?) -> some View {
-    let isDisplayed = isSelectedProject && model.selectedTab == worktree.session
+    let isDisplayed = isSelectedProject && model.displayedSession == worktree.session
     if let title {
       Button {
         reveal(worktree.session, nil)
@@ -207,16 +207,16 @@ private struct OverviewProjectSection: View {
   private var input: OverviewProjectInput {
     OverviewProjectInput(
       project: model.project.commonDirectory,
-      projectRootSessions: model.tabKeys.filter { $0.identity == model.projectRoot?.identity }
+      projectRootSessions: model.sessionKeys.filter { $0.identity == model.projectRoot?.identity }
         .compactMap { model.worktreeInput($0) },
-      tasks: model.tabKeys.filter { $0.identity != model.projectRoot?.identity }
+      tasks: model.sessionKeys.filter { $0.identity != model.projectRoot?.identity }
         .compactMap { model.worktreeInput($0) })
   }
 }
 
 extension DetectedWorktree {
   /// セッションのディレクトリを識別できるよう、branch 名ではなくディレクトリ名を使う (設計書 §5.3)。
-  var tabName: String {
+  var directoryName: String {
     URL(fileURLWithPath: worktreePath).lastPathComponent
   }
 }

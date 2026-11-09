@@ -9,8 +9,7 @@ extension GhosttySurfaceView {
     guard acceptsDrops != acceptsFileDrops else { return }
     acceptsFileDrops = acceptsDrops
     // Why not init で登録: AppKit は SwiftUI の opacity / allowsHitTesting を見ず、
-    // 最前面の登録済み NSView を選ぶ。3枚の代理 NSView で隠れた最終タブが選ばれ、
-    // 非選択タブの登録解除で解消した (レビュー C1、2026-10-31)。
+    // 最前面の登録済み NSView を選ぶため、非表示セッションの登録を残すと誤配送される。
     if acceptsDrops {
       registerForDraggedTypes([.fileURL])
     } else {

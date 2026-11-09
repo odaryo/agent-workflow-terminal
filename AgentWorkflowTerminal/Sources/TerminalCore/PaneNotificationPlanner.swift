@@ -260,6 +260,11 @@ public struct PaneNotificationPlanner: Sendable {
     expireMissingPanes(at: instant)
     guard var memory = sessions[session] else { return [] }
     memory.observedPanes = Set(snapshot.panes.map(\.id))
+    for paneID in snapshot.agentAbsentPanes where panes[paneID] != nil {
+      panes[paneID]?.lastKnown = nil
+      panes[paneID]?.isAttentionAnnounced = false
+      panes[paneID]?.isSummaryMember = false
+    }
     let isBaseline = !memory.hasStatesBaseline
     if isBaseline {
       guard snapshot.isComplete else { return [] }
@@ -267,11 +272,6 @@ public struct PaneNotificationPlanner: Sendable {
     }
     sessions[session] = memory
     var notifications: [PaneNotification] = []
-    for paneID in snapshot.agentAbsentPanes where panes[paneID] != nil {
-      panes[paneID]?.lastKnown = nil
-      panes[paneID]?.isAttentionAnnounced = false
-      panes[paneID]?.isSummaryMember = false
-    }
     for (paneID, pane) in panes where !isBaseline && pane.session == session {
       if !memory.observedPanes.contains(paneID) {
         // 観測が途切れた時間を Unknown の継続に含めない。

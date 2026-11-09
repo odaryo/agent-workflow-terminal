@@ -78,6 +78,28 @@ struct PaneNotificationPlannerAgentAbsenceTests: PaneNotificationPlannerTesting 
       planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(4))).isEmpty)
   }
 
+  @Test("#715: 再開後の未完の基準で Agent 不在を観測したら、再起動後の Question をまとめ通知に数える")
+  func absenceBeforeCompleteResumedBaselineResetsAttentionMemory() throws {
+    let start = Self.clock.now
+    var planner = baselined([pane("%1", .working)], at: start)
+    let question = complete([pane("%1", .question)])
+    try #require(
+      planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(1)))
+        == [event("%1", .question)])
+
+    planner.stopObserving(worktree)
+    let resumed = start.advanced(by: .seconds(2))
+    planner.startObserving(worktree, at: resumed)
+    let incompleteAbsence = WorktreePaneAgentStates(
+      panes: [], isComplete: false, agentAbsentPanes: [PaneID(rawValue: "%1")])
+    #expect(planner.observeStates(incompleteAbsence, in: worktree, at: resumed).isEmpty)
+    #expect(
+      planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(3)))
+        == [.attentionSummary(count: 1)])
+    #expect(
+      planner.observeStates(question, in: worktree, at: start.advanced(by: .seconds(4))).isEmpty)
+  }
+
   @Test("基準の Agent 不在そのものでは通知せず、後の Question は1回通知する")
   func absenceAtBaselineIsSilent() {
     var planner = started()

@@ -114,8 +114,8 @@ public enum PersistedWorktreeActivation: String, Sendable, Hashable, Codable {
 /// 「渡されなかった安定 ID は存在しない」と権威的に解釈してよいが、この関数が受け取る `detected` は
 /// アプリが止まっていた間の増減を含み、削除と一時的な不可視を区別できない。したがって、
 ///
-/// - 保存に無く今回検出できた worktree は `.inactive` から始める。停止中の出現は §3.2 の
-///   「観測中に新しく現れた」に当たらない。
+/// - 保存に無く今回検出できた worktree は `.inactive` から始める。§3.2 のとおり、停止中の出現も
+///   観測中の出現と同じ扱いである。
 /// - 保存にあり今回検出できなかったものは捨てず、到達不能として保持する。ユーザーの Active 指定を
 ///   「消えた」と決めつけて捨てないため。ただし今回 entry 単位で観測に失敗したパス (`unobserved`) は
 ///   `.unreachable` ではなく `.observationFailed` として保持する。到達可能性を確かめられていない

@@ -2,6 +2,7 @@ import TerminalCore
 
 public enum TmuxWorktreePaneSourceError: Error, Sendable, Equatable {
   case tmux(TmuxRunnerError)
+  case unparsableOutput(failedLineCount: Int)
 }
 
 /// 全 worktree の pane 一覧を `list-panes -a` 1回にまとめ、短い TTL の間だけ共有する
@@ -95,7 +96,11 @@ actor TmuxAllSessionPaneListCache {
       // 連携変数 (§12.7) も同じ1回で読む。pane 一覧と別に起動すると外部プロセスが増える。
       let result = try await runner.run(
         arguments: ["list-panes", "-a", "-F", TmuxListPanes.formatWithSummary])
-      return .success(TmuxListPanes.parseWithSummary(output: result.stdout).panes)
+      let parsed = TmuxListPanes.parseWithSummary(output: result.stdout)
+      if parsed.panes.isEmpty, !parsed.failures.isEmpty {
+        return .failure(.unparsableOutput(failedLineCount: parsed.failures.count))
+      }
+      return .success(parsed.panes)
     } catch {
       // server ごと居ない場合は「pane が無い」であって障害ではない。`-t` を渡していた頃に
       // 必要だった `can't find window:` の分岐は、`-a` が session を指さないので要らなくなった

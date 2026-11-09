@@ -159,6 +159,30 @@ struct PaneObservationStoreTests {
     try #require(condition())
   }
 
+  @Test("Issue #295 初回完了前後とも pane 一覧の取得不能と復旧を毎回反映する", arguments: [true, false])
+  func updatesPaneListAvailability(hasCompletedObservation: Bool) {
+    var observation = PaneObservationStore.Observed()
+    #expect(!observation.isPaneListUnavailable)
+    if hasCompletedObservation {
+      observation.receivePaneStates(.init(panes: [], isComplete: true))
+    }
+
+    observation.receivePaneStates(
+      .init(panes: [], isComplete: false, isPaneListUnavailable: true))
+    #expect(observation.isPaneListUnavailable)
+    #expect(observation.latestPaneStates == [])
+    #expect(observation.paneStates == (hasCompletedObservation ? [] : nil))
+
+    observation.receivePaneStates(.init(panes: [paneState], isComplete: false))
+    #expect(!observation.isPaneListUnavailable)
+    #expect(observation.latestPaneStates == [paneState])
+    #expect(observation.paneStates == (hasCompletedObservation ? [paneState] : nil))
+
+    observation.receivePaneStates(.init(panes: [], isComplete: true))
+    #expect(!observation.isPaneListUnavailable)
+    #expect(observation.paneStates == [])
+  }
+
   @Test("未完の snapshot だけでは未観測のまま", arguments: [true, false])
   func incompleteObservation(isEmpty: Bool) throws {
     var observation = PaneObservationStore.Observed()

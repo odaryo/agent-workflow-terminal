@@ -184,7 +184,13 @@ private struct OverviewProjectSection: View {
         }
       case .noAgentPane, .notObserved:
         let shellTitle = "shell \(worktree.session.index)"
-        let rowTitle = row == .notObserved ? "観測中…" : (title == nil ? shellTitle : "Agent pane なし")
+        let rowTitle =
+          if row == .notObserved {
+            store.observed[worktree.session]?.isPaneListUnavailable == true
+              ? "pane を観測できません" : "観測中…"
+          } else {
+            title == nil ? shellTitle : "Agent pane なし"
+          }
         Button {
           reveal(worktree.session, nil)
         } label: {

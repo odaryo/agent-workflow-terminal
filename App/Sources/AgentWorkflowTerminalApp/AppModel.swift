@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
   private var canSave = false
   private let rescan = DetachedOnceTask()
   let hostControlRescan = HostControlRescan()
+  let hostControlOpenQueue = HostControlOpenQueue()
   /// `rescan` と分ける。あちらは `run()` の二重起動を防ぐ側で、スキャンが**終わった**ことは
   /// 表さない。空の一覧を「worktree が無い」と読んでよいのは、この印が立った後だけである。
   @Published private(set) var didCompleteInitialScan = false
@@ -266,7 +267,7 @@ final class AppModel: ObservableObject {
     for await _ in hostControlRescan.events(interval: rescanInterval) {
       guard !Task.isCancelled else { return }
       let waiters = hostControlRescan.beginScan()
-      defer { hostControlRescan.complete(waiters) }
+      defer { hostControlRescan.finishScan(waiters) }
       // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
       guard case .success(let scan) = await scan(with: detector) else {
         reconcileFailedScan()

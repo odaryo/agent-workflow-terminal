@@ -54,18 +54,45 @@ public struct ClaudeCodeAdapter: AgentAdapter {
   }
 
   private static func promptState(_ screen: String) -> AgentState? {
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
     if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend")
-      || hasTrustPrompt(screen)
+      || hasTrustPrompt(screen),
+      hasActivePrompt(
+        in: lines,
+        containing: [
+          "Do you want to ", "Esc to cancel · Tab to amend", "Enter to confirm · Esc to cancel",
+          "Yes, I trust this folder",
+          "Claude Code'll be able to read, edit, and execute files here.",
+        ])
     {
       return .permission
     }
-    if screen.contains("Enter to select ·") && screen.contains("Type something.") {
+    if screen.contains("Enter to select ·") && screen.contains("Type something."),
+      hasActivePrompt(in: lines, containing: ["Enter to select ·", "Type something."])
+    {
       return .question
     }
     if hasPlanApprovalPrompt(screen) {
       return .permission
     }
     return nil
+  }
+
+  // Issue #645、設計書 §12.6・§12.8: 応答本文にも確認画面の文言が引用されるため、文言だけでは判断待ちにしない。
+  private static func hasActivePrompt(in lines: [Substring], containing texts: [String]) -> Bool {
+    guard
+      let index = lines.lastIndex(where: { line in
+        texts.contains { line.contains($0) }
+      })
+    else { return false }
+    return !hasInputPromptOrDone(lines.dropFirst(index + 1))
+  }
+
+  private static func hasInputPromptOrDone(_ lines: ArraySlice<Substring>) -> Bool {
+    lines.contains {
+      $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+        || $0.hasPrefix("❯\u{00A0}")
+    }
   }
 
   // Issue #252、設計書 §12.8: 2.1.319 で採取した trust 画面は選択肢の移動でも変わるため、
@@ -93,10 +120,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return
         (precedingText.contains("Would you like to proceed?")
         || precedingText.contains("Exit plan mode?"))
-        && !followingLines.contains {
-          $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
-            || $0.hasPrefix("❯\u{00A0}")
-        }
+        && !hasInputPromptOrDone(followingLines)
     }
   }
 

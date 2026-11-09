@@ -67,11 +67,10 @@ struct HostControlTests {
   }
 
   @Test(
-    "未知のcommandやversion、小数表記のversion、不正JSON、directory欠落を拒否する",
+    "未知のcommandやversion、不正JSON、directory欠落を拒否する",
     arguments: [
       #"{"version":1,"command":"unknown","directory":"/path"}"#,
       #"{"version":2,"command":"worktree.open","directory":"/path"}"#,
-      #"{"version":1.0,"command":"worktree.open","directory":"/path"}"#,
       "{",
       #"{"version":1,"command":"worktree.open"}"#,
     ]

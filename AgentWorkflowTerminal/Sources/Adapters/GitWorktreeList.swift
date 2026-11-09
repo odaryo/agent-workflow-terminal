@@ -22,6 +22,13 @@ public struct GitWorktreeListParseResult: Sendable, Equatable {
 }
 
 public enum GitWorktreeList {
+  public static func parseCompletedRecords(output: String) -> GitWorktreeListParseResult {
+    guard let terminator = output.range(of: "\0\0", options: .backwards) else {
+      return .init(entries: [], failures: [])
+    }
+    return parse(output: String(output[..<terminator.upperBound]))
+  }
+
   public static func parse(output: String) -> GitWorktreeListParseResult {
     let attributes = output.components(separatedBy: "\0")
     var records: [[String]] = [[]]

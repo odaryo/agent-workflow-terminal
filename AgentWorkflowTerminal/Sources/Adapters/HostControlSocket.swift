@@ -170,7 +170,9 @@ enum SocketIO {
   static func lock(_ path: String) throws(HostControlSocketError) -> Int32 {
     // macOSでは稼働中でもbacklogが満杯ならECONNREFUSEDになるため、接続で生存判定しない。
     let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK | O_NOFOLLOW
-    // 別スレッドの子起動でlockが一時的に残る場合と、open中の差し替えで再試行の上限を共用する。
+    // 別スレッドが子プロセスを起動している間は、closeしても子が参照を持つのでlockが残る。
+    // 実測では子の起動と並行すると約0.3%で起き、1msで解消した。1回の失敗では稼働中と判定しない。
+    // open中の差し替えも同じ再試行の上限を共用する。
     for attempt in 0...10 {
       let descriptor = Darwin.open(path + ".lock", flags, 0o600)
       if descriptor >= 0 {
@@ -321,6 +323,8 @@ private final class SocketDescriptor: Sendable {
 private actor SocketConnection {
   private var descriptor: SocketDescriptor?
   private var pauseMilliseconds = 2
+  // クライアントは接続が1本で節約できる CPU が無く、倍々にすると応答の受信だけが数十 ms 遅れる (#762 の実測)。
+  private var maximumPauseMilliseconds = 2
 
   init(descriptor: SocketDescriptor) {
     self.descriptor = descriptor
@@ -377,6 +381,7 @@ private actor SocketConnection {
     handlerTimeout: Duration,
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) async {
+    maximumPauseMilliseconds = 50
     await withTaskCancellationHandler {
       defer { close() }
       do {
@@ -439,7 +444,7 @@ private actor SocketConnection {
 
   private func pause(_ deadline: ContinuousClock.Instant) async throws {
     let delay = pauseMilliseconds
-    pauseMilliseconds = min(delay * 2, 50)
+    pauseMilliseconds = min(delay * 2, maximumPauseMilliseconds)
     try await Task.sleep(
       until: min(deadline, ContinuousClock.now.advanced(by: .milliseconds(delay))),
       clock: .continuous)
@@ -508,6 +513,6 @@ private actor SocketConnection {
       }
     }
   }
-  // 変更対象が本ファイルに限定されているため、socket処理を別ファイルへ分割しない。
+  // listener と接続は SocketIO の状態を共有するので、行数のためだけに分けない。
   // swiftlint:disable:next file_length
 }

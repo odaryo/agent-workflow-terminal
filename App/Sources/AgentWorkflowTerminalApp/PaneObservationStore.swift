@@ -19,6 +19,7 @@ final class PaneObservationStore: ObservableObject {
     var paneStates: [PaneAgentState]?
     /// 初回完了待ちでも、購読者と完了 tracker には最新の生の状態を渡す。
     var latestPaneStates: [PaneAgentState]?
+    var isPaneListUnavailable = false
     /// Overview に出す、pane ごとに安定化した状態 (§12.2 と同じ保持)。
     var displayStates: [PaneDisplayState] = []
     /// 非 Agent pane の分も含む。
@@ -29,6 +30,7 @@ final class PaneObservationStore: ObservableObject {
 
     mutating func receivePaneStates(_ snapshot: WorktreePaneAgentStates) {
       latestPaneStates = snapshot.panes
+      isPaneListUnavailable = snapshot.isPaneListUnavailable
       guard paneStates != nil || snapshot.isComplete else { return }
       paneStates = snapshot.panes
     }

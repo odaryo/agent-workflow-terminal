@@ -1,4 +1,5 @@
 import Adapters
+import Carbon
 import Foundation
 import SwiftUI
 import TerminalCore
@@ -41,6 +42,7 @@ final class ProjectsModel: ObservableObject {
   /// 確認ダイアログの内容。非 `nil` の間だけダイアログを出す。
   @Published private(set) var pendingUnregister: ProjectUnregisterReview?
   private let startup = DetachedOnceTask()
+  private var globalHotKey: GlobalHotKey?
   var hostControlServer: HostControlSocketServer?
   var pendingHostControl: Task<HostControlResponse, Never>?
   let hostControlEnvironment = HostControlEnvironmentTask()
@@ -76,6 +78,20 @@ final class ProjectsModel: ObservableObject {
   /// すぐ返る。`AppModel.run()` と同じく view の `.task` の寿命に乗せない (Issue #238)。
   func start() {
     startup.start { await self.load() }
+  }
+
+  func startGlobalHotKey() {
+    guard globalHotKey == nil else { return }
+    let hotKey = GlobalHotKey { [weak self] in
+      guard let self else { return }
+      navigator.bringToFront(selected: selectedModel)
+    }
+    globalHotKey = hotKey
+    let status = hotKey.register(keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey))
+    if status != noErr {
+      navigator.overviewNotice =
+        "⌘Space を登録できませんでした (status \(status))。他のアプリが同じキーを使っている可能性があります。"
+    }
   }
 
   private func load() async {

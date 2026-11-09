@@ -19,6 +19,17 @@ final class AppNavigator: ObservableObject {
     return mainWindow.isVisible || mainWindow.isMiniaturized
   }
 
+  func bringToFront(selected model: AppModel?) {
+    if mainWindow?.isMiniaturized == true {
+      mainWindow?.deminiaturize(nil)
+    }
+    openWindow?(id: "main")
+    // 他のアプリが前面にいると activate() では拒まれることがある。
+    NSApp.activate(ignoringOtherApps: true)
+    mainWindow?.makeKeyAndOrderFront(nil)
+    model?.paneObservations.requestTerminalFocus()
+  }
+
   /// Project → セッション → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`
   /// ならセッションまで。
   ///

@@ -29,6 +29,32 @@ struct SessionCycleTests {
         == (forward ? first : third))
   }
 
+  @Test("異なる Project の境界を前後に越える", arguments: [true, false])
+  func crossesProjects(forward: Bool) throws {
+    let otherRoot = try #require(WorktreeIdentity(rawValue: "/other/.git"))
+    let otherWorktree = try #require(WorktreeIdentity(rawValue: "/other/.git/worktrees/second"))
+    let firstProject = try [#require(first), #require(second)]
+    let secondProject = [TerminalSessionKey.primary(otherRoot), .primary(otherWorktree)]
+    let order = firstProject + secondProject
+    #expect(
+      SessionCycle.adjacent(
+        in: order, from: forward ? firstProject.last : secondProject.first, forward: forward)
+        == (forward ? secondProject.first : firstProject.last))
+  }
+
+  @Test("異なる Project をつないだ列の両端で循環する", arguments: [true, false])
+  func wrapsAcrossProjects(forward: Bool) throws {
+    let otherRoot = try #require(WorktreeIdentity(rawValue: "/other/.git"))
+    let otherWorktree = try #require(WorktreeIdentity(rawValue: "/other/.git/worktrees/second"))
+    let firstProject = try [#require(first), #require(second)]
+    let secondProject = [TerminalSessionKey.primary(otherRoot), .primary(otherWorktree)]
+    let order = firstProject + secondProject
+    #expect(
+      SessionCycle.adjacent(
+        in: order, from: forward ? secondProject.last : firstProject.first, forward: forward)
+        == (forward ? firstProject.first : secondProject.last))
+  }
+
   @Test("未選択または一覧外なら進行方向の端を選ぶ", arguments: [true, false], [true, false])
   func absentCurrent(forward: Bool, isNil: Bool) throws {
     let order = try [#require(first), #require(second), #require(third)]

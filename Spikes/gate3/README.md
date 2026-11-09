@@ -347,7 +347,7 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 - 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
 - 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
 
-**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
+**当時検出できなかった形 (Issue #725 の拡張は §6.12)**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
 
 採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
 
@@ -412,7 +412,7 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 - 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
 - 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
 
-**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
+**当時検出できなかった形 (Issue #725 の拡張は §6.12)**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
 
 採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
 
@@ -511,6 +511,35 @@ Codex 0.166.0 の `codex-0.166.0-update-prompt.json` を Permission とする (�
 で始まる行を使う。その選択肢より下に入力欄または `Worked for ` で始まる行があれば、§6.10 の trust と
 同じ条件で引用を除外する。数字付きの選択肢は入力欄として扱わないので、選択肢2へ移しても Permission とする。
 Gate 3 の記録にはこの画面は含まれない。
+
+### 6.12 ⎿ だけの API の失敗 (Issue #725)
+
+本物の Claude Code 2.1.319 を偽 API につないだ実画面 (tmux 3.8、macOS 27.0.1、160×40) を
+`claude-2.1.319-error-{403-login,credit-balance,model-404,not-logged-in,prompt-too-long,request-timed-out}.json`
+の6件に保存した。§6.5.1 で未検出だった形を、設計書 §12.8 の条件で Error とする。
+
+現ターンの最後の `⏺ ` の行は、`⏺ API Error:` に加えて
+`⏺ Please run /login · API Error:` と `⏺ There's an issue with the selected model` を対象にする。
+`⎿` だけの失敗は、正規表現
+`^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)|Credit balance too low · |Prompt is too long · )`
+に一致する最後の行より下に `⏺ ` で始まる行が無いことを条件にする。どちらも該当行より下の
+完了行 (`·\s*done\s+\d`) が必須。半角空白と NBSP の混在や、Prompt is too long の継続行を許容する。
+列2に固定するため4桁インデントの引用は Completed とし、失敗行の後に `⏺ Done.` がある場合も Completed とする。
+この2件は未ログインの実画面 fixture の文字列置換で検証する。
+
+タイムアウトは `Request timed out (` で始まる形と、括弧が無い `Request timed out` だけの行を含む。
+モデルの失敗は、括弧が折り返しで次の行へ移る形も含む。追い修正の実画面 fixture は
+`claude-2.1.319-error-{invalid-api-key,model-404-narrow-46,request-timed-out-default}.json` の3件である。
+
+**残存する制約**: Agent の本文が同じ文言で始まる画面は本物と区別できない。
+SGR が同じなのは、本物の 403 / 404 と本文の 403 についてだけである。本文の 404 の `⏺` は
+`38;5;231`、`⎿` の本物の失敗は `38;5;211`、ツールの出力は既定色である。
+テーマで色が変わるため、色では判定しない。
+`--verbose` の Bash の結果が同じ文言の1行だけで本文が続かないと `Error` になる。
+狭い幅 (30桁付近) では文言が折り返されて取りこぼす。採取していない文言 (`OAuth token revoked · `、
+`Login expired · `、`Invalid auth token · ` など、2.1.319 のバイナリには在る) は検出しない。
+Gate 3 の記録にはこれらの画面が無いので、設計書 §12.5 に従った再採点は後退の確認だけである。
+これらの失敗を検出できるかは実画面 fixture で確認する。
 
 ### 6.3 読み取れること
 

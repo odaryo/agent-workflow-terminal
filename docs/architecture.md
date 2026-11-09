@@ -1401,7 +1401,7 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 
 ### 12.6 状態遷移の未確定事項
 
-- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーはClaude Code 2.1.319の`⏺ API Error:`の形で出るものだけ検出でき、`⎿`だけの失敗と他のAgentは検出できないことを含む)
+- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーはClaude Code 2.1.319の実測した接頭辞と完了行の組み合わせ(§12.8)で検出し、それ以外の文言と他のAgentは検出できないことを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
 
@@ -1607,6 +1607,26 @@ Codex 0.166.0では、前後の空白を除いた行で`Update available ·`で�
 始まらない行も、`Worked for `で始まる行も無いときだけPermissionとする。trustと同じ位置の条件で、
 応答本文に引用された更新の確認を除外する。trustの判定の次、titleより先に見る。
 Gate 3の記録にはこの画面は含まれない(`Spikes/gate3/README.md` §6.11)。
+
+Claude Code 2.1.319のターン中のAPIエラーは、最後の送信済みプロンプトより下で、次のどちらかを満たし、
+該当行より下に完了行(`·\s*done\s+\d`)があるときに`Error`とする(Issue #632、#725)。
+
+- 最後の`⏺ `で始まる行が、`⏺ API Error:`、`⏺ Please run /login · API Error:`、
+  `⏺ There's an issue with the selected model`のいずれかで始まる。
+- `^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)|Credit balance too low · |Prompt is too long · )`
+  に一致する最後の行があり、その下に`⏺ `で始まる行が無い。列2に固定して深いインデントの引用を除く。
+
+タイムアウトは`Request timed out (`で始まる形と、括弧が無い`Request timed out`だけの行を含む。
+モデルの失敗は、括弧が折り返しで次の行へ移る形も含む。
+
+Agentの本文が同じ文言で始まる画面は本物と区別できない。SGRが同じなのは、本物の403 / 404と
+本文の403についてだけである。本文の404の`⏺`は`38;5;231`、`⎿`の本物の失敗は`38;5;211`、
+ツールの出力は既定色である。テーマで色が変わるため、色では判定しない。
+残存する制約として、`--verbose`のBashの結果が同じ文言の1行だけで本文が続かないと`Error`になる。
+狭い幅(30桁付近)では文言が折り返されて取りこぼす。採取していない文言(`OAuth token revoked · `、
+`Login expired · `、`Invalid auth token · `など、2.1.319のバイナリには在る)は検出しない。
+Gate 3の記録にはIssue #725のこれらの画面は無いため、§12.5に従った再採点は後退の確認だけであり、
+検出の確認は実画面のfixtureで行う(`Spikes/gate3/README.md` §6.12)。
 
 **Codexの起動直後のtitleのspinnerは`Working`のままとする — 現在の推奨(2026-11-09、Issue #642)。** Codex 0.166.0は、起動後の入力欄の画面(`Ask Codex to do anything`)のままtitleの先頭にspinnerを出すことがある。MCPサーバの起動待ちの間で、応答しないMCPサーバでは約30秒(起動から約14秒〜44秒)、MCPなしでは約1.3秒だった(tmux 3.8、隔離したCODEX_HOME)。Codexが実際に処理している区間であり、`Working`の間はDiffコメントを送れないので安全側に倒れる。入力欄のプレースホルダはターン中にも出るため、画面だけではターン中と区別できない。起動の間だけ`Idle`にする条件は足さない。
 

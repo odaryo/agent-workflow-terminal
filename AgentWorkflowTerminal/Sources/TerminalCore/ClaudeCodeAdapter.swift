@@ -154,12 +154,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
     guard !hasScrolledTranscript else { return nil }
     // Issue #632: 2.1.319 では retry が尽きても done が出るため、正常完了と区別する。
-    if let lastResponseIndex = currentTurnLines.lastIndex(where: { $0.hasPrefix("⏺ ") }),
-      currentTurnLines[lastResponseIndex].hasPrefix("⏺ API Error:"),
-      currentTurnLines.suffix(from: lastResponseIndex + 1).contains(where: {
-        $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
-      })
-    {
+    if hasCompletedAPIError(in: currentTurnLines) {
       return .error
     }
     if hasEmptyInputPrompt,
@@ -189,6 +184,32 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return .completed
     }
     return nil
+  }
+
+  private static func hasCompletedAPIError(in lines: ArraySlice<Substring>) -> Bool {
+    let lastResponseIndex = lines.lastIndex(where: { $0.hasPrefix("⏺ ") })
+    let responseErrorIndex = lastResponseIndex.flatMap { index in
+      [
+        "⏺ API Error:", "⏺ Please run /login · API Error:",
+        "⏺ There's an issue with the selected model",
+      ].contains(where: { lines[index].hasPrefix($0) }) ? index : nil
+    }
+    // Issue #725: 深いインデントの引用を除くため列 2 に固定する。区切りには NBSP も混ざる。
+    let nestedErrorIndex = lines.lastIndex(where: {
+      $0.range(
+        of: #"^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)"#
+          + #"|Credit balance too low · |Prompt is too long · )"#,
+        options: .regularExpression) != nil
+    })
+    let errorIndex =
+      responseErrorIndex
+      ?? nestedErrorIndex.flatMap { index in
+        lastResponseIndex.map { $0 > index } == true ? nil : index
+      }
+    guard let errorIndex else { return false }
+    return lines.suffix(from: errorIndex + 1).contains(where: {
+      $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+    })
   }
 
   // Issue #631: 完了行を出さないターンは Unknown のままだと Diff コメントを送れない。

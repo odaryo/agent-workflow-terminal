@@ -1,9 +1,9 @@
 {
-  "expectedState": "unknown",
+  "expectedState": "permission",
   "acceptableStates": [
-    "unknown"
+    "permission"
   ],
-  "note": "起動時の更新の確認 (Update available)。入力待ちで止まるが、§12.8 の trust prompt ではなく、Permission に含める決定も無い。trust の判定に footer の enter continue を使うと、ここを Permission と取り違える (陰性の対照)。 processNames は採取していない。adapter の processNames と同じ最小の値を入れた。",
+  "note": "起動時の更新の確認 (Issue #639、§12.8)。Permission として扱う。",
   "source": "x252-1 (m252 の採取)",
   "paneTitle": "codex /p/t/c/-/a/s/m/wx",
   "paneCurrentCommand": "codex",

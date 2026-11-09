@@ -1,8 +1,8 @@
 import Foundation
 
 /// Codex 0.152.1 が title に出す spinner / Action Required と画面の実測、および
-/// 0.166.0 の trust 画面の実測だけを使う (Spikes/gate3/README.md §3.2、§4.1、§6.2、§11、
-/// Issue #252、設計書 §12.8)。
+/// 0.166.0 の trust・更新確認画面の実測だけを使う (Spikes/gate3/README.md §3.2、§4.1、§6.2、§6.11、§11、
+/// Issue #252、#639、設計書 §12.8)。
 public struct CodexAdapter: AgentAdapter {
   public let id = AgentAdapterID(rawValue: "codex")
   public let processNames: Set<String> = ["codex"]
@@ -21,11 +21,16 @@ public struct CodexAdapter: AgentAdapter {
         let trustIndex = lines.lastIndex(where: {
           $0 == "› 1. Trust and continue" || $0 == "1. Trust and continue"
         }),
-        !lines.dropFirst(trustIndex + 1).contains(where: {
-          $0.hasPrefix("Worked for ")
-            || ($0.hasPrefix("› ")
-              && $0.range(of: #"^› \d+\. "#, options: .regularExpression) == nil)
-        })
+        !hasInputOrCompletion(in: lines, below: trustIndex)
+      {
+        return observation(.permission, signals)
+      }
+      // Issue #639、設計書 §12.8: 更新の選択も人の入力を待つため、title によらず判断待ちにする。
+      if lines.contains(where: { $0.hasPrefix("Update available · ") }),
+        let updateIndex = lines.lastIndex(where: {
+          $0.hasPrefix("› 1. Update now") || $0.hasPrefix("1. Update now")
+        }),
+        !hasInputOrCompletion(in: lines, below: updateIndex)
       {
         return observation(.permission, signals)
       }
@@ -44,6 +49,14 @@ public struct CodexAdapter: AgentAdapter {
     }
     if screen.contains("Ask Codex to do anything") { return observation(.idle, signals) }
     return unknown(signals, reason: .adapterUndetermined)
+  }
+
+  private func hasInputOrCompletion(in lines: [String], below index: Int) -> Bool {
+    lines.dropFirst(index + 1).contains(where: {
+      $0.hasPrefix("Worked for ")
+        || ($0.hasPrefix("› ")
+          && $0.range(of: #"^› \d+\. "#, options: .regularExpression) == nil)
+    })
   }
 
   private func attentionObservation(_ signals: AgentSignals) -> AgentObservationResult? {

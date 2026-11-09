@@ -130,6 +130,61 @@ struct CodexAdapterTests {
     #expect(fixtureState(of: result) == "permission")
   }
 
+  @Test("§12.8 応答中に更新の確認を引用しても Permission にしない (Issue #639)")
+  func quotedUpdatePromptInResponseIsNotPermission() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "codex-0.166.0-quoted-trust-in-reply.json").first)
+    let quotedTrustPrompt = """
+        Folder access
+        /private/tmp/sanitized
+        › 1. Trust and continue
+          2. Back to Agent Command Center
+
+          enter continue · esc back
+      """
+    let quotedUpdatePrompt = """
+        Update available · 0.166.0 → 0.167.0
+        Release notes: https://github.com/openai/codex/releases/latest
+
+        › 1. Update now (...)
+          2. Skip
+          3. Skip until next version
+
+          enter continue · esc skip
+      """
+    let screen = fixture.screen.replacingOccurrences(
+      of: quotedTrustPrompt, with: quotedUpdatePrompt)
+    try #require(screen != fixture.screen)
+    try #require(screen.contains("Worked for "))
+    try #require(screen.contains("› Ask Codex to do anything"))
+    let result = CodexAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) != "permission")
+  }
+
+  @Test("§12.8 更新の確認は選択肢2を選んでも Permission (Issue #639)")
+  func updatePromptWithSecondOptionSelectedIsPermission() throws {
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "codex-0.166.0-update-prompt.json").first)
+    let withoutFirstSelection = fixture.screen.replacingOccurrences(
+      of: "› 1. Update now", with: "  1. Update now")
+    try #require(withoutFirstSelection != fixture.screen)
+    let screen = withoutFirstSelection.replacingOccurrences(
+      of: "  2. Skip\n", with: "› 2. Skip\n")
+    try #require(screen != withoutFirstSelection)
+    let result = CodexAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "permission")
+  }
+
   @Test("title 由来の操作待ち category を保つ")
   func titleAttention() {
     let signals = AgentSignals(

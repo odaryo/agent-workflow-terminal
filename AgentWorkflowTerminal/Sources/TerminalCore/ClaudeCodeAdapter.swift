@@ -162,6 +162,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     {
       return .error
     }
+    if hasEmptyInputPrompt,
+      isIdleAfterTurnWithoutCompletionLine(
+        screen: screen, submittedPrompt: lastSubmittedPromptIndex.map { lines[$0] },
+        turnLines: currentTurnLines)
+    {
+      return .idle
+    }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
       && !screen.contains("⏺")
@@ -182,6 +189,34 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return .completed
     }
     return nil
+  }
+
+  // Issue #631: 完了行を出さないターンは Unknown のままだと Diff コメントを送れない。
+  // `!` の実行中と応答のストリーム中は入力欄が空でも次の入力を待っていない (footer の印で分かる)。
+  private static func isIdleAfterTurnWithoutCompletionLine(
+    screen: String, submittedPrompt: Substring?, turnLines: ArraySlice<Substring>
+  ) -> Bool {
+    guard !screen.contains("esc to interrupt"),
+      !turnLines.contains(where: { $0.hasPrefix("! ") })
+    else { return false }
+    // `⎿` の後は半角空白と NBSP の並び (2.1.319 の実測)。列を固定して引用された同じ文言を除く。
+    if let interruptedIndex = turnLines.lastIndex(where: {
+      $0.range(of: #"^  ⎿[ \x{00A0}]+Interrupted · "#, options: .regularExpression) != nil
+    }) {
+      return !turnLines.suffix(from: interruptedIndex + 1).contains(where: {
+        $0.hasPrefix("⏺ ")
+          || $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+      })
+    }
+    guard let submittedPrompt,
+      submittedPrompt.range(of: #"^❯ +/\S"#, options: .regularExpression) != nil,
+      let firstOutput = turnLines.first(where: {
+        !$0.trimmingCharacters(in: .whitespaces).isEmpty
+      }),
+      firstOutput.trimmingCharacters(in: .whitespaces).hasPrefix("⎿"),
+      !firstOutput.contains("Running in the background")
+    else { return false }
+    return !turnLines.contains(where: { $0.hasPrefix("⏺ ") })
   }
 
   // Issue #653: スクロール中は最後の送信済みプロンプトが前のターンのものに見えるため、

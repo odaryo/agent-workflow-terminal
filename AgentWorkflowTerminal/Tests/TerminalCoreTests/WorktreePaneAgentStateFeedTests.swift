@@ -473,9 +473,17 @@ private actor FeedOutputRecorder {
 actor FeedTestClock: ContinuousTimeSource {
   nonisolated let now = ContinuousClock().now
   private var sleepers: [CheckedContinuation<Void, any Error>] = []
+  private(set) var sleepCount = 0
 
   func sleep(until deadline: ContinuousClock.Instant) async throws {
+    sleepCount += 1
     try await withCheckedThrowingContinuation { continuation in sleepers.append(continuation) }
+  }
+
+  func waitForSleep(_ count: Int) async -> Bool {
+    let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+    while sleepCount < count, ContinuousClock().now < deadline { await Task.yield() }
+    return sleepCount >= count
   }
 
   func advance() {

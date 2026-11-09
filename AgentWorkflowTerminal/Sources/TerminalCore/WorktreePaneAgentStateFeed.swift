@@ -1,3 +1,5 @@
+import Foundation
+
 public protocol WorktreePaneSource: Sendable {
   /// 実装体は tmux `list-panes` の順序を保つ。session がまだ無ければ throw せず空配列を返す。
   /// 返すのはその session の pane だけで、同じ worktree の他の session の pane を混ぜない
@@ -16,7 +18,8 @@ public struct WorktreePaneAgentStates: Sendable, Hashable {
   public let panes: [PaneAgentState]
   public let agentAbsentPanes: Set<PaneID>
   /// pane 一覧の全 pane について、adapter の最初の結果 (観測か `.absent`) が届いている。
-  /// pane が無ければ真。後から pane が現れると、その結果が届くまで再び偽になる。
+  /// pane が無ければ真。一覧を観測できない間は偽で、後から pane が現れたときも
+  /// その結果が届くまで再び偽になる。
   ///
   /// - Important: 最初の配信は adapter の結果がまだ無いので、ほぼ必ず `[]` で偽になる。
   ///   これを「Agent pane が無い」と読んで基準にすると、次の配信で判断待ちの pane が全部
@@ -54,6 +57,7 @@ public struct WorktreePaneAgentStateFeed: Sendable {
   /// (設計書 §5.2)。空配列は Agent pane が1つも無いことを表し、代表状態の `nil` を Idle 表示へ
   /// 変換する規則は表示層に留める。
   /// 未観測を Agent 不在と誤認させないため、初回は全 pane の結果が揃うまで配信しない (§13)。
+  /// ただし一覧の観測失敗が続いた場合は Unknown として配信する。
   public func states(
     of session: TerminalSessionKey,
     panes paneSource: any WorktreePaneSource,
@@ -125,6 +129,7 @@ public struct WorktreePaneAgentStateFeed: Sendable {
           await coordinator.receive(panes)
         } catch {
           guard !Task.isCancelled else { break }
+          await coordinator.receiveListingFailure()
         }
 
         do {
@@ -165,6 +170,8 @@ actor WorktreePaneFeedCoordinator {
   private var lastYielded: WorktreePaneAgentStates?
   private var pollTask: Task<Void, Never>?
   private var isCancelled = false
+  private var consecutiveListingFailures = 0
+  private var listingFailedAt: Date?
 
   init(
     adapters: [any AgentAdapter],
@@ -190,6 +197,8 @@ actor WorktreePaneFeedCoordinator {
 
   func receive(_ panes: [PaneSnapshot]) async {
     guard !isCancelled else { return }
+    consecutiveListingFailures = 0
+    listingFailedAt = nil
     let paneIDs = Set(panes.map(\.id))
     let removed = entries.keys.filter { !paneIDs.contains($0) }
     for paneID in removed {
@@ -215,6 +224,16 @@ actor WorktreePaneFeedCoordinator {
         entries[pane.id] = PaneEntry(snapshot: pane, result: nil, task: nil, generation: 0)
         await startObservation(for: pane)
       }
+    }
+    yieldIfChanged()
+  }
+
+  func receiveListingFailure() {
+    guard !isCancelled else { return }
+    // 1回の tmux の失敗で状態と通知が揺れないよう、観測失敗へ倒す前に連続2回の失敗を待つ。
+    consecutiveListingFailures = min(consecutiveListingFailures + 1, 2)
+    if consecutiveListingFailures == 2, listingFailedAt == nil {
+      listingFailedAt = Date()
     }
     yieldIfChanged()
   }
@@ -289,16 +308,33 @@ actor WorktreePaneFeedCoordinator {
 
   private func yieldIfChanged() {
     let value = paneOrder.compactMap { paneID -> PaneAgentState? in
+      if let listingFailedAt {
+        guard entries[paneID]?.result != .absent else { return nil }
+        let previous: AgentStateObservation?
+        if case .observation(let observation) = entries[paneID]?.result {
+          previous = observation
+        } else {
+          previous = nil
+        }
+        return PaneAgentState(
+          id: paneID,
+          observation: AgentStateObservation(
+            state: .unknown, adapterID: previous?.adapterID ?? fallback.id,
+            observedAt: listingFailedAt, lastKnownAt: previous?.lastKnownAt,
+            diagnostics: "pane の一覧を観測できません", unknownReason: .observationFailed))
+      }
       guard case .observation(let observation) = entries[paneID]?.result else { return nil }
       return PaneAgentState(id: paneID, observation: observation)
     }
-    let isComplete = paneOrder.allSatisfy { entries[$0]?.result != nil }
+    let isComplete =
+      listingFailedAt == nil && !(paneOrder.isEmpty && consecutiveListingFailures > 0)
+      && paneOrder.allSatisfy { entries[$0]?.result != nil }
     let agentAbsentPanes = Set(paneOrder.filter { entries[$0]?.result == .absent })
     let snapshot = WorktreePaneAgentStates(
       panes: value, isComplete: isComplete, agentAbsentPanes: agentAbsentPanes)
     switch output {
     case .states(let continuation):
-      guard lastYielded != nil || isComplete else { return }
+      guard lastYielded != nil || isComplete || listingFailedAt != nil else { return }
       guard value != lastYielded?.panes else { return }
       continuation.yield(value)
     case .snapshots(let continuation):

@@ -2,14 +2,15 @@ import SwiftUI
 
 struct ProjectNavigationCommands: Commands {
   @ObservedObject var projects: ProjectsModel
+  @ObservedObject var shortcuts: ShortcutSettingsStore
 
   var body: some Commands {
     CommandGroup(after: .toolbar) {
       Button("前のプロジェクト") { selectAdjacentProject(forward: false) }
-        .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+        .keyboardShortcut(shortcuts.shortcut(for: .previousProject))
         .disabled(projects.selectedModel == nil)
       Button("次のプロジェクト") { selectAdjacentProject(forward: true) }
-        .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+        .keyboardShortcut(shortcuts.shortcut(for: .nextProject))
         .disabled(projects.selectedModel == nil)
     }
   }

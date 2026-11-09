@@ -28,11 +28,11 @@ struct AgentWorkflowTerminalApp: App {
     .windowResizability(.contentMinSize)
     .defaultSize(width: 900, height: 560)
     .commands {
-      ProjectNavigationCommands(projects: projects)
-      SessionCyclingCommands(projects: projects)
-      ViewerCommands(projects: projects)
+      ProjectNavigationCommands(projects: projects, shortcuts: projects.shortcuts)
+      SessionCyclingCommands(projects: projects, shortcuts: projects.shortcuts)
+      ViewerCommands(projects: projects, shortcuts: projects.shortcuts)
       CommandGroup(after: .toolbar) {
-        OverviewMenuItem(navigator: projects.navigator)
+        OverviewMenuItem(navigator: projects.navigator, shortcuts: projects.shortcuts)
       }
       // `Window` だけで File メニューごと消えることは計測済みで、この行は多重防御。
       CommandGroup(replacing: .newItem) {}

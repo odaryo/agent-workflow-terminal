@@ -100,7 +100,7 @@ public enum PaneNotification: Sendable, Hashable {
 /// - Important: 判断待ちは「その状態へ入った遷移1回につき1回」。`Unknown` (Needs Attention で
 ///   ないもの) と観測なし (pane 一覧に無いか結果が未着) は直前の既知の状態を保つ。
 ///   保たないと `Question` → `Unknown` → `Question` のたびに鳴る。Agent の終了 (`agentAbsentPanes`) は
-///   別の Agent の判断待ちを前の続きとみなさないため、基準の後は状態の記憶を捨てる。
+///   別の Agent の判断待ちを前の続きとみなさないため、基準の観測でも状態の記憶を捨てる。
 /// - Important: 種別不明の注意状態 (§12.4.3) と種類の分かる判断待ちの行き来は、同じ判断待ちの
 ///   続きとして再通知しない。ただし続きとみなすのは、その判断待ちを**既に知らせた**場合だけ
 ///   (通知を出した、または前面時の抑止で消費した。基準の時点の判断待ちはまとめ通知に数える
@@ -267,12 +267,12 @@ public struct PaneNotificationPlanner: Sendable {
     }
     sessions[session] = memory
     var notifications: [PaneNotification] = []
+    for paneID in snapshot.agentAbsentPanes where panes[paneID] != nil {
+      panes[paneID]?.lastKnown = nil
+      panes[paneID]?.isAttentionAnnounced = false
+      panes[paneID]?.isSummaryMember = false
+    }
     for (paneID, pane) in panes where !isBaseline && pane.session == session {
-      if snapshot.agentAbsentPanes.contains(paneID) {
-        panes[paneID]?.lastKnown = nil
-        panes[paneID]?.isAttentionAnnounced = false
-        panes[paneID]?.isSummaryMember = false
-      }
       if !memory.observedPanes.contains(paneID) {
         // 観測が途切れた時間を Unknown の継続に含めない。
         panes[paneID]?.trackUnknown(isPlain: false, at: instant)

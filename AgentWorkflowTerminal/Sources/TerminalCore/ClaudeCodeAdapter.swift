@@ -256,15 +256,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
     guard let index = lines.lastIndex(where: { $0.hasPrefix("❯") }) else { return .absent }
     let followingLines = lines.dropFirst(index + 1)
-    // Issue #270: 2.1.319 の \ + Enter の継続行は ❯ の下・区切りの上に出るため、
-    // 先頭行が空でも空欄とは限らない。継続行の dim は実測が無いため入力済みとして扱う。
+    // Issue #270 / #648: 2.1.319 の \ + Enter の継続行は ❯ の下・区切りの上に出るため、
+    // 先頭行も継続行も空白だけでも改行が残っている。継続行の dim は実測が無いため入力済みとして扱う。
     if let separatorIndex = followingLines.firstIndex(where: {
       let trimmed = $0.trimmingCharacters(in: .whitespaces)
       return !trimmed.isEmpty && trimmed.allSatisfy { $0 == "─" }
     }),
-      followingLines[..<separatorIndex].contains(where: {
-        !$0.trimmingCharacters(in: .whitespaces).isEmpty
-      })
+      !followingLines[..<separatorIndex].isEmpty
     {
       return .typed
     }
@@ -299,7 +297,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     case empty
     /// 文脈サジェスト。利用者の入力ではない。
     case placeholder
-    /// 最後の `❯` の行の下・区切りの上に文字がある場合も含む。そこが入力欄でないとき
+    /// 最後の `❯` の行の下・区切りの上に空白だけでも行がある場合も含む。そこが入力欄でないとき
     /// (permission / question のダイアログ、送信済みプロンプトが最後の `❯` の行のとき) にも
     /// 返るので、「利用者が打った」とは限らない。Idle / Completed へ丸めない向きにだけ使う。
     case typed

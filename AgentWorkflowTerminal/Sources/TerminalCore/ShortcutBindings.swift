@@ -20,7 +20,15 @@ public struct KeyCombination: Hashable, Sendable, Codable {
 
   public init(key: ShortcutKey, modifiers: Set<ShortcutModifier>) {
     if case .character(let character) = key {
-      self.key = .character(character.lowercased())
+      self.key =
+        switch character {
+        case " ": .space
+        case "\u{F700}": .upArrow
+        case "\u{F701}": .downArrow
+        case "\u{F702}": .leftArrow
+        case "\u{F703}": .rightArrow
+        default: .character(character.lowercased())
+        }
     } else {
       self.key = key
     }
@@ -34,12 +42,19 @@ public struct KeyCombination: Hashable, Sendable, Codable {
       modifiers: try container.decode(Set<ShortcutModifier>.self, forKey: .modifiers))
   }
 
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(key, forKey: .key)
+    try container.encode(modifiers.sorted { $0.rawValue < $1.rawValue }, forKey: .modifiers)
+  }
+
   private enum CodingKeys: String, CodingKey {
     case key, modifiers
   }
 }
 
 public enum ShortcutAssignmentError: Error, Equatable, Sendable {
+  case unsupportedKey
   case commandModifierRequired
   case reserved
   case conflict(ShortcutAction)
@@ -91,18 +106,20 @@ public struct ShortcutBindings: Equatable, Sendable {
 
   public func encoded() -> Data {
     let entries = Dictionary(uniqueKeysWithValues: overrides.map { ($0.key.rawValue, $0.value) })
-    return (try? JSONEncoder().encode(entries)) ?? Data("{}".utf8)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    return (try? encoder.encode(entries)) ?? Data("{}".utf8)
   }
 
   public static func decoded(from data: Data?) -> (bindings: Self, droppedCount: Int) {
     guard let data,
-      let entries = try? JSONDecoder().decode([String: KeyCombination].self, from: data)
+      let entries = try? JSONDecoder().decode([String: StoredCombination].self, from: data)
     else { return (Self(), 0) }
 
     var bindings = Self()
     var droppedCount = 0
-    for (name, combination) in entries {
-      guard let action = ShortcutAction(rawValue: name) else {
+    for (name, entry) in entries {
+      guard let action = ShortcutAction(rawValue: name), let combination = entry.combination else {
         droppedCount += 1
         continue
       }
@@ -140,11 +157,27 @@ public struct ShortcutBindings: Equatable, Sendable {
   }
 
   private static func validate(_ combination: KeyCombination) throws(ShortcutAssignmentError) {
+    if case .character(let character) = combination.key {
+      guard character.unicodeScalars.count == 1,
+        let scalar = character.unicodeScalars.first,
+        (0x21...0x7E).contains(scalar.value)
+      else {
+        throw .unsupportedKey
+      }
+    }
     guard combination.modifiers.contains(.command) else {
       throw .commandModifierRequired
     }
     guard !reserved.contains(combination) else {
       throw .reserved
+    }
+  }
+
+  private struct StoredCombination: Decodable {
+    let combination: KeyCombination?
+
+    init(from decoder: any Decoder) throws {
+      combination = try? KeyCombination(from: decoder)
     }
   }
 }

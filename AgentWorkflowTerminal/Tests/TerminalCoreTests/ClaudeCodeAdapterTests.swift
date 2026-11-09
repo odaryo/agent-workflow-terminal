@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 24)
+    #expect(fixtures.count == 28)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -380,5 +380,79 @@ struct ClaudeCodeAdapterTests {
       ),
       liveness: .alive
     )
+  }
+}
+
+extension ClaudeCodeAdapterTests {
+  @Test("前ターンの API Error と完了行は今の正常完了を妨げない (Issue #632)")
+  func previousTurnAPIErrorDoesNotOverrideCompletion() {
+    let screen = """
+      ❯ previous request
+      ⏺ API Error: Connection refused
+      ✻ Baked for 3m 11s · done 10:29 AM
+      ❯ current request
+      ⏺ DONE
+      ✻ Baked for 2s · done 10:30 AM
+      ❯
+      """
+    #expect(classifyQuietScreen(screen) == "completed")
+  }
+
+  @Test("今のターンの API Error より後に本文があれば正常完了する (Issue #632)")
+  func responseAfterAPIErrorIsCompleted() {
+    let screen = """
+      ❯ current request
+      ⏺ API Error: Connection refused
+      ⏺ DONE
+      ✻ Baked for 2s · done 10:30 AM
+      ❯
+      """
+    #expect(classifyQuietScreen(screen) == "completed")
+  }
+
+  @Test("最後の送信済みプロンプトより上の retry 行では Working にしない (Issue #632)")
+  func previousTurnRetryDoesNotIndicateWorking() {
+    let screen = """
+      ❯ previous request
+      ✻ Connection refused · Retrying in 9s · attempt 5/10
+      ❯ current request
+      ⏺ DONE
+      ✻ Baked for 2s · done 10:30 AM
+      ❯
+      """
+    #expect(classifyQuietScreen(screen) != "working")
+  }
+
+  @Test("本文の proceed 文言だけでは Permission にしない (Issue #632)")
+  func proceedTextWithoutChoicesIsNotPermission() {
+    let screen = """
+      ❯ current request
+      ⏺ Would you like to proceed?
+      ✻ Baked for 2s · done 10:30 AM
+      ❯
+      """
+    #expect(classifyQuietScreen(screen) != "permission")
+  }
+
+  @Test("plan 承認の2番目の選択肢へ移動しても Permission (Issue #632)")
+  func planApprovalWithSecondChoiceSelectedIsPermission() {
+    let screen = """
+      Claude has written up a plan and is ready to execute. Would you like to proceed?
+
+        1. Yes, and use auto mode
+      ❯ 2. Yes, and manually approve edits
+        3. No, keep planning
+      """
+    #expect(classifyQuietScreen(screen) == "permission")
+  }
+
+  private func classifyQuietScreen(_ screen: String) -> String {
+    fixtureState(
+      of: ClaudeCodeAdapter().classify(
+        signals: AgentSignals(
+          paneTitle: "", screenText: screen, styledScreenText: nil,
+          secondsSinceScreenChange: 2.0, hasObservedScreenChange: true,
+          observedAt: .distantPast
+        ), liveness: .alive))
   }
 }

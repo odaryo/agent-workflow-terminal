@@ -23,7 +23,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return unknown(signals, reason: .screenUnavailable)
     }
     if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend")
-      || Self.hasTrustPrompt(screen)
+      || Self.hasTrustPrompt(screen) || Self.hasPlanApprovalPrompt(screen)
     {
       return observation(.permission, signals)
     }
@@ -68,6 +68,19 @@ public struct ClaudeCodeAdapter: AgentAdapter {
         || lines.contains("Claude Code'll be able to read, edit, and execute files here."))
   }
 
+  // Issue #632: 2.1.319 の plan 承認は選択肢の移動でも画面が変わるため、
+  // 画面変化による Working より優先する。本文の同じ文言だけでは承認待ちとしない。
+  private static func hasPlanApprovalPrompt(_ screen: String) -> Bool {
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { $0.trimmingCharacters(in: .whitespaces) }
+    return lines.indices.contains { index in
+      (lines[index] == "Exit plan mode?" || lines[index].hasSuffix("Would you like to proceed?"))
+        && lines.dropFirst(index + 1).prefix(6).contains {
+          $0.range(of: #"^❯ \d+\. "#, options: .regularExpression) != nil
+        }
+    }
+  }
+
   private static func currentTurnState(
     screen: String, hasEmptyInputPrompt: Bool, hasScrolledTranscript: Bool
   ) -> AgentState? {
@@ -85,7 +98,24 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }) {
       return .working
     }
+    // Issue #632: 2.1.319 の retry 待ちもターンが続いており、Idle では入力を送れてしまう。
+    if currentTurnLines.contains(where: {
+      $0.range(
+        of: #"^[·✢✳✶✻✽] .+ · Retrying in \d+s · attempt \d+/\d+$"#, options: .regularExpression
+      ) != nil
+    }) {
+      return .working
+    }
     guard !hasScrolledTranscript else { return nil }
+    // Issue #632: 2.1.319 では retry が尽きても done が出るため、正常完了と区別する。
+    if let lastResponseIndex = currentTurnLines.lastIndex(where: { $0.hasPrefix("⏺ ") }),
+      currentTurnLines[lastResponseIndex].hasPrefix("⏺ API Error"),
+      currentTurnLines.suffix(from: lastResponseIndex + 1).contains(where: {
+        $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+      })
+    {
+      return .error
+    }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
       && !screen.contains("⏺")

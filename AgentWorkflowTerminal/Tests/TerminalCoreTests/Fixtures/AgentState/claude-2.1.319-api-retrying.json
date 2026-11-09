@@ -1,0 +1,22 @@
+{
+  "expectedState": "working",
+  "acceptableStates": [
+    "working"
+  ],
+  "note": "API の retry 中。ターンは続いていて入力すべきでない。行は `✻ <理由> · Retrying in 9s · attempt 5/10` で、…を持たず起動バナーの idle 判定に当たっていた (Issue #632)。 本物の claude 2.1.319 を、一時的な HOME と CLAUDE_CONFIG_DIR、ローカルの偽 API (retry は閉じたポート) につないで採取した。ログインしていないので 2 行目は API Usage Billing。",
+  "source": "claude-2.1.319-api-retrying (frames-retry/009、1 秒間隔の採取列)",
+  "paneTitle": "◑ Claude Code",
+  "paneCurrentCommand": "zsh",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude",
+    "caffeinate"
+  ],
+  "captureCommand": "tmux -L awt632c7f capture-pane -p -t =<session>: / capture-pane -e -p -t =<session>: (160x40)",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /…/c632/work-retry\n\n\n❯ Reply with OK only.\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n✻ Connection refused — a firewall or proxy may be blocking it (ECONNREFUSED) · Retrying in 9s · attempt 5/10\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ plan mode on (shift+tab to cycle) · esc to interrupt\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/…/c632/work-retry\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mReply with OK only.\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[38;5;211m\u001b[49m✻\u001b[39m \u001b[38;5;211mConnection refused — a firewall or proxy may be blocking it (ECONNREFUSED)\u001b[38;5;246m · Retrying in 9s · attempt 5/10\u001b[39m\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;246m❯ \u001b[7m\u001b[39m \u001b[0m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;73m⏸ plan mode on\u001b[38;5;246m (shift+tab to cycle) · esc to interrupt\u001b[39m\n"
+}

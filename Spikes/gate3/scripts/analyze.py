@@ -227,6 +227,56 @@ def c_screen_spinner(rec, agent, ctx):
     return state
 
 
+def c_screen_retry_error_plan(rec, agent, ctx):
+    state = c_screen_spinner(rec, agent, ctx)
+    if agent != "claude" or not agent_alive(rec, agent):
+        return state
+    if state in ("permission", "question", "error"):
+        return state
+    # Issue #632: 2.1.319 の plan 承認は選択肢の移動でも画面が変わるため。
+    lines = (rec.get("screen") or "").split("\n")
+    trimmed_lines = [line.strip() for line in lines]
+    for index, line in enumerate(trimmed_lines):
+        if line == "Exit plan mode?" or line.endswith("Would you like to proceed?"):
+            if any(re.search(r"^❯ \d+\. ", choice)
+                   for choice in trimmed_lines[index + 1:index + 7]):
+                return "permission"
+    last_prompt = next(
+        (index for index in range(len(lines) - 1, -1, -1)
+         if re.search(r"^❯ +\S", lines[index])), None
+    )
+    current_turn_lines = lines[last_prompt + 1:] if last_prompt is not None else lines
+    # Issue #632: 2.1.319 の retry 待ちは入力待ちではないため。
+    if any(re.search(r"^[·✢✳✶✻✽] .+ · Retrying in \d+s · attempt \d+/\d+$", line)
+           for line in current_turn_lines):
+        return "working"
+    prompt_index = next(
+        (index for index in range(len(lines) - 1, -1, -1)
+         if lines[index].startswith("❯")), None
+    )
+    if prompt_index is not None:
+        separator_index = next(
+            (index for index in range(prompt_index - 1, -1, -1)
+             if lines[index].strip() and set(lines[index].strip()) == {"─"}), None
+        )
+        if separator_index is not None and any(
+            re.search(r"(Jump to bottom|\d+ new messages?)", line)
+            for line in lines[max(0, separator_index - 3):separator_index]
+        ):
+            return state
+    # Issue #632: 2.1.319 では retry が尽きても done が出るため。
+    last_response = next(
+        (index for index in range(len(current_turn_lines) - 1, -1, -1)
+         if current_turn_lines[index].startswith("⏺ ")), None
+    )
+    if (last_response is not None
+            and current_turn_lines[last_response].startswith("⏺ API Error")
+            and any(re.search(r"·\s*done\s+\d", line)
+                    for line in current_turn_lines[last_response + 1:])):
+        return "error"
+    return state
+
+
 def c_tier_a(rec, agent, ctx):
     """Tier A の組み合わせ。
 
@@ -276,6 +326,7 @@ CLASSIFIERS = {
     "S2-screen": c_screen,
     "S2-screen-dim": c_screen_dim,
     "S2-screen-spinner": c_screen_spinner,
+    "S2-screen-retry-error-plan": c_screen_retry_error_plan,
     "TierA-combined": c_tier_a,
     "S3-hooks": c_hooks,
 }

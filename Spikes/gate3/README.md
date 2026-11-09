@@ -336,6 +336,22 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 0 になった。長い応答を流している間は spinner 行が出ないので (§6.3-2)、そこは今までどおり画面鮮度で拾う。
 2.1.263 の記録 (§6.4) は記録した Mac に残っていなかったので、再採点していない。
 
+### 6.5.1 API の retry、retry が尽きた後、plan 承認 (Issue #632)
+
+**この記録に3つの画面は写っていない。** よって下の採点で分かるのは、足した信号が既存の区間を壊していないことだけで、3つの画面の検出率は別の採取列で数えた。
+
+採取は本物の Claude Code 2.1.319 (tmux 3.8、macOS 27.0.1、160×40、1 秒間隔) を、一時的な HOME と `CLAUDE_CONFIG_DIR`、ダミーのトークン、ローカルの偽 API につないで行った。retry は閉じたポートへの接続で、plan 承認は偽 API に `Write` と `ExitPlanMode` を返させて出した。fixture は `claude-2.1.319-{api-retrying,api-error-exhausted,plan-approval,plan-exit-empty}.json`。
+
+- retry の行 (`✻ <理由> · Retrying in 9s · attempt 5/10`) が最後の送信済みプロンプトより下にあれば `working`
+- 現ターンの最後の `⏺ ` の行が `⏺ API Error` で始まり、その下に `· done N` があれば `error`
+- `Exit plan mode?` または `Would you like to proceed?` で終わる行の次の 6 行以内に `❯ <番号>. ` があれば `permission`
+
+採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
+
+**analyze.py の分類器** (`S2-screen-retry-error-plan`、2.1.259 composite r1〜r5): `S2-screen-spinner` と claude・codex の全区間で予測の内訳まで一致した。
+
+**製品の Adapter** (`replay-swift --score --poll 2.0`、4,548 フレーム): 変更の前後で出力がバイト単位で一致した (working 1.000、completed 0.978、completed(放置) 1.000、idle 0.976、permission 1.000 (危険率 0.000))。
+
 ### 6.6 起動時の trust prompt (Issue #252)
 
 §12.8 (設計書) が Permission に含めると決めた起動時の trust 画面を、両 CLI の現行版で採って fixture にした

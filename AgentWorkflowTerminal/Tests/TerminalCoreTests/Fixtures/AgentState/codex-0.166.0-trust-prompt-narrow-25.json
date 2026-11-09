@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "幅25列で footer が2行に折り返した本物の trust 画面。 25x24 で採取。processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "codex-0.166.0-trust-prompt-narrow-25",
+  "paneTitle": "/private/tmp/sanitized",
+  "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.166.0",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "codex"
+  ],
+  "captureCommand": "tmux capture-pane -p / capture-pane -e -p (25x24; b25-a)",
+  "screen": "  Folder access\n  /private/tmp/sanitized\n  Trust this folder?\n  Codex can read, edit,\n  and run files here,\n  subject to your\n  permission settings.\n  Folder settings can\n  run code\n  automatically, even\n  without a model\n  request. Continue\n  only if you trust\n  these files. Your\n  trust decision will\n  be saved.\n› 1. Trust and continue\n  2. Back to Agent\n     Command Center\n  enter continue · esc\n  back\n\n\n\n",
+  "styledScreen": "\u001b[1m  Folder access\u001b[0m\n  \u001b[2m/private/tmp/sanitized  \u001b[0m\n  Trust this folder?\n  Codex can read, edit,\n  and run files here,\n  subject to your\n  permission settings.\n  Folder settings can\n  run code\n  automatically, even\n  without a model\n  request. Continue\n  only if you trust\n  these files. Your\n  trust decision will\n  be saved.\n\u001b[1;7m› 1. Trust and continue\n\u001b[0m  2. Back to Agent\n     Command Center\n  \u001b[1menter\u001b[0;2m continue · \u001b[0;1mesc\u001b[0m\n  \u001b[2mback\u001b[0m\n\n\n\n"
+}

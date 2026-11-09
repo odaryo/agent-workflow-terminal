@@ -1571,8 +1571,21 @@ Codex 0.166.0は`Folder access`の行と、`› 1. Trust and continue`または`
 (前後の空白を除いた行の一致)を見る。Codexのtrust画面はpane titleに`Action Required`を出さないので、
 titleより画面を先に見る。titleで絞れない分、文言を含むだけの判定では作業中の画面に出た文言
 (このrepositoryのソースや設計書を読ませたときなど)でPermissionになり、Diffコメントも送れなくなるので、
-2行の組み合わせに限る。footerの`enter continue`は
-起動時の更新の確認(下記)と共有なので使わない。Codex 0.166.0はgitのrepositoryでない
+2行の組み合わせに限る。
+
+Claude CodeのPermission文言(`Do you want to `、`Esc to cancel · Tab to amend`、trust prompt)と
+Question文言(`Enter to select ·`と`Type something.`)は、該当文言を含む最後の行より下に
+NBSPの入力欄(`❯\u{00A0}`で始まる行)も完了行(`·\s*done\s+\d`)も無いときだけ判断待ちとする。
+応答本文に引用された確認画面を判断待ちと取り違えないためである(Issue #645)。
+
+Codexは前後の空白を除いた行で比較し、`1. Trust and continue`または`› 1. Trust and continue`に
+完全一致する最後の行より下に、`› `で始まり`› <数字>. `で始まらない行も、`Worked for `で始まる行も
+無いことを条件にして、引用された確認画面を除外する(Issue #645)。選択肢のカーソルも`› `で始まるため、
+`› 2. Back to Agent Command Center`などの選択肢は入力欄として扱わない。実測の範囲は幅23以上で、
+高さの下限は設けない。幅23〜28ではfooterが折り返し、高さ5以下ではfooterが画面外に切れるため、
+footerは必須にしない。幅20では選択肢の行が折り返すので判定できない(`Spikes/gate3/README.md` §6.10)。
+
+Codex 0.166.0はgitのrepositoryでない
 ディレクトリではtrust画面を出さなかった(task worktreeは常にrepositoryなので影響しない)。Gate 3の記録には
 どちらの画面も含まれず、再採点の数字は変わらない(24本の遷移列が変更前後で一致)。
 

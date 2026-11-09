@@ -192,6 +192,11 @@ final class PaneObservationStore: ObservableObject {
     let panes = snapshot.panes
     guard var current = observed[session] else { return }
     current.receivePaneStates(snapshot)
+    for paneID in snapshot.agentAbsentPanes {
+      completions.forget(paneID: paneID)
+      completionEntries[paneID] = nil
+      current.details[paneID]?.isTaskCompleted = false
+    }
     for pane in panes {
       // 解除の判定は生の状態で行う (§12.7)。安定化した状態で遅らせない。
       let display = completions.update(

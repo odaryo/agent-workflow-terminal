@@ -90,6 +90,21 @@ struct WorktreeCloseReviewTests {
     #expect(review.removalWarnings(for: inspection).isEmpty)
   }
 
+  @Test("branch を特定できない stash は別の文言で知らせる")
+  func warnsUndeterminedStashes() async throws {
+    let review = try await review(
+      CloseGit(
+        ancestorMerged: true, upstreamInSync: true,
+        stashOutput: "autostash\nWIP on (no branch): abc x\n"))
+
+    #expect(review.safety.report.inspection.branchStashes == .absent)
+    #expect(review.safety.report.inspection.undeterminedStashCount == 2)
+    #expect(
+      review.removalWarnings == [
+        "branch を特定できない stash が 2 件あります。この worktree の作業かどうかは件名から判断できません。"
+      ])
+  }
+
   @Test("stash の警告は ignored の後、未push の前に出す")
   func ordersStashWarningAfterIgnoredFiles() async throws {
     let review = try await review(

@@ -407,8 +407,10 @@ stashした後の`worktree remove`はrc=0で、stashは残る(git 2.50.1で実�
 (`WIP on <branch>: `／`On <branch>: `)から決め、branch名をバイト列として比べる。件名は作った時点の
 branch名しか持たないので、同じbranch名で作られた別の作業のstashも数えうる。警告の文言は
 「この worktreeのstash」ではなく「branch <名前>の名前で作られたstash」とする。detached HEADの
-worktreeは件名から持ち主を決められないので対象外にする。autostash・detachedの間に作ったstash・
-改名したbranchのstashのように件名からbranchを決められないものは、今は数えていない(Issue #640)。
+worktreeは件名から持ち主を決められないので対象外にする。件名からbranchを決められないstash
+(autostash・detachedの間に作ったもの・`git stash store`の既定の件名)は別に数え、1件以上あるときだけ
+別の文言で知らせる(確定 2026-11-09、Issue #640)。改名したbranchのstashは件名が旧名のままなので
+別のbranchのものと区別できず、数えない。
 ignoredと同じく別のgit呼び出しで行い、その失敗を他の検査へ波及させない。
 
 **upstream設定を持ちながら追跡refが存在しない状態は、未pushともpush済みとも別の第三の状態として

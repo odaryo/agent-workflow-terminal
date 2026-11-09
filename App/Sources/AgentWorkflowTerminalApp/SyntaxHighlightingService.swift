@@ -1,5 +1,6 @@
+import Adapters
 import AppKit
-import Highlighter
+import JavaScriptCore
 import SwiftUI
 
 actor SyntaxHighlightingService {
@@ -8,52 +9,105 @@ actor SyntaxHighlightingService {
     let background: Color
   }
 
-  static let shared = SyntaxHighlightingService()
+  static let shared = SyntaxHighlightingService(
+    resourceDirectory: Bundle.main.resourceURL?.appendingPathComponent("highlight-js"))
 
-  /// 計測 (release ビルド、Apple Silicon、同梱 highlight.js 11.11.1、Swift ソース):
+  /// 旧実装での計測 (release ビルド、Apple Silicon、同梱 highlight.js 11.11.1、Swift ソース):
   /// 64 KiB = 0.19 s / 128 KiB = 0.36 s / 256 KiB = 0.77 s / 1 MiB = 2.87 s / 2 MiB = 5.72 s と
   /// 入力サイズにほぼ比例する。1 秒を超えて色が付かない状態を見せないため 256 KiB で切る。
   /// §7.2 の警告閾値 (1 MiB) より小さいので、その間のファイルは素のまま表示される。
   static let maximumByteCount = 262_144
 
-  private static let lightThemeName = "xcode"
-  private static let darkThemeName = "atom-one-dark"
-  private static let fontName = "Menlo"
-  private static let fontSize: CGFloat = 12
+  private let resourceDirectory: URL?
+  private var context: JSContext?
+  private var didLoadContext = false
+  private var themes: [Bool: HighlightJSTheme] = [:]
+  private var attemptedThemes: Set<Bool> = []
 
-  private var highlighter: Highlighter?
-  private var isHighlighterUnavailable = false
-  private var themeIsDark: Bool?
-
-  func highlight(_ code: String, language: String, isDark: Bool) -> HighlightedCode? {
-    guard let highlighter = highlighter(isDark: isDark) else { return nil }
-    guard let attributed = highlighter.highlight(code, as: language) else { return nil }
-    guard let background = highlighter.theme.themeBackgroundColour else { return nil }
-    return HighlightedCode(
-      text: AttributedString(attributed), background: Color(nsColor: background))
+  init(resourceDirectory: URL?) {
+    self.resourceDirectory = resourceDirectory
   }
 
-  private func highlighter(isDark: Bool) -> Highlighter? {
-    guard !isHighlighterUnavailable else { return nil }
-    let highlighter: Highlighter
-    if let existing = self.highlighter {
-      highlighter = existing
-    } else {
-      // JavaScriptCore の context と highlight.js の評価はここで一度だけ行う。
-      guard let created = Highlighter() else {
-        isHighlighterUnavailable = true
-        return nil
-      }
-      highlighter = created
-      self.highlighter = created
+  func highlight(_ code: String, language: String, isDark: Bool) -> HighlightedCode? {
+    guard let context = javascriptContext(), let theme = theme(isDark: isDark) else { return nil }
+    context.exception = nil
+    // main や大きなスタックのスレッドへ移すと、深い入れ子で時間・メモリが急増する。
+    // 協調スレッドのスタック上限で素のテキストへ退避できるよう、JS 呼び出しはこの actor 内に留める。
+    let result = context.objectForKeyedSubscript("hljs")?.invokeMethod(
+      "highlight", withArguments: [code, ["language": language, "ignoreIllegals": true]])
+    guard context.exception == nil,
+      let value = result?.objectForKeyedSubscript("value"), value.isString,
+      let html = value.toString(), let runs = HighlightJSMarkup.parse(html)
+    else { return nil }
+    let reconstructed = runs.map(\.text).joined()
+    guard reconstructed.unicodeScalars.elementsEqual(code.unicodeScalars) else { return nil }
+
+    let font =
+      NSFont(name: "Menlo", size: 12)
+      ?? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    let attributed = NSMutableAttributedString(
+      string: code, attributes: [.font: font, .foregroundColor: nsColor(theme.baseColor)])
+    var offset = 0
+    for run in runs {
+      let length = run.text.utf16.count
+      attributed.addAttributes(
+        attributes(for: theme.style(forScopes: run.scopes), baseFont: font),
+        range: NSRange(location: offset, length: length))
+      offset += length
     }
-    if themeIsDark != isDark {
-      highlighter.setTheme(
-        isDark ? Self.darkThemeName : Self.lightThemeName,
-        withFont: Self.fontName,
-        ofSize: Self.fontSize)
-      themeIsDark = isDark
+    return HighlightedCode(
+      text: AttributedString(attributed),
+      background: Color(nsColor: nsColor(theme.backgroundColor)))
+  }
+
+  private func javascriptContext() -> JSContext? {
+    guard !didLoadContext else { return context }
+    didLoadContext = true
+    guard let resourceDirectory,
+      let source = try? String(
+        contentsOf: resourceDirectory.appendingPathComponent("highlight.min.js"), encoding: .utf8),
+      let created = JSContext()
+    else { return nil }
+    created.evaluateScript(source)
+    guard created.exception == nil,
+      let hljs = created.objectForKeyedSubscript("hljs"), !hljs.isUndefined, !hljs.isNull
+    else { return nil }
+    context = created
+    return created
+  }
+
+  private func theme(isDark: Bool) -> HighlightJSTheme? {
+    guard !attemptedThemes.contains(isDark) else { return themes[isDark] }
+    attemptedThemes.insert(isDark)
+    let name = isDark ? "atom-one-dark.css" : "xcode.css"
+    guard let resourceDirectory,
+      let css = try? String(
+        contentsOf: resourceDirectory.appendingPathComponent(name), encoding: .utf8),
+      let parsed = HighlightJSTheme.parse(css: css)
+    else { return nil }
+    themes[isDark] = parsed
+    return parsed
+  }
+
+  private func attributes(
+    for style: HighlightJSStyle, baseFont: NSFont
+  ) -> [NSAttributedString.Key: Any] {
+    var attributes: [NSAttributedString.Key: Any] = [:]
+    if let color = style.color { attributes[.foregroundColor] = nsColor(color) }
+    if let color = style.backgroundColor { attributes[.backgroundColor] = nsColor(color) }
+    if style.isUnderlined { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+    var traits: NSFontTraitMask = []
+    if style.isBold { traits.insert(.boldFontMask) }
+    if style.isItalic { traits.insert(.italicFontMask) }
+    if !traits.isEmpty {
+      attributes[.font] = NSFontManager.shared.convert(baseFont, toHaveTrait: traits)
     }
-    return highlighter
+    return attributes
+  }
+
+  private func nsColor(_ color: HighlightJSColor) -> NSColor {
+    NSColor(
+      srgbRed: CGFloat(color.red) / 255, green: CGFloat(color.green) / 255,
+      blue: CGFloat(color.blue) / 255, alpha: 1)
   }
 }

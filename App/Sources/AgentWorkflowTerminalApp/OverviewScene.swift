@@ -167,7 +167,7 @@ private struct OverviewProjectSection: View {
       .help("このセッションを表示")
       .accessibilityLabel(isDisplayed ? "表示中 \(title)" : title)
       .contextMenu {
-        OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+        sessionHeadingMenu(worktree)
       }
     }
     ForEach(worktree.rows, id: \.rowID) { row in
@@ -210,6 +210,19 @@ private struct OverviewProjectSection: View {
         }
       }
     }
+  }
+
+  @ViewBuilder
+  private func sessionHeadingMenu(_ worktree: OverviewWorktree) -> some View {
+    let panes = worktree.rows.compactMap { row -> OverviewPane? in
+      if case .pane(let pane) = row { return pane }
+      return nil
+    }
+    if !panes.isEmpty {
+      OverviewPaneIDItems(panes: panes)
+      Divider()
+    }
+    OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
   }
 
   /// 初回配信待ちを除外すると、観測対象の Task が Overview から一時的に消える。

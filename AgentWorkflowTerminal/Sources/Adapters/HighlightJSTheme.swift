@@ -115,6 +115,8 @@ private struct HighlightJSDeclarations: Equatable, Sendable {
   }
 
   static func parse(_ body: Substring) -> Self {
+    // @media の後の規則、!important、font-weight: 700 / bolder、oblique、text-decoration: none は
+    // 同梱の xcode.css / atom-one-dark.css には現れないため解釈対象外。テーマ追加時には表示に影響する制約。
     var result = Self()
     for declaration in body.split(separator: ";") {
       guard let colon = declaration.firstIndex(of: ":") else { continue }

@@ -124,6 +124,8 @@ TerminalCore  ←  Adapters  ←  (将来) App / Host Core
 - `TerminalCore` / `Adapters` はログを出さない。失敗は §2.3 のとおり呼び出し側へ返し、記録するかどうかは
   `App/` が決める。
 - git などの生の出力は1行に収まらないのでバナーに載せず、原文を `NSLog` に残す。
+  この原文はパスや stderr を含むので、`.public` の `os.Logger` へは移さない。読むときは stderr を繋いで
+  実行ファイルを起動する。`NSLog` は stderr にも出る (実測 2026-11-09、#766)。
 
 ---
 

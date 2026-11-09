@@ -169,6 +169,22 @@ app_quit() {
   sleep 1
 }
 
+# 権限の拒否 (-25211) は待っても直らず、アプリは起動しているので「ウィンドウが開かない」と
+# 区別する。$(...) の中の die は subshell しか終わらせないので、結果はグローバルで返す。
+read_app_window_count() {
+  local output
+  if output=$(osascript -e "tell application \"System Events\" to tell process \"${APP_NAME}\" to return count of windows" 2>&1); then
+    APP_WINDOW_COUNT=$output
+    return
+  fi
+  case "$output" in
+    *-25211*)
+      die "Accessibility の権限が拒否されました (-25211)。アプリは起動していますが、ウィンドウは確かめられていません。許可先は tmux server を起動したアプリです (CLAUDE.md)"
+      ;;
+  esac
+  APP_WINDOW_COUNT=0
+}
+
 app_launch() {
   local project="${1:-$PWD}"
   pgrep -x "$APP_NAME" >/dev/null && die "既に ${APP_NAME} が動いています。ユーザーか別の作業のインスタンスかもしれないので、操作せず確認してください"
@@ -198,11 +214,11 @@ app_launch() {
     --env AWT_TMUX_SOCKET_NAME="$tmux_socket_name" --args --project "$project"
   # プロセスの存在ではなくウィンドウの数で待つ。`count of windows` はプロセスさえあれば
   # 0 を返して成功するので、成否だけを見ると窓が無いまま先へ進む。
-  local i windows
+  local i
   for i in $(seq 1 30); do
     sleep 1
-    windows=$(osascript -e "tell application \"System Events\" to tell process \"${APP_NAME}\" to return count of windows" 2>/dev/null || echo 0)
-    [ "$windows" -ge 1 ] && break
+    read_app_window_count
+    [ "$APP_WINDOW_COUNT" -ge 1 ] && break
     [ "$i" -lt 30 ] || die "アプリのウィンドウが開きませんでした"
   done
   osascript >/dev/null <<EOS

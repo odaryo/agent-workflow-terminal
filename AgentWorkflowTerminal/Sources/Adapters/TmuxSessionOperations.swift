@@ -319,9 +319,6 @@ public struct TmuxSessionOperations: Sendable {
   /// 作れるので、prefix はアプリの管理下であることの証明にならない。どれが管理下かは、安定 ID
   /// から導出した名前 (`TmuxSessionName`) と突き合わせて上位が判断する。
   ///
-  /// 復号できない行は飛ばす。アプリ管理の名前は `[A-Za-z0-9_-]` だけで置換と復号で変わらないので、
-  /// 飛ばしても管理下の session を見落とさない (Issue #638)。
-  ///
   /// - Returns: server の停止なら空配列。
   /// - Throws: socket 欠落は空配列へ畳まず `serverSocketMissing` を投げる。生存中の server の
   ///   socket が消えた場合も同じ stderr になり (Issue #492)、空にすると呼び出し元が取り残された

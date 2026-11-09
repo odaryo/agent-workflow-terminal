@@ -13,8 +13,9 @@ extension AppModel {
   ) {
     let summaries = Set(failures.map(Self.summary(of:)))
     var failureSet = Set(summaries.map { "entry: \($0)" })
-    if let listingFailure {
-      failureSet.insert("listing: \(String(describing: listingFailure))")
+    // 原文を鍵にしない。stdout に各 worktree の HEAD が入り、commit のたびに閉じたバナーが戻る。
+    if listingFailure != nil {
+      failureSet.insert("listing")
     }
     guard !failureSet.isEmpty else {
       updateScanFailureWarning(nil, failures: failureSet)
@@ -22,7 +23,7 @@ extension AppModel {
     }
     var warnings: [String] = []
     if listingFailure != nil {
-      warnings.append("worktree の一覧を途中までしか読めませんでした。一部の worktree は前回の状態のままです。")
+      warnings.append("worktree の一覧を途中までしか読めませんでした。一覧に出なかった worktree は消えたものとしては扱っていません。")
     }
     if !summaries.isEmpty {
       warnings.append(
@@ -30,7 +31,8 @@ extension AppModel {
           + "消えたものとしては扱っていません: "
           + summaries.sorted().joined(separator: ", "))
     }
-    updateScanFailureWarning(warnings.joined(separator: "\n"), failures: failureSet)
+    // WarningBar は lineLimit(1) なので、改行で区切ると 2 文目が画面に出ない。
+    updateScanFailureWarning(warnings.joined(separator: " "), failures: failureSet)
   }
 
   private static func summary(of failure: GitWorktreeEntryFailure) -> String {

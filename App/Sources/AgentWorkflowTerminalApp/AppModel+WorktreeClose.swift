@@ -24,8 +24,8 @@ extension AppModel {
   /// §3.4 の4択はどれも Inactive 化を伴う。選択肢3・4で消えた worktree は、次のスキャンで
   /// 消失として一覧から落ちる (§3.2)。
   private func finishClose(of identity: WorktreeIdentity) {
-    // 先に隣を選ぶ。`setActivation` の中の `close` は選択中のセッションを外すと Project Root へ移し、
-    // その端末 (tmux client) を開いてしまう。
+    // 先に隣を選ぶ。`setActivation` の中の `close` はフォールバック先の端末を開くため、
+    // 後から隣を選ぶと不要な tmux client を開いてしまう。
     if selectedIdentity == identity, let neighbor = neighborSession(of: identity) {
       select(neighbor)
     }
@@ -33,16 +33,14 @@ extension AppModel {
     removeSessions(in: identity)
   }
 
-  /// 右隣、無ければ左隣の選べるセッション。どちらも無ければ `nil` で、`setActivation` が Project Root を選ぶ。
+  /// 隣が無い場合は `setActivation` が到達可能な Root、次いで Task へフォールバックし、
+  /// どちらも選べなければ選択を外す。
   private func neighborSession(of identity: WorktreeIdentity) -> TerminalSessionKey? {
     let sessions = sessionKeys
     guard let first = sessions.firstIndex(where: { $0.identity == identity }),
       let last = sessions.lastIndex(where: { $0.identity == identity })
     else { return nil }
-    let selectable = Set(inventory.selectableTaskWorktrees.map(\.identity))
-    let canSelect: (TerminalSessionKey) -> Bool = {
-      $0.identity == self.projectRoot?.identity || selectable.contains($0.identity)
-    }
+    let canSelect: (TerminalSessionKey) -> Bool = { self.canOpenSession(in: $0.identity) }
     return sessions[sessions.index(after: last)...].first(where: canSelect)
       ?? sessions[..<first].last(where: canSelect)
   }

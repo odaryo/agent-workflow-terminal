@@ -12,7 +12,10 @@ struct ProjectAgentCommandSheet: View {
   init(project: RegisteredProject, projects: ProjectsModel) {
     self.project = project
     self.projects = projects
-    _input = State(initialValue: project.agentCommand ?? "")
+    // 呼び出し元の `AppModel.project` は Project を開いたときの写しで、保存後の値を持たない。
+    // 古い値で開くと、そのまま保存しただけで設定を失う。
+    let current = projects.registry.project(project.commonDirectory) ?? project
+    _input = State(initialValue: current.agentCommand ?? "")
   }
 
   var body: some View {

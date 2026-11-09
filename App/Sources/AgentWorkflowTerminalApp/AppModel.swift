@@ -267,7 +267,10 @@ final class AppModel: ObservableObject {
       let waiters = hostControlRescan.beginScan()
       defer { hostControlRescan.complete(waiters) }
       // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
-      guard case .success(let scan) = await scan(with: detector) else { continue }
+      guard case .success(let scan) = await scan(with: detector) else {
+        reconcileFailedScan()
+        continue
+      }
 
       report(scanFailures: scan.failures)
       // 観測に失敗した entry を捨てて `detected` だけを渡すと、その worktree は消失扱いになり、
@@ -392,30 +395,23 @@ final class AppModel: ObservableObject {
     selectFallbackSession()
   }
 
-  private func reconcileSessionSelection() {
-    let sessions = Set(sessionKeys)
-    openedSessions.formIntersection(sessions)
-    guard let displayedSession else { return }
-    let isSelectable =
-      if displayedSession.identity == projectRoot?.identity {
-        projectRoot?.isReachable == true
-      } else {
-        inventory.selectableTaskWorktrees.contains { $0.identity == displayedSession.identity }
-      }
-    guard !sessions.contains(displayedSession) || !isSelectable else { return }
-    selectFallbackSession()
+  func reconcileFailedScan(
+    isDirectoryReachable: (String) -> Bool = AppModel.isReachableDirectory
+  ) {
+    guard let root = projectRoot, !isDirectoryReachable(root.worktreePath) else { return }
+    projectRoot = DetectedWorktree(
+      identity: root.identity, worktreePath: root.worktreePath, branch: root.branch,
+      isProjectRoot: root.isProjectRoot, observation: .unreachable)
+    // scan 全体が失敗した回には Active/Inactive の観測結果が無いため、保存しない。
+    reconcileSessionSelection()
   }
 
-  private func selectFallbackSession() {
-    // 到達を確認できない Project Root の選択は何も変更しないため、先に判定しないと
-    // 到達可能な Task へのフォールバックまで進まない。
-    if projectRoot?.isReachable == true {
-      selectProjectRoot()
-    } else if let next = firstSelectableWorktree {
-      select(next)
-    } else {
-      displayedSession = nil
-    }
+  nonisolated private static func isReachableDirectory(_ path: String) -> Bool {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+      isDirectory.boolValue
+    else { return false }
+    return FileManager.default.isExecutableFile(atPath: path)
   }
 
   func dismissWarning() {

@@ -38,7 +38,7 @@ struct OverviewProjectMenu: View {
         model.paneObservations.requestTerminalFocus()
       }
     }
-    .disabled(model.projectRoot == nil)
+    .disabled(model.projectRoot.map { !model.canOpenSession(in: $0.identity) } ?? true)
     Menu("Inactive の worktree を Active にする") {
       ForEach(model.inactiveWorktrees, id: \.identity) { worktree in
         Button(title(of: worktree)) {

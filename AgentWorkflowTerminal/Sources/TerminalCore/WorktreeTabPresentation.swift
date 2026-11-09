@@ -68,7 +68,7 @@ extension WorktreeInventory {
 /// ため (docs/coding-guidelines.md §2.1)。
 public enum WorktreeTabEmptyState: Sendable, Hashable {
   case noWorktrees
-  /// Active なタブは在るが、どれも到達可能でない。
+  /// Project Root と Active な Task のいずれも到達を確認できない。
   case noReachableWorktrees
   /// worktree は在るが、すべて Inactive。
   case noActiveWorktrees

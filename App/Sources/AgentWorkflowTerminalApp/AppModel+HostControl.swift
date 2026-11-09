@@ -8,7 +8,35 @@ extension AppModel {
   }
 
   func openWorktreeForAgent(directory: String) async -> HostControlResponse {
-    await rescanNow()
+    await hostControlOpenQueue.run {
+      await self.findAndOpenWorktreeForAgent(directory: directory)
+    }
+  }
+
+  private func findAndOpenWorktreeForAgent(directory: String) async -> HostControlResponse {
+    for attempt in 0..<3 {
+      await rescanNow()
+      guard !hostControlRescan.isStopped else {
+        return .failure(code: .notRegistered, message: "Project の登録が解除されました")
+      }
+      guard !Task.isCancelled else {
+        return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+      }
+      if let response = await openScannedWorktreeForAgent(directory: directory) {
+        return response
+      }
+      if attempt < 2 {
+        do {
+          try await Task.sleep(for: .milliseconds(200))
+        } catch {
+          return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+        }
+      }
+    }
+    return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
+  }
+
+  private func openScannedWorktreeForAgent(directory: String) async -> HostControlResponse? {
     let candidates = worktrees.map {
       (identity: $0.identity, worktreePath: $0.detected.worktreePath)
     }
@@ -17,28 +45,31 @@ extension AppModel {
       (
         directory: Self.realPath(directory),
         projectRoot: projectRootPath.flatMap { Self.realPath($0) },
-        worktrees: candidates.map { (identity: $0.identity, path: Self.realPath($0.worktreePath)) }
+        worktrees: candidates.map {
+          (identity: $0.identity, path: Self.realPath($0.worktreePath))
+        }
       )
     }.value
+    guard !hostControlRescan.isStopped else {
+      return .failure(code: .notRegistered, message: "Project の登録が解除されました")
+    }
     guard !Task.isCancelled else {
       return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
     }
-    guard let canonicalDirectory = paths.directory else {
-      return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
+    if let canonicalDirectory = paths.directory {
+      if paths.projectRoot == canonicalDirectory {
+        return .failure(code: .projectRoot, message: "Project Root は指定できません")
+      }
+      if let identity = paths.worktrees.first(where: { $0.path == canonicalDirectory })?.identity,
+        let worktree = worktrees.first(where: { $0.identity == identity })
+      {
+        guard worktree.detected.isReachable else {
+          return .failure(code: .unreachable, message: "worktree へ到達できません")
+        }
+        return await openHostControlSession(for: worktree)
+      }
     }
-    if paths.projectRoot == canonicalDirectory {
-      return .failure(code: .projectRoot, message: "Project Root は指定できません")
-    }
-    guard
-      let identity = paths.worktrees.first(where: { $0.path == canonicalDirectory })?.identity,
-      let worktree = worktrees.first(where: { $0.identity == identity })
-    else {
-      return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
-    }
-    guard worktree.detected.isReachable else {
-      return .failure(code: .unreachable, message: "worktree へ到達できません")
-    }
-    return await openHostControlSession(for: worktree)
+    return nil
   }
 
   private func openHostControlSession(for worktree: TaskWorktree) async -> HostControlResponse {
@@ -66,6 +97,9 @@ extension AppModel {
         return .failure(code: .tmuxFailed, message: "worktree のセッションが見つかりません")
       }
       key = first
+      guard !hostControlRescan.isStopped else {
+        return .failure(code: .notRegistered, message: "Project の登録が解除されました")
+      }
       if let failure = await createHostControlSession(
         for: key, directory: worktree.detected.worktreePath)
       {
@@ -122,13 +156,14 @@ final class HostControlRescan {
   private var waiters: [UUID: CheckedContinuation<Void, Never>] = [:]
   private var pending: Set<UUID> = []
   private var timer: Task<Void, Never>?
-  private var stopped = false
+  private(set) var isStopped = false
+  private var interval: Duration?
 
   func request() async {
     let id = UUID()
     await withTaskCancellationHandler {
       await withCheckedContinuation { continuation in
-        guard !stopped, !Task.isCancelled else {
+        guard !isStopped, !Task.isCancelled else {
           continuation.resume()
           return
         }
@@ -142,24 +177,37 @@ final class HostControlRescan {
   }
 
   func events(interval: Duration) -> AsyncStream<Void> {
-    let continuation = channel.continuation
-    timer = Task {
-      while !Task.isCancelled {
-        do {
-          try await Task.sleep(for: interval)
-        } catch {
-          return
-        }
-        continuation.yield(())
-      }
-    }
+    self.interval = interval
+    scheduleNextScan()
     return channel.stream
   }
 
+  func scheduleNextScan() {
+    timer?.cancel()
+    guard !isStopped, let interval else { return }
+    let continuation = channel.continuation
+    timer = Task {
+      do {
+        try await Task.sleep(for: interval)
+      } catch {
+        return
+      }
+      guard !Task.isCancelled else { return }
+      continuation.yield(())
+    }
+  }
+
   func beginScan() -> Set<UUID> {
+    timer?.cancel()
+    timer = nil
     let result = pending
     pending.removeAll()
     return result
+  }
+
+  func finishScan(_ ids: Set<UUID>) {
+    complete(ids)
+    scheduleNextScan()
   }
 
   func complete(_ ids: Set<UUID>) {
@@ -170,10 +218,36 @@ final class HostControlRescan {
   }
 
   func stop() {
-    stopped = true
+    isStopped = true
     timer?.cancel()
     timer = nil
     channel.continuation.finish()
     complete(Set(waiters.keys))
+  }
+}
+
+@MainActor
+final class HostControlOpenQueue {
+  private var pending: Task<HostControlResponse, Never>?
+
+  func run(
+    _ operation: @escaping @MainActor () async -> HostControlResponse
+  ) async -> HostControlResponse {
+    let previous = pending
+    let task = Task {
+      _ = await previous?.value
+      guard !Task.isCancelled else {
+        return HostControlResponse.failure(
+          code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
+      }
+      return await operation()
+    }
+    pending = task
+    return await withTaskCancellationHandler {
+      if Task.isCancelled { task.cancel() }
+      return await task.value
+    } onCancel: {
+      task.cancel()
+    }
   }
 }

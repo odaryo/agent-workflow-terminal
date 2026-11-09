@@ -94,6 +94,8 @@ extension ProjectsModel {
       let project: RegisteredProject
       do {
         project = try await resolver.resolve(directory: URL(fileURLWithPath: directory))
+      } catch GitProjectResolutionError.directoryUnreachable {
+        return .failure(code: .unreachable, message: "worktree へ到達できません")
       } catch {
         return .failure(code: .notRegistered, message: "登録済みの Project を解決できません")
       }

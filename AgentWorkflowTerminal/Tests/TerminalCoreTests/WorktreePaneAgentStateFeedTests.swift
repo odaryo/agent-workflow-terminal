@@ -214,7 +214,8 @@ struct WorktreePaneAgentStateFeedTests {
   func recoversAfterPaneListFailure() async throws {
     let context = try makeContext(panes: [.failure(TestError.failed), .success([pane("%1")])])
     var iterator = context.stream.makeAsyncIterator()
-    await context.paneSource.waitForCalls(1)
+    // 呼び出し回数では sleep の登録前に advance が空振りし、次の周期が永遠に来ない。
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
     await context.channel.waitForSubscriber(.init(rawValue: "%1"))
     await context.channel.send(observation(.working, adapter: "matched"), to: .init(rawValue: "%1"))
@@ -481,7 +482,7 @@ actor FeedTestClock: ContinuousTimeSource {
   }
 
   func waitForSleep(_ count: Int) async -> Bool {
-    let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+    let deadline = ContinuousClock().now.advanced(by: .seconds(10))
     while sleepCount < count, ContinuousClock().now < deadline { await Task.yield() }
     return sleepCount >= count
   }

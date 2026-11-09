@@ -18,20 +18,23 @@ public struct WorktreePaneAgentStates: Sendable, Hashable {
   public let panes: [PaneAgentState]
   public let agentAbsentPanes: Set<PaneID>
   /// pane 一覧の全 pane について、adapter の最初の結果 (観測か `.absent`) が届いている。
-  /// pane が無ければ真。一覧を観測できない間は偽で、後から pane が現れたときも
-  /// その結果が届くまで再び偽になる。
+  /// 取得できた一覧に pane が無ければ真。一覧の取得成功前と連続2回以上の取得失敗中は偽で、
+  /// 後から pane が現れたときもその結果が届くまで再び偽になる。
   ///
   /// - Important: 最初の配信は adapter の結果がまだ無いので、ほぼ必ず `[]` で偽になる。
   ///   これを「Agent pane が無い」と読んで基準にすると、次の配信で判断待ちの pane が全部
   ///   遷移に見える (#387)。
   public let isComplete: Bool
+  public let isPaneListUnavailable: Bool
 
   public init(
-    panes: [PaneAgentState], isComplete: Bool, agentAbsentPanes: Set<PaneID> = []
+    panes: [PaneAgentState], isComplete: Bool, agentAbsentPanes: Set<PaneID> = [],
+    isPaneListUnavailable: Bool = false
   ) {
     self.panes = panes
     self.agentAbsentPanes = agentAbsentPanes
     self.isComplete = isComplete
+    self.isPaneListUnavailable = isPaneListUnavailable
   }
 }
 
@@ -170,6 +173,7 @@ actor WorktreePaneFeedCoordinator {
   private var lastYielded: WorktreePaneAgentStates?
   private var pollTask: Task<Void, Never>?
   private var isCancelled = false
+  private var hasListedPanes = false
   private var consecutiveListingFailures = 0
   private var listingFailedAt: Date?
 
@@ -197,6 +201,7 @@ actor WorktreePaneFeedCoordinator {
 
   func receive(_ panes: [PaneSnapshot]) async {
     guard !isCancelled else { return }
+    hasListedPanes = true
     consecutiveListingFailures = 0
     listingFailedAt = nil
     let paneIDs = Set(panes.map(\.id))
@@ -308,32 +313,27 @@ actor WorktreePaneFeedCoordinator {
 
   private func yieldIfChanged() {
     let value = paneOrder.compactMap { paneID -> PaneAgentState? in
+      guard case .observation(let observation) = entries[paneID]?.result else { return nil }
       if let listingFailedAt {
-        guard entries[paneID]?.result != .absent else { return nil }
-        let previous: AgentStateObservation?
-        if case .observation(let observation) = entries[paneID]?.result {
-          previous = observation
-        } else {
-          previous = nil
-        }
         return PaneAgentState(
           id: paneID,
           observation: AgentStateObservation(
-            state: .unknown, adapterID: previous?.adapterID ?? fallback.id,
-            observedAt: listingFailedAt, lastKnownAt: previous?.lastKnownAt,
+            state: .unknown, adapterID: observation.adapterID,
+            observedAt: listingFailedAt, lastKnownAt: observation.lastKnownAt,
             diagnostics: "pane の一覧を観測できません", unknownReason: .observationFailed))
       }
-      guard case .observation(let observation) = entries[paneID]?.result else { return nil }
       return PaneAgentState(id: paneID, observation: observation)
     }
     let isComplete =
-      listingFailedAt == nil && !(paneOrder.isEmpty && consecutiveListingFailures > 0)
+      listingFailedAt == nil && hasListedPanes
       && paneOrder.allSatisfy { entries[$0]?.result != nil }
     let agentAbsentPanes = Set(paneOrder.filter { entries[$0]?.result == .absent })
     let snapshot = WorktreePaneAgentStates(
-      panes: value, isComplete: isComplete, agentAbsentPanes: agentAbsentPanes)
+      panes: value, isComplete: isComplete, agentAbsentPanes: agentAbsentPanes,
+      isPaneListUnavailable: listingFailedAt != nil)
     switch output {
     case .states(let continuation):
+      guard isComplete || !value.isEmpty else { return }
       guard lastYielded != nil || isComplete || listingFailedAt != nil else { return }
       guard value != lastYielded?.panes else { return }
       continuation.yield(value)

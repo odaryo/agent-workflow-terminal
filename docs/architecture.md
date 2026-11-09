@@ -1064,6 +1064,8 @@ New snapshot is created
 Old snapshot and comments remain in review history
 ```
 
+Base／BranchのDiffに添えるHEADは最後の`git status`から読むので、merge-baseを計算している間にHEADが動くと、計算に使ったcommitと表示のHEADが一致しないことがある。次の観測で「変更あり」のバナーが出て解消するので、残存挙動として直さない(2026-11-09、Issue #634)。
+
 Refreshは既存snapshotの上書きではなく、新しいsnapshotの作成である。古いコメントを新Diffへ推測追従させない。
 
 コメントは移さない代わりに、表示中以外のsnapshotに未送信のコメントがあれば、その件数をバナーに出し、

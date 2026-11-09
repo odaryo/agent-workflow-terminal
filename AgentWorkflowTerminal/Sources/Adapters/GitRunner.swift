@@ -71,6 +71,7 @@ public enum GitDiffTarget: Sendable, Equatable {
 /// `normal` は未追跡 directory を末尾 `/` の1件へ畳む。Diff はファイル単位の差分を要るので
 /// `all` を選ぶ (§9.1.3)。既定を変えないのは、File Browser 側が件数の爆発を避けているため。
 public enum GitUntrackedFilesMode: String, Sendable, Equatable {
+  case no
   case normal
   case all
 }

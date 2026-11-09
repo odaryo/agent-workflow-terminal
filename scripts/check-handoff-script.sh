@@ -54,9 +54,37 @@ trap on_exit EXIT
 cat >"$work_dir/agent" <<'AGENT'
 #!/usr/bin/env bash
 set -eu
-printf '%s\0' "$@" >"$AWT_TEST_ARGV"
-sleep 30
+exec python3 -I -c '
+import os
+import pathlib
+import sys
+import time
+pathlib.Path(os.environ["AWT_TEST_ARGV"]).write_bytes(
+    b"".join(arg.encode("utf-8") + b"\0" for arg in sys.argv[1:]))
+time.sleep(30)
+' "$@"
 AGENT
+
+cat >"$work_dir/changing-screen.py" <<'SCREEN'
+import pathlib
+import sys
+import time
+
+stop = pathlib.Path(sys.argv[1])
+counter = 0
+while not stop.exists():
+    print(f"\rchanging {counter:012d}> ", end="", flush=True)
+    if counter == 0:
+        stop.with_suffix(".ready").touch()
+    counter += 1
+    time.sleep(0.05)
+stop.with_suffix(".done").touch()
+SCREEN
+
+cat >"$work_dir/changing-screen.rc" <<'RC'
+PS1='handoff> '
+python3 -I "$AWT_TEST_DIR/changing-screen.py" "$AWT_TEST_DIR/screen-stop" &
+RC
 
 cat >"$work_dir/hostctl" <<'HOSTCTL'
 #!/usr/bin/env bash
@@ -75,6 +103,17 @@ fi
 created=true
 case "$AWT_TEST_MODE" in
   existing) created=false ;;
+  missing-session) ;;
+  changing-screen)
+    tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
+      env AWT_TEST_DIR="$AWT_TEST_DIR" AWT_TEST_ARGV="$AWT_TEST_DIR/argv" \
+      /bin/bash --noprofile --rcfile "$AWT_TEST_DIR/changing-screen.rc" -i
+    for ((attempt = 0; attempt < 50; attempt++)); do
+      [[ ! -e "$AWT_TEST_DIR/screen-stop.ready" ]] || break
+      sleep 0.1
+    done
+    [[ -e "$AWT_TEST_DIR/screen-stop.ready" ]] || exit 1
+    ;;
   no-prompt)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 /bin/sleep 600
     ;;
@@ -188,6 +227,24 @@ assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b
 else
   ng 'argv または成功時の stdout が期待と異なります'
 fi
+
+rm -f "$work_dir/argv"
+AWT_TEST_SESSION=exec-agent
+AWT_TEST_AGENT="exec $work_dir/agent"
+sessions+=(exec-agent)
+expect_exit 0 'exec で pane の shell を置き換えて起動する' --directory "$work_dir" --prompt "$prompt"
+checked=$((checked + 1))
+if wait_for_argv && python3 -I -c '
+import pathlib
+import sys
+assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
+' "$work_dir/argv" "$prompt"; then
+  info 'OK: exec でも argv がそのまま届いた'
+else
+  ng 'exec の argv が期待と異なります'
+fi
+AWT_TEST_SESSION=success
+AWT_TEST_AGENT="$work_dir/agent"
 
 rm -f "$work_dir/argv"
 before=$(T capture-pane -p -t '=success:')
@@ -311,9 +368,36 @@ AWT_TEST_AGENT=true
 sessions+=(no-agent)
 expect_exit 7 '即座に終わるコマンドは Agent 起動を確認できない' --directory "$work_dir" --prompt short
 
+AWT_TEST_SESSION=short-lived-exec
+AWT_TEST_AGENT="exec /bin/sh -c 'sleep 1; exit 1'"
+sessions+=(short-lived-exec)
+expect_exit 7 '短命の exec を Agent の起動と取り違えない' --directory "$work_dir" --prompt short
+checked=$((checked + 1))
+if T has-session -t '=short-lived-exec' 2>/dev/null; then
+  ng '短命の exec の session が残っています'
+else
+  info 'OK: 短命の exec の session は消えた（cleanup の対象には残す）'
+fi
+
+AWT_TEST_SESSION=literal-command
+AWT_TEST_AGENT=0x41
+sessions+=(literal-command)
+expect_exit 7 '16進数のキー表記を含む agentCommand を文字列として送る' --directory "$work_dir" --prompt x
+checked=$((checked + 1))
+if T capture-pane -p -t '=literal-command:' | rg -q -F "handoff> 0x41 'x'"; then
+  info 'OK: pane に 0x41 が literal で届いた'
+else
+  ng 'pane に 0x41 が literal で届いていません'
+fi
+
 for shell_name in zsh fish; do
   if ! command -v "$shell_name" >/dev/null 2>&1; then
-    info "SKIP: $shell_name がありません"
+    if [[ "${CI:-}" == true ]]; then
+      checked=$((checked + 1))
+      ng "$shell_name がありません"
+    else
+      info "SKIP: $shell_name がありません"
+    fi
     continue
   fi
   export AWT_TEST_SHELL
@@ -335,6 +419,42 @@ assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b
   fi
   rm -f "$work_dir/argv"
 done
+
+AWT_TEST_MODE=missing-session
+AWT_TEST_SESSION=gone
+AWT_TEST_AGENT="$work_dir/agent"
+sessions+=(gone-other)
+T new-session -d -s gone-other -x 120 -y 24 \
+  env PS1='handoff> ' AWT_TEST_ARGV="$work_dir/argv" /bin/bash --norc --noprofile -i
+sleep 0.5
+before=$(T capture-pane -p -t '=gone-other:')
+expect_exit 5 '存在しない session の接頭辞が一致しても送らない' --directory "$work_dir" --prompt wrong-session
+expect_unsent gone-other
+
+AWT_TEST_MODE=changing-screen
+AWT_TEST_SESSION=changing-screen
+sessions+=(changing-screen)
+expect_exit 5 'cursor が正でも画面が変わり続ける pane には送らない' --directory "$work_dir" --prompt changing-screen
+checked=$((checked + 1))
+cursor=$(T display-message -p -t '=changing-screen:' '#{cursor_x}')
+if [[ "$cursor" =~ ^[0-9]+$ && "$cursor" -gt 0 ]]; then
+  info 'OK: 変化する画面の cursor は0より大きい'
+else
+  ng '変化する画面の cursor が0より大きくありません'
+fi
+touch "$work_dir/screen-stop"
+for ((attempt = 0; attempt < 50; attempt++)); do
+  [[ ! -e "$work_dir/screen-stop.done" ]] || break
+  sleep 0.1
+done
+checked=$((checked + 1))
+if [[ -e "$work_dir/screen-stop.done" ]]; then
+  info 'OK: 変化する画面の出力が止まった'
+else
+  ng '変化する画面の出力が止まりません'
+fi
+before=$(T capture-pane -p -t '=changing-screen:')
+expect_unsent changing-screen
 
 AWT_TEST_MODE=no-prompt
 AWT_TEST_SESSION=no-prompt

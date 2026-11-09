@@ -413,7 +413,8 @@ extension HostControlSocketTests {
     var response: [UInt8] = []
     var byte: UInt8 = 0
     while true {
-      try #require(Darwin.recv(descriptor, &byte, 1, 0) == 1)
+      let received = Darwin.recv(descriptor, &byte, 1, 0)
+      try #require(received == 1, "recv=\(received) errno=\(errno) bytes=\(response.count)")
       if byte == 10 { return String(decoding: response, as: UTF8.self) }
       response.append(byte)
     }

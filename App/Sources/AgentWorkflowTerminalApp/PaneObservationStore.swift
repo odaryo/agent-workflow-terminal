@@ -1,5 +1,6 @@
 import Adapters
 import Foundation
+import OSLog
 import SwiftUI
 import TerminalCore
 
@@ -53,12 +54,15 @@ final class PaneObservationStore: ObservableObject {
   private var stabilizers: [TerminalSessionKey: PaneDisplayStateStabilizer] = [:]
   private var completions = PaneTaskCompletionTracker()
   private var completionEntries: [PaneID: PaneSummaryEntry<AgentStampedValue>] = [:]
+  private var summaryDiagnostics: [TerminalSessionKey: PaneSummaryDiagnosticTracker] = [:]
   private var isStopped = false
   private let clock = ContinuousClock()
 
   /// 概要 (§12.7) を読み直す間隔。pane 一覧の feed と同じ 2 秒にする。`list-panes` は feed と
   /// 同じキャッシュ (TTL 1 秒) から読むので、外部プロセスの起動は TTL で上から抑えられる。
   private static let summaryInterval = Duration.seconds(2)
+  private static let harnessSignalLog = Logger(
+    subsystem: "dev.local.agentworkflowterminal", category: "harness-signals")
 
   private struct Observation {
     let states: Task<Void, Never>
@@ -175,6 +179,7 @@ final class PaneObservationStore: ObservableObject {
       continuation.finish()
     }
     stabilizers[session] = nil
+    summaryDiagnostics[session] = nil
     if let gone = observed.removeValue(forKey: session) {
       for paneID in gone.details.keys {
         completions.forget(paneID: paneID)
@@ -262,6 +267,7 @@ final class PaneObservationStore: ObservableObject {
         title: OverviewPaneDetail.displayTitle(fromPaneTitle: snapshot.pane.title))
     }
     guard !Task.isCancelled, var current = observed[session] else { return }
+    logNewDiagnostics(for: summaries, of: session)
     let rawStates = Dictionary(
       (current.latestPaneStates ?? []).map { ($0.id, $0.state) },
       uniquingKeysWith: { first, _ in first })
@@ -287,6 +293,17 @@ final class PaneObservationStore: ObservableObject {
       observed[session] = current
     }
     notifier?.completionsObserved(displays, undetermined: undetermined, in: session)
+  }
+
+  private func logNewDiagnostics(for summaries: [PaneSummary], of session: TerminalSessionKey) {
+    var diagnostics = summaryDiagnostics[session] ?? PaneSummaryDiagnosticTracker()
+    for diagnostic in diagnostics.newDiagnostics(for: summaries) {
+      // NSLog の本文は統合ログで `<private>` に伏せられ、ハーネスの書き手が読めない (実測 macOS 27)。
+      Self.harnessSignalLog.notice(
+        "pane \(diagnostic.paneID.rawValue, privacy: .public) の連携変数を読み捨てました: \(diagnostic.message, privacy: .public)"
+      )
+    }
+    summaryDiagnostics[session] = diagnostics
   }
 
   private static func hasValue(_ reading: PaneUserOptionReading) -> Bool {

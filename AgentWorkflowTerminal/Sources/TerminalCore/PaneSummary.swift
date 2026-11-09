@@ -65,6 +65,10 @@ public enum PaneAgentProcess: Sendable, Hashable, Codable {
 
 /// `<agent-pid> <text>` (§12.7)。
 public struct AgentStampedValue: Sendable, Hashable, Codable {
+  // 秒は桁が足りず、マイクロ秒以上は桁が多すぎるため、エポックミリ秒の範囲に制限する。
+  private static let turnStartMillisecondsRange: Range<Int64> =
+    1_000_000_000_000..<10_000_000_000_000
+
   public let agentProcessID: Int32
   public let text: String
   public let turnStartedAt: Date?
@@ -119,9 +123,16 @@ public struct AgentStampedValue: Sendable, Hashable, Codable {
       else {
         return .malformed(.invalidTurnStart)
       }
+      guard turnStartMillisecondsRange.contains(value) else {
+        return .malformed(.turnStartOutOfRange)
+      }
       turnStartedAt = Date(timeIntervalSince1970: Double(value) / 1000)
       text = String(turnAndToken[turnAndToken.index(after: separator)...])
     }
+    return parsedValue(processID: processID, text: text, turnStartedAt: turnStartedAt)
+  }
+
+  private static func parsedValue(processID: Int32, text: String, turnStartedAt: Date?) -> Parsed {
     if let violation = PaneSummaryFormatViolation.textViolation(text) {
       return .malformed(violation == .blank ? .emptyText : violation)
     }
@@ -132,6 +143,7 @@ public struct AgentStampedValue: Sendable, Hashable, Codable {
 public enum PaneSummaryFormatViolation: Sendable, Hashable, Codable {
   case missingTurnStart
   case invalidTurnStart
+  case turnStartOutOfRange
   case blank
   case missingAgentProcessID
   case missingSeparator

@@ -119,7 +119,8 @@ public enum PersistedWorktreeActivation: String, Sendable, Hashable, Codable {
 /// - 保存にあり今回検出できなかったものは捨てず、到達不能として保持する。ユーザーの Active 指定を
 ///   「消えた」と決めつけて捨てないため。ただし今回 entry 単位で観測に失敗したパス (`unobserved`) は
 ///   `.unreachable` ではなく `.observationFailed` として保持する。到達可能性を確かめられていない
-///   ものを「到達不能」と断定して見せないため (Issue #243)。
+///   ものを「到達不能」と断定して見せないため (Issue #243)。同じ理由で、`isListingComplete` が
+///   `false` のとき、今回未検出の保存済み Task はすべて `.observationFailed` として保持する。
 /// - したがって `appeared` と `disappeared` は常に空になる。復元は出現も消失も宣言しない。
 ///
 /// - Important: `saved` の `nil` は「保存が無い」= 初回起動を表し、空の保存 (前回は1件も
@@ -138,7 +139,8 @@ public enum PersistedWorktreeActivation: String, Sendable, Hashable, Codable {
 public func restoreWorktreeInventory(
   detected: [DetectedWorktree],
   saved: PersistedWorktreeInventory?,
-  unobserved: [String] = []
+  unobserved: [String] = [],
+  isListingComplete: Bool = true
 ) -> WorktreeScanResult {
   guard let saved else {
     return reconcileDetectedWorktrees(detected: detected, previous: nil, unobserved: unobserved)
@@ -190,7 +192,8 @@ public func restoreWorktreeInventory(
     retained.insert(projectRoot.identity)
   }
   let leftovers = restoredLeftovers(
-    saved: saved, retained: retained, unobservedPaths: unobservedPaths)
+    saved: saved, retained: retained, unobservedPaths: unobservedPaths,
+    isListingComplete: isListingComplete)
   taskWorktrees.append(contentsOf: leftovers.taskWorktrees)
   unobservedIdentities.append(contentsOf: leftovers.unobserved)
   taskWorktrees = taskWorktreesInOpenedOrder(
@@ -209,13 +212,16 @@ public func restoreWorktreeInventory(
 private func restoredLeftovers(
   saved: PersistedWorktreeInventory,
   retained: Set<WorktreeIdentity>,
-  unobservedPaths: Set<String>
+  unobservedPaths: Set<String>,
+  isListingComplete: Bool
 ) -> (taskWorktrees: [TaskWorktree], unobserved: [WorktreeIdentity]) {
   var remaining = retained
   var taskWorktrees: [TaskWorktree] = []
   var unobserved: [WorktreeIdentity] = []
   for task in saved.taskWorktrees where remaining.insert(task.identity).inserted {
-    let observation = restoredObservation(of: task.worktreePath, in: unobservedPaths)
+    let observation: WorktreeObservation =
+      isListingComplete
+      ? restoredObservation(of: task.worktreePath, in: unobservedPaths) : .observationFailed
     if observation == .observationFailed {
       unobserved.append(task.identity)
     }

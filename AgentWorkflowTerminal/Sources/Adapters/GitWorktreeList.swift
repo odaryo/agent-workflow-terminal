@@ -22,6 +22,16 @@ public struct GitWorktreeListParseResult: Sendable, Equatable {
 }
 
 public enum GitWorktreeList {
+  /// 最後の `\0\0` より後の不完全な record は捨てる。git 2.50.1 実測では、壊れた
+  /// worktree の record は終端の2つ目の `\0` を欠き、それ以降の worktree は出力されない。
+  /// 通常の `parse` へ部分出力を渡すと、未完了の record まで有効な entry として採り得る。
+  public static func parseCompletedRecords(output: String) -> GitWorktreeListParseResult {
+    guard let terminator = output.range(of: "\0\0", options: .backwards) else {
+      return .init(entries: [], failures: [])
+    }
+    return parse(output: String(output[..<terminator.upperBound]))
+  }
+
   public static func parse(output: String) -> GitWorktreeListParseResult {
     let attributes = output.components(separatedBy: "\0")
     var records: [[String]] = [[]]

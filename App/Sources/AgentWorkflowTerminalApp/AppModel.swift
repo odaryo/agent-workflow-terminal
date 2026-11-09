@@ -159,7 +159,7 @@ final class AppModel: ObservableObject {
     return switch state {
     case nil: nil
     case .noWorktrees: "worktree がありません。"
-    case .noReachableWorktrees: "到達できる worktree がありません。"
+    case .noReachableWorktrees: "到達を確認できる worktree がありません。"
     case .noActiveWorktrees: "Active な worktree がありません。Inactive の一覧から Active にしてください。"
     }
   }
@@ -315,7 +315,7 @@ final class AppModel: ObservableObject {
     // 選択後では端末の .task が印より先に走り、確認なしで session を作り得る。
     restoredSessions = hasSavedInventory ? Set(sessionKeys) : []
     didCompleteInitialScan = true
-    if projectRoot != nil {
+    if projectRoot?.isReachable == true {
       selectProjectRoot()
     } else if let first = firstSelectableWorktree {
       select(first)
@@ -407,9 +407,8 @@ final class AppModel: ObservableObject {
   }
 
   private func selectFallbackSession() {
-    // 到達不能な Project Root へは移さない。`selectProjectRoot()` は worktree の選択と違って
-    // 到達可能性を見ないので、自動で呼ぶこの経路が「開けない Project Root を勝手に開く」
-    // 入口になる (`select(_:)` の doc コメントにある `$HOME` へ落ちる `new-session`)。
+    // 到達を確認できない Project Root の選択は何も変更しないため、先に判定しないと
+    // 到達可能な Task へのフォールバックまで進まない。
     if projectRoot?.isReachable == true {
       selectProjectRoot()
     } else if let next = firstSelectableWorktree {

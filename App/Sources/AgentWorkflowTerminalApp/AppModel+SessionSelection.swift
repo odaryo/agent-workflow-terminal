@@ -17,7 +17,7 @@ extension AppModel {
   }
 
   func canOpenSession(in identity: WorktreeIdentity) -> Bool {
-    if identity == projectRoot?.identity { return true }
+    if identity == projectRoot?.identity { return projectRoot?.isReachable == true }
     return worktrees.contains {
       $0.identity == identity && $0.activation == .active && $0.detected.isReachable
     }
@@ -29,7 +29,9 @@ extension AppModel {
   }
 
   func selectProjectRoot() {
-    guard let projectRoot, let key = sessionLayout.tabs(in: projectRoot.identity).first else {
+    guard let projectRoot, projectRoot.isReachable,
+      let key = sessionLayout.tabs(in: projectRoot.identity).first
+    else {
       return
     }
     select(key)

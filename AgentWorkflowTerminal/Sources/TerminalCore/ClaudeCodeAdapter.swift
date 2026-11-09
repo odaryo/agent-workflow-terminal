@@ -54,18 +54,45 @@ public struct ClaudeCodeAdapter: AgentAdapter {
   }
 
   private static func promptState(_ screen: String) -> AgentState? {
+    let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
     if screen.contains("Do you want to ") || screen.contains("Esc to cancel · Tab to amend")
-      || hasTrustPrompt(screen)
+      || hasTrustPrompt(screen),
+      hasActivePrompt(
+        in: lines,
+        containing: [
+          "Do you want to ", "Esc to cancel · Tab to amend", "Enter to confirm · Esc to cancel",
+          "Yes, I trust this folder",
+          "Claude Code'll be able to read, edit, and execute files here.",
+        ])
     {
       return .permission
     }
-    if screen.contains("Enter to select ·") && screen.contains("Type something.") {
+    if screen.contains("Enter to select ·") && screen.contains("Type something."),
+      hasActivePrompt(in: lines, containing: ["Enter to select ·", "Type something."])
+    {
       return .question
     }
     if hasPlanApprovalPrompt(screen) {
       return .permission
     }
     return nil
+  }
+
+  // Issue #645、設計書 §12.6・§12.8: 応答本文にも確認画面の文言が引用されるため、文言だけでは判断待ちにしない。
+  private static func hasActivePrompt(in lines: [Substring], containing texts: [String]) -> Bool {
+    guard
+      let index = lines.lastIndex(where: { line in
+        texts.contains { line.contains($0) }
+      })
+    else { return false }
+    return !hasInputPromptOrDone(lines.dropFirst(index + 1))
+  }
+
+  private static func hasInputPromptOrDone(_ lines: ArraySlice<Substring>) -> Bool {
+    lines.contains {
+      $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+        || $0.hasPrefix("❯\u{00A0}")
+    }
   }
 
   // Issue #252、設計書 §12.8: 2.1.319 で採取した trust 画面は選択肢の移動でも変わるため、
@@ -93,10 +120,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return
         (precedingText.contains("Would you like to proceed?")
         || precedingText.contains("Exit plan mode?"))
-        && !followingLines.contains {
-          $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
-            || $0.hasPrefix("❯\u{00A0}")
-        }
+        && !hasInputPromptOrDone(followingLines)
     }
   }
 
@@ -130,13 +154,15 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
     guard !hasScrolledTranscript else { return nil }
     // Issue #632: 2.1.319 では retry が尽きても done が出るため、正常完了と区別する。
-    if let lastResponseIndex = currentTurnLines.lastIndex(where: { $0.hasPrefix("⏺ ") }),
-      currentTurnLines[lastResponseIndex].hasPrefix("⏺ API Error:"),
-      currentTurnLines.suffix(from: lastResponseIndex + 1).contains(where: {
-        $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
-      })
-    {
+    if hasCompletedAPIError(in: currentTurnLines) {
       return .error
+    }
+    if hasEmptyInputPrompt,
+      isIdleAfterTurnWithoutCompletionLine(
+        screen: screen, submittedPrompt: lastSubmittedPromptIndex.map { lines[$0] },
+        turnLines: currentTurnLines)
+    {
+      return .idle
     }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
@@ -158,6 +184,60 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return .completed
     }
     return nil
+  }
+
+  private static func hasCompletedAPIError(in lines: ArraySlice<Substring>) -> Bool {
+    let lastResponseIndex = lines.lastIndex(where: { $0.hasPrefix("⏺ ") })
+    let responseErrorIndex = lastResponseIndex.flatMap { index in
+      [
+        "⏺ API Error:", "⏺ Please run /login · API Error:",
+        "⏺ There's an issue with the selected model",
+      ].contains(where: { lines[index].hasPrefix($0) }) ? index : nil
+    }
+    // Issue #725: 深いインデントの引用を除くため列 2 に固定する。区切りには NBSP も混ざる。
+    let nestedErrorIndex = lines.lastIndex(where: {
+      $0.range(
+        of: #"^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)"#
+          + #"|Credit balance too low · |Prompt is too long · )"#,
+        options: .regularExpression) != nil
+    })
+    let errorIndex =
+      responseErrorIndex
+      ?? nestedErrorIndex.flatMap { index in
+        lastResponseIndex.map { $0 > index } == true ? nil : index
+      }
+    guard let errorIndex else { return false }
+    return lines.suffix(from: errorIndex + 1).contains(where: {
+      $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+    })
+  }
+
+  // Issue #631: 完了行を出さないターンは Unknown のままだと Diff コメントを送れない。
+  // `!` の実行中と応答のストリーム中は入力欄が空でも次の入力を待っていない (footer の印で分かる)。
+  private static func isIdleAfterTurnWithoutCompletionLine(
+    screen: String, submittedPrompt: Substring?, turnLines: ArraySlice<Substring>
+  ) -> Bool {
+    guard !screen.contains("esc to interrupt"),
+      !turnLines.contains(where: { $0.hasPrefix("! ") })
+    else { return false }
+    // `⎿` の後は半角空白と NBSP の並び (2.1.319 の実測)。列を固定して引用された同じ文言を除く。
+    if let interruptedIndex = turnLines.lastIndex(where: {
+      $0.range(of: #"^  ⎿[ \x{00A0}]+Interrupted · "#, options: .regularExpression) != nil
+    }) {
+      return !turnLines.suffix(from: interruptedIndex + 1).contains(where: {
+        $0.hasPrefix("⏺ ")
+          || $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+      })
+    }
+    guard let submittedPrompt,
+      submittedPrompt.range(of: #"^❯ +/\S"#, options: .regularExpression) != nil,
+      let firstOutput = turnLines.first(where: {
+        !$0.trimmingCharacters(in: .whitespaces).isEmpty
+      }),
+      firstOutput.trimmingCharacters(in: .whitespaces).hasPrefix("⎿"),
+      !firstOutput.contains("Running in the background")
+    else { return false }
+    return !turnLines.contains(where: { $0.hasPrefix("⏺ ") })
   }
 
   // Issue #653: スクロール中は最後の送信済みプロンプトが前のターンのものに見えるため、
@@ -197,15 +277,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     let lines = screen.split(separator: "\n", omittingEmptySubsequences: false)
     guard let index = lines.lastIndex(where: { $0.hasPrefix("❯") }) else { return .absent }
     let followingLines = lines.dropFirst(index + 1)
-    // Issue #270: 2.1.319 の \ + Enter の継続行は ❯ の下・区切りの上に出るため、
-    // 先頭行が空でも空欄とは限らない。継続行の dim は実測が無いため入力済みとして扱う。
+    // Issue #270 / #648: 2.1.319 の \ + Enter の継続行は ❯ の下・区切りの上に出るため、
+    // 先頭行も継続行も空白だけでも改行が残っている。継続行の dim は実測が無いため入力済みとして扱う。
     if let separatorIndex = followingLines.firstIndex(where: {
       let trimmed = $0.trimmingCharacters(in: .whitespaces)
       return !trimmed.isEmpty && trimmed.allSatisfy { $0 == "─" }
     }),
-      followingLines[..<separatorIndex].contains(where: {
-        !$0.trimmingCharacters(in: .whitespaces).isEmpty
-      })
+      !followingLines[..<separatorIndex].isEmpty
     {
       return .typed
     }
@@ -240,7 +318,7 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     case empty
     /// 文脈サジェスト。利用者の入力ではない。
     case placeholder
-    /// 最後の `❯` の行の下・区切りの上に文字がある場合も含む。そこが入力欄でないとき
+    /// 最後の `❯` の行の下・区切りの上に空白だけでも行がある場合も含む。そこが入力欄でないとき
     /// (permission / question のダイアログ、送信済みプロンプトが最後の `❯` の行のとき) にも
     /// 返るので、「利用者が打った」とは限らない。Idle / Completed へ丸めない向きにだけ使う。
     case typed

@@ -102,7 +102,8 @@ public struct DiffSnapshotBuilder: Sendable {
     if case .commit = request {
       // Commit Diff の範囲表示 (§9.1) のためだけに読む。`observe` (変更検知のポーリング) では
       // 読まないよう `collect` の外に置き、読めなくても Diff 自体は作れるので失敗にしない。
-      head = (try? await status(untrackedFiles: .normal)).flatMap { Self.head(of: $0.status) }
+      // HEAD だけを読むので untracked は走査しない (10 万件で 150 ms と 22 ms、#634)。
+      head = (try? await status(untrackedFiles: .no)).flatMap { Self.head(of: $0.status) }
     }
     return DiffSnapshotBuildResult(
       snapshot: DiffSnapshot(

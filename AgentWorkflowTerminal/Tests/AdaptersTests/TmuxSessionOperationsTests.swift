@@ -136,6 +136,27 @@ struct TmuxSessionOperationsTests: TmuxSessionOperationsTestSupport {
         == prefix + ["list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#])
   }
 
+  @Test("復号できない行は飛ばして件数を返し、list は読めた名前だけを返す")
+  func countsUndecodableLinesThroughListing() async throws {
+    let stub = TmuxSessionRunnerStub(
+      result: stubSuccess(stdout: "awt-feature-a-0badcafe\nbad\\tname\nuser-plain\n"))
+    let operations = try makeOperations(stub)
+
+    let listing = try await operations.listWithUndecodableCount()
+    #expect(listing.names == ["awt-feature-a-0badcafe", "user-plain"])
+    #expect(listing.undecodableLineCount == 1)
+    #expect(try await operations.list() == ["awt-feature-a-0badcafe", "user-plain"])
+  }
+
+  @Test("server が動いていない場合は復号できない行も 0 件になる")
+  func reportsNoUndecodableLinesWithoutServer() async throws {
+    let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerNotRunningStderr))
+
+    #expect(
+      try await makeOperations(stub).listWithUndecodableCount()
+        == TmuxSessionNameList(names: [], undecodableLineCount: 0))
+  }
+
   @Test("server が動いていない場合の一覧は空になる")
   func listsNothingWithoutServer() async throws {
     let stub = TmuxSessionRunnerStub(result: stubFailure(stderr: tmuxServerNotRunningStderr))

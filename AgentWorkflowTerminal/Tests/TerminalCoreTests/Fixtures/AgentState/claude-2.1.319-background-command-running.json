@@ -1,0 +1,21 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "/code-review のバックグラウンド実行中。Running in the background の行があり、footer に esc to interrupt は無い。 Issue #631。160x40 で採取。processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "claude-2.1.319-background-command-running (review-a-005、160x40)",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude"
+  ],
+  "captureCommand": "tmux -L <隔離 socket> capture-pane -p / capture-pane -e -p (160x40)",
+  "secondsSinceScreenChange": 5.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /private/tmp/sanitized\n\n\n❯ hello\n\n⏺ OK\n\n✻ Cogitated for 0s · done 1:53 PM\n\n❯ /code-review\n  ⎿  Running in the background as @code-review\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts · ↓ to manage\n\n  ⏺ main\n  ◯ code-review  /code-review                                                                                                                               2s\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/private/tmp/sanitized\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mhello\u001b[39m\n\n\u001b[38;5;231m\u001b[49m⏺\u001b[39m OK\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mCogitated for 0s · done 1:53 PM\u001b[39m\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231m/code-review\u001b[39m\n\u001b[38;5;246m\u001b[49m  ⎿  \u001b[39mRunning in the background as @code-review\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m❯ \u001b[7m \u001b[0m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on · ? for shortcuts · ↓ to manage\u001b[39m\n\n\u001b[1m  ⏺ main\u001b[0m\n\u001b[38;5;246m  ◯ \u001b[39mcode-review  \u001b[38;5;246m/code-review\u001b[39m                                                                                                                               \u001b[38;5;246m2s\u001b[39m\n"
+}

@@ -9,7 +9,10 @@ struct HostControlSocketTests {
   @Test("実socketで要求と成功・失敗応答を往復する", arguments: [true, false])
   func roundTrip(opened: Bool) async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let expected = HostControlRequest.openWorktree(directory: "/worktree 日本語")
     let response: HostControlResponse =
       opened
@@ -36,7 +39,10 @@ struct HostControlSocketTests {
   @Test("ファイルが無ければserverUnavailableを返す")
   func unavailableWithoutFile() async {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     #expect(!FileManager.default.fileExists(atPath: path))
     do {
       _ = try await HostControlSocketClient.send(
@@ -50,7 +56,10 @@ struct HostControlSocketTests {
   @Test("閉じたsocketの残存ファイルを引き継ぐ")
   func takesOverStaleSocket() async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let descriptor = try Self.makeSocket()
     let bound = Self.withAddress(path) { address, length in
       Darwin.bind(descriptor, address, length)
@@ -69,7 +78,10 @@ struct HostControlSocketTests {
   @Test("生きたserverのsocketを奪わない")
   func rejectsLiveServer() async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let first = HostControlSocketServer(path: path)
     let second = HostControlSocketServer(path: path)
     try await withServer(first) {
@@ -135,6 +147,86 @@ struct HostControlSocketTests {
     #expect(try FileManager.default.destinationOfSymbolicLink(atPath: path) == path + ".missing")
   }
 
+  @Test("lockのsymlinkを辿らずioを返す", arguments: [true, false])
+  func rejectsLockSymlink(targetExists: Bool) async throws {
+    let path = uniquePath()
+    let target = path + ".target"
+    let contents = Data("lockのリンク先".utf8)
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+      try? FileManager.default.removeItem(atPath: target)
+    }
+    if targetExists { try contents.write(to: URL(fileURLWithPath: target)) }
+    try FileManager.default.createSymbolicLink(
+      atPath: path + ".lock", withDestinationPath: target)
+    let server = HostControlSocketServer(path: path)
+    do {
+      try await server.start { _ in Self.response }
+      Issue.record("lockのsymlinkを辿って起動できた")
+    } catch {
+      switch error {
+      case .io: break
+      default: Issue.record("io以外のエラー: \(error)")
+      }
+    }
+    await server.stop()
+    #expect(try FileManager.default.destinationOfSymbolicLink(atPath: path + ".lock") == target)
+    #expect(!FileManager.default.fileExists(atPath: path))
+    if targetExists {
+      #expect(try Data(contentsOf: URL(fileURLWithPath: target)) == contents)
+    } else {
+      #expect(!FileManager.default.fileExists(atPath: target))
+    }
+  }
+
+  @Test("不正UTF-8の要求は置換せずhandlerに渡さずinvalid_requestを返す")
+  func rejectsInvalidUTF8Request() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let bytes =
+      Array(#"{"version":1,"command":"worktree.open","directory":"/"#.utf8)
+      + [0xFF] + Array("\"}\n".utf8)
+    try await withServer(
+      HostControlSocketServer(path: path),
+      handler: { _ in
+        Issue.record("不正UTF-8を含む要求がhandlerに渡った")
+        return Self.response
+      },
+      body: {
+        let line = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
+        let response = try HostControlProtocol.decodeResponse(line).get()
+        guard case .failure(let code, _) = response else {
+          Issue.record("不正UTF-8の要求が成功した")
+          return
+        }
+        #expect(code == .invalidRequest)
+      }
+    )
+  }
+
+  @Test("キャンセル済みTaskの要求は中断の .io を返す")
+  func preservesClientCancellation() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    try await withServer(HostControlSocketServer(path: path)) {
+      let task = Task {
+        withUnsafeCurrentTask { $0?.cancel() }
+        return try await HostControlSocketClient.send(
+          .openWorktree(directory: "/path"), to: path, timeout: .seconds(30))
+      }
+      await #expect(throws: HostControlSocketError.io("Hostとの通信が中断されました")) {
+        _ = try await task.value
+      }
+    }
+  }
+
   @Test("invalid_requestのmessageにDecodingErrorを含めない")
   func readableInvalidRequest() async throws {
     let path = uniquePath()
@@ -143,7 +235,7 @@ struct HostControlSocketTests {
       try? FileManager.default.removeItem(atPath: path + ".lock")
     }
     try await withServer(HostControlSocketServer(path: path)) {
-      let line = try await Task.detached { try Self.sendInvalidRequest(to: path) }.value
+      let line = try await Self.offPool { try Self.sendRequest(Array("{}\n".utf8), to: path) }
       let response = try HostControlProtocol.decodeResponse(line).get()
       guard case .failure(let code, let message) = response else {
         Issue.record("不正要求が成功した")
@@ -179,7 +271,10 @@ struct HostControlSocketTests {
   @Test("socketファイルは0600で作る")
   func socketPermissions() async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let server = HostControlSocketServer(path: path)
     try await withServer(server) {
       let attributes = try FileManager.default.attributesOfItem(atPath: path)
@@ -192,7 +287,10 @@ struct HostControlSocketTests {
   @Test("stopでsocketファイルを削除する")
   func stopRemovesSocket() async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let server = HostControlSocketServer(path: path)
     try await withServer(server) {
       #expect(FileManager.default.fileExists(atPath: path))
@@ -203,7 +301,10 @@ struct HostControlSocketTests {
   @Test("64KiBを超える要求はhandlerに渡さず接続を閉じる")
   func closesOversizedRequest() async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let server = HostControlSocketServer(path: path)
     try await withServer(
       server,
@@ -212,9 +313,9 @@ struct HostControlSocketTests {
         return Self.response
       },
       body: {
-        try await Task.detached {
+        try await Self.offPool {
           try Self.sendOversizedRequest(to: path)
-        }.value
+        }
       }
     )
   }
@@ -222,7 +323,10 @@ struct HostControlSocketTests {
   @Test("遅いhandlerを待ち続けずtimedOutを返す")
   func timesOutSlowHandler() async throws {
     let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path) }
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
     let server = HostControlSocketServer(path: path)
     try await withServer(
       server,
@@ -244,6 +348,9 @@ struct HostControlSocketTests {
     )
   }
 
+}
+
+extension HostControlSocketTests {
   private static let response = HostControlResponse.opened(
     HostControlOpenedWorktree(
       session: "awt-x-12345678", directory: "/path", created: true, agentCommand: nil))
@@ -291,7 +398,17 @@ struct HostControlSocketTests {
     }
   }
 
-  private static func sendInvalidRequest(to path: String) throws -> String {
+  // 同期の recv を並行性ランタイムのスレッドで待つと、コア数の少ない環境でサーバの処理が回らない
+  // (CI と LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 で EAGAIN を実測、Issue #700)。
+  private static func offPool<T: Sendable>(
+    _ body: @escaping @Sendable () throws -> T
+  ) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+      DispatchQueue.global().async { continuation.resume(with: Result { try body() }) }
+    }
+  }
+
+  private static func sendRequest(_ bytes: [UInt8], to path: String) throws -> String {
     let descriptor = try makeSocket()
     defer { Darwin.close(descriptor) }
     var timeout = timeval(tv_sec: 2, tv_usec: 0)
@@ -300,13 +417,13 @@ struct HostControlSocketTests {
         descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
         socklen_t(MemoryLayout<timeval>.size)) == 0)
     try #require(withAddress(path) { Darwin.connect(descriptor, $0, $1) } == 0)
-    let bytes = Array("{}\n".utf8)
     let sent = bytes.withUnsafeBytes { Darwin.send(descriptor, $0.baseAddress, $0.count, 0) }
     try #require(sent == bytes.count)
     var response: [UInt8] = []
     var byte: UInt8 = 0
     while true {
-      try #require(Darwin.recv(descriptor, &byte, 1, 0) == 1)
+      let received = Darwin.recv(descriptor, &byte, 1, 0)
+      try #require(received == 1, "recv=\(received) errno=\(errno) bytes=\(response.count)")
       if byte == 10 { return String(decoding: response, as: UTF8.self) }
       response.append(byte)
     }

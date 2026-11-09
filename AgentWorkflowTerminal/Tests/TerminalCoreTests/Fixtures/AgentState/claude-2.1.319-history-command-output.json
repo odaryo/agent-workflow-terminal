@@ -1,0 +1,21 @@
+{
+  "expectedState": "idle",
+  "acceptableStates": [
+    "idle"
+  ],
+  "note": "前のターンの完了後に /model を実行した画面。設定結果が履歴に書かれ、その下に空の入力欄がある。 Issue #631。本物の Claude Code を一時 HOME と偽 API につないで採取した。",
+  "source": "claude-2.1.319-history-command-output (model-end、160x40)",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude"
+  ],
+  "captureCommand": "tmux -L <隔離 socket> capture-pane -p / capture-pane -e -p (160x40)",
+  "secondsSinceScreenChange": 5.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /private/tmp/sanitized/work-model\n\n\n❯ hello\n\n⏺ OK\n\n✻ Worked for 0s · done 1:00 PM\n\n❯ /model\n  ⎿  Set model to Opus 5.5 (default) and saved as your default for new sessions\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            ◐ medium · /effort\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · ? for shortcuts\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/private/tmp/sanitized/work-model\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mhello\u001b[39m\n\n\u001b[38;5;231m\u001b[49m⏺\u001b[39m OK\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mWorked for 0s · done 1:00 PM\u001b[39m\n\n\u001b[38;5;246m\u001b[48;5;237m❯\u001b[39m \u001b[38;5;231m/model\u001b[39m\n\u001b[38;5;246m\u001b[49m  ⎿  \u001b[39mSet model to \u001b[38;5;153mOpus 5.5 (default)\u001b[39m and saved as your default for new sessions\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            \u001b[38;5;246m◐ medium · /effort\u001b[39m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m❯ \u001b[7m \u001b[0m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on · ? for shortcuts\u001b[39m\n"
+}

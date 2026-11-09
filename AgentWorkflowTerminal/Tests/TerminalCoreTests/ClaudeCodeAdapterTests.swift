@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 36)
+    #expect(fixtures.count == 58)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -73,8 +73,8 @@ struct ClaudeCodeAdapterTests {
     #expect(fixtureState(of: result) == "permission")
   }
 
-  @Test("継続行が空白だけなら空の入力欄として Completed (Issue #270)")
-  func whitespaceOnlyContinuationIsCompleted() throws {
+  @Test("継続行が空白だけでも入力欄に改行が残っているので Unknown (Issue #648)")
+  func whitespaceOnlyContinuationIsUnknown() throws {
     let fixture = try #require(
       AgentStateFixture.load(prefix: "claude-2.1.319-typing-multiline-empty-first").first)
     let screen = fixture.screen.replacingOccurrences(of: "  second line\n", with: "  \n")
@@ -85,7 +85,7 @@ struct ClaudeCodeAdapterTests {
         secondsSinceScreenChange: fixture.secondsSinceScreenChange, hasObservedScreenChange: true,
         observedAt: .distantPast
       ), liveness: fixture.liveness)
-    #expect(fixtureState(of: result) == "completed")
+    #expect(fixtureState(of: result) == "unknown")
   }
 
   @Test("先頭行が空でも3行の入力の途中は Unknown (Issue #270)")

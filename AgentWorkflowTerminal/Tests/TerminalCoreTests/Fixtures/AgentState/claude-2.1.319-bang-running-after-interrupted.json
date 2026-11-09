@@ -1,0 +1,21 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "ターンを中断した後の ! sleep 12 の実行中。中断行と空の入力欄が残るが、footer に esc to interrupt がある。 Issue #631。160x40 で採取。processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "claude-2.1.319-bang-running-after-interrupted (intrbang2-a-005、160x40)",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude"
+  ],
+  "captureCommand": "tmux -L <隔離 socket> capture-pane -p / capture-pane -e -p (160x40)",
+  "secondsSinceScreenChange": 5.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /private/tmp/sanitized\n\n\n❯ SLOWPLEASE wait\n\n⏺ Working on it, first part of the reply.\n  ⎿  Interrupted · What should Claude do instead?\n\n!  sleep 12\n  ⎿  Running…\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏸ manual mode on · esc to interrupt\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/private/tmp/sanitized\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mSLOWPLEASE wait\u001b[39m\n\n\u001b[38;5;231m\u001b[49m⏺\u001b[39m Working on it, first part of the reply.\n\u001b[38;5;246m  ⎿  Interrupted · What should Claude do instead?\u001b[39m\n\n\u001b[38;5;211m\u001b[48;5;59m! \u001b[38;5;231m sleep 12\u001b[39m\n\u001b[38;5;246m\u001b[49m  ⎿  Running…\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;246m❯ \u001b[7m\u001b[39m \u001b[0m\n\u001b[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  \u001b[38;5;246m⏸ manual mode on · esc to interrupt\u001b[39m\n"
+}

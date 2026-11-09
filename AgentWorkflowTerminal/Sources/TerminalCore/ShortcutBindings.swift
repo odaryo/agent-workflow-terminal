@@ -190,9 +190,9 @@ extension ShortcutAction {
     case .nextProject:
       KeyCombination(key: .downArrow, modifiers: [.command, .option])
     case .previousSession:
-      KeyCombination(key: .leftArrow, modifiers: [.command, .option])
+      KeyCombination(key: .upArrow, modifiers: [.command])
     case .nextSession:
-      KeyCombination(key: .rightArrow, modifiers: [.command, .option])
+      KeyCombination(key: .downArrow, modifiers: [.command])
     case .toggleOverview:
       KeyCombination(key: .character("o"), modifiers: [.command, .shift])
     case .toggleCodeViewer:

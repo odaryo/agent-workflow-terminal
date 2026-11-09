@@ -95,6 +95,17 @@ final class UserNotificationPoster {
   /// 許可の要求を1回にまとめる。並んで届いた通知がそれぞれ要求を出さないように。
   private var authorization: Task<Bool, Never>?
 
+  static func authorizationSummary() async -> NotificationAuthorizationSummary {
+    guard Bundle.main.bundleIdentifier != nil else { return .unknown }
+    let center = UNUserNotificationCenter.current()
+    return await withCheckedContinuation { continuation in
+      center.getNotificationSettings { settings in
+        continuation.resume(
+          returning: NotificationAuthorizationSummary(settings.authorizationStatus))
+      }
+    }
+  }
+
   /// `open` は通知を開いたときに main actor で呼ぶ。
   static func make(
     open: @escaping @MainActor @Sendable (NotificationTarget) async -> Void

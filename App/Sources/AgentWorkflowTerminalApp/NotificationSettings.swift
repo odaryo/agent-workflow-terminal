@@ -1,5 +1,40 @@
+import AppKit
 import SwiftUI
 import TerminalCore
+import UserNotifications
+
+enum NotificationAuthorizationSummary: Sendable, Equatable {
+  case allowed
+  case denied
+  case notDetermined
+  case unknown
+
+  init(_ status: UNAuthorizationStatus) {
+    switch status {
+    case .authorized, .provisional: self = .allowed
+    case .denied: self = .denied
+    case .notDetermined: self = .notDetermined
+    default: self = .unknown
+    }
+  }
+
+  var label: String {
+    switch self {
+    case .allowed: "許可されています"
+    case .denied: "拒否されています"
+    case .notDetermined: "未決定"
+    case .unknown: "確認できません"
+    }
+  }
+
+  var detail: String? {
+    switch self {
+    case .allowed, .unknown: nil
+    case .denied: "通知は表示されません。システム設定の「通知」で許可してください。"
+    case .notDetermined: "最初の通知のときに確認します。"
+    }
+  }
+}
 
 /// 通知の種類ごとの ON / OFF と、長時間 `Unknown` の継続時間 (設計書 §11.2)。UserDefaults に置く。
 enum NotificationPreferences {
@@ -40,7 +75,9 @@ extension PaneNotificationKind {
 }
 
 /// ⌘, の設定画面。
+@MainActor
 struct NotificationSettingsView: View {
+  @State private var authorizationSummary: NotificationAuthorizationSummary?
   @AppStorage(NotificationPreferences.key(.question)) private var question =
     NotificationPreferences.isEnabledByDefault(.question)
   @AppStorage(NotificationPreferences.key(.permission)) private var permission =
@@ -58,6 +95,17 @@ struct NotificationSettingsView: View {
 
   var body: some View {
     Form {
+      Section("macOS の通知の許可") {
+        if let summary = authorizationSummary {
+          Text(summary.label)
+          if let detail = summary.detail {
+            Text(detail)
+              .font(.caption).foregroundStyle(.secondary)
+          }
+        } else {
+          Text("確認中…")
+        }
+      }
       Section("判断待ち") {
         Toggle(PaneNotificationKind.question.settingsLabel, isOn: $question)
         Toggle(PaneNotificationKind.permission.settingsLabel, isOn: $permission)
@@ -83,5 +131,15 @@ struct NotificationSettingsView: View {
     }
     .formStyle(.grouped)
     .frame(width: 420)
+    .task {
+      authorizationSummary = await UserNotificationPoster.authorizationSummary()
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
+    ) { _ in
+      Task {
+        authorizationSummary = await UserNotificationPoster.authorizationSummary()
+      }
+    }
   }
 }

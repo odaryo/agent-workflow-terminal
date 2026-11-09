@@ -7,7 +7,7 @@ struct CodexAdapterTests {
   func fixtures() throws {
     let adapter = CodexAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "codex-")
-    #expect(fixtures.count == 9)
+    #expect(fixtures.count == 12)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -18,7 +18,8 @@ struct CodexAdapterTests {
 
   @Test("§12.8 trust prompt は title の spinner より優先して Permission (Issue #252)")
   func trustPromptWithSpinnerTitleIsPermission() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt").first)
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt.json").first)
     let result = CodexAdapter().classify(
       signals: AgentSignals(
         paneTitle: "⠴ wx2", screenText: fixture.screen, styledScreenText: fixture.styledScreen,
@@ -30,7 +31,8 @@ struct CodexAdapterTests {
 
   @Test("trust 文言が両方消えた画面は footer が残っても Permission にしない (Issue #252)")
   func removedTrustMarkersAreNotPermission() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt").first)
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt.json").first)
     let withoutQuestion = fixture.screen.replacingOccurrences(of: "Trust this folder?", with: "")
     try #require(withoutQuestion != fixture.screen)
     let screen = withoutQuestion.replacingOccurrences(of: "› 1. Trust and continue", with: "")
@@ -111,7 +113,8 @@ struct CodexAdapterTests {
 
   @Test("trust prompt は選択肢2を選んでも Permission (Issue #252)")
   func trustPromptWithSecondOptionSelectedIsPermission() throws {
-    let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt").first)
+    let fixture = try #require(
+      AgentStateFixture.load(prefix: "codex-0.166.0-trust-prompt.json").first)
     let withoutFirstSelection = fixture.screen.replacingOccurrences(
       of: "› 1. Trust and continue", with: "  1. Trust and continue")
     try #require(withoutFirstSelection != fixture.screen)

@@ -18,8 +18,14 @@ public struct CodexAdapter: AgentAdapter {
         $0.trimmingCharacters(in: .whitespaces)
       }
       if lines.contains("Folder access"),
-        lines.contains("› 1. Trust and continue") || lines.contains("1. Trust and continue"),
-        lines.last(where: { !$0.isEmpty }) == "enter continue · esc back"
+        let trustIndex = lines.lastIndex(where: {
+          $0 == "› 1. Trust and continue" || $0 == "1. Trust and continue"
+        }),
+        !lines.dropFirst(trustIndex + 1).contains(where: {
+          $0.hasPrefix("Worked for ")
+            || ($0.hasPrefix("› ")
+              && $0.range(of: #"^› \d+\. "#, options: .regularExpression) == nil)
+        })
       {
         return observation(.permission, signals)
       }

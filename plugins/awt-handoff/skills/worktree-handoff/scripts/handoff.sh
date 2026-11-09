@@ -170,7 +170,8 @@ fi
 
 # 子プロセスの有無では、rc や常駐が残した子を Agent と取り違える。前景のプロセスグループの変化を見る。
 if ! foreground_before=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ') ||
-  [[ ! "$foreground_before" =~ ^[0-9]+$ ]]; then
+  [[ ! "$foreground_before" =~ ^[0-9]+$ ]] ||
+  ! command_before=$(ps -o comm= -p "$pane_pid") || [[ -z "$command_before" ]]; then
   printf 'session=%s pane の前景プロセスを読めません。\n' "$session" >&2
   exit 6
 fi
@@ -180,24 +181,38 @@ if ! tmux send-keys -t "=$session:" -l -- "$line" ||
   printf 'session=%s セッションへの送信に失敗しました。\n' "$session" >&2
   exit 6
 fi
-# プロンプトが動かす外部コマンドも前景を一瞬変えるので、同じプロセスグループが3秒続いてはじめて起動とみなす。
+# プロンプトの外部コマンドを取り違えないよう、前景の変化が3秒続いてはじめて起動とみなす。
+# exec はプロセスグループを変えないので、pane PID の comm の変化も同じ期間確かめる。
 # 10秒以内に現れて3秒続く Agent を見逃さないよう、13秒まで見る。
 foreground_candidate=""
 foreground_samples=0
+command_candidate=""
+command_samples=0
 for ((attempt = 0; attempt < 65; attempt++)); do
   sleep 0.2
   foreground_now=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ')
   if [[ ! "$foreground_now" =~ ^[0-9]+$ || "$foreground_now" == "$foreground_before" ]]; then
     foreground_candidate=""
     foreground_samples=0
-    continue
+  else
+    if [[ "$foreground_now" != "$foreground_candidate" ]]; then
+      foreground_candidate="$foreground_now"
+      foreground_samples=0
+    fi
+    foreground_samples=$((foreground_samples + 1))
   fi
-  if [[ "$foreground_now" != "$foreground_candidate" ]]; then
-    foreground_candidate="$foreground_now"
-    foreground_samples=0
+  command_now=$(ps -o comm= -p "$pane_pid")
+  if [[ -z "$command_now" || "$command_now" == "$command_before" ]]; then
+    command_candidate=""
+    command_samples=0
+  else
+    if [[ "$command_now" != "$command_candidate" ]]; then
+      command_candidate="$command_now"
+      command_samples=0
+    fi
+    command_samples=$((command_samples + 1))
   fi
-  foreground_samples=$((foreground_samples + 1))
-  if [[ "$foreground_samples" -ge 15 ]]; then
+  if [[ "$foreground_samples" -ge 15 || "$command_samples" -ge 15 ]]; then
     printf 'session=%s\n' "$session"
     exit 0
   fi

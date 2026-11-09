@@ -120,6 +120,7 @@ TerminalCore  ←  Adapters  ←  (将来) App / Host Core
 ### 2.4 ログ
 
 - ログを出すのは `App/` だけで、`NSLog` に `[app]` を前置して書く。`print` / `os.Logger` は使っていない。
+ただし、ハーネスの書き手など利用者に読ませる診断は、`os.Logger` の `privacy: .public` で出す。`NSLog` の本文は統合ログで `<private>` に伏せられて読めない (実測 2026-11-09、macOS 27.0.1、#673)。値そのものは記録しない。
 - `TerminalCore` / `Adapters` はログを出さない。失敗は §2.3 のとおり呼び出し側へ返し、記録するかどうかは
   `App/` が決める。
 - git などの生の出力は1行に収まらないのでバナーに載せず、原文を `NSLog` に残す。

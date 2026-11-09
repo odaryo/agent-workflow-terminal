@@ -347,72 +347,7 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 - 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
 - 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
 
-**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
-
-採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
-
-**analyze.py の分類器** (`S2-screen-retry-error-plan`、2.1.259 composite r1〜r5): `S2-screen-spinner` との違いは claude の真値 working の 343 フレームが `idle` から `unknown` に変わることだけで (`S2-screen-spinner` が `idle` を返すが送信済みプロンプトがある画面)、他の区間と codex は予測の内訳まで一致した。この分類器は `c_screen` の判定 (`(?i)api error` が先に `error` を返す、など) を継承しているので、製品の Adapter と同じ条件ではない。
-
-**製品の Adapter** (`replay-swift --score --poll 2.0`、製品の観測間隔。`--no-styled` は
-属性を無かったことにして採点する対照):
-
-| 記録 / 入力 | idle | working | permission (危険率) | completed | completed(放置) |
-|---|---|---|---|---|---|
-| 2.1.259 記録 (属性なし) | 0.976 | 0.953 | 1.000 (0.000) | 0.978 | 1.000 |
-| 2.1.263 記録・dim 無視 | 0.978 | 0.955 | 1.000 (0.000) | **0.892** | **0.801** |
-| 2.1.263 記録・dim あり | 0.978 | 0.955 | 1.000 (0.000) | **0.978** | **1.000** |
-
-2.1.259 の行は §13.2 の k=2 行と一致する (この Issue の変更で旧記録の採点は 1 フレームも
-変わっていない。属性を持たない記録では dim ルールが発火しないため)。
-
-2.1.263 で Completed が落ちるのは、ターン完了後の入力欄に文脈サジェストが描かれ
-`^❯[ ]*$` に一致しなくなるためで、取りこぼしは**全て `unknown`** (危険な誤判定は
-増えていない: permission 危険率 0.000 のまま)。dim を空欄として扱うと 2.1.259 と同じ
-水準へ戻る。idle / working / permission は dim の有無で変わらない。
-
-### 6.5 spinner 行と完了行の位置 (Issue #627)
-
-ツールの実行を待つ間、Claude Code の画面で毎フレーム変わるのは spinner の行 (`✻ Propagating… (5s · ↓ 12 tokens)`)
-の1行だけで、§13 の最小変化行数 (claude=2) から外れる。そのとき前のターンの `· done` が画面に残っていると、
-`· done N` の有無だけを見る判定は `completed` を返していた。2.1.319 (tmux 3.8、macOS 27.0.1) の実機で採った
-画面と、この記録の 2.1.259 の画面には、同じ形の spinner 行がある。列 0 から始まり、記号 `·✢✳✶✻✽` の1字・
-半角空白・語・`…` が並び、その後は行末か ` (` である。完了行も `✻` で始まるが `…` を含まない。足した信号は次の2つ。
-
-- spinner 行が最後の送信済みプロンプト (`❯` + U+0020) より下にあれば `working`
-- `· done N` の行が最後の送信済みプロンプトより下にあるときだけ `completed`
-
-**analyze.py の分類器** (`S2-screen-spinner`、2.1.259 composite r1〜r5、working n=443):
-
-| 分類器 | working recall | working の内訳 | 他の状態 |
-|---|---|---|---|
-| `S2-screen` | 0.059 | idle 373 / completed 44 / working 26 | idle・permission・completed・completed(放置) は 1.000、危険率 0.000 |
-| `S2-screen-spinner` (新) | 0.226 | idle 343 / working 100 | 同上 (1 フレームも変わらない) |
-
-**製品の Adapter** (`replay-swift --score`、GUARD 除外後 4,548 フレーム):
-
-| 間隔 | 版 | working | completed | completed(放置) | idle | permission (危険率) |
-|---|---|---|---|---|---|---|
-| 2.0s | 変更前 | 0.953 (completed 21) | 0.978 | 1.000 | 0.976 | 1.000 (0.000) |
-| 2.0s | 変更後 | **1.000** | 0.978 | 1.000 | 0.976 | 1.000 (0.000) |
-| 0.25s | 変更前 | 0.738 (unknown 65 / completed 44 / idle 7) | 1.000 | 1.000 | 1.000 | 1.000 (0.000) |
-| 0.25s | 変更後 | **0.867** (unknown 59) | 1.000 | 1.000 | 1.000 | 1.000 (0.000) |
-
-working 以外の行は、変更の前後で予測の内訳まで一致した。working で `completed` を先に出す誤判定はどちらの間隔でも
-0 になった。長い応答を流している間は spinner 行が出ないので (§6.3-2)、そこは今までどおり画面鮮度で拾う。
-2.1.263 の記録 (§6.4) は記録した Mac に残っていなかったので、再採点していない。
-
-### 6.5.1 API の retry、retry が尽きた後、plan 承認 (Issue #632)
-
-**この記録に3つの画面は写っていない。** よって下の採点で分かるのは、足した信号が既存の区間を壊していないことだけで、3つの画面の検出率は別の採取列で数えた。
-
-採取は本物の Claude Code 2.1.319 (tmux 3.8、macOS 27.0.1、160×40、1 秒間隔) を、一時的な HOME と `CLAUDE_CONFIG_DIR`、ダミーのトークン、ローカルの偽 API につないで行った。retry は閉じたポートへの接続で、plan 承認は偽 API に `Write` と `ExitPlanMode` を返させて出した。fixture は `claude-2.1.319-{api-retrying,api-error-exhausted,plan-approval,plan-exit-empty}.json`。
-
-- ` · Retrying in <待ち時間> · attempt` で終わる行、または続けて `n/m` で終わる行が最後の送信済みプロンプトより下にあり、その行より下に `· done N` が無ければ `working` (待ち時間は `9s` と `1m 0s` を実測。44 列以下では行が割れ、記号と `n/m` が別の行になる)
-- 最後の送信済みプロンプトが `/` で始まらないなら、起動バナーでも `idle` にしない (retry の文言が変わっても `idle` に戻さないため。`/clear`、`/context`、`/model` の後は Agent が待機しているので `idle` のまま)
-- 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
-- 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
-
-**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
+**当時検出できなかった形 (Issue #725 の拡張は §6.12)**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
 
 採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
 
@@ -445,7 +380,7 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 2.1.319 で、前のターンの完了後に入力欄で `\` + Enter を打って1行目を空にし、2行目に文字を打つと、入力欄は
 `❯` + NBSP の行の下、区切りの `─` の行の上に継続行を出す (`claude-2.1.319-typing-multiline-empty-first.json`)。
 1行目だけを見る判定は入力欄を空と読み、送信済みプロンプトより下の `· done` で `completed` を返していた
-(fixture で確認)。入力欄を「最後の `❯` の行から次の区切りの行の直前まで」として読み、継続行に文字があれば
+(fixture で確認)。入力欄を「最後の `❯` の行から次の区切りの行の直前まで」として読み、継続行に文字があれば (Issue #648 で空白だけの継続行にも広げた)
 入力済みにした。区切りの見えない画面は今どおり1行目だけで決める。この記録の採点表と `--dump` の遷移列は、
 変更前 (#252 の後の main) と変更後で一致した。
 
@@ -480,6 +415,66 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 そのため、印の先頭文言 `Jump to bottom` または `<数字> new message(s)` だけを使い、後ろの部分は問わない。
 この3行の窓の外にある transcript の新着区切りは拾わない。タスク一覧が出ていると印は区切り線の 6〜8 行上になり、この判定は効かない (受け入れた残存挙動)。spinner が見えていれば今までどおり `working`。
 この変更で Gate 3 の記録の判定は1フレームも変わっていない (2.0 秒 polling の `--score` が #382 の後と同一)。
+
+### 6.10 引用された確認画面 (Issue #645)
+
+Claude Code 2.1.319 / Codex 0.166.0 の実画面を fixture にし、応答本文に引用された確認画面を
+判断待ちから除外した (設計書 §12.8)。
+
+- Claude Code: `claude-2.1.319-quoted-prompts-in-reply.json`、
+  `claude-2.1.319-quoted-prompts-streaming.json`、`claude-2.1.319-quoted-prompts-transcript.json`。
+  Permission / Question の該当文言を含む最後の行より下に入力欄または完了行があれば、判断待ちにしない。
+- Codex: `codex-0.166.0-quoted-trust-in-reply.json`。引用の下に `Worked for <1s • 13:21` と
+  `› Ask Codex to do anything` がある。前後の空白を除いた行で、最後の trust 選択肢より下に
+  `Worked for ` で始まる行、または `› ` で始まり `› <数字>. ` で始まらない行があれば、trust の判断待ちにしない。
+  カーソルを2番目へ移した本物の画面の `› 2. Back to Agent Command Center` は入力欄として扱わない。
+  `codex-0.166.0-trust-prompt-narrow-25.json` / `codex-0.166.0-trust-prompt-short-4.json` は本物の
+  trust 画面で、footer が折り返す幅23〜28や、footer が画面外に切れる高さ5以下でも判断待ちとする。
+  実測の範囲は幅23以上、高さの下限なし。幅20では選択肢の行が折り返すので判定できない。
+
+Gate 3 の記録では変更前後で変化が無かった。遷移列 TSV は256行が一致し、`claude-*` / `codex-*` の
+全13,272フレームの判定もバイト単位で一致した。`--score --poll 2.0` と `--poll 0.25` のどちらでも
+変更前後の採点結果は一致した。`--score --poll 2.0` は permission 770、recall 1.000、危険率 0.000。
+この記録には引用された確認画面が無いので、記録の一致は「後退していない」ことの証拠であり、
+「引用を除外できる」ことの証拠ではない。引用の除外は上記の実画面 fixture で確認する。
+
+### 6.11 Codex の更新の確認 (Issue #639)
+
+Codex 0.166.0 の `codex-0.166.0-update-prompt.json` を Permission とする (設計書 §12.8)。
+§6.6 の採取時点では unknown としていたが、更新の選択も人の入力を待つため判断待ちに含める。
+前後の空白を除いた行で `Update available · ` と、最後の `› 1. Update now` または `1. Update now`
+で始まる行を使う。その選択肢より下に入力欄または `Worked for ` で始まる行があれば、§6.10 の trust と
+同じ条件で引用を除外する。数字付きの選択肢は入力欄として扱わないので、選択肢2へ移しても Permission とする。
+Gate 3 の記録にはこの画面は含まれない。
+
+### 6.12 ⎿ だけの API の失敗 (Issue #725)
+
+本物の Claude Code 2.1.319 を偽 API につないだ実画面 (tmux 3.8、macOS 27.0.1、160×40) を
+`claude-2.1.319-error-{403-login,credit-balance,model-404,not-logged-in,prompt-too-long,request-timed-out}.json`
+の6件に保存した。§6.5.1 で未検出だった形を、設計書 §12.8 の条件で Error とする。
+
+現ターンの最後の `⏺ ` の行は、`⏺ API Error:` に加えて
+`⏺ Please run /login · API Error:` と `⏺ There's an issue with the selected model` を対象にする。
+`⎿` だけの失敗は、正規表現
+`^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)|Credit balance too low · |Prompt is too long · )`
+に一致する最後の行より下に `⏺ ` で始まる行が無いことを条件にする。どちらも該当行より下の
+完了行 (`·\s*done\s+\d`) が必須。半角空白と NBSP の混在や、Prompt is too long の継続行を許容する。
+列2に固定するため4桁インデントの引用は Completed とし、失敗行の後に `⏺ Done.` がある場合も Completed とする。
+この2件は未ログインの実画面 fixture の文字列置換で検証する。
+
+タイムアウトは `Request timed out (` で始まる形と、括弧が無い `Request timed out` だけの行を含む。
+モデルの失敗は、括弧が折り返しで次の行へ移る形も含む。追い修正の実画面 fixture は
+`claude-2.1.319-error-{invalid-api-key,model-404-narrow-46,request-timed-out-default}.json` の3件である。
+
+**残存する制約**: Agent の本文が同じ文言で始まる画面は本物と区別できない。
+SGR が同じなのは、本物の 403 / 404 と本文の 403 についてだけである。本文の 404 の `⏺` は
+`38;5;231`、`⎿` の本物の失敗は `38;5;211`、ツールの出力は既定色である。
+テーマで色が変わるため、色では判定しない。
+`--verbose` の Bash の結果が同じ文言の1行だけで本文が続かないと `Error` になる。
+狭い幅 (30桁付近) では文言が折り返されて取りこぼす。採取していない文言 (`OAuth token revoked · `、
+`Login expired · `、`Invalid auth token · ` など、2.1.319 のバイナリには在る) は検出しない。
+Gate 3 の記録にはこれらの画面が無いので、設計書 §12.5 に従った再採点は後退の確認だけである。
+これらの失敗を検出できるかは実画面 fixture で確認する。
 
 ### 6.3 読み取れること
 

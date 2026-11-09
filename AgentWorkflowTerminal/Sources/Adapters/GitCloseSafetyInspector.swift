@@ -2,6 +2,19 @@ import Foundation
 import TerminalCore
 
 enum GitStashList {
+  static func undeterminedCount(output: String) -> Int {
+    output.utf8.split(separator: 0x0A).count { line in
+      guard let prefix = ["WIP on ", "On "].first(where: { line.starts(with: $0.utf8) }) else {
+        return true
+      }
+      let subject = line.dropFirst(prefix.utf8.count)
+      guard let separator = subject.firstIndex(of: 0x3A),
+        subject[separator...].starts(with: ": ".utf8)
+      else { return true }
+      return subject[..<separator].elementsEqual("(no branch)".utf8)
+    }
+  }
+
   static func count(output: String, branch: String) -> Int {
     // git は branch 名をバイト列で区別する。Character 境界や String の正準等価比較は使わない。
     output.utf8.split(separator: 0x0A).count { line in
@@ -110,7 +123,8 @@ public struct GitCloseSafetyInspector: Sendable {
             ignoredFiles: ignoredCheck.status,
             branchStashes: stashCheck.status,
             unpushedCommits: statusChecks.unpushedCommits,
-            branchMerge: .unknown),
+            branchMerge: .unknown,
+            undeterminedStashCount: stashCheck.undeterminedCount),
           defaultBranch: .unresolved(reason: .detachedHead)),
         failures: failures)
     }
@@ -135,7 +149,8 @@ public struct GitCloseSafetyInspector: Sendable {
           ignoredFiles: ignoredCheck.status,
           branchStashes: stashCheck.status,
           unpushedCommits: statusChecks.unpushedCommits,
-          branchMerge: branchMerge),
+          branchMerge: branchMerge,
+          undeterminedStashCount: stashCheck.undeterminedCount),
         defaultBranch: defaultBranchResult.resolution),
       failures: failures)
   }
@@ -202,14 +217,21 @@ public struct GitCloseSafetyInspector: Sendable {
 
   private func inspectBranchStashes(
     targetBranch: String?
-  ) async -> (status: BranchStashStatus, failures: [GitCloseSafetyInspectionFailure]) {
-    guard let targetBranch else { return (.notApplicable, []) }
+  ) async -> StashInspection {
     do {
       let output = try await runner.run(.stashList()).stdout
+      let undeterminedCount = GitStashList.undeterminedCount(output: output)
+      guard let targetBranch else {
+        return .init(status: .notApplicable, undeterminedCount: undeterminedCount, failures: [])
+      }
       let count = GitStashList.count(output: output, branch: targetBranch)
-      return (count > 0 ? .present(count: count) : .absent, [])
+      return .init(
+        status: count > 0 ? .present(count: count) : .absent,
+        undeterminedCount: undeterminedCount, failures: [])
     } catch {
-      return (.unknown, [.init(check: .branchStashes, reason: .git(error))])
+      return .init(
+        status: .unknown, undeterminedCount: 0,
+        failures: [.init(check: .branchStashes, reason: .git(error))])
     }
   }
 
@@ -462,6 +484,12 @@ public struct GitCloseSafetyInspector: Sendable {
 
   private struct IgnoredInspection: Sendable {
     let status: IgnoredFilesStatus
+    let failures: [GitCloseSafetyInspectionFailure]
+  }
+
+  private struct StashInspection: Sendable {
+    let status: BranchStashStatus
+    let undeterminedCount: Int
     let failures: [GitCloseSafetyInspectionFailure]
   }
 

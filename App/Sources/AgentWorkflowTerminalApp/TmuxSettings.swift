@@ -47,12 +47,16 @@ enum TmuxSettings {
 
 @MainActor
 struct AppSettingsView: View {
+  @ObservedObject var projects: ProjectsModel
+
   var body: some View {
     TabView {
       NotificationSettingsView()
         .tabItem { Label("通知", systemImage: "bell") }
       TmuxSettingsView()
         .tabItem { Label("tmux", systemImage: "terminal") }
+      ProjectSettingsView(projects: projects)
+        .tabItem { Label("Project", systemImage: "folder") }
     }
   }
 }

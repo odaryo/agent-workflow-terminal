@@ -36,8 +36,9 @@ public enum DiffCommentSendGate {
   /// 送信を許可する状態 (ユーザー決定 2026-09-08、Issue #240)。
   ///
   /// `completed` を含めるのは、その pane が空の入力欄で次のプロンプトを待っており `idle` と
-  /// 同じ安全性のため。実測上、Agent がターンを終えた後の pane は `idle` にならない
-  /// (`ClaudeCodeAdapter` の `idle` は起動バナーが画面に残っている間だけ。Gate 3 §10-4) ので、
+  /// 同じ安全性のため。実測上、Agent がターンを終えた後の pane は通常 `idle` にならない
+  /// (`ClaudeCodeAdapter` の `idle` は起動バナーが残っている間と、中断・履歴へ書くコマンドの後だけ。
+  /// Gate 3 §10-4、Issue #631) ので、
   /// これを外すと §9.2 の主フローで送信が常に無効になる。
   ///
   /// `error` は含めない。Agent が落ちて pane が素のシェルへ戻っていると、コメント本文が

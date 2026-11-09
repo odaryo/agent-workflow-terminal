@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "高さ8行で選択肢2を選び、1. Update now がスクロールで消えた本物の更新確認画面。 80x8 で採取。processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "codex-0.166.0-update-prompt-short-8-cursor-2",
+  "paneTitle": "/private/tmp/sanitized",
+  "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.166.0",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "codex"
+  ],
+  "captureCommand": "tmux capture-pane -p / capture-pane -e -p (80x8; sh80x8-b)",
+  "screen": "\n  Update available · 0.166.0 → 0.167.0\n  Release notes: https://github.com/openai/codex/releases/latest\n↑\n› 2. Skip\n↓\n  enter continue · esc skip\n\n",
+  "styledScreen": "\n  \u001b[1mUpdate available\u001b[0;2m · 0.166.0 → 0.167.0\u001b[0m\n  \u001b[2mRelease notes: \u001b[4m\u001b]8;;https://github.com/openai/codex/releases/latest\u001b\\https://github.com/openai/codex/releases/latest\u001b[0m\u001b]8;;\u001b\\\n\u001b[38;5;75m↑\u001b[39m\n\u001b[1;7m› 2. Skip\n\u001b[0m\u001b[38;5;75m↓\u001b[39m\n  \u001b[1menter\u001b[0;2m continue · \u001b[0;1mesc\u001b[0;2m skip\u001b[0m\n\n"
+}

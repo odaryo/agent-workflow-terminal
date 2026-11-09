@@ -49,7 +49,7 @@ struct AgentWorkflowTerminalApp: App {
       }
     }
     Settings {
-      AppSettingsView()
+      AppSettingsView(projects: projects)
     }
   }
 }

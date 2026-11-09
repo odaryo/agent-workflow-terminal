@@ -2,8 +2,6 @@ import AppKit
 import SwiftUI
 import TerminalCore
 
-/// メイン window の中身。window は1枚のまま (`Window(id: "main")`、Issue #238) で、選択中の1 Project
-/// だけを表示し、ツールバーのメニューで切り替える (Issue #372)。
 struct ProjectsWindowContent: View {
   @ObservedObject var projects: ProjectsModel
   @Environment(\.openWindow) private var openWindow
@@ -38,11 +36,6 @@ struct ProjectsWindowContent: View {
       }
     }
     .background { MainWindowCapture(navigator: projects.navigator) }
-    .toolbar {
-      ToolbarItem(placement: .navigation) {
-        ProjectMenu(projects: projects)
-      }
-    }
     .confirmationDialog(
       projects.pendingUnregister?.title ?? "",
       isPresented: Binding(
@@ -120,7 +113,7 @@ struct ProjectsWindowContent: View {
     } else {
       ContentUnavailableView(
         "選択できる Project がありません", systemImage: "exclamationmark.triangle",
-        description: Text("登録済みの Project にはどれも到達できません。ツールバーのメニューから理由を確認してください。"))
+        description: Text("登録済みの Project にはどれも到達できません。設定画面の「Project」から理由を確認してください。"))
     }
   }
 }
@@ -159,46 +152,6 @@ private struct MainWindowCapture: NSViewRepresentable {
 
     func capture() {
       if let window { navigator?.mainWindow = window }
-    }
-  }
-}
-
-private struct ProjectMenu: View {
-  @ObservedObject var projects: ProjectsModel
-
-  var body: some View {
-    Menu {
-      ForEach(projects.registry.projects, id: \.commonDirectory) { project in
-        projectItem(project)
-      }
-    } label: {
-      Label(projects.selectedProject?.displayName ?? "Project", systemImage: "folder")
-        .labelStyle(.titleAndIcon)
-    }
-    .help("Project")
-    .disabled(!projects.didLoad)
-  }
-
-  @ViewBuilder
-  private func projectItem(_ project: RegisteredProject) -> some View {
-    switch projects.slots[project.commonDirectory] {
-    case .available:
-      // `Toggle` で印を付ける。メニューの中の `Toggle` はチェックマーク付きの項目になる。
-      Toggle(
-        project.displayName,
-        isOn: Binding(
-          get: { projects.registry.selection == project.commonDirectory },
-          set: { _ in projects.select(project.commonDirectory) }
-        ))
-    case .unavailable(let reason):
-      // 到達不能な Project は選択できないので、選択中の Project 向けの「登録を解除」からは外せない。
-      // 項目ごとのサブメニューに解除を置く (全 Project が到達不能で選択が無いときもここから外せる)。
-      Menu("\(project.displayName) (到達不能: \(reason))") {
-        Button("登録を解除") { Task { await projects.requestUnregister(project.commonDirectory) } }
-      }
-    case nil:
-      Button(project.displayName) {}
-        .disabled(true)
     }
   }
 }

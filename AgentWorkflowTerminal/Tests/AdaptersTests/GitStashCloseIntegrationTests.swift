@@ -16,6 +16,7 @@ struct GitStashCloseIntegrationTests {
       let result = try await inspectLinkedWorktree(in: repository)
 
       #expect(result.report.inspection.branchStashes == .present(count: 1))
+      #expect(result.report.inspection.undeterminedStashCount == 0)
       #expect(result.report.inspection.uncommittedChanges == .absent)
       #expect(result.failures.isEmpty)
     }
@@ -31,6 +32,7 @@ struct GitStashCloseIntegrationTests {
       let result = try await inspectLinkedWorktree(in: repository)
 
       #expect(result.report.inspection.branchStashes == .absent)
+      #expect(result.report.inspection.undeterminedStashCount == 0)
       #expect(result.failures.isEmpty)
     }
   }
@@ -44,6 +46,33 @@ struct GitStashCloseIntegrationTests {
 
       let result = try await inspectLinkedWorktree(in: repository, expectedBranch: nil)
       #expect(result.report.inspection.branchStashes == .notApplicable)
+      #expect(result.report.inspection.undeterminedStashCount == 1)
+      #expect(result.failures.isEmpty)
+    }
+  }
+
+  @Test(
+    "stash store の既定の件名を target の branch の有無によらず別に数える", arguments: [false, true])
+  func countsStoredStash(detached: Bool) async throws {
+    try await withGitRepository { repository in
+      try await addTrackedFile(in: repository)
+      let branchArguments = detached ? ["--detach"] : ["-b", "feature/x"]
+      try await repository.git(["worktree", "add", "-q"] + branchArguments + ["../wt", "HEAD"])
+      try "changed\n".write(
+        to: repository.mainWorktree.appending(path: "tracked.txt"), atomically: true,
+        encoding: .utf8)
+      let created = try await repository.gitExitCode(["stash", "create"])
+      try #require(created.exitCode == 0)
+      let stashObject = created.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+      try #require(!stashObject.isEmpty)
+      try await repository.git(["stash", "store", stashObject])
+
+      let result = try await inspectLinkedWorktree(
+        in: repository, expectedBranch: detached ? nil : "feature/x")
+
+      #expect(result.report.inspection.branchStashes == (detached ? .notApplicable : .absent))
+      let undeterminedStashCount: Int = result.report.inspection.undeterminedStashCount
+      #expect(undeterminedStashCount == 1)
       #expect(result.failures.isEmpty)
     }
   }

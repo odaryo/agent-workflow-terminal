@@ -168,7 +168,7 @@ private enum SocketIO {
 
   static func lock(_ path: String) throws(HostControlSocketError) -> Int32 {
     // macOSでは稼働中でもbacklogが満杯ならECONNREFUSEDになるため、接続で生存判定しない。
-    let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK
+    let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK | O_NOFOLLOW
     var descriptor = Darwin.open(path + ".lock", flags, 0o600)
     // 別スレッドが子プロセスを起動している間は、closeしても子が参照を持つのでlockが残る。
     // 実測では子の起動と並行すると約0.3%で起き、1msで解消した。1回の失敗では稼働中と判定しない。
@@ -319,7 +319,8 @@ private actor SocketConnection {
     let deadline = ContinuousClock.now.advanced(by: timeout)
     try await connect(path: path, address: address, deadline: deadline)
     try await writeLine(HostControlProtocol.encode(request), deadline: deadline)
-    let line = try await readLine(deadline: deadline)
+    let bytes = try await readLine(deadline: deadline)
+    let line = String(decoding: bytes, as: UTF8.self)
     switch HostControlProtocol.decodeResponse(line) {
     case .success(let response): return response
     case .failure(let error): throw HostControlSocketError.io(error.message)
@@ -361,11 +362,16 @@ private actor SocketConnection {
       defer { close() }
       do {
         try SocketIO.configure(try checkedDescriptor(.now.advanced(by: .seconds(5))))
-        let line = try await readLine(deadline: .now.advanced(by: .seconds(5)), limit: 65_536)
+        let bytes = try await readLine(deadline: .now.advanced(by: .seconds(5)), limit: 65_536)
         let response: HostControlResponse
-        switch HostControlProtocol.decodeRequest(line) {
-        case .success(let request): response = await handler(request)
-        case .failure(let error): response = .failure(code: .invalidRequest, message: error.message)
+        if let line = String(bytes: bytes, encoding: .utf8) {
+          switch HostControlProtocol.decodeRequest(line) {
+          case .success(let request): response = await handler(request)
+          case .failure(let error):
+            response = .failure(code: .invalidRequest, message: error.message)
+          }
+        } else {
+          response = .failure(code: .invalidRequest, message: "要求のUTF-8形式が不正です")
         }
         try await writeLine(
           HostControlProtocol.encode(response), deadline: .now.advanced(by: .seconds(5)))
@@ -409,7 +415,7 @@ private actor SocketConnection {
 
   private func readLine(
     deadline: ContinuousClock.Instant, limit: Int = Int.max
-  ) async throws -> String {
+  ) async throws -> [UInt8] {
     var bytes: [UInt8] = []
     var buffer = [UInt8](repeating: 0, count: 4096)
     while true {
@@ -422,7 +428,7 @@ private actor SocketConnection {
           throw HostControlSocketError.io("要求が64KiBを超えています")
         }
         bytes.append(contentsOf: line)
-        if line.count != chunk.count { return String(decoding: bytes, as: UTF8.self) }
+        if line.count != chunk.count { return bytes }
       } else if count == 0 {
         throw HostControlSocketError.io("改行の前に接続が閉じられました")
       } else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {

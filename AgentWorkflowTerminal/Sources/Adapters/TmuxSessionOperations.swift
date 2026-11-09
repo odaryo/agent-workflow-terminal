@@ -43,9 +43,6 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   case invalidHistoryLimit(Int)
   /// `new-session -P -F '#{session_id}'` が `$N` 以外を返した。原文を捨てずに載せる。
   case unexpectedSessionIDOutput(String)
-  /// `TmuxListPanes` と同じ規則で復号できない一覧の行。読み違えた名前で session を
-  /// 取り違えないよう、捨てずに原文ごと失敗させる。
-  case invalidSessionNameEscape(String)
   /// 想定外の出力を未設定とみなすとユーザーの値を上書きしかねないため、設定せずに失敗させる。
   /// tmux の版数差や形式の変化を診断できるよう、stdout の原文を保持する。
   case unexpectedShowOptionsOutput(String)
@@ -60,6 +57,16 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   /// 上記へ分類しなかった失敗。終了コード・stdout・stderr を加工せずに保持する。
   /// tmux の非ゼロ終了を「正常状態」と「エラー」へ一般に分類するのは Issue #62 の担当。
   case tmux(TmuxRunnerError)
+}
+
+public struct TmuxSessionNameList: Sendable, Equatable {
+  public let names: [String]
+  public let undecodableLineCount: Int
+
+  public init(names: [String], undecodableLineCount: Int) {
+    self.names = names
+    self.undecodableLineCount = undecodableLineCount
+  }
 }
 
 /// 複数クライアントが同時 attach したときの window サイズ (設計書 §4.2)。
@@ -317,30 +324,22 @@ public struct TmuxSessionOperations: Sendable {
   ///   socket が消えた場合も同じ stderr になり (Issue #492)、空にすると呼び出し元が取り残された
   ///   server を probe できない (Issue #500)。
   public func list() async throws(TmuxSessionOperationError) -> [String] {
+    try await listWithUndecodableCount().names
+  }
+
+  public func listWithUndecodableCount() async throws(TmuxSessionOperationError)
+    -> TmuxSessionNameList
+  {
     do {
       let result = try await run(
         ["list-sessions", "-F", #"#{s/\\/\\\\/:session_name}"#], session: nil)
-      return try Self.parseSessionNames(output: result.stdout)
+      return Self.parseSessionNames(output: result.stdout)
     } catch {
       switch error {
-      case .serverNotRunning: return []
+      case .serverNotRunning: return TmuxSessionNameList(names: [], undecodableLineCount: 0)
       default: throw error
       }
     }
-  }
-
-  static func parseSessionNames(
-    output: String
-  ) throws(TmuxSessionOperationError) -> [String] {
-    var names: [String] = []
-    for line in output.split(separator: "\n") {
-      do {
-        names.append(try TmuxListPanes.decodeSessionName(String(line)))
-      } catch {
-        throw .invalidSessionNameEscape(String(line))
-      }
-    }
-    return names
   }
 
   private enum SessionPresence: Sendable, Equatable {

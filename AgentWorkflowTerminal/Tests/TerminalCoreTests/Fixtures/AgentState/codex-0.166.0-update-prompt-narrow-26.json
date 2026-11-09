@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "幅26列で Update available · の直後に折り返した本物の更新確認画面。 26x24 で採取。processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "codex-0.166.0-update-prompt-narrow-26",
+  "paneTitle": "/private/tmp/sanitized",
+  "paneCurrentCommand": "codex",
+  "agentVersion": "codex-cli 0.166.0",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "codex"
+  ],
+  "captureCommand": "tmux capture-pane -p / capture-pane -e -p (26x24; sw26x24-a)",
+  "screen": "\n  Update available ·\n  0.166.0 → 0.167.0\n  Release notes:\n  https://github.com/ope\n  nai/codex/releases/lat\n  est\n\n› 1. Update now (runs `sh\n     -c 's=$(curl -fsSL\n     https://chatgpt.com/\n     codex/install.sh) &&\n     CODEX_NON_INTERACTIVE\n     =1 eval \"$s\"'`)\n  2. Skip\n  3. Skip until next\n     version\n\n  enter continue · esc\n  skip\n\n\n\n\n",
+  "styledScreen": "\n  \u001b[1mUpdate available\u001b[0;2m ·\u001b[0m\n  \u001b[2m0.166.0 → 0.167.0\u001b[0m\n  \u001b[2mRelease notes:\u001b[0m\n  \u001b[2;4m\u001b]8;;https://github.com/openai/codex/releases/latest\u001b\\https://github.com/ope\u001b[0m\u001b]8;;\u001b\\\n  \u001b[2;4m\u001b]8;;https://github.com/openai/codex/releases/latest\u001b\\nai/codex/releases/lat\u001b[0m\u001b]8;;\u001b\\\n  \u001b[2;4m\u001b]8;;https://github.com/openai/codex/releases/latest\u001b\\est\u001b[0m\u001b]8;;\u001b\\\n\n\u001b[1;7m› 1. Update now (runs `sh\n     -c 's=$(curl -fsSL\n     \u001b]8;;https://chatgpt.com/codex/install.sh\u001b\\https://chatgpt.com/\u001b]8;;\u001b\\\n     \u001b]8;;https://chatgpt.com/codex/install.sh\u001b\\codex/install.sh\u001b]8;;\u001b\\) &&\n     CODEX_NON_INTERACTIVE\n     =1 eval \"$s\"'`)\n\u001b[0m  2. Skip\n  3. Skip until next\n     version\n\n  \u001b[1menter\u001b[0;2m continue · \u001b[0;1mesc\u001b[0m\n  \u001b[2mskip\n\u001b[0m\n\n\n\n"
+}

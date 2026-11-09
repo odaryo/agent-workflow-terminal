@@ -1,0 +1,21 @@
+{
+  "expectedState": "unknown",
+  "acceptableStates": [
+    "unknown"
+  ],
+  "note": "確認・trust・質問画面を引用した応答の ctrl+o transcript。完了行があり、入力欄はない。 160x40 で採取。processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "claude-2.1.319-quoted-prompts-transcript",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "claude 2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "captureCommand": "tmux capture-pane -p / capture-pane -e -p (160x40; transcript-ctrlo)",
+  "capturedAt": "2026-11-09",
+  "secondsSinceScreenChange": 5.0,
+  "processNames": [
+    "claude"
+  ],
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /private/tmp/sanitized\n\n\n❯ QUOTEPLEASE show\n\n                                                                                                                                01:16 PM claude-opus-5-5\n⏺ Here is the screen you asked about:\n\n  Do you want to proceed?\n  ❯ 1. Yes\n    2. No\n\n  Esc to cancel · Tab to amend\n\n  Yes, I trust this folder\n  Claude Code'll be able to read, edit, and execute files here.\n  Enter to confirm · Esc to cancel\n\n  Enter to select · ↑/↓ to navigate · Esc to cancel\n  Type something.\n\n✻ Worked for 0s · done 1:16 PM\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  Showing detailed transcript · ctrl+o to toggle · ↑↓ scroll · v to open in vi · ? for shortcuts                                                        verbose\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/private/tmp/sanitized\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mQUOTEPLEASE show\u001b[39m\n\n\u001b[49m                                                                                                                                \u001b[38;5;246m01:16 PM\u001b[39m \u001b[38;5;246mclaude-opus-5-5\u001b[39m\n\u001b[38;5;231m⏺\u001b[39m Here is the screen you asked about:\n\n  \u001b[38;5;153mDo you want to proceed?\u001b[39m\n  \u001b[38;5;153m❯ 1. Yes\u001b[39m\n    \u001b[38;5;153m2. No\u001b[39m\n\n  \u001b[38;5;153mEsc to cancel · Tab to amend\u001b[39m\n\n  \u001b[38;5;153mYes, I trust this folder\u001b[39m\n  \u001b[38;5;153mClaude Code'll be able to read, edit, and execute files here.\u001b[39m\n  \u001b[38;5;153mEnter to confirm · Esc to cancel\u001b[39m\n\n  \u001b[38;5;153mEnter to select · ↑/↓ to navigate · Esc to cancel\u001b[39m\n  \u001b[38;5;153mType something.\u001b[39m\n\n\u001b[38;5;246m✻\u001b[39m \u001b[38;5;246mWorked for 0s · done 1:16 PM\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[0m  \u001b[38;5;246mShowing detailed transcript · ctrl+o to toggle · ↑↓ scroll · v to open in vi · ? for shortcuts\u001b[39m                                                        \u001b[38;5;246mverbose\n"
+}

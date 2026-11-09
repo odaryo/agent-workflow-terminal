@@ -16,7 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Build / test / lint
 
 ```shell
-cd AgentWorkflowTerminal && swift build && swift test     # CI 対象の core package
+cd AgentWorkflowTerminal && swift build                   # CI 対象の core package
+cd AgentWorkflowTerminal && swift test --skip AdaptersSerialTimingTests
+cd AgentWorkflowTerminal && swift test --no-parallel --filter AdaptersSerialTimingTests  # 経過時間を測るので分ける
 scripts/fetch-ghostty.sh                                  # CI / 通常開発用の事前ビルド済み libghostty
 scripts/build-ghostty.sh                                  # ref 更新担当者向けの libghostty 自前ビルド
 scripts/build-app.sh                                      # ローカルの macOS app bundle
@@ -178,7 +180,6 @@ button がずれ、「開く」のつもりで「閉じる」を押していた�
 **実 HID のクリックは、`AXFrontmost` が true でも、画面上でアプリを覆っている別のアプリ (ユーザーの端末) へ届きうる**
 (#414 の確認で起きかけた)。`ui-click.swift` はクリックの直前にその座標の要素の pid を確かめ、違えばクリックしない。
 UI 確認は、アプリのウィンドウが画面上で見えていて、ユーザーの PC 操作とぶつからない時間に回す。
-タブの選択状態は、タブを切り取ったスクリーンショットの塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
 
 **Accessibility の許可先は tmux ではなく、tmux server を起動したアプリである (実測 2026-11-09、macOS 27.0.1)。**
 tmux 3.8 の実体を「アクセシビリティ」に追加してオンにしても `AXIsProcessTrusted` は `false` のままだった。

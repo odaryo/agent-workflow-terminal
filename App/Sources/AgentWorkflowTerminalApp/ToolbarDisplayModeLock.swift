@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-// Icon and Label は Project メニューの Label の title をアイコンの下に描き、ツールバーが2段になる。
+// Icon and Label は項目の title をアイコンの下に描き、ツールバーが2段になる。
 // macOS 14 は allowsDisplayModeCustomization が無く、表示形式メニューが残る。
 // SceneBuilder は if #available を扱えず、windowToolbarLabelStyle(fixed:) を macOS 14 と両立できない。
 @MainActor

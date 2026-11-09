@@ -108,7 +108,7 @@ public enum PaneNotification: Sendable, Hashable {
 ///   遷移として通知する — 続きとみなすと、無効にした種類が有効な種類の通知を飲み込む。
 ///   知らせたかどうかはその時点の設定で決まり、後から設定を変えても遡って変わらない。
 /// - Important: session (タブ) ごとの最初の観測は基準であり遷移とみなさない。状態の基準は
-///   `WorktreePaneAgentStates.isComplete` が初めて真になった観測で、それより前の観測は捨てる
+///   `WorktreePaneAgentStates.isComplete` が初めて真になった観測で、それより前の観測は捨てる (Agent 不在のリセットだけは先に効かせる。#715)
 ///   — feed の最初の yield は adapter の結果が無いので `[]` になり、それを基準にすると次の観測で
 ///   判断待ちの pane が全部個別に鳴る (#387)。完了表示の基準は最初の `observeCompletions` で、
 ///   その時点で有効な token は鳴らさない (再起動のたびに古い完了が鳴るのを防ぐ。アプリ停止中に
@@ -260,6 +260,11 @@ public struct PaneNotificationPlanner: Sendable {
     expireMissingPanes(at: instant)
     guard var memory = sessions[session] else { return [] }
     memory.observedPanes = Set(snapshot.panes.map(\.id))
+    for paneID in snapshot.agentAbsentPanes where panes[paneID] != nil {
+      panes[paneID]?.lastKnown = nil
+      panes[paneID]?.isAttentionAnnounced = false
+      panes[paneID]?.isSummaryMember = false
+    }
     let isBaseline = !memory.hasStatesBaseline
     if isBaseline {
       guard snapshot.isComplete else { return [] }
@@ -267,11 +272,6 @@ public struct PaneNotificationPlanner: Sendable {
     }
     sessions[session] = memory
     var notifications: [PaneNotification] = []
-    for paneID in snapshot.agentAbsentPanes where panes[paneID] != nil {
-      panes[paneID]?.lastKnown = nil
-      panes[paneID]?.isAttentionAnnounced = false
-      panes[paneID]?.isSummaryMember = false
-    }
     for (paneID, pane) in panes where !isBaseline && pane.session == session {
       if !memory.observedPanes.contains(paneID) {
         // 観測が途切れた時間を Unknown の継続に含めない。

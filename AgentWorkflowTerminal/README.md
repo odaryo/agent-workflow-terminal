@@ -145,8 +145,8 @@ macos-15 runner イメージに入っていないため、この job が単体�
 
 skip は静かに起きます — 環境変数が無いと `.enabled(if:)` の suite は skip されますが
 `swift test` は成功で終わります (実測: フラグ無しでも `Test run with 63 tests in 8 suites passed`)。
-そのため job は統合 suite だけの実行結果を `scripts/check-integration-ran.sh` に掛け、skip 0 件と
-件数の下限を検査します。実行後には `scripts/check-integration-leftovers.sh` が、残存 socket・
+そのため job は統合テストを有効にした全体の実行結果を `scripts/check-integration-ran.sh` に掛け、skip 0 件と
+件数の下限を検査します (要約の件数は skip を含むので、走ったことの判定は skip 0 件で行います)。実行後には `scripts/check-integration-leftovers.sh` が、残存 socket・
 `-L awt-` の tmux server・fixture の一時ディレクトリが無いことを検査します
 (socket が残っている = 上記のとおり server の停止を確認できなかった、という異常)。
 

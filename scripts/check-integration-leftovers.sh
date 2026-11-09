@@ -33,8 +33,8 @@ socket_dir="${TMUX_TMPDIR:-/private/tmp}/tmux-$(id -u)"
 found=0
 
 if [[ -d "$socket_dir" ]]; then
-  # 名前を awt-* に限定しない。CI の runner には tmux が最初から入っておらず、この job が
-  # 入れて統合テストだけが使うため、どの socket が残っていても後始末漏れになる。
+  # 名前を awt-* に限定しない。CI の runner には tmux が最初から入っておらず、この検査を走らせる
+  # job が入れて自分の検査だけが使うため、どの socket が残っていても後始末漏れになる。
   sockets=$(find "$socket_dir" -mindepth 1 -maxdepth 1 2>/dev/null || true)
   if [[ -n "$sockets" ]]; then
     info "tmux socket が残っています ($socket_dir):"

@@ -4,8 +4,6 @@ import Testing
 
 @testable import Adapters
 
-/// 同じ `@Suite` の続き。別の型にすると CI の統合テスト検査 (suite 数を完全一致で見る
-/// `scripts/check-integration-ran.sh`) の期待値が動くため、extension で足す。
 extension GitWorktreeDetectorIntegrationTests {
 
   /// gitfile 破壊の経路。git 2.50.1 (Apple Git-155) 実測: 0 バイトの `.git` に `worktree list` は

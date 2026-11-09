@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "Bash の承認待ち。160x12 で採取。 processNames は未採取のため、adapter の最小の検出対象を使用。",
+  "source": "claude-2.1.319-permission-bash-short",
+  "paneTitle": "✳ Claude Code",
+  "paneCurrentCommand": "2.1.319",
+  "agentVersion": "claude 2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "captureCommand": "tmux capture-pane -p / capture-pane -e -p (160x12; permshort-end)",
+  "capturedAt": "2026-11-09",
+  "secondsSinceScreenChange": 2.0,
+  "processNames": [
+    "claude"
+  ],
+  "screen": " Tip: auto mode handles these prompts for you — choose \"switch to auto mode\" below\n touch a file\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n touch /private/tmp/awt645-never\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n Do you want to proceed?\n ❯ 1. Yes\n   2. Yes, and always allow access to /private/tmp from this project\n   3. Yes, and switch to auto mode · auto mode handles these prompts for you\n   4. No\n\n Esc to cancel · Tab to amend\n",
+  "styledScreen": " \u001b[1mTip: auto mode handles these prompts for you — choose \"switch to auto mode\" below\u001b[0m\n \u001b[38;5;246mtouch a file\u001b[39m\n\u001b[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n\u001b[39m touch /private/tmp/awt645-never\n\u001b[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n\u001b[39m Do you want to proceed?\n \u001b[38;5;153m❯\u001b[39m \u001b[38;5;246m1. \u001b[38;5;153mYes\u001b[39m\n   \u001b[38;5;246m2. \u001b[39mYes, and always allow access to \u001b[1m/private/tmp\u001b[0m from this project\n   \u001b[38;5;246m3. \u001b[39mYes, and switch to auto mode\u001b[38;5;246m · auto mode handles these prompts for you\u001b[39m\n   \u001b[38;5;246m4. \u001b[39mNo\n\n \u001b[38;5;246mEsc to cancel · Tab to amend\u001b[39m\n"
+}

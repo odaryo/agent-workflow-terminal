@@ -65,6 +65,29 @@ struct CodexAdapterTests {
     #expect(fixtureState(of: result) == fixture.expectedState)
   }
 
+  @Test("応答中に trust 画面と footer を引用しても Completed (Issue #645)")
+  func quotedTrustPromptInResponseIsCompleted() throws {
+    let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.152.1-completed").first)
+    let responseLine = "• notes.txt を作成し、today と1行だけ書きました。"
+    let quotedPrompt = """
+      Folder access
+      /private/tmp/sanitized
+      › 1. Trust and continue
+      2. Back to Agent Command Center
+      enter continue · esc back
+      """
+    let screen = fixture.screen.replacingOccurrences(
+      of: responseLine, with: quotedPrompt + "\n" + responseLine)
+    try #require(screen != fixture.screen)
+    let result = CodexAdapter().classify(
+      signals: AgentSignals(
+        paneTitle: fixture.paneTitle, screenText: screen, styledScreenText: nil,
+        secondsSinceScreenChange: fixture.secondsSinceScreenChange,
+        hasObservedScreenChange: true, observedAt: .distantPast
+      ), liveness: fixture.liveness)
+    #expect(fixtureState(of: result) == "completed")
+  }
+
   @Test("入力欄の trust 文言だけでは Permission にしない (Issue #252)")
   func trustTextInInputIsUnknown() throws {
     let fixture = try #require(AgentStateFixture.load(prefix: "codex-0.152.1-idle").first)

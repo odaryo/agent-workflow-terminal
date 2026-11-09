@@ -12,13 +12,14 @@ public struct CodexAdapter: AgentAdapter {
     guard liveness != .absent else { return .absent }
     guard liveness == .alive else { return unknown(signals, reason: .livenessUnavailable) }
     // Issue #252、設計書 §12.8: 0.166.0 の trust 画面は Action Required を出さないため、
-    // title より先に見る。文言の contains では作業中の画面を取り違えるため、2行の完全一致にする。
+    // title より先に見る。Issue #645: 応答本文にも確認画面が引用されるため、文言だけでは判断待ちにしない。
     if let screen = signals.screenText {
       let lines = screen.components(separatedBy: .newlines).map {
         $0.trimmingCharacters(in: .whitespaces)
       }
       if lines.contains("Folder access"),
-        lines.contains("› 1. Trust and continue") || lines.contains("1. Trust and continue")
+        lines.contains("› 1. Trust and continue") || lines.contains("1. Trust and continue"),
+        lines.last(where: { !$0.isEmpty }) == "enter continue · esc back"
       {
         return observation(.permission, signals)
       }

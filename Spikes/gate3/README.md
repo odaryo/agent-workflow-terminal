@@ -342,15 +342,18 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 
 採取は本物の Claude Code 2.1.319 (tmux 3.8、macOS 27.0.1、160×40、1 秒間隔) を、一時的な HOME と `CLAUDE_CONFIG_DIR`、ダミーのトークン、ローカルの偽 API につないで行った。retry は閉じたポートへの接続で、plan 承認は偽 API に `Write` と `ExitPlanMode` を返させて出した。fixture は `claude-2.1.319-{api-retrying,api-error-exhausted,plan-approval,plan-exit-empty}.json`。
 
-- retry の行 (`✻ <理由> · Retrying in 9s · attempt 5/10`) が最後の送信済みプロンプトより下にあれば `working`
-- 現ターンの最後の `⏺ ` の行が `⏺ API Error` で始まり、その下に `· done N` があれば `error`
-- `Exit plan mode?` または `Would you like to proceed?` で終わる行の次の 6 行以内に `❯ <番号>. ` があれば `permission`
+- ` · Retrying in <待ち時間> · attempt` で終わる行、または続けて `n/m` で終わる行が最後の送信済みプロンプトより下にあれば `working` (待ち時間は `9s` と `1m 0s` を実測。44 列以下では行が割れ、記号と `n/m` が別の行になる)
+- 送信済みプロンプトがあるなら起動バナーでも `idle` にしない (retry の文言が変わった場合と 44 列以下の割れ方で `idle` に戻さないため)
+- 現ターンの最後の `⏺ ` の行が `⏺ API Error:` で始まり、その下に `· done N` があれば `error` (接続拒否・500・429・529 を実測)
+- 選択中の番号付き選択肢より上の 8 行に `Exit plan mode?` か `Would you like to proceed?` があり、その行より下に完了行と NBSP の入力欄が無ければ `permission` (84 列以下の折り返しを含む。question の判定より後)
+
+**検出できない形**: 401 や残高不足などの `⎿  <メッセージ>` だけの失敗、`⏺ Please run /login · API Error: 403 …`、`⏺ There's an issue with the selected model` は `error` にならない。Agent の本文が `API Error:` で始まる画面は `error` に誤検出する (色も同じで区別できない)。
 
 採取列の内訳は、retry の 400 フレームのうち retry の行が 171、`⏺ API Error` が 227、送信前が 2 で、plan の 9 フレームのうち承認の画面が 7 である。
 
-**analyze.py の分類器** (`S2-screen-retry-error-plan`、2.1.259 composite r1〜r5): `S2-screen-spinner` と claude・codex の全区間で予測の内訳まで一致した。
+**analyze.py の分類器** (`S2-screen-retry-error-plan`、2.1.259 composite r1〜r5): `S2-screen-spinner` と claude・codex の全区間で予測の内訳まで一致した。 ただしこの分類器は `c_screen` の判定 (`(?i)api error` が先に `error` を返す、など) を継承しているので、製品の Adapter と同じ条件ではない。
 
-**製品の Adapter** (`replay-swift --score --poll 2.0`、4,548 フレーム): 変更の前後で出力がバイト単位で一致した (working 1.000、completed 0.978、completed(放置) 1.000、idle 0.976、permission 1.000 (危険率 0.000))。
+**製品の Adapter** (`replay-swift --score --poll 2.0`、4,548 フレーム): 変更の前後で出力がバイト単位で一致した。`--poll 0.25` でも同じである (2.0 秒では working 1.000、completed 0.978、completed(放置) 1.000、idle 0.976、permission 1.000 (危険率 0.000))。
 
 ### 6.6 起動時の trust prompt (Issue #252)
 

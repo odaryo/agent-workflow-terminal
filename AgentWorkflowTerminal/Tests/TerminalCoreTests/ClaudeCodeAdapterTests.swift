@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 28)
+    #expect(fixtures.count == 34)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -384,6 +384,23 @@ struct ClaudeCodeAdapterTests {
 }
 
 extension ClaudeCodeAdapterTests {
+  @Test(
+    "起動バナーが残っていても送信後の応答待ちは Idle に戻さない (Issue #632)",
+    arguments: [false, true]
+  )
+  func startupBannerOnlyIndicatesIdleBeforeSubmission(hasSubmittedPrompt: Bool) {
+    let submittedPrompt = hasSubmittedPrompt ? "❯ current request\n" : ""
+    let screen = """
+      Claude Code v2.1.319
+      \(submittedPrompt)
+      ──────────
+      ❯\u{00A0}
+      ──────────
+      ⏵⏵ bypass permissions mode on
+      """
+    #expect(classifyQuietScreen(screen) == (hasSubmittedPrompt ? "unknown" : "idle"))
+  }
+
   @Test("前ターンの API Error と完了行は今の正常完了を妨げない (Issue #632)")
   func previousTurnAPIErrorDoesNotOverrideCompletion() {
     let screen = """

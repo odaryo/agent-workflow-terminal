@@ -63,7 +63,7 @@ struct AgentAdapterTests {
   }
 
   @Test("Error を許容しない実測 fixture は Error を返さない")
-  func fixturesNeverInferError() throws {
+  func fixturesDisallowingErrorNeverInferError() throws {
     for fixture in try AgentStateFixture.load(prefix: "claude-") {
       let result = ClaudeCodeAdapter().classify(
         signals: fixture.signals, liveness: fixture.liveness

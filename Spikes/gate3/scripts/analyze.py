@@ -234,20 +234,32 @@ def c_screen_retry_error_plan(rec, agent, ctx):
     if state in ("permission", "question", "error"):
         return state
     # Issue #632: 2.1.319 の plan 承認は選択肢の移動でも画面が変わるため。
-    lines = (rec.get("screen") or "").split("\n")
+    screen = rec.get("screen") or ""
+    if "Enter to select ·" in screen and "Type something." in screen:
+        return "question"
+    lines = screen.split("\n")
     trimmed_lines = [line.strip() for line in lines]
     for index, line in enumerate(trimmed_lines):
-        if line == "Exit plan mode?" or line.endswith("Would you like to proceed?"):
-            if any(re.search(r"^❯ \d+\. ", choice)
-                   for choice in trimmed_lines[index + 1:index + 7]):
-                return "permission"
+        if not re.search(r"^❯ \d+\. ", line):
+            continue
+        preceding_text = " ".join(
+            line for line in trimmed_lines[max(0, index - 8):index] if line
+        )
+        if (("Would you like to proceed?" in preceding_text
+             or "Exit plan mode?" in preceding_text)
+                and not any(re.search(r"·\s*done\s+\d", following)
+                            or following.startswith("❯\u00a0")
+                            for following in lines[index + 1:])):
+            return "permission"
     last_prompt = next(
         (index for index in range(len(lines) - 1, -1, -1)
          if re.search(r"^❯ +\S", lines[index])), None
     )
     current_turn_lines = lines[last_prompt + 1:] if last_prompt is not None else lines
+    if state == "idle" and last_prompt is not None:
+        state = "unknown"
     # Issue #632: 2.1.319 の retry 待ちは入力待ちではないため。
-    if any(re.search(r"^[·✢✳✶✻✽] .+ · Retrying in \d+s · attempt \d+/\d+$", line)
+    if any(re.search(r"· Retrying in [^·]+ · attempt(?: \d+/\d+)?$", line)
            for line in current_turn_lines):
         return "working"
     prompt_index = next(
@@ -270,7 +282,7 @@ def c_screen_retry_error_plan(rec, agent, ctx):
          if current_turn_lines[index].startswith("⏺ ")), None
     )
     if (last_response is not None
-            and current_turn_lines[last_response].startswith("⏺ API Error")
+            and current_turn_lines[last_response].startswith("⏺ API Error:")
             and any(re.search(r"·\s*done\s+\d", line)
                     for line in current_turn_lines[last_response + 1:])):
         return "error"

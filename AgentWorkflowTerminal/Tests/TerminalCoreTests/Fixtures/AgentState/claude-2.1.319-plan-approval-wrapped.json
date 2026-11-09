@@ -1,0 +1,21 @@
+{
+  "expectedState": "permission",
+  "acceptableStates": [
+    "permission"
+  ],
+  "note": "84 列では `Would you like to proceed?` が2行に折り返される。84 列。 Issue #632 のレビューで、本物の claude 2.1.319 を一時的な HOME と CLAUDE_CONFIG_DIR、ローカルの偽 API につないで採取した。pane title は採っていない。",
+  "source": "claude-2.1.319-plan-approval-wrapped (c/plan84/frames/0009、1 秒間隔の採取列)",
+  "paneTitle": "",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude",
+    "caffeinate"
+  ],
+  "captureCommand": "tmux -L <隔離 socket> capture-pane -p / capture-pane -e -p",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "\n  ⎿  /plan to preview\n▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n  ────────────────────────────────────────────────────────────────────────────────\n   Ready to code?\n\n   Here is Claude's plan:\n  ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n   Plan\n\n   1. Add a greeting file.                                                        ↓\n  ────────────────────────────────────────────────────────────────────────────────\n   Claude has written up a plan and is ready to execute. Would you like to\n   proceed?\n\n   ❯ 1. Yes, and use auto mode\n     2. Yes, manually approve edits\n     3. Tell Claude what to change\n        shift+tab to approve with this feedback\n\n   ctrl+g to edit in Vim · /…/plans/plan.md\n",
+  "styledScreen": "\n\u001b[38;5;246m  ⎿  /plan to preview\u001b[39m\n\u001b[38;5;153m▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔\n\n\u001b[39m  \u001b[38;5;73m────────────────────────────────────────────────────────────────────────────────\u001b[39m\n   \u001b[1m\u001b[38;5;153mReady to code?\u001b[0m\n\n   Here is Claude's plan:\n  \u001b[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\u001b[39m\n   \u001b[1;3;4mPlan\u001b[0m\n\n   1. Add a greeting file.                                                        \u001b[38;5;246m↓\u001b[39m\n  \u001b[38;5;73m────────────────────────────────────────────────────────────────────────────────\u001b[39m\n   \u001b[38;5;246mClaude has written up a plan and is ready to execute. Would you like to \u001b[39m\n   \u001b[38;5;246mproceed?\u001b[39m\n\n   \u001b[38;5;153m❯\u001b[39m \u001b[38;5;246m1. \u001b[38;5;153mYes, and use auto mode\u001b[39m\n     \u001b[38;5;246m2. \u001b[39mYes, manually approve edits\n     \u001b[38;5;246m3. Tell Claude what to change\u001b[39m\n        \u001b[38;5;246mshift+tab to approve with this feedback\u001b[39m\n\n   \u001b[38;5;246mctrl+g to edit in Vim · /…/plans/plan.md\u001b[39m\n"
+}

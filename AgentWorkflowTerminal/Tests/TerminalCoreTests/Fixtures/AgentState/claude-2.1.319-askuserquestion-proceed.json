@@ -1,0 +1,21 @@
+{
+  "expectedState": "question",
+  "acceptableStates": [
+    "question"
+  ],
+  "note": "AskUserQuestion の質問文が `Would you like to proceed?` である。 Issue #632 のレビューで、本物の claude 2.1.319 を一時的な HOME と CLAUDE_CONFIG_DIR、ローカルの偽 API につないで採取した。pane title は採っていない。",
+  "source": "claude-2.1.319-askuserquestion-proceed (c/askq/frames/0006、1 秒間隔の採取列)",
+  "paneTitle": "",
+  "agentVersion": "2.1.319 (Claude Code)",
+  "tmuxVersion": "tmux 3.8",
+  "os": "macOS 27.0.1 (26A434) arm64",
+  "capturedAt": "2026-11-09",
+  "processNames": [
+    "claude",
+    "caffeinate"
+  ],
+  "captureCommand": "tmux -L <隔離 socket> capture-pane -p / capture-pane -e -p",
+  "secondsSinceScreenChange": 2.0,
+  "screen": "\n ▐▛███▛█   Claude Code v2.1.319\n▝▜██████▀  Opus 5.5 · API Usage Billing\n ▝▝   ▝▝   /…/c632r/work\n\n\n❯ Reply with OK only.\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nPlanning: /…/c632r/work\nreply-with-ok-only-silly-bumblebee.md\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n ☐ Proceed\n\nWould you like to proceed?\n\n❯ 1. Yes\n     go\n  2. No\n     stop\n  3. Type something.\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  4. Chat about this\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+  "styledScreen": "\n\u001b[38;5;174m ▐\u001b[48;5;16m▛███▛█\u001b[39m\u001b[49m   \u001b[1mClaude Code\u001b[0m \u001b[38;5;246mv2.1.319\u001b[39m\n\u001b[38;5;174m▝▜\u001b[48;5;16m█████\u001b[49m█▀\u001b[39m  \u001b[38;5;246mOpus 5.5 · API Usage Billing\u001b[39m\n\u001b[38;5;174m ▝▝   ▝▝ \u001b[39m  \u001b[38;5;246m/…/c632r/work\u001b[39m\n\n\n\u001b[38;5;246m\u001b[48;5;237m❯ \u001b[38;5;231mReply with OK only.\u001b[39m\n\u001b[38;5;246m\u001b[49m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\nPlanning: /…/c632r/work\nreply-with-ok-only-silly-bumblebee.md\u001b[39m\n\u001b[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[38;5;16m\u001b[48;5;153m ☐ Proceed \u001b[39m\u001b[49m\n\n\u001b[1m\u001b[38;5;231mWould you like to proceed?\u001b[0m\n\n\u001b[38;5;153m❯\u001b[39m \u001b[38;5;246m1.\u001b[39m \u001b[38;5;153mYes\u001b[39m\n     \u001b[38;5;246mgo\u001b[39m\n  \u001b[38;5;246m2.\u001b[39m No\n     \u001b[38;5;246mstop\u001b[39m\n  \u001b[38;5;246m3. Type something.\u001b[39m\n\u001b[38;5;246m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\u001b[39m  4. Chat about this\n\n\u001b[38;5;246mEnter to select · ↑/↓ to navigate · Esc to cancel\u001b[39m\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+}

@@ -1391,7 +1391,7 @@ Adapterが状態判定に使ってよい信号は、**PoC Gate 3の記録で採�
 
 ### 12.6 状態遷移の未確定事項
 
-- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーはClaude Code 2.1.319のretryが尽きた画面だけ計測済みで、他のAgentと他の失敗は未計測であることを含む)
+- `Permission`、`Question`、`Completed`、`Error`の厳密な検出条件(Gate 3で取得可否は実測済み。`Question`に相当する状態を持たないAgentがあること、ターン中のAPIエラーはClaude Code 2.1.319の`⏺ API Error:`の形で出るものだけ検出でき、`⎿`だけの失敗と他のAgentは検出できないことを含む)
 - PR Readyの検出元
 - Adapter eventの永続化期間
 

@@ -89,6 +89,37 @@ struct TmuxWorktreePaneSourceTests {
     #expect(panes == TmuxListPanes.parseWithSummary(output: valid).panes.map(\.snapshot))
   }
 
+  @Test("全行不正は行数だけのエラーにし、元の行を露出しない", arguments: [1, 3])
+  func rejectsEntirelyUnparsableOutput(lineCount: Int) async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/invalid"))
+    let lines = (0..<lineCount).map { "/private/project-\($0) confidential-title-\($0)" }
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 0, stdout: lines.joined(separator: "\n") + "\n", stderr: ""))
+    let source = try makeSource(spy)
+
+    do {
+      _ = try await source.panes(of: worktree)
+      Issue.record("全行不正の一覧を成功として返した")
+    } catch {
+      #expect(error == .unparsableOutput(failedLineCount: lineCount))
+      let description = String(describing: error)
+      for line in lines {
+        #expect(!description.contains(line))
+        for value in line.split(separator: " ") {
+          #expect(!description.contains(value))
+        }
+      }
+    }
+  }
+
+  @Test("空の出力は空配列にする")
+  func mapsEmptyOutputToEmpty() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/empty"))
+    let spy = WorktreePaneProcessSpy(result: .init(exitCode: 0, stdout: "", stderr: ""))
+
+    #expect(try await makeSource(spy).panes(of: worktree).isEmpty)
+  }
+
   @Test("TTL の内側なら worktree が違っても list-panes は1回だけ起動する")
   func sharesOneLaunchAcrossWorktrees() async throws {
     let worktrees = try (0..<5).map {

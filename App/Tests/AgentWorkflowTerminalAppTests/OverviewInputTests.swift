@@ -40,6 +40,45 @@ struct OverviewInputTests {
     #expect(makeTabSummaries([input]).first?.rows == [.noAgentPane])
   }
 
+  @Test("Issue #295 pane 一覧が取得不能で表示 pane が無ければ未観測にする", arguments: [true, false])
+  func unavailableEmptyObservation(hasCompletedObservation: Bool) throws {
+    let input = OverviewWorktreeInput(
+      session: .primary(identity),
+      observation: .init(
+        paneStates: hasCompletedObservation ? [] : nil, isPaneListUnavailable: true),
+      mainPane: nil)
+
+    #expect(!input.isObserved)
+    #expect(input.paneStates.isEmpty)
+    let project = try #require(
+      makeAgentPaneOverview([
+        OverviewProjectInput(project: identity, projectRootSessions: [], tasks: [input])
+      ]).first)
+    #expect(project.tasks.first?.rows == [.notObserved])
+    #expect(makeTabSummaries([input]).first?.rows == [.notObserved])
+  }
+
+  @Test("Issue #295 pane 一覧が取得不能でも既知の pane は Unknown の行を表示する")
+  func unavailableObservationWithPane() throws {
+    let display = PaneDisplayState(paneID: pane, state: .unknown, category: .unknown)
+    let input = OverviewWorktreeInput(
+      session: .primary(identity),
+      observation: .init(
+        paneStates: [PaneAgentState(id: pane, state: .unknown, lastUpdatedAt: .distantPast)],
+        isPaneListUnavailable: true, displayStates: [display]), mainPane: nil)
+
+    #expect(input.isObserved)
+    #expect(input.paneStates == [display])
+    let project = try #require(
+      makeAgentPaneOverview([
+        OverviewProjectInput(project: identity, projectRootSessions: [], tasks: [input])
+      ]).first)
+    let row = try #require(project.tasks.first?.rows.first?.pane)
+    #expect(row.paneID == pane)
+    #expect(row.display.state == .unknown)
+    #expect(makeTabSummaries([input]).first?.rows.first?.pane?.display.state == .unknown)
+  }
+
   @Test("表示状態と詳細とメイン pane をそのまま渡す")
   func observedPane() throws {
     let display = PaneDisplayState(

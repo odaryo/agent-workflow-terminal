@@ -19,9 +19,11 @@ extension OverviewWorktreeInput {
   init(
     session: TerminalSessionKey, observation: PaneObservationStore.Observed?, mainPane: PaneID?
   ) {
+    let displayStates = observation?.displayStates ?? []
     self.init(
-      session: session, paneStates: observation?.displayStates ?? [],
+      session: session, paneStates: displayStates,
       details: observation?.details ?? [:], mainPane: mainPane,
-      isObserved: observation?.paneStates != nil)
+      isObserved: observation?.paneStates != nil
+        && !(observation?.isPaneListUnavailable == true && displayStates.isEmpty))
   }
 }

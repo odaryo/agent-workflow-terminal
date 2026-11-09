@@ -19,7 +19,7 @@ enum OverviewSidebarPreferences {
   static let widthKey = "overview.sidebar.width"
   static let defaultIsOpen = true
   static let defaultWidth: Double = 300
-  static let widthRange: ClosedRange<Double> = 240...480
+  static let widthRange: ClosedRange<Double> = 160...480
   /// `DrawerResizeHandle` の当たり判定の幅。サイドバーと端末の間に1本置く。
   static let handleWidth = Double(ViewerDrawerMetrics.resizeHandleWidth)
 

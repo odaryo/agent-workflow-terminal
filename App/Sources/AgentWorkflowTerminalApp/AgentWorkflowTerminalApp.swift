@@ -26,6 +26,7 @@ struct AgentWorkflowTerminalApp: App {
         .frame(minWidth: 480, minHeight: 320)
     }
     .windowResizability(.contentMinSize)
+    .windowToolbarStyle(.unifiedCompact)
     .defaultSize(width: 900, height: 560)
     .commands {
       ProjectNavigationCommands(projects: projects, shortcuts: projects.shortcuts)

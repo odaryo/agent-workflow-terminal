@@ -16,9 +16,10 @@ public enum HighlightJSMarkup: Sendable {
 }
 
 private struct HighlightJSMarkupParser {
-  // run ごとの scopes により時間とメモリが O(runs × depth) となり、32 KiB の `/*` の繰り返しで
-  // 1.42 s / 1185 MiB を実測したため、深さを無制限にしない。上限超過は呼び出し側で素のテキストへ戻す。
-  private static let maximumDepth = 256
+  // 実ファイル 128,476 個で最大深さは 14。actor 上で 256 KiB・深さ 32 が約 1.05 s、256 では約 4.6 s
+  // (支配項は HighlightJSTheme.style(forScopes:)) のため、深さを 32 に制限する。
+  // 上限超過は呼び出し側で素のテキストへ戻す。
+  private static let maximumDepth = 32
 
   private static let entities: [(String, UInt8)] = [
     ("&amp;", 0x26), ("&lt;", 0x3C), ("&gt;", 0x3E), ("&quot;", 0x22), ("&#x27;", 0x27),

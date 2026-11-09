@@ -132,8 +132,9 @@ jobs:
             -- swift test --skip AdaptersSerialTimingTests
 
       # 環境変数が無いと統合 suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
-      # 全体の実行のログで skip 0 件と件数の下限を検査する。統合 suite だけを --filter で走らせる
-      # 別の段は、同じテストの2回目の実行だったのでやめた (#719)。下限は 2026-11-09 の 1715 件から決めた。
+      # Swift Testing の要約の件数は skip を含むので、統合テストが走ったかを区別できるのは skip の行だけで
+      # ある。件数の下限が検出するのはテストの総数が減ったことだけで、2026-11-09 時点の約 1715 件から
+      # 決めた。統合 suite だけを --filter で走らせる別の段は、同じテストの2回目の実行だったのでやめた (#719)。
       - name: Verify integration suites actually ran
         if: ${{ !cancelled() && steps.integration-full.outcome != 'skipped' }}
         run: |

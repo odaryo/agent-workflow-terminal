@@ -12,7 +12,8 @@ usage() {
 統合テストが実際に実行されたことを swift test の出力から確認する。
 環境変数が渡っていないと `.enabled(if:)` の suite は skip されるが、実行は成功で終わる
 (実測: フラグ無しでも "Test run with 63 tests in 8 suites passed")。GREEN だけでは
-「走った」と言えないため、skip が1件も無いことと件数の下限をここで検査する。
+「走った」と言えないため、skip が1件も無いことをここで検査する。要約の件数は skip を含むので、
+件数の下限が検出するのはテストの総数が減ったことだけである。
 
   --log <path>       swift test の出力ファイル
   --min-tests <n>    実行されたテスト件数の下限

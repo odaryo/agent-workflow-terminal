@@ -218,15 +218,14 @@ final class ProjectsModel: ObservableObject {
 
   func setAgentCommand(
     _ input: String, of commonDirectory: WorktreeIdentity
-  ) -> ProjectAgentCommandError? {
-    switch ProjectAgentCommand.normalized(input) {
-    case .success(let command):
-      registry.setAgentCommand(command, of: commonDirectory)
-      save()
-      return nil
-    case .failure(let error):
+  ) -> ProjectAgentCommandSaveError? {
+    if let error = setProjectAgentCommand(
+      input, of: commonDirectory, canSave: canSave, registry: &registry)
+    {
       return error
     }
+    save()
+    return nil
   }
 
   /// 一覧から外すだけで、repository・tmux session・アプリ内データには触れない (設計書 §16.1)。
@@ -434,6 +433,25 @@ final class ProjectsModel: ObservableObject {
       .unexpectedCommonDirectoryOutput:
       "git の出力を解釈できません"
     }
+  }
+}
+
+enum ProjectAgentCommandSaveError: Equatable {
+  case invalid(ProjectAgentCommandError)
+  case cannotSave
+}
+
+func setProjectAgentCommand(
+  _ input: String, of commonDirectory: WorktreeIdentity, canSave: Bool,
+  registry: inout ProjectRegistry
+) -> ProjectAgentCommandSaveError? {
+  guard canSave else { return .cannotSave }
+  switch ProjectAgentCommand.normalized(input) {
+  case .success(let command):
+    registry.setAgentCommand(command, of: commonDirectory)
+    return nil
+  case .failure(let error):
+    return .invalid(error)
   }
 }
 

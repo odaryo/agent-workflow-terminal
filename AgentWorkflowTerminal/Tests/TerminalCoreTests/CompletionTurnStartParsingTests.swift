@@ -50,6 +50,33 @@ struct CompletionTurnStartParsingTests {
   }
 
   @Test(
+    "秒・マイクロ秒・ナノ秒とエポックミリ秒の範囲外を拒否する",
+    arguments: [
+      "1794187512", "1794187512000000", "1794187512000000000",
+      "999999999999", "10000000000000",
+    ])
+  func rejectsOutOfRangeTurnStart(milliseconds: String) {
+    #expect(
+      AgentStampedValue.parseCompletion("42 turn=\(milliseconds) token")
+        == .malformed(.turnStartOutOfRange))
+  }
+
+  @Test(
+    "エポックミリ秒の下限と上限直前を受理する",
+    arguments: [Int64(1_000_000_000_000), 9_999_999_999_999])
+  func acceptsTurnStartBoundaries(milliseconds: Int64) throws {
+    let parsed = AgentStampedValue.parseCompletion("42 turn=\(milliseconds) token")
+    guard case .value(let value) = parsed else {
+      Issue.record("範囲内の開始時刻を拒否した")
+      return
+    }
+    #expect(value.agentProcessID == 42)
+    #expect(value.text == "token")
+    let startedAt = try #require(value.turnStartedAt)
+    #expect(startedAt == Date(timeIntervalSince1970: Double(milliseconds) / 1000))
+  }
+
+  @Test(
     "開始時刻と token の間には半角空白が必要",
     arguments: ["42 turn=123", "42 turn=123token", "42 turn=123\ttoken"])
   func rejectsMissingTokenSeparator(raw: String) {
@@ -94,7 +121,7 @@ struct CompletionTurnStartParsingTests {
     ])
   func rejectsInvalidToken(text: String, violation: PaneSummaryFormatViolation) {
     #expect(
-      AgentStampedValue.parseCompletion("42 turn=123 \(text)") == .malformed(violation))
+      AgentStampedValue.parseCompletion("42 turn=1794130451048 \(text)") == .malformed(violation))
   }
 
   @Test("見える Cf は完了本文でも受理する")

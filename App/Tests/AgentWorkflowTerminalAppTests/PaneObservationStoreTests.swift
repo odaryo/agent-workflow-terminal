@@ -8,11 +8,11 @@ import Testing
 @MainActor
 @Suite("Issue #387 初回の観測完了")
 struct PaneObservationStoreTests {
-  // 配信された Completed の時刻 (10) でも Working の観測時刻 (20) でもなく、Working が運ぶ
-  // 応答終了の最終観測時刻 (16) で判定することを、その前後に始まったターンで固定する。
+  // 配信された Completed の時刻 (1794187510) でも Working の観測時刻 (1794187520) でもなく、Working が運ぶ
+  // 応答終了の最終観測時刻 (1794187516) で判定することを、その前後に始まったターンで固定する。
   @Test(
     "Issue #386 Working が運ぶ応答終了の最終観測時刻より前のターンの完了だけを解除する",
-    arguments: [(11_000, false), (17_000, true)])
+    arguments: [(1_794_187_511_000, false), (1_794_187_517_000, true)])
   func dismissesCompletionAfterObservedTurnEnd(
     turnStartMilliseconds: Int, remainsCompleted: Bool
   ) async throws {
@@ -45,7 +45,7 @@ struct PaneObservationStoreTests {
           identity: identity, worktreePath: "/repo", branch: "main", isProjectRoot: true),
         taskWorktrees: []), sessions: [session])
     let pane = PaneID(rawValue: "%2")
-    let firstTurnEnd = Date(timeIntervalSince1970: 10)
+    let firstTurnEnd = Date(timeIntervalSince1970: 1794187510)
     let completed = PaneAgentState(
       id: pane,
       observation: AgentStateObservation(
@@ -63,8 +63,8 @@ struct PaneObservationStoreTests {
       id: pane,
       observation: AgentStateObservation(
         state: .working, adapterID: AgentAdapterID(rawValue: "test"),
-        observedAt: Date(timeIntervalSince1970: 20),
-        lastTurnEndObservedAt: Date(timeIntervalSince1970: 16)))
+        observedAt: Date(timeIntervalSince1970: 1794187520),
+        lastTurnEndObservedAt: Date(timeIntervalSince1970: 1794187516)))
     states.continuation.yield(.init(panes: [working], isComplete: true))
     try await waitUntil { store.observed[session]?.latestPaneStates == [working] }
     #expect(store.observed[session]?.details[pane]?.isTaskCompleted == remainsCompleted)

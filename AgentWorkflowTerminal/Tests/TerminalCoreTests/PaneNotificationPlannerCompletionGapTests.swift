@@ -20,11 +20,11 @@ struct PlannerCompletionGapTests: PaneNotificationPlannerTesting {
     var planner = baselined([pane("%1", .completed)])
     var tracker = PaneTaskCompletionTracker()
     let token = AgentStampedValue(
-      agentProcessID: 42, text: "done", turnStartedAt: Date(timeIntervalSince1970: 11))
+      agentProcessID: 42, text: "done", turnStartedAt: Date(timeIntervalSince1970: 1794187511))
     let previous = AgentStampedValue(
-      agentProcessID: 42, text: "previous", turnStartedAt: Date(timeIntervalSince1970: 9))
-    let oldReading = summary(.value("42 turn=9000 previous"), process: .unobservable)
-    let raw = PaneUserOptionReading.value("42 turn=11000 done")
+      agentProcessID: 42, text: "previous", turnStartedAt: Date(timeIntervalSince1970: 1794187509))
+    let oldReading = summary(.value("42 turn=1794187509000 previous"), process: .unobservable)
+    let raw = PaneUserOptionReading.value("42 turn=1794187511000 done")
     let missing = summary(raw, process: .unobservable)
     let accepted = summary(raw, process: .identified(processID: 42))
     #expect(accepted == .accepted(token))
@@ -32,27 +32,27 @@ struct PlannerCompletionGapTests: PaneNotificationPlannerTesting {
 
     let baseline = tracker.update(
       paneID: PaneID(rawValue: "%1"), completion: .accepted(previous), agentState: .completed,
-      lastTurnEndObservedAt: Date(timeIntervalSince1970: 10))
+      lastTurnEndObservedAt: Date(timeIntervalSince1970: 1794187510))
     #expect(baseline == .completed(previous))
     #expect(deliver(&planner, baseline, reading: .accepted(previous)).isEmpty)
     let working = tracker.update(
       paneID: PaneID(rawValue: "%1"), completion: oldReading, agentState: .working,
-      lastTurnEndObservedAt: Date(timeIntervalSince1970: 10))
+      lastTurnEndObservedAt: Date(timeIntervalSince1970: 1794187510))
     #expect(deliver(&planner, working, reading: oldReading).isEmpty)
     let written = tracker.update(
       paneID: PaneID(rawValue: "%1"), completion: missing, agentState: .working,
-      lastTurnEndObservedAt: Date(timeIntervalSince1970: 12))
+      lastTurnEndObservedAt: Date(timeIntervalSince1970: 1794187512))
     #expect(deliver(&planner, written, reading: missing).isEmpty)
     let recovered = tracker.update(
       paneID: PaneID(rawValue: "%1"), completion: accepted, agentState: .working,
-      lastTurnEndObservedAt: Date(timeIntervalSince1970: 12))
+      lastTurnEndObservedAt: Date(timeIntervalSince1970: 1794187512))
     #expect(recovered == .completed(token))
     #expect(
       deliver(&planner, recovered, reading: accepted)
         == [event("%1", .taskCompleted, completion: token)])
     let repeated = tracker.update(
       paneID: PaneID(rawValue: "%1"), completion: accepted, agentState: .completed,
-      lastTurnEndObservedAt: Date(timeIntervalSince1970: 12))
+      lastTurnEndObservedAt: Date(timeIntervalSince1970: 1794187512))
     #expect(repeated == .completed(token))
     #expect(deliver(&planner, repeated, reading: accepted).isEmpty)
   }

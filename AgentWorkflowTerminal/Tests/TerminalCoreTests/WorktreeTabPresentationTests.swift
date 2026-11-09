@@ -141,6 +141,67 @@ struct WorktreeTabPresentationTests {
         == .noActiveWorktrees)
   }
 
+  @Test(
+    "到達を確認できない Project Root だけなら「到達できない」と案内する (§3.2、§12.3)",
+    arguments: [WorktreeObservation.unreachable, .observationFailed]
+  )
+  func reportsNoReachableWorktreesWithOnlyUnavailableProjectRoot(
+    observation: WorktreeObservation
+  ) throws {
+    let inventory = WorktreeInventory(
+      projectRoot: try root(observation: observation), taskWorktrees: [])
+
+    #expect(
+      inventory.tabEmptyState(hasSelection: false, didCompleteInitialScan: true)
+        == .noReachableWorktrees)
+  }
+
+  @Test("到達可能な Project Root だけなら案内しない (§3.2)")
+  func staysSilentWithOnlyReachableProjectRoot() throws {
+    let inventory = WorktreeInventory(projectRoot: try root(), taskWorktrees: [])
+
+    #expect(inventory.tabEmptyState(hasSelection: false, didCompleteInitialScan: true) == nil)
+  }
+
+  @Test("Project Root が到達不能でも到達可能な Active Task があれば案内しない (§3.2)")
+  func staysSilentWithUnreachableProjectRootAndReachableActiveTask() throws {
+    let inventory = WorktreeInventory(
+      projectRoot: try root(observation: .unreachable),
+      taskWorktrees: [try task("active", activation: .active)])
+
+    #expect(inventory.tabEmptyState(hasSelection: false, didCompleteInitialScan: true) == nil)
+  }
+
+  @Test("Project Root が到達不能で Task が Inactive だけなら Active 化を促す (§3.2)")
+  func reportsNoActiveWorktreesWithUnreachableProjectRoot() throws {
+    let inventory = WorktreeInventory(
+      projectRoot: try root(observation: .unreachable),
+      taskWorktrees: [try task("inactive", activation: .inactive)])
+
+    #expect(
+      inventory.tabEmptyState(hasSelection: false, didCompleteInitialScan: true)
+        == .noActiveWorktrees)
+  }
+
+  @Test("Project Root と Active Task がともに到達不能なら「到達できない」と案内する (§3.2)")
+  func reportsNoReachableWorktreesWithUnreachableProjectRootAndActiveTask() throws {
+    let inventory = WorktreeInventory(
+      projectRoot: try root(observation: .unreachable),
+      taskWorktrees: [try task("unreachable", activation: .active, observation: .unreachable)])
+
+    #expect(
+      inventory.tabEmptyState(hasSelection: false, didCompleteInitialScan: true)
+        == .noReachableWorktrees)
+  }
+
+  @Test("初回スキャン後に Project Root も Task も無ければ「worktree が無い」と案内する (§3.2)")
+  func reportsNoWorktreesWithoutProjectRootOrTasks() {
+    let inventory = WorktreeInventory(projectRoot: nil, taskWorktrees: [])
+
+    #expect(
+      inventory.tabEmptyState(hasSelection: false, didCompleteInitialScan: true) == .noWorktrees)
+  }
+
   @Test("選べる worktree の一覧は Active かつ到達可能に限る")
   func selectableExcludesInactiveAndUnreachable() throws {
     let inventory = WorktreeInventory(

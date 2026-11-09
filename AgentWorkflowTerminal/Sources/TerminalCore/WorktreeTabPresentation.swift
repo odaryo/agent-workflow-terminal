@@ -52,9 +52,11 @@ extension WorktreeInventory {
     didCompleteInitialScan: Bool
   ) -> WorktreeTabEmptyState? {
     guard didCompleteInitialScan, !hasSelection else { return nil }
-    guard projectRoot == nil, selectableTaskWorktrees.isEmpty else { return nil }
-    // ここへ来る時点で Project Root は無い。在れば選べるタブとして上で除かれている。
-    guard !taskWorktrees.isEmpty else { return .noWorktrees }
+    guard projectRoot?.isReachable != true, selectableTaskWorktrees.isEmpty else { return nil }
+    // Project Root の到達を確認できない場合は、存在していても「無い」と断定しない (設計書 §12.3)。
+    guard !taskWorktrees.isEmpty else {
+      return projectRoot == nil ? .noWorktrees : .noReachableWorktrees
+    }
     // Active はあるのに選べるものが無い = すべて到達可能でない。「Active が無い」と出すと、
     // 実際には出ているタブの説明にならない。
     guard tabbedTaskWorktrees.isEmpty else { return .noReachableWorktrees }
@@ -66,7 +68,7 @@ extension WorktreeInventory {
 /// ため (docs/coding-guidelines.md §2.1)。
 public enum WorktreeTabEmptyState: Sendable, Hashable {
   case noWorktrees
-  /// Active なタブは在るが、どれも到達可能でない。
+  /// Project Root と Active な Task のいずれも到達を確認できない。
   case noReachableWorktrees
   /// worktree は在るが、すべて Inactive。
   case noActiveWorktrees

@@ -46,6 +46,9 @@ public enum HostControlProtocol {
   ) -> Result<HostControlRequest, HostControlProtocolError> {
     do {
       let wire = try JSONDecoder().decode(RequestWire.self, from: Data(line.utf8))
+      guard try hasIntegerVersion(line) else {
+        return .failure(HostControlProtocolError(message: "要求のJSON形式が不正です"))
+      }
       guard wire.version == version, wire.command == "worktree.open" else {
         return .failure(HostControlProtocolError(message: "未対応のcommandまたはversionです"))
       }
@@ -75,12 +78,39 @@ public enum HostControlProtocol {
   ) -> Result<HostControlResponse, HostControlProtocolError> {
     do {
       let wire = try JSONDecoder().decode(ResponseWire.self, from: Data(line.utf8))
+      guard try hasIntegerVersion(line) else {
+        return .failure(HostControlProtocolError(message: "応答のJSON形式が不正です"))
+      }
       return .success(wire.response)
     } catch let error as HostControlProtocolError {
       return .failure(error)
     } catch {
       return .failure(HostControlProtocolError(message: "応答のJSON形式が不正です"))
     }
+  }
+
+  private static func hasIntegerVersion(_ line: String) throws -> Bool {
+    // JSONDecoderは1.0や1e0もIntへ変換するため、検証済みJSONの元の数値表記を確認する。
+    let expression = try NSRegularExpression(
+      pattern: #""(?:\\.|[^"\\])*"|[{}\[\],:]|[^\s{}\[\],:]+"#)
+    let tokens = expression.matches(in: line, range: NSRange(line.startIndex..., in: line))
+      .compactMap { match in Range(match.range, in: line).map { String(line[$0]) } }
+    var depth = 0
+    var found = false
+    for (index, token) in tokens.enumerated() {
+      switch token {
+      case "{", "[": depth += 1
+      case "}", "]": depth -= 1
+      default:
+        guard depth == 1, index + 2 < tokens.count, tokens[index + 1] == ":",
+          token.hasPrefix("\""),
+          try JSONDecoder().decode(String.self, from: Data(token.utf8)) == "version"
+        else { continue }
+        guard tokens[index + 2] == "1" else { return false }
+        found = true
+      }
+    }
+    return found
   }
 
   private static func encodeObject(_ object: [String: Any]) -> String {

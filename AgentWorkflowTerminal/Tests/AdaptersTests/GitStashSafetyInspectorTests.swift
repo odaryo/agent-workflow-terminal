@@ -41,6 +41,8 @@ struct GitStashSafetyInspectorTests {
       .inspect(projectRootBranch: nil)
 
     #expect(result.report.inspection.branchStashes == .unknown)
+    let undeterminedStashCount: Int = result.report.inspection.undeterminedStashCount
+    #expect(undeterminedStashCount == 0)
     #expect(result.report.inspection.uncommittedChanges == .absent)
     #expect(result.report.inspection.ignoredFiles == .absent)
     #expect(result.report.inspection.unpushedCommits == .absent)

@@ -67,7 +67,7 @@ struct ViewerDrawerView<Terminal: View>: View {
 
   private var minimumDrawerWidth: CGFloat {
     ViewerDrawerMetrics.minimumDrawerWidth(
-      for: layout.content, arrangement: layout.content.flatMap { layout.arrangement(for: $0) })
+      for: layout.content, arrangement: layout.content.map { layout.arrangement(for: $0) })
   }
 
   @ViewBuilder
@@ -127,8 +127,6 @@ struct ViewerDrawerView<Terminal: View>: View {
       } else {
         unavailable(content)
       }
-    case .evidence:
-      unavailable(content)
     }
   }
 
@@ -161,7 +159,7 @@ struct ViewerDrawerMetrics {
     case .diff:
       // DiffContentLayout の HStack: 一覧 240 + 差分 200 + コメント 260 + 区切り 2 本。
       return DiffContentMetrics.wideMinimumWidth
-    case .evidence, nil:
+    case nil:
       return 240
     }
   }
@@ -169,7 +167,7 @@ struct ViewerDrawerMetrics {
   static func minimumWindowWidth(for layout: ViewerDrawerLayout) -> CGFloat {
     guard layout.isOpen else { return 480 }
     let minimum = minimumDrawerWidth(
-      for: layout.content, arrangement: layout.content.flatMap { layout.arrangement(for: $0) })
+      for: layout.content, arrangement: layout.content.map { layout.arrangement(for: $0) })
     return max(480, minimumTerminalWidth + minimum + resizeHandleWidth)
   }
 
@@ -202,7 +200,6 @@ extension ViewerContent {
     switch self {
     case .code: "Code"
     case .diff: "Diff"
-    case .evidence: "Evidence"
     }
   }
 
@@ -210,7 +207,6 @@ extension ViewerContent {
     switch self {
     case .code: "doc.text"
     case .diff: "arrow.left.arrow.right"
-    case .evidence: "checkmark.seal"
     }
   }
 }

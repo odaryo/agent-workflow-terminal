@@ -1,7 +1,6 @@
 public enum ViewerContent: Sendable, Hashable, CaseIterable {
   case code
   case diff
-  case evidence
 }
 
 public struct ViewerDrawerLayout: Sendable, Hashable {
@@ -34,11 +33,10 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
     self.content = self.content == content ? nil : content
   }
 
-  public func arrangement(for content: ViewerContent) -> ViewerContentArrangement? {
+  public func arrangement(for content: ViewerContent) -> ViewerContentArrangement {
     switch content {
     case .code: arrangements.code
     case .diff: arrangements.diff
-    case .evidence: nil
     }
   }
 
@@ -48,7 +46,6 @@ public struct ViewerDrawerLayout: Sendable, Hashable {
     switch content {
     case .code: arrangements.code = arrangement
     case .diff: arrangements.diff = arrangement
-    case .evidence: break
     }
   }
 }

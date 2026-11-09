@@ -18,7 +18,8 @@ struct ViewerDrawerToolbar: View {
       .menuStyle(.borderlessButton)
 
       if layout.isOpen {
-        if let content = layout.content, let arrangement = layout.arrangement(for: content) {
+        if let content = layout.content {
+          let arrangement = layout.arrangement(for: content)
           Picker(
             "中身の並び",
             selection: Binding(
@@ -52,7 +53,6 @@ private extension ViewerContent {
     switch self {
     case .code: "Code"
     case .diff: "Diff"
-    case .evidence: "Evidence"
     }
   }
 }

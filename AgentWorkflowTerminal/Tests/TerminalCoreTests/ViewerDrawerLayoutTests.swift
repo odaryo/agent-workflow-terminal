@@ -3,7 +3,7 @@ import Testing
 
 @Suite("Viewer Drawer のレイアウト (設計書 §6.1)")
 struct ViewerDrawerLayoutTests {
-  @Test("既定値は閉じていて Code は左右、Diff は上下、Evidence は並びなし")
+  @Test("既定値は閉じていて Code は左右、Diff は上下")
   func defaultIsClosed() {
     let layout = ViewerDrawerLayout()
     #expect(layout == .closed)
@@ -12,7 +12,6 @@ struct ViewerDrawerLayoutTests {
     #expect(layout.arrangements == .defaults)
     #expect(layout.arrangement(for: .code) == .sideBySide)
     #expect(layout.arrangement(for: .diff) == .stacked)
-    #expect(layout.arrangement(for: .evidence) == nil)
   }
 
   @Test("開いて閉じると閉状態へ戻る", arguments: ViewerContent.allCases)
@@ -81,6 +80,7 @@ struct ViewerDrawerLayoutTests {
     layout.open(content)
     layout.setArrangement(.stacked, for: .code)
     layout.setArrangement(.sideBySide, for: .diff)
+    #expect(layout.content == content)
     let saved = ViewerContentArrangements(code: .stacked, diff: .sideBySide)
 
     layout.close()
@@ -118,19 +118,6 @@ struct ViewerDrawerLayoutTests {
     #expect(layout.arrangements == .init(code: .stacked, diff: .sideBySide))
   }
 
-  @Test(
-    "Evidence の並び変更は開閉状態に関わらず何も変えない",
-    arguments: [nil, ViewerContent.code, .diff, .evidence],
-    ViewerContentArrangement.allCases)
-  func ignoresEvidenceArrangement(content: ViewerContent?, arrangement: ViewerContentArrangement) {
-    var layout = ViewerDrawerLayout(arrangements: .init(code: .stacked, diff: .sideBySide))
-    if let content { layout.open(content) }
-    let original = layout
-    layout.setArrangement(arrangement, for: .evidence)
-    #expect(layout == original)
-    #expect(layout.arrangement(for: .evidence) == nil)
-  }
-
   @Test("閉じている間にも Code と Diff の並びを変更できる")
   func changesArrangementsWhileClosed() {
     var layout = ViewerDrawerLayout()
@@ -154,6 +141,5 @@ struct ViewerDrawerLayoutTests {
     #expect(layout.arrangements == saved)
     #expect(layout.arrangement(for: .code) == code)
     #expect(layout.arrangement(for: .diff) == diff)
-    #expect(layout.arrangement(for: .evidence) == nil)
   }
 }

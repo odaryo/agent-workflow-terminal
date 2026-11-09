@@ -1606,13 +1606,21 @@ Claude Code 2.1.319のターン中のAPIエラーは、最後の送信済みプ�
 該当行より下に完了行(`·\s*done\s+\d`)があるときに`Error`とする(Issue #632、#725)。
 
 - 最後の`⏺ `で始まる行が、`⏺ API Error:`、`⏺ Please run /login · API Error:`、
-  `⏺ There's an issue with the selected model (`のいずれかで始まる。
-- `^  ⎿[ \x{00A0}]+(Not logged in · |Request timed out \(|Credit balance too low · |Prompt is too long · )`
+  `⏺ There's an issue with the selected model`のいずれかで始まる。
+- `^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)|Credit balance too low · |Prompt is too long · )`
   に一致する最後の行があり、その下に`⏺ `で始まる行が無い。列2に固定して深いインデントの引用を除く。
 
-Agentの本文が同じ文言で始まる画面は本物と区別できない(SGRも同じ)。Gate 3の記録には
-Issue #725のこれらの画面は無いため、§12.5に従った再採点は後退の確認だけであり、検出の確認は
-実画面のfixtureで行う(`Spikes/gate3/README.md` §6.12)。
+タイムアウトは`Request timed out (`で始まる形と、括弧が無い`Request timed out`だけの行を含む。
+モデルの失敗は、括弧が折り返しで次の行へ移る形も含む。
+
+Agentの本文が同じ文言で始まる画面は本物と区別できない。SGRが同じなのは、本物の403 / 404と
+本文の403についてだけである。本文の404の`⏺`は`38;5;231`、`⎿`の本物の失敗は`38;5;211`、
+ツールの出力は既定色である。テーマで色が変わるため、色では判定しない。
+残存する制約として、`--verbose`のBashの結果が同じ文言の1行だけで本文が続かないと`Error`になる。
+狭い幅(30桁付近)では文言が折り返されて取りこぼす。採取していない文言(`OAuth token revoked · `、
+`Login expired · `、`Invalid auth token · `など、2.1.319のバイナリには在る)は検出しない。
+Gate 3の記録にはIssue #725のこれらの画面は無いため、§12.5に従った再採点は後退の確認だけであり、
+検出の確認は実画面のfixtureで行う(`Spikes/gate3/README.md` §6.12)。
 
 ## 13. 全Agent pane Overview
 

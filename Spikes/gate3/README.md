@@ -519,17 +519,27 @@ Gate 3 の記録にはこの画面は含まれない。
 の6件に保存した。§6.5.1 で未検出だった形を、設計書 §12.8 の条件で Error とする。
 
 現ターンの最後の `⏺ ` の行は、`⏺ API Error:` に加えて
-`⏺ Please run /login · API Error:` と `⏺ There's an issue with the selected model (` を対象にする。
+`⏺ Please run /login · API Error:` と `⏺ There's an issue with the selected model` を対象にする。
 `⎿` だけの失敗は、正規表現
-`^  ⎿[ \x{00A0}]+(Not logged in · |Request timed out \(|Credit balance too low · |Prompt is too long · )`
+`^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)|Credit balance too low · |Prompt is too long · )`
 に一致する最後の行より下に `⏺ ` で始まる行が無いことを条件にする。どちらも該当行より下の
 完了行 (`·\s*done\s+\d`) が必須。半角空白と NBSP の混在や、Prompt is too long の継続行を許容する。
 列2に固定するため4桁インデントの引用は Completed とし、失敗行の後に `⏺ Done.` がある場合も Completed とする。
 この2件は未ログインの実画面 fixture の文字列置換で検証する。
 
-**残存する制約**: Agent の本文が同じ文言で始まる画面は本物と区別できない (SGR も同じ)。
+タイムアウトは `Request timed out (` で始まる形と、括弧が無い `Request timed out` だけの行を含む。
+モデルの失敗は、括弧が折り返しで次の行へ移る形も含む。追い修正の実画面 fixture は
+`claude-2.1.319-error-{invalid-api-key,model-404-narrow-46,request-timed-out-default}.json` の3件である。
+
+**残存する制約**: Agent の本文が同じ文言で始まる画面は本物と区別できない。
+SGR が同じなのは、本物の 403 / 404 と本文の 403 についてだけである。本文の 404 の `⏺` は
+`38;5;231`、`⎿` の本物の失敗は `38;5;211`、ツールの出力は既定色である。
+テーマで色が変わるため、色では判定しない。
+`--verbose` の Bash の結果が同じ文言の1行だけで本文が続かないと `Error` になる。
+狭い幅 (30桁付近) では文言が折り返されて取りこぼす。採取していない文言 (`OAuth token revoked · `、
+`Login expired · `、`Invalid auth token · ` など、2.1.319 のバイナリには在る) は検出しない。
 Gate 3 の記録にはこれらの画面が無いので、設計書 §12.5 に従った再採点は後退の確認だけである。
-これらの失敗を検出できるかは上記の実画面 fixture で確認する。
+これらの失敗を検出できるかは実画面 fixture で確認する。
 
 ### 6.3 読み取れること
 

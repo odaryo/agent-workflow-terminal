@@ -191,13 +191,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     let responseErrorIndex = lastResponseIndex.flatMap { index in
       [
         "⏺ API Error:", "⏺ Please run /login · API Error:",
-        "⏺ There's an issue with the selected model (",
+        "⏺ There's an issue with the selected model",
       ].contains(where: { lines[index].hasPrefix($0) }) ? index : nil
     }
     // Issue #725: 深いインデントの引用を除くため列 2 に固定する。区切りには NBSP も混ざる。
     let nestedErrorIndex = lines.lastIndex(where: {
       $0.range(
-        of: #"^  ⎿[ \x{00A0}]+(Not logged in · |Request timed out \("#
+        of: #"^  ⎿[ \x{00A0}]+(Not logged in · |Invalid API key · |Request timed out(?: \(|$)"#
           + #"|Credit balance too low · |Prompt is too long · )"#,
         options: .regularExpression) != nil
     })

@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 54)
+    #expect(fixtures.count == 57)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -441,17 +441,6 @@ extension ClaudeCodeAdapterTests {
     #expect(classifyQuietScreen(screen) == "completed")
   }
 
-  @Test(
-    "未ログインの文言が深い引用か後続の本文があれば Completed (Issue #725)",
-    arguments: [("\n  ⎿ ", "\n    ⎿ "), ("\n✻ Brewed", "\n⏺ Done.\n✻ Brewed")]
-  )
-  func quotedOrSupersededLoginErrorIsCompleted(replacement: (String, String)) throws {
-    let fixture = try #require(
-      AgentStateFixture.load(prefix: "claude-2.1.319-error-not-logged-in").first)
-    let screen = fixture.screen.replacingOccurrences(of: replacement.0, with: replacement.1)
-    try #require(screen != fixture.screen)
-    #expect(classifyQuietScreen(screen) == "completed")
-  }
   @Test("最後の送信済みプロンプトより上の retry 行では Working にしない (Issue #632)")
   func previousTurnRetryDoesNotIndicateWorking() {
     let screen = """

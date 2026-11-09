@@ -368,6 +368,28 @@ AWT_TEST_AGENT=true
 sessions+=(no-agent)
 expect_exit 7 '即座に終わるコマンドは Agent 起動を確認できない' --directory "$work_dir" --prompt short
 
+AWT_TEST_SESSION=short-lived-exec
+AWT_TEST_AGENT="exec /bin/sh -c 'sleep 1; exit 1'"
+sessions+=(short-lived-exec)
+expect_exit 7 '短命の exec を Agent の起動と取り違えない' --directory "$work_dir" --prompt short
+checked=$((checked + 1))
+if T has-session -t '=short-lived-exec' 2>/dev/null; then
+  ng '短命の exec の session が残っています'
+else
+  info 'OK: 短命の exec の session は消えた（cleanup の対象には残す）'
+fi
+
+AWT_TEST_SESSION=literal-command
+AWT_TEST_AGENT=0x41
+sessions+=(literal-command)
+expect_exit 7 '16進数のキー表記を含む agentCommand を文字列として送る' --directory "$work_dir" --prompt x
+checked=$((checked + 1))
+if T capture-pane -p -t '=literal-command:' | rg -q -F "handoff> 0x41 'x'"; then
+  info 'OK: pane に 0x41 が literal で届いた'
+else
+  ng 'pane に 0x41 が literal で届いていません'
+fi
+
 for shell_name in zsh fish; do
   if ! command -v "$shell_name" >/dev/null 2>&1; then
     if [[ "${CI:-}" == true ]]; then

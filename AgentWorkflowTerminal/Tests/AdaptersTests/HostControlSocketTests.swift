@@ -197,7 +197,7 @@ struct HostControlSocketTests {
         return Self.response
       },
       body: {
-        let line = try await Task.detached { try Self.sendRequest(bytes, to: path) }.value
+        let line = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
         let response = try HostControlProtocol.decodeResponse(line).get()
         guard case .failure(let code, _) = response else {
           Issue.record("不正UTF-8の要求が成功した")
@@ -235,8 +235,7 @@ struct HostControlSocketTests {
       try? FileManager.default.removeItem(atPath: path + ".lock")
     }
     try await withServer(HostControlSocketServer(path: path)) {
-      let line = try await Task.detached { try Self.sendRequest(Array("{}\n".utf8), to: path) }
-        .value
+      let line = try await Self.offPool { try Self.sendRequest(Array("{}\n".utf8), to: path) }
       let response = try HostControlProtocol.decodeResponse(line).get()
       guard case .failure(let code, let message) = response else {
         Issue.record("不正要求が成功した")
@@ -314,9 +313,9 @@ struct HostControlSocketTests {
         return Self.response
       },
       body: {
-        try await Task.detached {
+        try await Self.offPool {
           try Self.sendOversizedRequest(to: path)
-        }.value
+        }
       }
     )
   }
@@ -396,6 +395,16 @@ extension HostControlSocketTests {
       pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
         body($0, socklen_t(MemoryLayout<sockaddr_un>.size))
       }
+    }
+  }
+
+  // 同期の recv を並行性ランタイムのスレッドで待つと、コア数の少ない環境でサーバの処理が回らない
+  // (CI と LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 で EAGAIN を実測、Issue #700)。
+  private static func offPool<T: Sendable>(
+    _ body: @escaping @Sendable () throws -> T
+  ) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+      DispatchQueue.global().async { continuation.resume(with: Result { try body() }) }
     }
   }
 

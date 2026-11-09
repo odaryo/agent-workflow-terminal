@@ -70,6 +70,56 @@ struct PaneObservationStoreTests {
     #expect(store.observed[session]?.details[pane]?.isTaskCompleted == remainsCompleted)
   }
 
+  @Test("Issue #661 worktree の観測を停止して再開すると初回完了を引き継がない")
+  func resetsCompletedObservationAfterRestart() async throws {
+    let root = try #require(WorktreeIdentity(rawValue: "/repo/.git"))
+    let identity = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/task"))
+    let rootSession = TerminalSessionKey.primary(root)
+    let session = TerminalSessionKey.primary(identity)
+    let feeds = AsyncStream<AsyncStream<WorktreePaneAgentStates>.Continuation>.makeStream()
+    defer { feeds.continuation.finish() }
+    let store = PaneObservationStore(
+      dependencies: AppDependencies(
+        launchProject: .none, tmuxExecutable: nil, tmuxError: nil,
+        paneStates: { key in
+          let states = AsyncStream<WorktreePaneAgentStates>.makeStream()
+          if key == session { feeds.continuation.yield(states.continuation) }
+          return states.stream
+        }, tmuxRunner: nil, paneSource: nil, signalSource: nil,
+        sessionActivityProbe: nil, applicationSupportDirectory: nil, applicationSupportWarning: nil),
+      notifier: nil)
+    defer { store.stopAll() }
+    let inventory = WorktreeInventory(
+      projectRoot: DetectedWorktree(
+        identity: root, worktreePath: "/repo", branch: "main", isProjectRoot: true),
+      taskWorktrees: [
+        TaskWorktree(
+          detected: DetectedWorktree(
+            identity: identity, worktreePath: "/repo/task", branch: "task", isProjectRoot: false),
+          activation: .active)
+      ])
+    var iterator = feeds.stream.makeAsyncIterator()
+    store.observe(inventory, tabs: [rootSession, session])
+    let firstFeed = try #require(await iterator.next())
+    defer { firstFeed.finish() }
+    firstFeed.yield(.init(panes: [paneState], isComplete: true))
+    try await waitUntil { store.observed[session]?.paneStates != nil }
+    #expect(store.observed[session]?.paneStates == [paneState])
+
+    store.observe(inventory, tabs: [rootSession])
+    #expect(store.observed[session] == nil)
+    store.observe(inventory, tabs: [rootSession, session])
+    let restartedFeed = try #require(await iterator.next())
+    defer { restartedFeed.finish() }
+    #expect(store.observed[session]?.paneStates == nil)
+
+    restartedFeed.yield(.init(panes: [], isComplete: false))
+    restartedFeed.yield(.init(panes: [paneState], isComplete: false))
+    try await waitUntil { store.observed[session]?.latestPaneStates == [paneState] }
+    #expect(store.observed[session] != nil)
+    #expect(store.observed[session]?.paneStates == nil)
+  }
+
   private func waitUntil(_ condition: () -> Bool) async throws {
     let deadline = ContinuousClock.now.advanced(by: .seconds(5))
     while !condition(), ContinuousClock.now < deadline {

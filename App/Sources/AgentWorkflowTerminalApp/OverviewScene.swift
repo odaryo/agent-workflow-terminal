@@ -59,8 +59,10 @@ struct OverviewView: View {
           }
         }
         .listStyle(.sidebar)
+        .scrollContentBackground(.hidden)
       }
     }
+    .background(.windowBackground)
     .onAppear { navigator.openWindow = openWindow }
   }
 
@@ -180,7 +182,7 @@ private struct OverviewProjectSection: View {
           reveal(worktree.session, pane.paneID)
         }
       case .noAgentPane, .notObserved:
-        let shellTitle = worktree.session.index > 1 ? "シェル \(worktree.session.index)" : "シェル"
+        let shellTitle = "shell \(worktree.session.index)"
         let rowTitle = row == .notObserved ? "観測中…" : (title == nil ? shellTitle : "Agent pane なし")
         Button {
           reveal(worktree.session, nil)

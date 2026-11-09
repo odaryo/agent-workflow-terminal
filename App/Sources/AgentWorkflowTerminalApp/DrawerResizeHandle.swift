@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 // Why not Divider / onHover: 境界の合成ドラッグ18回で幅が変わらず、Divider は横線になった。
-// NSView の当たり判定と cursor rect を同じ領域に持たせ、隣の端末のカーソル処理に頼らない。
+// NSView の当たり判定とカーソルの領域を同じにし、隣の端末のカーソル処理に頼らない。
 @MainActor
 struct DrawerResizeHandle: NSViewRepresentable {
   let width: CGFloat
@@ -35,13 +35,27 @@ struct DrawerResizeHandle: NSViewRepresentable {
     var onWidthChange: (@MainActor (CGFloat) -> Void)?
     var onDragEnd: (@MainActor (CGFloat) -> Void)?
     private var dragStart: (width: CGFloat, windowX: CGFloat)?
+    private var cursorTrackingArea: NSTrackingArea?
 
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func resetCursorRects() {
-      addCursorRect(bounds, cursor: .resizeLeftRight)
+    // Why not resetCursorRects: Overview の境界で ↔ が出なかった (#752)。
+    override func updateTrackingAreas() {
+      super.updateTrackingAreas()
+      if let cursorTrackingArea { removeTrackingArea(cursorTrackingArea) }
+      let area = NSTrackingArea(
+        rect: .zero,
+        options: [.cursorUpdate, .inVisibleRect, .activeInKeyWindow],
+        owner: self
+      )
+      addTrackingArea(area)
+      cursorTrackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+      NSCursor.resizeLeftRight.set()
     }
 
     override func draw(_ dirtyRect: NSRect) {

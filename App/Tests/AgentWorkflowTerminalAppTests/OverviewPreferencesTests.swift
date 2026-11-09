@@ -8,9 +8,9 @@ struct OverviewPreferencesTests {
     #expect(OverviewSidebarPreferences.defaultIsOpen)
   }
 
-  @Test("サイドバーの幅は 240〜480 に収め、非有限値は既定へ戻す")
+  @Test("サイドバーの幅は 160〜480 に収め、非有限値は既定へ戻す")
   func widthClamp() {
-    #expect(OverviewSidebarPreferences.clamped(100) == 240)
+    #expect(OverviewSidebarPreferences.clamped(100) == 160)
     #expect(OverviewSidebarPreferences.clamped(600) == 480)
     #expect(OverviewSidebarPreferences.clamped(333) == 333)
     #expect(OverviewSidebarPreferences.clamped(.nan) == 300)

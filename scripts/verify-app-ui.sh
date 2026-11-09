@@ -221,7 +221,7 @@ EOS
 # 検証用の差分を作るため、リポジトリに untracked のプローブファイルを一時的に置く。
 selftest() {
   # Project Root のセッションは常にメイン作業ツリーを指すため、プローブもそこへ置く。
-  # Overview の Agent がいない行は「シェル」、表示中は「表示中 シェル」なので部分一致で選ぶ。
+  # Overview の Agent がいない行は「shell 1」、表示中は「表示中 shell 1」なので部分一致で選ぶ。
   local main_worktree
   main_worktree=$(git worktree list --porcelain | awk 'NR == 1 { print $2 }')
   [ -n "$main_worktree" ] || die "メイン作業ツリーを特定できませんでした"
@@ -241,7 +241,7 @@ selftest() {
   printf 'probe line one\nprobe line two\nprobe line three\n' >"$SELFTEST_PROBE"
   app_launch "$main_worktree"
   # ボタンの順番に依存しないよう、文言と role で対象を特定する。
-  app_click_text "シェル" --role AXButton
+  app_click_text "shell 1" --role AXButton
   app_click_text "Viewer" --exact --role AXMenuButton
   swift "$SCRIPT_DIR/ui-ax.swift" "$APP_NAME" press "Diff" --exact --role AXMenuItem
   sleep 2

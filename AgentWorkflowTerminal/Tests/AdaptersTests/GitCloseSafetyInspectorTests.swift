@@ -175,6 +175,10 @@ struct GitCloseSafetyInspectorTests {
   @Test("detached HEAD の push と merge は判定不能であり、問う必要が無いのではない")
   func reportsBranchChecksAsUnknownForDetachedHead() async throws {
     let stub = CloseInspectionProcessStub { arguments in
+      // detached でも branch を特定できない stash は数えるので `stash list` は読む (#640)。
+      if commandArguments(arguments) == GitReadCommand.stashList().arguments {
+        return .success(.init(exitCode: 0, stdout: "", stderr: ""))
+      }
       #expect(
         [GitReadCommand.status().arguments, GitReadCommand.status(includeIgnored: true).arguments]
           .contains(commandArguments(arguments)))

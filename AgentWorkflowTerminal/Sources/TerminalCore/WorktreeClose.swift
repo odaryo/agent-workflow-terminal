@@ -138,19 +138,22 @@ public struct WorktreeCloseInspection: Sendable, Hashable {
   public let branchStashes: BranchStashStatus
   public let unpushedCommits: UnpushedCommitsStatus
   public let branchMerge: BranchMergeStatus
+  public let undeterminedStashCount: Int
 
   public init(
     uncommittedChanges: UncommittedChangesStatus,
     ignoredFiles: IgnoredFilesStatus,
     branchStashes: BranchStashStatus,
     unpushedCommits: UnpushedCommitsStatus,
-    branchMerge: BranchMergeStatus
+    branchMerge: BranchMergeStatus,
+    undeterminedStashCount: Int = 0
   ) {
     self.uncommittedChanges = uncommittedChanges
     self.ignoredFiles = ignoredFiles
     self.branchStashes = branchStashes
     self.unpushedCommits = unpushedCommits
     self.branchMerge = branchMerge
+    self.undeterminedStashCount = undeterminedStashCount
   }
 }
 

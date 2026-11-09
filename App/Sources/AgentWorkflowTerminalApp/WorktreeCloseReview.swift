@@ -80,6 +80,11 @@ struct WorktreeCloseReview: Sendable {
   func removalWarnings(for inspection: WorktreeCloseInspection) -> [String] {
     var warnings = fileRemovalWarnings(for: inspection)
     warnings += stashRemovalWarnings(for: inspection.branchStashes)
+    if inspection.undeterminedStashCount > 0 {
+      warnings.append(
+        "branch を特定できない stash が \(inspection.undeterminedStashCount) 件あります。この worktree の作業かどうかは件名から判断できません。"
+      )
+    }
     switch inspection.unpushedCommits {
     case .present: warnings.append("push していない commit があります (upstream が無いか、upstream より先行しています)。")
     // §3.4: 「追跡先が消えた」と読める文言にしない。未 push のまま upstream だけ設定した場合もここへ来る。

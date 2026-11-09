@@ -47,6 +47,46 @@ struct GitStashListTests {
   }
 
   @Test(
+    "branch を特定できない stash だけを数える",
+    arguments: [
+      ("", 0),
+      ("autostash", 1),
+      ("Created via \"git stash store\".", 1),
+      ("custom subject: WIP on feature/x: note", 1),
+      ("WIP on feature/x", 1),
+      ("On main", 1),
+      ("WIP on feature/x:note", 1),
+      ("On main:note", 1),
+      ("WIP on (no branch): abc x", 1),
+      ("On (no branch): note", 1),
+      ("WIP on feature/x: abc x", 0),
+      ("On main: note", 0),
+      ("On feature/(no branch): note", 0),
+      ("On main: (no branch)", 0),
+    ])
+  func countsUndeterminedSubjects(output: String, expected: Int) {
+    let count: Int = GitStashList.undeterminedCount(output: output)
+
+    #expect(count == expected)
+  }
+
+  @Test("通常の stash が混在しても branch を特定できない件数を合計する")
+  func countsMixedUndeterminedSubjects() {
+    let output = """
+      WIP on feature/x: abc x
+      autostash
+      Created via "git stash store".
+      WIP on (no branch): abc x
+      On main: note
+      WIP on feature/x
+      On main
+
+      """
+
+    #expect(GitStashList.undeterminedCount(output: output) == 5)
+  }
+
+  @Test(
     "メッセージや branch 名が結合文字で始まっても数える",
     arguments: [
       ("On feature/x: \u{301}note", "feature/x"),

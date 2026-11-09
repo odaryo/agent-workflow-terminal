@@ -1,6 +1,10 @@
 import Adapters
 import Foundation
 import TerminalCore
+import os
+
+private let tmuxListingLog = Logger(
+  subsystem: "dev.local.agentworkflowterminal", category: "tmux")
 
 struct TmuxSessionAttachment: Sendable, Equatable {
   let command: [String]
@@ -45,11 +49,17 @@ struct TmuxSessionProvisioner: Sendable {
     self.orphanedServerProbe = orphanedServerProbe
   }
 
-  /// 空配列は「session が無い」ことの確認である。取り残された server が居る場合は `[]` にせず投げる。
+  /// 空配列は「管理下の session が無い」ことの確認である (復号できない行は飛ばす。Issue #638)。取り残された server が居る場合は `[]` にせず投げる。
   /// 呼び出し側が空の一覧でセッションを刈り込まないため。
   func sessionNames() async throws(TmuxSessionProvisionerError) -> [String] {
     do {
-      return try await operations.list()
+      let listing = try await operations.listWithUndecodableCount()
+      if listing.undecodableLineCount > 0 {
+        // 本文を読めるよう `Logger` の公開ログへ出す (規約 §2.4)。名前そのものは記録しない。
+        tmuxListingLog.notice(
+          "復号できない tmux session 名を \(listing.undecodableLineCount, privacy: .public) 件飛ばしました。")
+      }
+      return listing.names
     } catch .serverNotRunning {
       return []
     } catch .serverSocketMissing(let socketPath) {

@@ -481,6 +481,28 @@ working 以外の行は、変更の前後で予測の内訳まで一致した。
 この3行の窓の外にある transcript の新着区切りは拾わない。タスク一覧が出ていると印は区切り線の 6〜8 行上になり、この判定は効かない (受け入れた残存挙動)。spinner が見えていれば今までどおり `working`。
 この変更で Gate 3 の記録の判定は1フレームも変わっていない (2.0 秒 polling の `--score` が #382 の後と同一)。
 
+### 6.10 引用された確認画面 (Issue #645)
+
+Claude Code 2.1.319 / Codex 0.166.0 の実画面を fixture にし、応答本文に引用された確認画面を
+判断待ちから除外した (設計書 §12.8)。
+
+- Claude Code: `claude-2.1.319-quoted-prompts-in-reply.json`、
+  `claude-2.1.319-quoted-prompts-streaming.json`、`claude-2.1.319-quoted-prompts-transcript.json`。
+  Permission / Question の該当文言を含む最後の行より下に入力欄または完了行があれば、判断待ちにしない。
+- Codex: `codex-0.166.0-quoted-trust-in-reply.json`。引用の下に `Worked for <1s • 13:21` と
+  `› Ask Codex to do anything` がある。前後の空白を除いた行で、最後の trust 選択肢より下に
+  `Worked for ` で始まる行、または `› ` で始まり `› <数字>. ` で始まらない行があれば、trust の判断待ちにしない。
+  カーソルを2番目へ移した本物の画面の `› 2. Back to Agent Command Center` は入力欄として扱わない。
+  `codex-0.166.0-trust-prompt-narrow-25.json` / `codex-0.166.0-trust-prompt-short-4.json` は本物の
+  trust 画面で、footer が折り返す幅23〜28や、footer が画面外に切れる高さ5以下でも判断待ちとする。
+  実測の範囲は幅23以上、高さの下限なし。幅20では選択肢の行が折り返すので判定できない。
+
+Gate 3 の記録では変更前後で変化が無かった。遷移列 TSV は256行が一致し、`claude-*` / `codex-*` の
+全13,272フレームの判定もバイト単位で一致した。`--score --poll 2.0` と `--poll 0.25` のどちらでも
+変更前後の採点結果は一致した。`--score --poll 2.0` は permission 770、recall 1.000、危険率 0.000。
+この記録には引用された確認画面が無いので、記録の一致は「後退していない」ことの証拠であり、
+「引用を除外できる」ことの証拠ではない。引用の除外は上記の実画面 fixture で確認する。
+
 ### 6.3 読み取れること
 
 1. **単独信号はどれか一つで必ず 100% 危険側へ倒れる。**

@@ -118,10 +118,13 @@ public struct ClaudeCodeAdapter: AgentAdapter {
       return .working
     }
     // Issue #632: 2.1.319 の retry 待ちもターンが続いており、Idle では入力を送れてしまう。
-    if currentTurnLines.contains(where: {
-      $0.range(
+    if currentTurnLines.indices.contains(where: { index in
+      currentTurnLines[index].range(
         of: #"· Retrying in [^·]+ · attempt(?: \d+/\d+)?$"#, options: .regularExpression
       ) != nil
+        && !currentTurnLines.suffix(from: index + 1).contains(where: {
+          $0.range(of: #"·\s*done\s+\d"#, options: .regularExpression) != nil
+        })
     }) {
       return .working
     }
@@ -137,7 +140,10 @@ public struct ClaudeCodeAdapter: AgentAdapter {
     }
     // 起動バナーはスクロールアウトするため、idle の検出率に上限がある (Gate 3 §10-4)。
     if hasEmptyInputPrompt && screen.contains("Claude Code v") && screen.contains("mode on")
-      && !screen.contains("⏺") && lastSubmittedPromptIndex == nil
+      && !screen.contains("⏺")
+      && lastSubmittedPromptIndex.map({
+        lines[$0].range(of: #"^❯ +/"#, options: .regularExpression) != nil
+      }) ?? true
     {
       return .idle
     }

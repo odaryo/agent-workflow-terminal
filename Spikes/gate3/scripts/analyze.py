@@ -256,11 +256,14 @@ def c_screen_retry_error_plan(rec, agent, ctx):
          if re.search(r"^❯ +\S", lines[index])), None
     )
     current_turn_lines = lines[last_prompt + 1:] if last_prompt is not None else lines
-    if state == "idle" and last_prompt is not None:
+    if (state == "idle" and last_prompt is not None
+            and not re.search(r"^❯ +/", lines[last_prompt])):
         state = "unknown"
     # Issue #632: 2.1.319 の retry 待ちは入力待ちではないため。
     if any(re.search(r"· Retrying in [^·]+ · attempt(?: \d+/\d+)?$", line)
-           for line in current_turn_lines):
+           and not any(re.search(r"·\s*done\s+\d", following)
+                       for following in current_turn_lines[index + 1:])
+           for index, line in enumerate(current_turn_lines)):
         return "working"
     prompt_index = next(
         (index for index in range(len(lines) - 1, -1, -1)

@@ -8,7 +8,7 @@ struct ClaudeCodeAdapterTests {
   func fixtures() throws {
     let adapter = ClaudeCodeAdapter()
     let fixtures = try AgentStateFixture.load(prefix: "claude-")
-    #expect(fixtures.count == 34)
+    #expect(fixtures.count == 36)
     for fixture in fixtures {
       let actual = fixtureState(
         of: adapter.classify(signals: fixture.signals, liveness: fixture.liveness)
@@ -399,6 +399,20 @@ extension ClaudeCodeAdapterTests {
       ⏵⏵ bypass permissions mode on
       """
     #expect(classifyQuietScreen(screen) == (hasSubmittedPrompt ? "unknown" : "idle"))
+  }
+
+  @Test("カスタムスラッシュコマンドの retry 待ちは起動バナーが残っていても Working (Issue #632)")
+  func customSlashCommandRetryIndicatesWorking() {
+    let screen = """
+      Claude Code v2.1.319
+      ❯ /custom
+      ✻ Connection refused · Retrying in 9s · attempt 5/10
+      ──────────
+      ❯\u{00A0}
+      ──────────
+      ⏸ plan mode on
+      """
+    #expect(classifyQuietScreen(screen) == "working")
   }
 
   @Test("前ターンの API Error と完了行は今の正常完了を妨げない (Issue #632)")

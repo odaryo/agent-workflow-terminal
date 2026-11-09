@@ -49,7 +49,7 @@ struct TmuxSessionProvisioner: Sendable {
     self.orphanedServerProbe = orphanedServerProbe
   }
 
-  /// 空配列は「session が無い」ことの確認である。取り残された server が居る場合は `[]` にせず投げる。
+  /// 空配列は「管理下の session が無い」ことの確認である (復号できない行は飛ばす。Issue #638)。取り残された server が居る場合は `[]` にせず投げる。
   /// 呼び出し側が空の一覧でセッションを刈り込まないため。
   func sessionNames() async throws(TmuxSessionProvisionerError) -> [String] {
     do {

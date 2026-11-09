@@ -64,6 +64,7 @@ struct PaneObservationStoreTests {
     fixture.states.continuation.yield(.init(panes: [working], isComplete: true))
     try await waitUntil { store.observed[session]?.latestPaneStates == [working] }
     #expect(store.observed[session]?.details[pane]?.isTaskCompleted == false)
+    // feed は absent でも fake の ps が同じ PID を生かす組み合わせは、PID 再利用の形である (設計書 §12.7 の残存リスク)。
     try await waitUntil { store.observed[session]?.details[pane]?.isTaskCompleted == true }
   }
 
@@ -91,6 +92,12 @@ struct PaneObservationStoreTests {
     fixture.states.continuation.yield(
       .init(panes: [], isComplete: false, agentAbsentPanes: [pane]))
     try await waitUntil { store.observed[session]?.latestPaneStates == [] }
+    #expect(store.observed[session]?.details[pane]?.isTaskCompleted == false)
+
+    let purposeBeforeRefresh = store.observed[session]?.details[pane]?.purpose
+    try await waitUntil(timeout: .seconds(10)) {
+      store.observed[session]?.details[pane]?.purpose != purposeBeforeRefresh
+    }
     #expect(store.observed[session]?.details[pane]?.isTaskCompleted == false)
   }
 

@@ -63,6 +63,7 @@ struct ProjectsWindowContent: View {
     }
     .task { projects.start() }
     .onAppear { projects.navigator.openWindow = openWindow }
+    .onAppear { projects.startGlobalHotKey() }
   }
 
   private var mainColumn: some View {

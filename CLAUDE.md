@@ -180,6 +180,16 @@ button がずれ、「開く」のつもりで「閉じる」を押していた�
 UI 確認は、アプリのウィンドウが画面上で見えていて、ユーザーの PC 操作とぶつからない時間に回す。
 タブの選択状態は、タブを切り取ったスクリーンショットの塗り (選択中は塗り、非選択は枠線だけ) で判定できる。
 
+**Accessibility の許可先は tmux ではなく、tmux server を起動したアプリである (実測 2026-11-09、macOS 27.0.1)。**
+tmux 3.8 の実体を「アクセシビリティ」に追加してオンにしても `AXIsProcessTrusted` は `false` のままだった。
+macOS の判定対象は tccd のログで分かる (`log show --last 40s --info --debug --predicate 'process == "tccd" AND eventMessage CONTAINS "Accessibility"'`)。
+このときの記録は `Failed to match existing code requirement for subject dev.local.agentworkflowterminal` で、
+tmux server を起動した開発版のバンドルが対象だった。バンドルはアドホック署名なので、**作り直すと cdhash が変わり許可が無効になる**。
+`App/build/AgentWorkflowTerminal.app` を一覧から消して追加し直すと `true` になり、`selftest` が通った。
+メインの worktree で `scripts/build-app.sh` を実行すると無効になるので、UI 確認のビルドは別の worktree で行う
+(別の worktree なら署名は変わらない)。tmux server を別のアプリが起動し直したら、許可先もそのアプリに変わる。
+`System Events` の `name of first process` は権限なしでも通るので、権限の確認には使わない。
+
 **UI 層を計測するときの作法** (#278 の実測による)。
 
 - **合成キーストロークは埋め込み端末 (libghostty の NSView) へ届く。** 以前「届かないので実キーボードを

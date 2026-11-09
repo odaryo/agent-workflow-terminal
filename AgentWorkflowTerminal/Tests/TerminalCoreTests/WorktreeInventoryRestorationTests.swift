@@ -139,6 +139,48 @@ struct WorktreeInventoryRestorationTests {
     #expect(activation(restored, of: movedAlpha.identity) == .active)
   }
 
+  @Test(
+    "部分一覧に無い保存済み Task は Active/Inactive を保持して観測失敗として復元する",
+    arguments: [WorktreeActivation.active, .inactive]
+  )
+  func missingSavedTaskInPartialListingIsUnobserved(activation: WorktreeActivation) throws {
+    let alpha = try detected("alpha")
+    let missing = try detected("missing", branch: "feat/missing")
+
+    let restored = restoreWorktreeInventory(
+      detected: [alpha], saved: saved([(missing, activation)]), isListingComplete: false)
+
+    let retained = try #require(
+      restored.inventory.taskWorktrees.first { $0.identity == missing.identity })
+    #expect(retained.activation == activation)
+    #expect(retained.detected.observation == .observationFailed)
+    #expect(retained.detected.worktreePath == missing.worktreePath)
+    #expect(retained.detected.branch == missing.branch)
+    #expect(restored.unobserved == [missing.identity])
+    #expect(restored.appeared.isEmpty)
+    #expect(restored.disappeared.isEmpty)
+  }
+
+  @Test(
+    "完全な一覧に無い保存済み Task は明示指定でも既定でも到達不能として復元する",
+    arguments: [WorktreeActivation.active, .inactive]
+  )
+  func missingSavedTaskInCompleteListingIsUnreachable(activation: WorktreeActivation) throws {
+    let missing = try detected("missing")
+    let savedState = saved([(missing, activation)])
+
+    let explicit = restoreWorktreeInventory(
+      detected: [], saved: savedState, isListingComplete: true)
+    let implicit = restoreWorktreeInventory(detected: [], saved: savedState)
+
+    #expect(explicit == implicit)
+    #expect(explicit.inventory.taskWorktrees.map(\.activation) == [activation])
+    #expect(explicit.inventory.taskWorktrees.map(\.detected.observation) == [.unreachable])
+    #expect(explicit.unobserved.isEmpty)
+    #expect(explicit.appeared.isEmpty)
+    #expect(explicit.disappeared.isEmpty)
+  }
+
   // MARK: - Project Root
 
   @Test("保存されたProject Rootが検出できなければ到達不能として残す")

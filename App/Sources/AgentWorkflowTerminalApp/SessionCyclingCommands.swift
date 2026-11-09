@@ -2,14 +2,15 @@ import SwiftUI
 
 struct SessionCyclingCommands: Commands {
   @ObservedObject var projects: ProjectsModel
+  @ObservedObject var shortcuts: ShortcutSettingsStore
 
   var body: some Commands {
     CommandGroup(after: .toolbar) {
       Button("前のセッション") { projects.selectedModel?.selectPreviousSession() }
-        .keyboardShortcut(.leftArrow, modifiers: [.command, .option])
+        .keyboardShortcut(shortcuts.shortcut(for: .previousSession))
         .disabled(projects.selectedModel == nil)
       Button("次のセッション") { projects.selectedModel?.selectNextSession() }
-        .keyboardShortcut(.rightArrow, modifiers: [.command, .option])
+        .keyboardShortcut(shortcuts.shortcut(for: .nextSession))
         .disabled(projects.selectedModel == nil)
       Button("次のセッション") { projects.selectedModel?.selectNextSession() }
         .keyboardShortcut(.tab, modifiers: .control)

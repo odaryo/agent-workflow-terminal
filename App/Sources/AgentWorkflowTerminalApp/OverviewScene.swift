@@ -4,6 +4,7 @@ import TerminalCore
 /// `openWindow` は View の environment からしか取れないので、メニュー項目を View にする。
 struct OverviewMenuItem: View {
   let navigator: AppNavigator
+  @ObservedObject var shortcuts: ShortcutSettingsStore
   @Environment(\.openWindow) private var openWindow
 
   var body: some View {
@@ -12,7 +13,7 @@ struct OverviewMenuItem: View {
     Button("Overview を表示") {
       navigator.toggleOverviewSidebar(openWindow: openWindow)
     }
-    .keyboardShortcut("o", modifiers: [.command, .shift])
+    .keyboardShortcut(shortcuts.shortcut(for: .toggleOverview))
   }
 }
 

@@ -51,6 +51,8 @@ struct AppSettingsView: View {
 
   var body: some View {
     TabView {
+      ShortcutSettingsView(store: projects.shortcuts)
+        .tabItem { Label("ショートカット", systemImage: "keyboard") }
       NotificationSettingsView()
         .tabItem { Label("通知", systemImage: "bell") }
       TmuxSettingsView()

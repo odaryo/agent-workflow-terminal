@@ -19,15 +19,39 @@ final class AppNavigator: ObservableObject {
     return mainWindow.isVisible || mainWindow.isMiniaturized
   }
 
+  func toggleFromGlobalHotKey(selected model: AppModel?) {
+    if NSApp.isActive, let mainWindow,
+      mainWindow.isVisible, !mainWindow.isMiniaturized,
+      mainWindow.isOnActiveSpace, mainWindow.isMainWindow
+    {
+      NSApp.hide(nil)
+    } else {
+      bringToFront(selected: model)
+    }
+  }
+
   func bringToFront(selected model: AppModel?) {
+    NSApp.unhideWithoutActivation()
+    if let mainWindow, !mainWindow.styleMask.contains(.fullScreen) {
+      mainWindow.collectionBehavior.insert(.moveToActiveSpace)
+    }
     if mainWindow?.isMiniaturized == true {
       mainWindow?.deminiaturize(nil)
     }
-    openWindow?(id: "main")
+    if !isMainWindowOpen {
+      openWindow?(id: "main")
+    }
+    mainWindow?.makeKeyAndOrderFront(nil)
     // 他のアプリが前面にいると activate() では拒まれることがある。
     NSApp.activate(ignoringOtherApps: true)
-    mainWindow?.makeKeyAndOrderFront(nil)
     model?.paneObservations.requestTerminalFocus()
+    if let window = mainWindow, !window.styleMask.contains(.fullScreen) {
+      // ⌘Tab や Dock の動きを変えないため戻すが、同じ runloop では window server に届く前に戻り、移動が効かないことがある (設計書 §5.4)。
+      Task { @MainActor [weak window] in
+        try? await Task.sleep(for: .seconds(0.5))
+        window?.collectionBehavior.remove(.moveToActiveSpace)
+      }
+    }
   }
 
   /// Project → セッション → tmux の window と pane → メイン window の端末、の順に移す。`pane` が `nil`

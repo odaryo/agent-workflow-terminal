@@ -84,7 +84,7 @@ final class ProjectsModel: ObservableObject {
     guard globalHotKey == nil else { return }
     let hotKey = GlobalHotKey { [weak self] in
       guard let self else { return }
-      navigator.bringToFront(selected: selectedModel)
+      navigator.toggleFromGlobalHotKey(selected: selectedModel)
     }
     globalHotKey = hotKey
     let status = hotKey.register(keyCode: UInt32(kVK_Space), modifiers: UInt32(cmdKey))

@@ -38,11 +38,11 @@ jobs:
   build-and-test:
     name: Build & Test (SwiftPM, unit + integration)
     runs-on: macos-15
-    # 段ごとの上限は 600 + 300 (単体) + 600 + 300 (統合) = 1800s。CI 実測 (run 41304065113) の
+    # 段ごとの上限は 600 + 300 (単体) + 600 (統合) = 1500s。CI 実測 (run 41304065113) の
     # 固定費は setup+checkout+toolchain 約 10s / brew 14s / build 69s、wrapper の停止処理は 17s
     # (run 34245198762)。
-    # 固定費を 420s、停止処理を 4 本分 240s まで見積もっても 2460s = 41 分で、45 分に届かない。
-    # 4 本ともハングした回でも、どれも exit 124 とスタックを書き終えてから job が終わる。
+    # 固定費を 420s、停止処理を 3 本分 180s まで見積もっても 2100s = 35 分で、45 分に届かない。
+    # 3 本ともハングした回でも、どれも exit 124 とスタックを書き終えてから job が終わる。
     timeout-minutes: 45
     defaults:
       run:
@@ -115,16 +115,11 @@ jobs:
         timeout-minutes: 5
         run: "$GITHUB_WORKSPACE/scripts/check-stop-tty-processes.sh"
 
-      - name: Handoff script - checks
-        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
-        timeout-minutes: 5
-        run: "$GITHUB_WORKSPACE/scripts/check-handoff-script.sh"
-
       # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは単体テストと
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
-      # 統合テストは既定の swift test では `.enabled(if:)` で無効になっており、フラグはこの段と
-      # 次の段にだけ渡す。
+      # 統合テストは既定の swift test では `.enabled(if:)` で無効になっており、フラグはこの段にだけ渡す。
       - name: Test (integration enabled)
+        id: integration-full
         if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
         env:
           AWT_TMUX_INTEGRATION: "1"
@@ -136,36 +131,15 @@ jobs:
             --timeout 600 \
             -- swift test --skip AdaptersSerialTimingTests
 
-      # 統合 suite だけを走らせた結果で「実際に走ったか」を検査する。環境変数が無いと
-      # これらの suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
-      # filter は、環境変数で skip される統合テストの全 20 ファイルと、実 git を使うが skip されない
-      # DiffSnapshotRangeIntegrationTests の計 21 ファイル (146 テスト) を1回で走らせる。
-      # skip を静かに見逃さないよう、実行後に scripts/check-integration-ran.sh で件数と skip 0 件を検査する。
-      # 並べるのは suite の struct 名ではなくファイル名。swift test の filter は test ID の中の
-      # ソースの位置にも一致するので、struct 名が違う GitWorktreeDetectorPrunableTests なども拾える (#512)。
-      # `.enabled(if:)` の統合テストのファイルを足したら、ここにも足して件数を直す。
-      - name: Test (integration suites only)
-        id: integration-only
-        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
-        env:
-          AWT_TMUX_INTEGRATION: "1"
-          AWT_GIT_INTEGRATION: "1"
-          AWT_RIPGREP_INTEGRATION: "1"
-          AWT_INTEGRATION_FILTER: >-
-            TmuxRunnerIntegrationTests|TmuxListPanesIntegrationTests|TmuxPaneOperationsIntegrationTests|TmuxSessionOperationsIntegrationTests|TmuxTextInjectionIntegrationTests|TmuxWorktreePaneSourceIntegrationTests|TmuxPaneSummaryIntegrationTests|GitWorktreeDetectorIntegrationTests|GitWorktreeDetectorPrunableIntegrationTests|TmuxOrphanedServerProbeIntegrationTests|GitProjectResolverIntegrationTests|GitFileHistoryIntegrationTests|DiffSnapshotRangeIntegrationTests|RipgrepSearchIntegrationTests|GitWorktreeDetectorPathSpellingIntegrationTests|DiffCommentSendGateIntegrationTests|InactivePaneObservationIntegrationTests|MainPaneRegistryIntegrationTests|TmuxPaneScreenBatchIntegrationTests|TmuxSessionActivityProbeIntegrationTests|GitWorktreeDetectorSharedIdentityIntegrationTests
-        run: |
-          "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
-            --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --timeout 300 \
-            -- swift test --filter "$AWT_INTEGRATION_FILTER"
-
+      # 環境変数が無いと統合 suite は skip されるが swift test は成功で終わるため、GREEN では判定できない。
+      # 全体の実行のログで skip 0 件と件数の下限を検査する。統合 suite だけを --filter で走らせる
+      # 別の段は、同じテストの2回目の実行だったのでやめた (#719)。下限は 2026-11-09 の 1715 件から決めた。
       - name: Verify integration suites actually ran
-        if: ${{ !cancelled() && steps.integration-only.outcome != 'skipped' }}
+        if: ${{ !cancelled() && steps.integration-full.outcome != 'skipped' }}
         run: |
           "$GITHUB_WORKSPACE/scripts/check-integration-ran.sh" \
-            --log "$RUNNER_TEMP/test-logs/integration-only.log" \
-            --min-tests 146 \
-            --suites 21
+            --log "$RUNNER_TEMP/test-logs/integration-full.log" \
+            --min-tests 1700
 
       # テストが落ちた回ほど後始末の状態を知りたいので、失敗しても走らせる。always() では
       # ないのは、concurrency の cancel-in-progress で途中で殺された回にも走ってしまい、
@@ -213,6 +187,24 @@ jobs:
       - name: Test
         working-directory: App
         run: swift test
+
+      # Handoff の検査はタイムアウトを待つ件が大半で約 85 秒かかる。Swift のビルドを待たないので、
+      # 全体の長さを決める build-and-test から、短いこのジョブへ移した (#719)。単体テストを CLI の
+      # 無い環境で走らせるため、導入は App の Test の後にする。
+      - name: Install tmux and ripgrep
+        id: install-clis
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: brew install tmux ripgrep
+
+      - name: Handoff script - checks
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        timeout-minutes: 5
+        run: scripts/check-handoff-script.sh
+
+      - name: Check for leftover servers and sockets
+        if: ${{ !cancelled() }}
+        run: scripts/check-integration-leftovers.sh
 
   # 互いに独立した短い検査をまとめたジョブ。各段は `!cancelled()` で走らせ、1つが落ちても
   # 残りの段の結果を得る (ジョブを分けていた頃と同じく、全部の結果を1回の run で見るため)。

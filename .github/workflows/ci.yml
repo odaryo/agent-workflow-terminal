@@ -92,11 +92,11 @@ jobs:
 
       # tmux と ripgrep は runner イメージに無い (実測 2026-09-08: macos-15-arm64 の README に
       # どちらも記載が無い)。導入は 13〜19 秒 (実測 2026-11-01)。
-      - name: Install tmux and ripgrep
+      - name: Install tmux, ripgrep and fish
         id: install-clis
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 10
-        run: brew install tmux ripgrep
+        run: brew install tmux ripgrep fish
 
       # 版数は固定せず runner の既定を使い、ログに残す。サポート下限版数が未決 (Issue #16) の
       # 段階で pin すると、外界のドリフトを検出するというこの段の目的自体が消える。
@@ -192,11 +192,11 @@ jobs:
       # Handoff の検査はタイムアウトを待つ件が大半で約 85 秒かかる。Swift のビルドを待たないので、
       # 全体の長さを決める build-and-test から、短いこのジョブへ移した (#719)。単体テストを CLI の
       # 無い環境で走らせるため、導入は App の Test の後にする。
-      - name: Install tmux and ripgrep
+      - name: Install tmux, ripgrep and fish
         id: install-clis
         if: ${{ !cancelled() }}
         timeout-minutes: 10
-        run: brew install tmux ripgrep
+        run: brew install tmux ripgrep fish
 
       - name: Handoff script - checks
         if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}

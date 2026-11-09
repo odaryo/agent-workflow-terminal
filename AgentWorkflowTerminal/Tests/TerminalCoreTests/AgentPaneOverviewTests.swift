@@ -4,14 +4,12 @@ import Testing
 
 @Suite("全 Agent pane Overview の行と並び順 (設計書 §13)")
 struct AgentPaneOverviewTests {
-  private let base = ContinuousClock().now
-
   @Test("Project は入力 (登録) の順のまま並べ、Needs Attention があっても動かさない")
   func projectsKeepRegistrationOrder() throws {
     let quiet = try project(
-      "/a/.git", tasks: [try task("/a/.git/worktrees/t", [pane("%1", .idle, 1)])])
+      "/a/.git", tasks: [try task("/a/.git/worktrees/t", [pane("%1", .idle)])])
     let urgent = try project(
-      "/b/.git", tasks: [try task("/b/.git/worktrees/t", [pane("%2", .permission, 9)])])
+      "/b/.git", tasks: [try task("/b/.git/worktrees/t", [pane("%2", .permission)])])
 
     let overview = makeAgentPaneOverview([quiet, urgent])
 
@@ -20,9 +18,9 @@ struct AgentPaneOverviewTests {
 
   @Test("Project Root は Task と混ぜずに別枠へ置く")
   func projectRootIsSeparate() throws {
-    let root = try task("/a", [pane("%9", .question, 9)])
+    let root = try task("/a", [pane("%9", .question)])
     let input = try project(
-      "/a/.git", root: root, tasks: [try task("/a/.git/worktrees/t", [pane("%1", .idle, 1)])])
+      "/a/.git", root: root, tasks: [try task("/a/.git/worktrees/t", [pane("%1", .idle)])])
 
     let overview = try #require(makeAgentPaneOverview([input]).first)
 
@@ -30,12 +28,12 @@ struct AgentPaneOverviewTests {
     #expect(overview.tasks.map(\.worktree) == [input.tasks[0].worktree])
   }
 
-  @Test("Task は Needs Attention や最終更新にかかわらず入力順を保つ")
-  func tasksKeepInputOrderRegardlessOfAttentionAndLastUpdate() throws {
-    let old = try task("/a/.git/worktrees/old", [pane("%1", .working, 1)])
-    let recent = try task("/a/.git/worktrees/recent", [pane("%2", .working, 8)])
+  @Test("Task は Needs Attention にかかわらず入力順を保つ")
+  func tasksKeepInputOrderRegardlessOfAttention() throws {
+    let old = try task("/a/.git/worktrees/old", [pane("%1", .working)])
+    let recent = try task("/a/.git/worktrees/recent", [pane("%2", .working)])
     let attention = try task(
-      "/a/.git/worktrees/attention", [pane("%3", .working, 9), pane("%4", .error, 2)])
+      "/a/.git/worktrees/attention", [pane("%3", .working), pane("%4", .error)])
 
     let overview = try #require(
       makeAgentPaneOverview([try project("/a/.git", tasks: [old, recent, attention])]).first)
@@ -45,13 +43,12 @@ struct AgentPaneOverviewTests {
 
   @Test("種別不明の Needs Attention があっても Task は入力順を保つ")
   func undeterminedAttentionDoesNotReorderTasks() throws {
-    let plain = try task("/a/.git/worktrees/plain", [pane("%1", .working, 9)])
+    let plain = try task("/a/.git/worktrees/plain", [pane("%1", .working)])
     let undetermined = try task(
       "/a/.git/worktrees/undetermined",
       [
         PaneDisplayState(
-          paneID: PaneID(rawValue: "%2"), state: .unknown, category: .needsAttention,
-          changedAt: at(1))
+          paneID: PaneID(rawValue: "%2"), state: .unknown, category: .needsAttention)
       ])
 
     let overview = try #require(
@@ -60,10 +57,10 @@ struct AgentPaneOverviewTests {
     #expect(overview.tasks.map(\.worktree) == [plain, undetermined].map(\.worktree))
   }
 
-  @Test("Needs Attention を含む Task どうしも最終更新にかかわらず入力順を保つ")
-  func attentionTasksKeepInputOrderRegardlessOfLastUpdate() throws {
-    let older = try task("/a/.git/worktrees/older", [pane("%1", .question, 2)])
-    let newer = try task("/a/.git/worktrees/newer", [pane("%2", .idle, 7), pane("%3", .error, 1)])
+  @Test("Needs Attention を含む Task どうしも入力順を保つ")
+  func attentionTasksKeepInputOrder() throws {
+    let older = try task("/a/.git/worktrees/older", [pane("%1", .question)])
+    let newer = try task("/a/.git/worktrees/newer", [pane("%2", .idle), pane("%3", .error)])
 
     let overview = try #require(
       makeAgentPaneOverview([try project("/a/.git", tasks: [older, newer])]).first)
@@ -74,7 +71,7 @@ struct AgentPaneOverviewTests {
   @Test("Agent pane の有無にかかわらず Task は入力順を保つ")
   func tasksKeepInputOrderRegardlessOfAgentPanes() throws {
     let emptyA = try task("/a/.git/worktrees/emptyA", [])
-    let busy = try task("/a/.git/worktrees/busy", [pane("%1", .idle, 1)])
+    let busy = try task("/a/.git/worktrees/busy", [pane("%1", .idle)])
     let emptyB = try task("/a/.git/worktrees/emptyB", [])
 
     let overview = try #require(
@@ -94,16 +91,16 @@ struct AgentPaneOverviewTests {
     #expect(overview.tasks.first?.rows == [.noAgentPane])
   }
 
-  @Test("Task 内の pane は Needs Attention や最終更新にかかわらず入力順を保つ")
+  @Test("Task 内の pane は Needs Attention にかかわらず入力順を保つ")
   func panesWithinTaskKeepInputOrder() throws {
     let input = try task(
       "/a/.git/worktrees/t",
       [
-        pane("%1", .working, 3),
-        pane("%2", .question, 1),
-        pane("%3", .idle, 6),
-        pane("%4", .permission, 4),
-        pane("%5", .completed, 6),
+        pane("%1", .working),
+        pane("%2", .question),
+        pane("%3", .idle),
+        pane("%4", .permission),
+        pane("%5", .completed),
       ])
 
     let overview = try #require(
@@ -114,7 +111,7 @@ struct AgentPaneOverviewTests {
 
   @Test("行にするのは状態のある (Agent と判定された) pane だけで、概要しか無い pane は出さない")
   func onlyAgentPanesBecomeRows() throws {
-    var input = try task("/a/.git/worktrees/t", [pane("%1", .working, 1)])
+    var input = try task("/a/.git/worktrees/t", [pane("%1", .working)])
     input.details = [
       PaneID(rawValue: "%1"): OverviewPaneDetail(purpose: "実装"),
       PaneID(rawValue: "%7"): OverviewPaneDetail(purpose: "zsh の pane"),
@@ -278,7 +275,7 @@ struct AgentPaneOverviewTests {
     let detail = OverviewPaneDetail(
       location: PaneLocation(windowIndex: 1, paneIndex: 2), purpose: "目的", status: "実装中",
       isTaskCompleted: true, title: "✳ 進捗の確認")
-    var input = try task("/a/.git/worktrees/t", [pane("%1", .working, 2), pane("%2", .idle, 1)])
+    var input = try task("/a/.git/worktrees/t", [pane("%1", .working), pane("%2", .idle)])
     input.details = [PaneID(rawValue: "%1"): detail]
 
     let overview = try #require(
@@ -293,7 +290,7 @@ struct AgentPaneOverviewTests {
 
   @Test("メイン pane に登録された pane だけに印を付ける")
   func marksRegisteredMainPane() throws {
-    var input = try task("/a/.git/worktrees/t", [pane("%1", .working, 2), pane("%2", .idle, 1)])
+    var input = try task("/a/.git/worktrees/t", [pane("%1", .working), pane("%2", .idle)])
     input.mainPane = PaneID(rawValue: "%2")
 
     let overview = try #require(
@@ -325,8 +322,8 @@ struct AgentPaneOverviewTests {
 
   @Test("Project Root の session は入力 (番号) の順に並べ、Needs Attention があっても動かさない (設計書 §12.2)")
   func projectRootSessionsKeepInputOrder() throws {
-    let first = try sessionInput(session("/a", 1), [pane("%1", .idle, 1)])
-    let second = try sessionInput(session("/a", 2), [pane("%2", .question, 9)])
+    let first = try sessionInput(session("/a", 1), [pane("%1", .idle)])
+    let second = try sessionInput(session("/a", 2), [pane("%2", .question)])
     let input = OverviewProjectInput(
       project: try #require(WorktreeIdentity(rawValue: "/a/.git")),
       projectRootSessions: [first, second], tasks: [])
@@ -352,7 +349,7 @@ struct AgentPaneOverviewTests {
 
   @Test("projectRoot から作った入力は、その1つだけを Project Root の session に持つ")
   func projectRootInputIsSingleSession() throws {
-    let root = try task("/a", [pane("%9", .idle, 1)])
+    let root = try task("/a", [pane("%9", .idle)])
 
     let withRoot = try project("/a/.git", root: root, tasks: [])
     let withoutRoot = try project("/a/.git", tasks: [])
@@ -366,9 +363,9 @@ struct AgentPaneOverviewTests {
 
   @Test("同じ worktree の2つの session は束ねず、入力順で別々に並べる (設計書 §12.2 / §13)")
   func sessionsOfOneWorktreeAreSeparateTasks() throws {
-    let first = try sessionInput(session("/a/.git/worktrees/t", 1), [pane("%1", .working, 3)])
-    let other = try sessionInput(session("/a/.git/worktrees/u", 1), [pane("%2", .working, 5)])
-    let second = try sessionInput(session("/a/.git/worktrees/t", 2), [pane("%3", .question, 1)])
+    let first = try sessionInput(session("/a/.git/worktrees/t", 1), [pane("%1", .working)])
+    let other = try sessionInput(session("/a/.git/worktrees/u", 1), [pane("%2", .working)])
+    let second = try sessionInput(session("/a/.git/worktrees/t", 2), [pane("%3", .question)])
 
     let overview = try #require(
       makeAgentPaneOverview([try project("/a/.git", tasks: [first, other, second])]).first)
@@ -381,7 +378,7 @@ struct AgentPaneOverviewTests {
   @Test("出力の session は入力の session と一致する")
   func outputCarriesInputSession() throws {
     let root = try sessionInput(session("/a", 3), [])
-    let task = try sessionInput(session("/a/.git/worktrees/t", 2), [pane("%1", .idle, 1)])
+    let task = try sessionInput(session("/a/.git/worktrees/t", 2), [pane("%1", .idle)])
     let input = OverviewProjectInput(
       project: try #require(WorktreeIdentity(rawValue: "/a/.git")),
       projectRootSessions: [root], tasks: [task])
@@ -405,14 +402,9 @@ struct AgentPaneOverviewTests {
     OverviewWorktreeInput(session: key, paneStates: panes)
   }
 
-  private func at(_ seconds: Int) -> ContinuousClock.Instant {
-    base.advanced(by: .seconds(seconds))
-  }
-
-  private func pane(_ id: String, _ state: AgentState, _ seconds: Int) -> PaneDisplayState {
+  private func pane(_ id: String, _ state: AgentState) -> PaneDisplayState {
     PaneDisplayState(
-      paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory,
-      changedAt: at(seconds))
+      paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory)
   }
 
   private func task(_ path: String, _ panes: [PaneDisplayState]) throws -> OverviewWorktreeInput {

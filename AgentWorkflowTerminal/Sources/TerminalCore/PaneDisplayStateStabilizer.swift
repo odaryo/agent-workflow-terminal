@@ -4,18 +4,13 @@ public struct PaneDisplayState: Sendable, Hashable {
   public let state: AgentState
   /// `state == .unknown` でも `.needsAttention` になり得る (§12.4.3)。`state` から導かない。
   public let category: WorktreeStateCategory
-  /// `nil` は基準の観測に在った pane が、注意不要の `.signalMissing` の Unknown から初めて状態が決まる変化を除き、
-  /// まだ表示状態を変えていないことを表す。
-  public let changedAt: ContinuousClock.Instant?
 
   public init(
-    paneID: PaneID, state: AgentState, category: WorktreeStateCategory,
-    changedAt: ContinuousClock.Instant?
+    paneID: PaneID, state: AgentState, category: WorktreeStateCategory
   ) {
     self.paneID = paneID
     self.state = state
     self.category = category
-    self.changedAt = changedAt
   }
 }
 
@@ -32,7 +27,6 @@ public struct PaneDisplayStateStabilizer: Sendable {
   private struct Entry: Sendable {
     var stabilizer: WorktreeRepresentativeStateStabilizer
     var shown: PaneDisplayState
-    var awaitsInitialResolution: Bool
     var removalDeadline: ContinuousClock.Instant?
   }
 
@@ -54,13 +48,12 @@ public struct PaneDisplayStateStabilizer: Sendable {
     }.min()
   }
 
-  /// `panes` は Agent pane だけ (`.absent` を除いた観測)。一時的な観測消失で行と最終更新が
+  /// `panes` は Agent pane だけ (`.absent` を除いた観測)。一時的な観測消失で行が
   /// 跳ねないよう、消失中は最後の表示を `holdDuration` の間保つ (設計書 §13)。
   public mutating func observe(
     _ panes: [PaneAgentState], at instant: ContinuousClock.Instant
   ) -> [PaneDisplayState] {
     let present = Set(panes.map(\.id))
-    let isFirstObservation = lastObservedAt == nil
     let previous = paneOrder
     lastObservedAt = instant
     for paneID in paneOrder {
@@ -82,22 +75,13 @@ public struct PaneDisplayStateStabilizer: Sendable {
         ?? Entry(
           stabilizer: WorktreeRepresentativeStateStabilizer(holdDuration: holdDuration),
           shown: PaneDisplayState(
-            paneID: pane.id, state: pane.state, category: pane.category,
-            changedAt: isFirstObservation ? nil : instant),
-          awaitsInitialResolution: isFirstObservation
-            && pane.state == .unknown && pane.category != .needsAttention
-            && pane.unknownReason == .signalMissing)
+            paneID: pane.id, state: pane.state, category: pane.category))
       entry.removalDeadline = nil
       let stabilized = entry.stabilizer.observe(state: observed, at: instant) ?? observed
-      let isInitialResolution =
-        entry.awaitsInitialResolution
-        && (stabilized.state != .unknown || stabilized.category == .needsAttention)
       if stabilized.state != entry.shown.state || stabilized.category != entry.shown.category {
         entry.shown = PaneDisplayState(
-          paneID: pane.id, state: stabilized.state, category: stabilized.category,
-          changedAt: entry.awaitsInitialResolution ? nil : instant)
+          paneID: pane.id, state: stabilized.state, category: stabilized.category)
       }
-      if isInitialResolution { entry.awaitsInitialResolution = false }
       entries[pane.id] = entry
     }
     paneOrder = retainingMissingPanes(in: panes.map(\.id), previous: previous)
@@ -112,18 +96,18 @@ public struct PaneDisplayStateStabilizer: Sendable {
     return inserting(previousIDs, retaining: inputOrder)
   }
 
-  private func inserting(_ inputOrder: [PaneID], retaining retained: [PaneID]) -> [PaneID] {
-    let retainedIDs = Set(retained)
+  private func inserting(_ previousOrder: [PaneID], retaining inputOrder: [PaneID]) -> [PaneID] {
+    let inputIDs = Set(inputOrder)
     var preceding: [PaneID: [PaneID]] = [:]
     var pending: [PaneID] = []
-    for paneID in inputOrder {
-      if retainedIDs.contains(paneID) {
+    for paneID in previousOrder {
+      if inputIDs.contains(paneID) {
         preceding[paneID] = pending
         pending = []
       } else {
         pending.append(paneID)
       }
     }
-    return retained.flatMap { (preceding[$0] ?? []) + [$0] } + pending
+    return inputOrder.flatMap { (preceding[$0] ?? []) + [$0] } + pending
   }
 }

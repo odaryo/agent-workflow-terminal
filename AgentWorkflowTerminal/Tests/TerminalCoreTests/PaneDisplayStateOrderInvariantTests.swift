@@ -19,13 +19,10 @@ struct PaneDisplayStateOrderInvariantTests {
       let current = stabilizer.observe(
         ids.map { pane($0, .working) }, at: start.advanced(by: .seconds(step)))
       expectInputAndRetainedOrder(previous, current, inputIDs: ids, seed: 0, step: step)
-      #expect(current.filter { $0.changedAt == nil }.map(\.paneID.rawValue) == ["%2", "%3", "%4"])
-      #expect(current.filter { $0.changedAt == nil }.allSatisfy { $0.category == .working })
-      if step > 0 {
-        #expect(
-          current.first { $0.paneID.rawValue == "%1" }?.changedAt
-            == start.advanced(by: .seconds(1)))
-      }
+      #expect(
+        current.filter { $0.paneID.rawValue != "%1" }.map(\.paneID.rawValue)
+          == ["%2", "%3", "%4"])
+      #expect(current.allSatisfy { $0.category == .working })
       previous = current
     }
   }
@@ -83,7 +80,6 @@ struct PaneDisplayStateOrderInvariantTests {
       expectInputAndRetainedOrder(
         previous, current, inputIDs: input.map(\.id.rawValue), seed: 0, step: step)
       #expect(current.map(\.paneID.rawValue) == ["%1", "%2", "%3"], "step=\(step)")
-      #expect(current.map(\.changedAt) == [nil, nil, nil], "step=\(step)")
       previous = current
     }
     #expect(previous.map(\.state) == Array(repeating: destination, count: 3))
@@ -115,7 +111,6 @@ struct PaneDisplayStateOrderInvariantTests {
       expectInputAndRetainedOrder(
         previous, current, inputIDs: input.map(\.id.rawValue), seed: seed, step: step)
       #expect(current.count == ids.count, "seed=\(seed), step=\(step)")
-      #expect(current.allSatisfy { $0.changedAt == nil }, "seed=\(seed), step=\(step)")
       previous = current
     }
 

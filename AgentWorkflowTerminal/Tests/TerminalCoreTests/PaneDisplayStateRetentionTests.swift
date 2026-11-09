@@ -6,42 +6,13 @@ import Testing
 struct PaneDisplayStateRetentionTests {
   private let start = ContinuousClock().now
 
-  @Test("最初の観測に在る pane は同じ nil の最終更新で、状態が変わるとその時刻になる")
-  func firstObservationsShareUnchangedTimestamp() throws {
+  @Test("同じ状態を繰り返し観測しても pane の入力順を保つ")
+  func unchangedObservationsKeepInputOrder() throws {
     var stabilizer = PaneDisplayStateStabilizer()
-    let first = stabilizer.observe([pane("%1", .working), pane("%2", .working)], at: at(0))
+    _ = stabilizer.observe([pane("%1", .working), pane("%2", .working)], at: at(0))
     let both = stabilizer.observe([pane("%1", .working), pane("%2", .working)], at: at(3))
 
-    #expect(first.map(\.changedAt) == [nil, nil])
-    #expect(both.map(\.changedAt) == [nil, nil])
     #expect(both.map(\.paneID.rawValue) == ["%1", "%2"])
-    let changed = stabilizer.observe([pane("%1", .question), pane("%2", .working)], at: at(4))
-    #expect(changed.first?.changedAt == at(4))
-    #expect(changed.last?.changedAt == nil)
-  }
-
-  @Test("2回目以降に初めて現れた pane はその観測時刻を最終更新とし、以後の同じ状態では保つ")
-  func laterPanesUseTheirFirstObservationTime() throws {
-    var stabilizer = PaneDisplayStateStabilizer()
-    _ = stabilizer.observe([pane("%1", .working)], at: at(0))
-
-    let second = stabilizer.observe([pane("%1", .working), pane("%2", .working)], at: at(3))
-    #expect(second.map(\.changedAt) == [nil, at(3)])
-    let third = stabilizer.observe(
-      [pane("%3", .working), pane("%1", .working), pane("%2", .working)], at: at(3600))
-    #expect(third.map(\.changedAt) == [at(3600), nil, at(3)])
-  }
-
-  @Test("最初の空の観測も数え、その後に初めて現れた pane はすべて観測時刻を最終更新に持つ")
-  func emptyFirstObservationStillEstablishesBaseline() throws {
-    var stabilizer = PaneDisplayStateStabilizer()
-    #expect(stabilizer.observe([], at: at(0)).isEmpty)
-
-    let second = stabilizer.observe([pane("%1", .working), pane("%2", .idle)], at: at(3))
-    #expect(second.map(\.changedAt) == [at(3), at(3)])
-    let third = stabilizer.observe(
-      [pane("%1", .working), pane("%2", .idle), pane("%3", .question)], at: at(4))
-    #expect(third.map(\.changedAt) == [at(3), at(3), at(4)])
   }
 
   @Test("消えた pane は消失時点の表示のまま9秒保持し、繰り返し観測しても外す期限を延ばさない")
@@ -102,8 +73,6 @@ struct PaneDisplayStateRetentionTests {
       [pane("%5", .working), pane("%4", .working), pane("%1", .working), pane("%6", .working)],
       at: at(2))
     #expect(next.map(\.paneID.rawValue) == ["%5", "%2", "%3", "%4", "%1", "%6"])
-    #expect(next.first { $0.paneID.rawValue == "%5" }?.changedAt == at(2))
-    #expect(next.first { $0.paneID.rawValue == "%6" }?.changedAt == at(2))
     #expect(
       next.filter { $0.paneID.rawValue == "%2" || $0.paneID.rawValue == "%3" }
         == Array(previous[1...2]))
@@ -119,8 +88,9 @@ struct PaneDisplayStateRetentionTests {
 
     let shown = stabilizer.observe([pane("%4", .working), pane("%3", .working)], at: at(1))
 
-    #expect(shown.filter { $0.changedAt == nil }.map(\.paneID.rawValue) == ["%1", "%2", "%3"])
-    #expect(shown.first { $0.paneID.rawValue == "%4" }?.changedAt == at(1))
+    #expect(
+      shown.filter { $0.paneID.rawValue != "%4" }.map(\.paneID.rawValue)
+        == ["%1", "%2", "%3"])
   }
 
   @Test("消失と新規出現が重なる間も観測した pane は入力順に並び、全 pane が揃うと全体が tmux 順に戻る")
@@ -158,7 +128,7 @@ struct PaneDisplayStateRetentionTests {
     #expect(stabilizer.nextDeadline == nil)
   }
 
-  @Test("再出現した pane は元の最終更新を保ち、次の消失から改めて9秒保持する")
+  @Test("再出現した pane は元の表示を保ち、次の消失から改めて9秒保持する")
   func reappearanceResetsOnlyRemovalDeadline() throws {
     var stabilizer = PaneDisplayStateStabilizer()
     _ = stabilizer.observe([pane("%1", .working)], at: at(0))
@@ -173,7 +143,7 @@ struct PaneDisplayStateRetentionTests {
     #expect(stabilizer.observe([], at: at(20)).isEmpty)
   }
 
-  @Test("消失期限後の再出現は期限の再観測の有無によらず初出になり、その観測時刻を最終更新に持つ", arguments: [false, true])
+  @Test("消失期限後の再出現は期限の再観測の有無によらず初出として即時に表示する", arguments: [false, true])
   func reappearanceAfterExpiryIsNew(observeDeadline: Bool) throws {
     var stabilizer = PaneDisplayStateStabilizer()
     _ = stabilizer.observe([pane("%1", .working)], at: at(0))
@@ -185,7 +155,6 @@ struct PaneDisplayStateRetentionTests {
     let shown = stabilizer.observe([pane("%1", .idle)], at: at(13))
     let only = try #require(shown.first)
     #expect(only.state == .idle)
-    #expect(only.changedAt == at(13))
     #expect(stabilizer.nextDeadline == nil)
   }
 

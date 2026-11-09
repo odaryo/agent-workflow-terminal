@@ -3,8 +3,6 @@ import Testing
 
 @Suite("タブの右クリック一覧の順序と行 (設計書 §5.3 / §13)")
 struct TabSummaryTests {
-  private let base = ContinuousClock().now
-
   @Test("タブが無ければ一覧も空になる")
   func noTabsYieldsNoSummaries() {
     #expect(makeTabSummaries([]).isEmpty)
@@ -13,8 +11,8 @@ struct TabSummaryTests {
   @Test("Idle、Question、Agent pane なしのタブを、同じディレクトリでも入力順に保つ")
   func tabsKeepInputOrder() throws {
     let tabs = [
-      try tab(1, [pane("%1", .idle, 1)]),
-      try tab(2, [pane("%2", .question, 2)]),
+      try tab(1, [pane("%1", .idle)]),
+      try tab(2, [pane("%2", .question)]),
       try tab(3, []),
     ]
 
@@ -33,16 +31,16 @@ struct TabSummaryTests {
     #expect(summary.rows == [.noAgentPane])
   }
 
-  @Test("pane 行は Overview と一致し、Needs Attention や最終更新にかかわらず入力順を保つ")
+  @Test("pane 行は Overview と一致し、Needs Attention にかかわらず入力順を保つ")
   func rowsMatchOverviewOrder() throws {
     let input = try tab(
       2,
       [
-        pane("%1", .working, 3),
-        pane("%2", .question, 1),
-        pane("%3", .idle, 6),
-        pane("%4", .permission, 4),
-        pane("%5", .completed, 6),
+        pane("%1", .working),
+        pane("%2", .question),
+        pane("%3", .idle),
+        pane("%4", .permission),
+        pane("%5", .completed),
       ])
     let project = OverviewProjectInput(
       project: try #require(WorktreeIdentity(rawValue: "/a/.git")),
@@ -60,8 +58,8 @@ struct TabSummaryTests {
 
   @Test("pane 行に表示状態、対応する details または既定値、mainPane の印を渡す")
   func rowsCarryDetailsAndMainPane() throws {
-    let working = pane("%1", .working, 2)
-    let idle = pane("%2", .idle, 1)
+    let working = pane("%1", .working)
+    let idle = pane("%2", .idle)
     let detail = OverviewPaneDetail(
       location: PaneLocation(windowIndex: 1, paneIndex: 2), purpose: "目的", status: "実装中",
       isTaskCompleted: true)
@@ -81,10 +79,9 @@ struct TabSummaryTests {
     #expect(panes.map(\.isMain) == [true, false])
   }
 
-  private func pane(_ id: String, _ state: AgentState, _ seconds: Int) -> PaneDisplayState {
+  private func pane(_ id: String, _ state: AgentState) -> PaneDisplayState {
     PaneDisplayState(
-      paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory,
-      changedAt: base.advanced(by: .seconds(seconds)))
+      paneID: PaneID(rawValue: id), state: state, category: state.worktreeCategory)
   }
 
   private func tab(_ index: Int, _ panes: [PaneDisplayState]) throws -> OverviewWorktreeInput {

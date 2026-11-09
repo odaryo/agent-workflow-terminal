@@ -2,7 +2,7 @@ import Adapters
 import SwiftUI
 import TerminalCore
 
-/// §8 の検索 UI。§6.1 が Drawer の内容を Code / Diff / Evidence の3種で確定させているため、
+/// §8 の検索 UI。§6.1 が Drawer の内容を確定させているため、
 /// 独立したペインにはせず `.code` ペインの中に置く。
 struct WorktreeSearchBar: View {
   @ObservedObject var model: WorktreeSearchModel

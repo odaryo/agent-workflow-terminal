@@ -82,6 +82,21 @@ struct PaneNotificationContentTests {
     #expect(paneShortName(paneID: pane, isMain: false, location: nil) == "%7")
   }
 
+  @Test(
+    "pane ID メニューは位置または ID にメインの印を添える",
+    arguments: [
+      (true, false, "pane 1.2"),
+      (true, true, "pane 1.2 (メイン)"),
+      (false, false, "pane %7"),
+      (false, true, "pane %7 (メイン)"),
+    ])
+  func paneIDMenuTitles(hasLocation: Bool, isMain: Bool, expected: String) {
+    let pane = PaneID(rawValue: "%7")
+    let location = hasLocation ? PaneLocation(windowIndex: 1, paneIndex: 2) : nil
+
+    #expect(paneIDMenuTitle(paneID: pane, isMain: isMain, location: location) == expected)
+  }
+
   @Test("設定が未保存の種類は既定値として読む")
   func preferencesDefaults() throws {
     let suite = "PaneNotificationContentTests.\(UUID().uuidString)"

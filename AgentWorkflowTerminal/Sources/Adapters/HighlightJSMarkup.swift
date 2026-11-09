@@ -16,6 +16,11 @@ public enum HighlightJSMarkup: Sendable {
 }
 
 private struct HighlightJSMarkupParser {
+  // 実ファイル 128,476 個で最大深さは 14。actor 上で 256 KiB・深さ 32 が約 1.05 s、256 では約 4.6 s
+  // (支配項は HighlightJSTheme.style(forScopes:)) のため、深さを 32 に制限する。
+  // 上限超過は呼び出し側で素のテキストへ戻す。
+  private static let maximumDepth = 32
+
   private static let entities: [(String, UInt8)] = [
     ("&amp;", 0x26), ("&lt;", 0x3C), ("&gt;", 0x3E), ("&quot;", 0x22), ("&#x27;", 0x27),
   ]
@@ -29,6 +34,7 @@ private struct HighlightJSMarkupParser {
   private var offset = 0
   private var scopes: [Scope] = []
   private var currentScope: Int?
+  private var depth = 0
   private var text: [UInt8] = []
   private var runs: [HighlightJSRun] = []
 
@@ -60,8 +66,10 @@ private struct HighlightJSMarkupParser {
     if consume("</span>") {
       guard let currentScope else { return false }
       self.currentScope = scopes[currentScope].parent
+      depth -= 1
       return true
     }
+    guard depth < Self.maximumDepth else { return false }
     guard consume("<span class=\"") else { return false }
     let start = offset
     while offset < bytes.count && bytes[offset] != 0x22 {
@@ -75,6 +83,7 @@ private struct HighlightJSMarkupParser {
     }
     scopes.append(Scope(classes: classes, parent: currentScope))
     currentScope = scopes.count - 1
+    depth += 1
     return true
   }
 
@@ -99,6 +108,7 @@ private struct HighlightJSMarkupParser {
   private mutating func flushText() {
     guard !text.isEmpty else { return }
     // 空の入れ子でもスタックのスナップショットをコピーすると二次になるため、親を索引で保持する。
+    // ただし、空でない run の scopes は親を辿ってコピーするため、時間とメモリは Σdepth のまま。
     var runScopes: [[String]] = []
     var scope = currentScope
     while let index = scope {

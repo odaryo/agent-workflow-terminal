@@ -4,13 +4,10 @@ import TerminalCore
 
 /// entry 単位に還元できない失敗。これだけが `scan()` から throw される。
 public enum GitWorktreeScanError: Error, Sendable, Equatable {
-  /// - Important: `worktree list` 自体が entry 1件の事故で全滅する。git 2.50.1 実測では、ある
-  ///   worktree の `locked` を `chmod 000` にすると
-  ///   `fatal: failed to read '.git/worktrees/wt2/locked': Permission denied` で exit 128 になり、
-  ///   その worktree より前の record を完全な形で吐いてから死ぬ (壊れた worktree 自身の record は
-  ///   終端の `\0` を欠いた途中まで、それより後の worktree は1件も現れない)。部分 stdout は
-  ///   `GitRunnerError.commandFailed` が保持しているが、それを信用して検出を続けるかは
-  ///   Issue #140 の担当で、現状はここへ来て Project 全体の検出が止まる。
+  /// `commandFailed` 以外の一覧取得失敗、または部分 stdout の完結 record に有効な entry が
+  /// 1件も無い場合に throw する。`commandFailed` で有効な entry があれば部分出力で続け、
+  /// 元の失敗を `listingFailure` に残す。ただし完結 record に解析失敗があれば
+  /// `malformedListOutput` を throw する。stderr の文言は git の版と locale に依存するため使わない。
   case list(GitRunnerError)
   /// 1件でもあればスキャン全体を失敗させる。どの record が壊れたかは分かっても、それが
   /// どの worktree の record だったかは分からないので、entry 単位の失敗にできない。
@@ -35,11 +32,23 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
 
 /// - Important: `failures` を捨てて `detected` だけを `reconcileDetectedWorktrees` へ渡すと、
 ///   失敗した worktree は消失扱いになる (`GitWorktreeDetector` の契約を参照)。
+///   `listingFailure` が非 nil のときは `detected` が不完全であり、`isListingComplete: false`
+///   も渡さないと、部分出力より後の未検出 worktree が消失扱いになる。
 public struct GitWorktreeScanResult: Sendable, Equatable {
+  public let listingFailure: GitRunnerError?
   /// `worktree list` に現れた順。
   public let detected: [DetectedWorktree]
   /// 検出順。同じスキャンで `detected` と同時に立ち得る。
   public let failures: [GitWorktreeEntryFailure]
+
+  init(
+    detected: [DetectedWorktree], failures: [GitWorktreeEntryFailure],
+    listingFailure: GitRunnerError? = nil
+  ) {
+    self.detected = detected
+    self.failures = failures
+    self.listingFailure = listingFailure
+  }
 }
 
 /// `git worktree list --porcelain -z` の結果から `DetectedWorktree` の一覧を作る (設計書 §3.2)。
@@ -182,14 +191,20 @@ public struct GitWorktreeDetector: Sendable {
   /// - Returns: 対象外として除外した entry はどちらの配列にも載せず、除外したこと自体も
   ///   呼び出し側へ伝えない (`isScannable` / `describe`)。
   public func scan() async throws(GitWorktreeScanError) -> GitWorktreeScanResult {
-    let output: String
+    let parsed: GitWorktreeListParseResult
+    let listingFailure: GitRunnerError?
     do {
-      output = try await projectRunner.run(.worktreeList()).stdout
+      let output = try await projectRunner.run(.worktreeList()).stdout
+      parsed = GitWorktreeList.parse(output: output)
+      listingFailure = nil
     } catch {
-      throw .list(error)
+      guard case .commandFailed(_, let output, _) = error else { throw .list(error) }
+      let partial = GitWorktreeList.parseCompletedRecords(output: output)
+      guard !partial.entries.isEmpty else { throw .list(error) }
+      parsed = partial
+      listingFailure = error
     }
 
-    let parsed = GitWorktreeList.parse(output: output)
     guard parsed.failures.isEmpty else {
       throw .malformedListOutput(parsed.failures)
     }
@@ -210,9 +225,11 @@ public struct GitWorktreeDetector: Sendable {
       case .failed(let failure): failures.append(failure)
       }
     }
-    return Self.resolveSharedIdentities(
+    let resolved = Self.resolveSharedIdentities(
       detected: detected, failures: failures, commonDirectory: commonDirectory,
       findAdministrativeDirectory: findAdministrativeDirectory)
+    return GitWorktreeScanResult(
+      detected: resolved.detected, failures: resolved.failures, listingFailure: listingFailure)
   }
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。

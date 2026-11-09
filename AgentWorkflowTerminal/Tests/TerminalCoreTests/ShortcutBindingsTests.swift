@@ -11,7 +11,6 @@ private enum ShortcutFixtures {
     (.toggleOverview, KeyCombination(key: .character("o"), modifiers: [.command, .shift])),
     (.toggleCodeViewer, KeyCombination(key: .character("c"), modifiers: [.command, .shift])),
     (.toggleDiffViewer, KeyCombination(key: .character("d"), modifiers: [.command, .shift])),
-    (.toggleEvidenceViewer, KeyCombination(key: .character("e"), modifiers: [.command, .shift])),
     (.bringAppToFront, KeyCombination(key: .space, modifiers: [.command])),
   ]
   static let custom = KeyCombination(key: .character("k"), modifiers: [.command, .control])

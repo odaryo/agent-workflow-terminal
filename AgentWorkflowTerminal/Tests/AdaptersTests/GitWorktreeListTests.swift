@@ -41,6 +41,59 @@ struct GitWorktreeListTests {
     #expect(
       GitWorktreeList.parse(output: "HEAD abc\0\0worktree /ok\0unknown x\0\0").entries.count == 1)
   }
+  @Test(
+    "§3.2 locked の異常による部分出力では終端まで揃った main と wt1 だけを返す",
+    arguments: ["unreadable", "dangling-symlink", "directory"]
+  )
+  func parsesOnlyCompletedFixtureRecords(failure: String) throws {
+    let output = try fixture(
+      named: "git-2.50.1-worktree-list-porcelain-z-locked-\(failure).txt")
+
+    let result = GitWorktreeList.parseCompletedRecords(output: output)
+
+    #expect(
+      result.entries.map { URL(fileURLWithPath: $0.path).lastPathComponent } == ["main", "wt1"])
+    #expect(result.entries.map(\.branch) == ["refs/heads/main", "refs/heads/wt1"])
+    #expect(result.failures.isEmpty)
+  }
+
+  @Test(
+    "record 終端が無い入力は entry にも failure にもしない",
+    arguments: [
+      "", "worktree /wt/alpha", "worktree /wt/alpha\0branch refs/heads/alpha\0", "HEAD abc\0",
+    ]
+  )
+  func discardsOutputWithoutCompletedRecords(output: String) {
+    let result = GitWorktreeList.parseCompletedRecords(output: output)
+
+    #expect(result.entries.isEmpty)
+    #expect(result.failures.isEmpty)
+  }
+
+  @Test(
+    "完全な出力では通常の parse と同じ結果を返す",
+    arguments: [
+      "git-2.50.1-worktree-list-porcelain-z.txt",
+      "git-2.50.1-worktree-list-porcelain-z-bare.txt",
+    ]
+  )
+  func completedFixtureMatchesNormalParse(name: String) throws {
+    let output = try fixture(named: name)
+
+    #expect(
+      GitWorktreeList.parseCompletedRecords(output: output) == GitWorktreeList.parse(output: output)
+    )
+  }
+
+  @Test("完全な不正 record は通常の parse と同じ failure を返す")
+  func completedMalformedRecordMatchesNormalParse() {
+    let output = "HEAD abc\0\0worktree /ok\0\0"
+
+    #expect(
+      GitWorktreeList.parseCompletedRecords(output: output) == GitWorktreeList.parse(output: output)
+    )
+  }
+
   private func fixture(named name: String) throws -> String {
     let url = try #require(
       Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures"))

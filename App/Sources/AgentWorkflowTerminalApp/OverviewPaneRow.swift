@@ -27,16 +27,19 @@ struct OverviewPaneRow: View {
           HStack(spacing: 6) {
             Image(systemName: "chevron.right").opacity(showsDisplayedMark ? 1 : 0)
             AgentStateIcon(presentation: presentation)
-            Text(name).monospacedDigit()
+            if pane.isMain {
+              Text("メイン")
+            }
           }
           .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .help("この pane へ移動")
         // 記号と Text から label が合成されない (AX 属性に description が無かった、実測)。
+        // VoiceOver と UI 確認のハーネスが行を区別できるよう、見た目から消した ID も name に残す。
         .accessibilityLabel("\(showsDisplayedMark ? "表示中 " : "")\(presentation.label) \(name)")
         .contextMenu {
-          sessionMenu
+          rowMenu
         }
 
         TextField("目的", text: $draft, prompt: Text(pane.detail.title ?? "目的"))
@@ -63,6 +66,9 @@ struct OverviewPaneRow: View {
           }
           .buttonStyle(.plain)
           .accessibilityLabel(statusAccessibilityLabel)
+          .contextMenu {
+            rowMenu
+          }
         }
       }
       if let error {
@@ -81,6 +87,15 @@ struct OverviewPaneRow: View {
     .onChange(of: isEditing) { _, editing in
       // 確定せずに離れたら観測の値へ戻す。戻さないと、書かれていない値が書かれたように残る。
       if !editing { draft = shownPurpose }
+    }
+  }
+
+  @ViewBuilder
+  private var rowMenu: some View {
+    OverviewPaneIDItems(panes: [pane])
+    if let sessionMenu {
+      Divider()
+      sessionMenu
     }
   }
 
@@ -134,4 +149,9 @@ func paneShortName(paneID: PaneID, isMain: Bool, location: PaneLocation?) -> Str
   if isMain { return "メイン" }
   guard let location else { return paneID.rawValue }
   return "\(location.windowIndex).\(location.paneIndex)"
+}
+
+func paneIDMenuTitle(paneID: PaneID, isMain: Bool, location: PaneLocation?) -> String {
+  let name = paneShortName(paneID: paneID, isMain: false, location: location)
+  return "pane \(name)\(isMain ? " (メイン)" : "")"
 }

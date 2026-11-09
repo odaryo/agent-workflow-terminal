@@ -104,13 +104,18 @@ public struct GitProjectResolver: Sendable {
 
     let commonDirectory = try await commonDirectory(of: directory, runner: runner)
 
-    let listOutput: String
+    let parsed: GitWorktreeListParseResult
     do {
-      listOutput = try await runner.run(.worktreeList()).stdout
+      let listOutput = try await runner.run(.worktreeList()).stdout
+      parsed = GitWorktreeList.parse(output: listOutput)
     } catch {
-      throw .worktreeList(error)
+      guard case .commandFailed(_, let output, _) = error else { throw .worktreeList(error) }
+      let partial = GitWorktreeList.parseCompletedRecords(output: output)
+      guard !partial.entries.isEmpty else { throw .worktreeList(error) }
+      // git-worktree(1) は main worktree が常に先頭と定めているため、後続の一覧が
+      // 途切れていても、完了済みの先頭 entry だけで Project Root を決められる。
+      parsed = partial
     }
-    let parsed = GitWorktreeList.parse(output: listOutput)
     guard parsed.failures.isEmpty else { throw .malformedWorktreeList(parsed.failures) }
     guard let main = parsed.entries.first else { throw .emptyWorktreeList }
 

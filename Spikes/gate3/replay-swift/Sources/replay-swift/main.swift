@@ -8,7 +8,8 @@ import TerminalCore
 // 使い方 (このディレクトリで):
 //   swift run -c release replay-swift                       # 遷移列 TSV から再計算 (既定)
 //   swift run -c release replay-swift --records <runs dir>  # 生記録 (.gitignore) から計算
-//   swift run -c release replay-swift --records <dir> --dump # 遷移列 TSV を書き出す
+//   swift run -c release replay-swift --records <dir> --dump --tsv <path>
+//                                                           # 遷移列 TSV を書き出す (--tsv は必須)
 //   swift run -c release replay-swift --score --records <runs dir> [--poll 2.0]
 //                                                           # 真値区間との混同行列 (生記録が要る)
 //   swift run -c release replay-swift --score --records <dir> --poll 2.0 --min-changed-lines 1
@@ -645,6 +646,11 @@ if shouldDump {
   guard recordsDir != nil else {
     FileHandle.standardError.write(Data("--dump には --records が要る\n".utf8))
     exit(1)
+  }
+  // 追跡している TSV は §12.2 の数字の根拠なので、既定の出力先にしない (Issue #643)。
+  guard option("--tsv") != nil else {
+    FileHandle.standardError.write(Data("--dump には --tsv <出力先> が要る\n".utf8))
+    exit(2)
   }
   try dumpTSV(dataset, to: tsvPath)
   print("書き出した: \(tsvPath)")

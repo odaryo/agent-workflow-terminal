@@ -2181,7 +2181,7 @@ sessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindow�
 | Large binary storage | filesystem |
 | Search | ripgrep CLI |
 | Code Viewer | TextKit／SwiftUIベースのread-only viewer |
-| Syntax highlighting (macOS) | HighlighterSwift（MIT。同梱するhighlight.jsはBSD-3）。採用は**確定**。JavaScriptCoreで動くため、上限を超える本文はハイライトせず素で表示する |
+| Syntax highlighting (macOS) | 同梱するhighlight.js（BSD-3）をJavaScriptCoreで直接呼ぶ。採用は**確定**（2026-11-09、Issue #751。HighlighterSwiftの採用を置き換え。SwiftPMの`Bundle.module`は`.app`直下とビルド時の絶対パスしか探さず、`.app`直下は署名できないため、ビルド後に`.build`が残らないアプリでは`fatalError`で落ちる）。リソースは`Contents/Resources`に置く。JavaScriptCoreで動くため、上限を超える本文はハイライトせず素で表示する |
 | Syntax highlight | v1は軽量実装。必要なら後でTree-sitter |
 | Clientの構造化データ | SSHでHost上の`hostctl`を呼ぶ(§21.4) |
 
@@ -2418,6 +2418,7 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 | [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | モバイルクライアントをSwiftで作る場合のSSH候補(§20.6) |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | MIT | SQLite access候補 |
 | [ripgrep](https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#how-is-ripgrep-licensed) | MIT または Unlicense | 外部CLI候補。プロジェクトではMIT条件を採用する案 |
+| [highlight.js](https://github.com/highlightjs/highlight.js/blob/main/LICENSE) | BSD-3-Clause | macOSのSyntax highlightingで採用(確定、§21)。11.11.1を`App/Resources/highlight-js/`にLICENSEごと同梱する |
 | [Tree-sitter core](https://github.com/tree-sitter/tree-sitter/blob/master/LICENSE) | MIT | 将来候補。各言語grammarは個別確認 |
 | [Mosh](https://github.com/mobile-shell/mosh) | GPL-3.0系。iOS向け追加文書あり | アプリへ組み込まない。作業PCのClientは外部CLIとして呼ぶ(§20.5)。モバイルでの扱いは未確定(§20.6) |
 
@@ -2983,6 +2984,7 @@ PR_READY
 - [x] Claude Codeの中断の後と履歴へ書くコマンドの後は、空の入力欄を確認して`Idle`とする。実行中とバックグラウンドの実行中は`Idle`としない(2026-11-09、§12.6)
 - [x] 改行だけが残ったClaude Codeの入力欄は空欄とみなさない(2026-11-09、§12.6)
 - [x] 導入順序は hostctlと作業PCのClient → モバイルクライアント → モバイルへのPush通知(2026-11-09、§20.8)
+- [x] macOSのSyntax highlightingはHighlighterSwiftをやめ、同梱のhighlight.jsをJavaScriptCoreで直接呼ぶ(2026-11-09、§21、Issue #751)
 
 # 付録B. 現在の推奨構成チェックリスト
 

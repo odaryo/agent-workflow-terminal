@@ -10,10 +10,7 @@ let package = Package(
   name: "AgentWorkflowTerminalApp",
   platforms: [.macOS(.v14)],
   dependencies: [
-    .package(path: "../AgentWorkflowTerminal"),
-    // syntax highlight (§7.3)。同梱される highlight.js 11.11.1 は BSD-3 で License policy を満たす。
-    // JavaScriptCore で highlight.js を評価するため、更新で色付けが変わり得る。版は固定する。
-    .package(url: "https://github.com/smittytone/HighlighterSwift", exact: "3.1.0"),
+    .package(path: "../AgentWorkflowTerminal")
   ],
   targets: [
     .binaryTarget(
@@ -42,7 +39,6 @@ let package = Package(
       dependencies: [
         "GhosttyRenderer",
         .product(name: "Adapters", package: "AgentWorkflowTerminal"),
-        .product(name: "Highlighter", package: "HighlighterSwift"),
         .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
       ],
       swiftSettings: commonSwiftSettings

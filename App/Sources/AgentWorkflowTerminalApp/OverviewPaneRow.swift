@@ -4,8 +4,8 @@ import TerminalCore
 
 /// Overview の pane 1行 (設計書 §13)。状態・名前・目的・現在地・タスク完了。
 ///
-/// 目的の入力欄だけは行の選択 (pane への移動) に含めない。含めると、編集しようとしたクリックで
-/// メイン window へ移ってしまう。
+/// 目的欄もクリックでは pane へ移動し、編集はメニューから始める。クリックで編集に入ると移動できず、
+/// 移動と編集を同時に始めると端末へフォーカスが移って目的を入力できない。
 struct OverviewPaneRow: View {
   let pane: OverviewPane
   @ObservedObject var store: PaneObservationStore
@@ -14,6 +14,7 @@ struct OverviewPaneRow: View {
   let reveal: () -> Void
 
   @State private var draft = ""
+  @State private var isPurposeEditable = false
   @FocusState private var isEditing: Bool
   /// 書き込みに成功し、観測にまだ現れていない値。観測は最大で 2 秒 (+ キャッシュの 1 秒) 遅れて
   /// 届くので、確定直後に古い値へ戻って見えるのを防ぐ。
@@ -65,6 +66,18 @@ struct OverviewPaneRow: View {
               .allowsHitTesting(false)
           }
         }
+        .overlay {
+          if !isPurposeEditable {
+            Button(action: reveal) {
+              Color.clear.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .contextMenu {
+              rowMenu
+            }
+            .accessibilityHidden(true)
+          }
+        }
         .frame(maxWidth: .infinity)
 
         // 空の現在地にも幅を割くと、目的欄が狭いサイドバーで数文字分まで縮む (#604)。
@@ -103,13 +116,18 @@ struct OverviewPaneRow: View {
     }
     .onChange(of: isEditing) { _, editing in
       // 確定せずに離れたら観測の値へ戻す。戻さないと、書かれていない値が書かれたように残る。
-      if !editing { draft = shownPurpose }
+      if !editing {
+        draft = shownPurpose
+        isPurposeEditable = false
+      }
     }
   }
 
   @ViewBuilder
   private var rowMenu: some View {
     OverviewPaneIDItems(panes: [pane])
+    Divider()
+    Button("目的を編集") { startEditingPurpose() }
     if let sessionMenu {
       Divider()
       sessionMenu
@@ -137,6 +155,13 @@ struct OverviewPaneRow: View {
     written ?? pane.detail.purpose ?? ""
   }
 
+  private func startEditingPurpose() {
+    isPurposeEditable = true
+    Task { @MainActor in
+      isEditing = true
+    }
+  }
+
   private func submit() {
     let text = draft
     Task {
@@ -145,7 +170,7 @@ struct OverviewPaneRow: View {
         // 確定 (Return) でフォーカスが外れ、未確定の値は観測値へ戻されている (実測)。直すために
         // 打ち直させないよう、拒否された値を入力欄へ戻す。
         draft = text
-        isEditing = true
+        startEditingPurpose()
         return
       }
       error = nil

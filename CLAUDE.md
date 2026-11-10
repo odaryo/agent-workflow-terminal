@@ -54,10 +54,10 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 
 | Operation | Script |
 | --- | --- |
-| Commit | `scripts/wf-commit.sh` |
+| Commit (or direct `git commit`, see below) | `scripts/wf-commit.sh` |
 | Publish the prebuilt GhosttyKit Release asset | `scripts/wf-ghostty-publish.sh` |
-| Push | `scripts/wf-push.sh` |
-| Sync `main` into a work branch | `scripts/wf-sync-main.sh` |
+| Push (or direct `git push`, see below) | `scripts/wf-push.sh` |
+| Sync `main` into a work branch (or direct `git merge origin/main`, see below) | `scripts/wf-sync-main.sh` |
 | Review diff (PR or branch) | `scripts/wf-review-diff.sh` |
 | Create an Issue | `scripts/wf-issue-create.sh` |
 | Comment on an Issue | `scripts/wf-issue-comment.sh` |
@@ -76,9 +76,35 @@ Documentation is written in Japanese; keep that language when editing docs. Comm
 | Create a worktree | `scripts/wf-worktree-create.sh` |
 | Remove a worktree and its local branch | `scripts/wf-worktree-remove.sh` |
 
-Both agents and humans perform these operations through the scripts, never through raw `git`/`gh` write commands. If a request can't be expressed through a script, fix the script — don't route around it with a raw command.
+Both agents and humans perform these operations through the scripts, never through raw `gh` write commands, and never through raw `git` beyond the range below. If a request can't be expressed through a script, fix the script — don't route around it with a raw command.
 
-Always invoke these from the repository root as `scripts/wf-*.sh <args>` — the `.claude/settings.json` allow rules are defined against that exact string form.
+**git の書き込みは、次の範囲なら直接実行してよい (ユーザー決定 2026-11-11)。** main は GitHub のルールセット
+`protect-main` (対象 `~DEFAULT_BRANCH`) が守っている。削除・force push・PR を通さない変更を GitHub が拒否するので、
+作業ブランチの中の操作はスクリプトを通さなくてよい。2026-11-10 まではこのルールセットの対象が空で、どのブランチにも
+効いていなかった (`gh api repos/odaryo/agent-workflow-terminal/rules/branches/main` が `[]`)。その間、main を守って
+いたのは `wf-commit.sh` / `wf-push.sh` の確認だけだった。直接の git に広げる前に対象を直した。
+
+- **直接実行してよい**: ファイルを名指しした `git add <path>...`、作業ブランチでの `git commit`、`git fetch`、main での
+  `git pull --ff-only`、作業ブランチでの `git merge origin/main`、作業ブランチの通常の `git push` (初回は
+  `git push -u origin <branch>`)。
+- **禁止**:
+  - main への commit と push。ルールセットが拒否するので、`wf-commit.sh` / `wf-push.sh` の `--allow-main` も使えない。
+  - force push (`--force` / `--force-with-lease` / `+<refspec>`)。作業ブランチで要るときは `scripts/wf-push.sh --force` を使う。
+  - push 済みの commit の書き換え (`--amend` や `rebase`)。
+  - `git add -A` / `git add .` / `git commit -a`。メインの checkout にはユーザーの作業中の変更があり、巻き込む。
+  - 自分が作っていない変更を消すこと (`git reset --hard`・`git clean`・`git checkout -- .`・`git restore .`)。
+  - 素の `git stash`。stash はすべての worktree と並列のレーンで共有される。
+  - 自分が作っていないブランチの削除。
+- **main の取り込みは rebase ではなく merge にする。** 理由は `wf-sync-main.sh` と同じで、squash マージで履歴は畳まれる
+  一方、rebase は push 済みのブランチに force push を要求する。
+- **commit の形式は変わらない。** タイトルは Conventional Commits、本文に Why、末尾に attribution を付ける。
+  `wf-commit.sh` を通せば、タイトルの形式と、main ではないことを確かめられる。
+- **引き続きスクリプトを通すもの**:
+  - worktree の作成と削除。置き場所・命名・stdout の契約と、tmux session の扱いをスクリプトが持っている。
+  - ブランチの掃除。
+  - GitHub への書き込み (Issue・PR・マージ・milestone・Project・CI の再実行・Release) のすべて。
+
+Always invoke the scripts from the repository root as `scripts/wf-*.sh <args>` — the `.claude/settings.json` allow rules are defined against that exact string form. Direct `git` write commands are not in those allow rules, so they may prompt for permission.
 
 Task worktrees live at `<main-worktree-parent>/awt-worktrees/<slug>` by default; set
 `AWT_WORKTREES_DIR` to override the parent directory. `wf-worktree-create.sh` writes only the created

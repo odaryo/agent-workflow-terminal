@@ -6,6 +6,14 @@ let commonSwiftSettings: [SwiftSetting] = [
   .enableUpcomingFeature("ExistentialAny")
 ]
 
+// Why not header を修正: vendored v1.3.1 XCFramework は、upstream の umbrella header が
+// 意図的に再 export しない libghostty-vt header を含む。GhosttyRenderer を import するだけの
+// ターゲットも同じ clang module を読むので、同じ抑止が要る。
+let ghosttyClientSwiftSettings =
+  commonSwiftSettings + [
+    SwiftSetting.unsafeFlags(["-Xcc", "-Wno-incomplete-umbrella"])
+  ]
+
 let package = Package(
   name: "AgentWorkflowTerminalApp",
   platforms: [.macOS(.v14)],
@@ -23,11 +31,7 @@ let package = Package(
         "GhosttyKit",
         .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
       ],
-      // Why not header を修正: vendored v1.3.1 XCFramework は、upstream の umbrella header が
-      // 意図的に再 export しない libghostty-vt header を含む。
-      swiftSettings: commonSwiftSettings + [
-        .unsafeFlags(["-Xcc", "-Wno-incomplete-umbrella"])
-      ],
+      swiftSettings: ghosttyClientSwiftSettings,
       linkerSettings: [
         .linkedLibrary("ghostty-fat"),
         .linkedLibrary("stdc++"),
@@ -41,7 +45,7 @@ let package = Package(
         .product(name: "Adapters", package: "AgentWorkflowTerminal"),
         .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
       ],
-      swiftSettings: commonSwiftSettings
+      swiftSettings: ghosttyClientSwiftSettings
     ),
     .testTarget(
       name: "AgentWorkflowTerminalAppTests",
@@ -50,7 +54,7 @@ let package = Package(
         .product(name: "Adapters", package: "AgentWorkflowTerminal"),
         .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
       ],
-      swiftSettings: commonSwiftSettings
+      swiftSettings: ghosttyClientSwiftSettings
     ),
     .testTarget(
       name: "GhosttyRendererTests",
@@ -59,9 +63,7 @@ let package = Package(
         "GhosttyKit",
         .product(name: "TerminalCore", package: "AgentWorkflowTerminal"),
       ],
-      swiftSettings: commonSwiftSettings + [
-        .unsafeFlags(["-Xcc", "-Wno-incomplete-umbrella"])
-      ]
+      swiftSettings: ghosttyClientSwiftSettings
     ),
   ],
   swiftLanguageModes: [.v6]

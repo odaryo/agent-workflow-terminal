@@ -293,7 +293,8 @@ enum SocketIO {
     let parent = path.lastIndex(of: "/").map { String(path[...$0]) } ?? "./"
     var template = Array((parent + "XXXXXX").utf8CString)
     guard mkdtemp(&template) != nil else { throw error() }
-    let directory = String(cString: template)
+    let directory = String(
+      decoding: template.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     defer { Darwin.rmdir(directory) }
     let temporaryPath = directory + "/s"
     defer { Darwin.unlink(temporaryPath) }

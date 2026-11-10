@@ -68,7 +68,7 @@ assert len(entries) == 1
 assert "matcher" not in entries[0]
 assert entries[0]["hooks"] == [{
     "type": "command",
-    "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh",
+    "command": '"${CLAUDE_PLUGIN_ROOT}"/hooks/session-start.sh',
     "timeout": 10,
 }]
 assert os.path.isfile(sys.argv[2]) and os.access(sys.argv[2], os.X_OK)

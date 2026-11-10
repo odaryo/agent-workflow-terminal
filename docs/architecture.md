@@ -2100,6 +2100,13 @@ Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのCl
 - 接続はTailscale上のSSHで進める。AndroidもTailscaleを使う。
 - Moshは、運用してSSHの接続性が悪ければ検討する。Moshの実装をアプリへ取り込むとGPL系のコードが§23と衝突するので、検討するときは方法から決める。
 
+**iOS／iPadOSの端末部品 — 確定(2026-11-10、Gate 2のiPadの計測による)。** SwiftTermを使う。iPadの実機(iPadOS 27.0.1、SwiftTerm 1.99.3)で、表示幅・true color・Agent TUIの表示、Esc・Ctrl・矢印、タッチ・トラックパッド、貼り付けは手を入れずに通った(計測は`Spikes/gate2-ipad/README.md`、Issue #789)。そのままでは足りない次の2つは、アプリ側で手当てする。
+
+- **日本語の変換中の文字**: SwiftTermはmarked textを保持するが描かず、派生クラスからも上書きできない。SwiftTermには手を入れず、アプリに端末とは別の入力欄を設け、変換はそこで行い、確定した文字だけを端末へ送る。送る時点と欄の出し方は未確定とする(§25)。
+- **外付けキーボードのOptionの組み合わせ**: Option+矢印が届かず、Option+Shift+文字のShiftが落ちる。アプリ側で、macOSのアプリと同じバイト列を送るよう直す。⌘の組み合わせは端末へ送らず、アプリのショートカットに使う。
+
+手当てが成り立たない場合の次の候補は、libghosttyをiOSでも使う案と、`libghostty-vt`と自前の描画である(§24)。
+
 **配布 — 確定(2026-11-10。直接インストールとv1の配布対象は2026-10-08の確定を維持)。** iOS／iPadOSアプリは、XcodeからDevelopment署名で実機へ直接インストールし、TestFlight／App Storeでの配布とApp Store審査はv1の対象外とする。当面はApple Developer Programに加入せず、無料のPersonal Teamで署名する。Personal Teamのprofileは7日で切れ、Push通知の機能も使えないとされる(どちらも二次情報で、Gate 2で確かめる)。切れたらMacから入れ直す。加入するかは、Push通知(§20.8)に着手するときに改めて決める。
 
 **接続鍵 — iOSは2026-10-08の確定を維持し、Androidにも同じ線引きを当てはめる(Androidは現在の推奨)。**
@@ -2118,8 +2125,8 @@ Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのCl
 |---|---|---|
 | iOS／iPadOSのUI | SwiftUI | `TerminalCore`の型を使える |
 | AndroidのUI | Kotlin | Android着手時に部品と合わせて確かめる |
-| iOS／iPadOSの端末部品 | SwiftTerm | MIT。`UITextInput`のmarked textの実装があることをソースで確認した(2026-11-10)。実機の品質はGate 2で測る |
-| iOS／iPadOSのSSH | Citadel。不足ならSwiftNIO SSH | CitadelはMIT、SwiftNIO SSHはApache-2.0 |
+| iOS／iPadOSの端末部品 | SwiftTerm(**確定**、上記) | MIT。marked textは保持するが描画しない(1.99.3。Gate 2で確認)ので、日本語は別の入力欄で受ける |
+| iOS／iPadOSのSSH | Citadel。不足ならSwiftNIO SSH | CitadelはMIT、SwiftNIO SSHはApache-2.0。Gate 2のiPadでは公開鍵認証・host keyの確認・PTY・window-changeが動いた。ただしCitadel 0.12.1はSSHの中核に個人のフォーク`Wellz26/swift-nio-ssh`を使い、pty-reqとexecを組み合わせる公開APIが無い。本採用の前に決める(§25) |
 | Androidの端末部品とSSH | connectbot/termlib と cbssh | どちらもApache-2.0。termlibは採用例が少なくIMEの記載が無いので、Android着手時に再評価する |
 | CodeとDiffの表示 | `hostctl`のJSONを各OSのネイティブ画面で表示する | HostにHTTPを開かず、認証をSSHに一本化する。`DiffViewerModel`などの一部はiPadへ流用できる(Gitの取得部分は置き換える) |
 | 再接続 | 前面に戻ったら自動で再接続し、同じsessionへattachし直す | sessionはtmuxが保つ。モバイルOSはバックグラウンドのアプリの通信を止める |
@@ -2152,7 +2159,7 @@ Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのCl
 
 **画面サイズ — 現在の推奨(2026-11-10)。** §4.2で確定した`window-size smallest`を維持し、モバイルはアプリが裏へ回ったらdetachする。`smallest`ならiPadで全内容が見える。iPadの接続中はHostのwindowも縮むが、detachすれば元の大きさへ戻る。
 
-`attach-session -f ignore-size`は採らない。tmux 3.8で、200x50のクライアントがattachしている`smallest`のsessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindowが200x49のまま変わらないことを計測した(flagなしでは40x9に縮んだ。2026-11-08、隔離socket)。この場合モバイルは自分の画面より大きいwindowを見ることになり、はみ出す。サポート下限の3.4での挙動と実機での見え方はGate 2で測る。
+`attach-session -f ignore-size`は採らない。tmux 3.8で、200x50のクライアントがattachしている`smallest`のsessionへ40x10のクライアントを`-f ignore-size`でattachしてもwindowが200x49のまま変わらないことを計測した(flagなしでは40x9に縮んだ。2026-11-08、隔離socket)。この場合モバイルは自分の画面より大きいwindowを見ることになり、はみ出す。iPadの実機(tmux 3.8)では、接続中にwindowが191×63から180×53へ縮み、切断すると戻ることを確かめた(Gate 2、2026-11-10)。サポート下限の3.4での挙動は未計測である。
 
 ### 20.8 導入順序 — 確定(2026-11-10)
 
@@ -2181,7 +2188,7 @@ Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのCl
 | 言語 | Swift 6 |
 | UI | SwiftUI + 必要最小限のAppKit／UIKit |
 | Terminal core (macOS) | libghostty C API(完全版)。採用は**確定**(Gate 1通過、§21.5) |
-| Terminal core (モバイル) | iOS／iPadOSはSwiftTerm。AndroidはAndroid着手時に再評価する(§20.6)。libghostty(完全版)への依存は要求しない(制約自体は**確定**、§21.5) |
+| Terminal core (モバイル) | iOS／iPadOSはSwiftTerm(**確定**、2026-11-10。日本語の入力欄とOptionの組み合わせはアプリ側で手当てする。§20.6)。AndroidはAndroid着手時に再評価する(§20.6)。libghostty(完全版)への依存は要求しない(制約自体は**確定**、§21.5) |
 | Terminal abstraction | `TerminalRenderer` protocolでrenderer依存を隔離し、platformごとに実装を差し替える |
 | Multiplexer | tmux CLIを外部processとして操作 |
 | Git | git CLIを外部processとして操作 |
@@ -2293,7 +2300,7 @@ Client
 ```text
 TerminalRenderer
 ├─ GhosttyRenderer            # macOS、確定(Gate 1通過)
-└─ iOS／iPadOSのrenderer      # 現在の推奨はSwiftTerm(§20.6)
+└─ iOS／iPadOSのrenderer      # SwiftTerm、確定(2026-11-10、§20.6)
 ```
 
 AndroidはSwiftで作らない(§20.6)ので、`TerminalRenderer` protocolはSwiftの側の境界に留まり、Android側はその技術の中で同じ隔離を行う。
@@ -2415,7 +2422,7 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 |---|---|---|
 | [Ghostty / libghostty](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT | macOS版で採用(確定、§21.5)。iOSの完全版は対象外。固定commit／配布物の依存も再監査 |
 | [libghostty-vt](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT(Ghostty本体と同一repository) | SwiftTermが不成立のときの候補。VTパーサのみで描画層を含まない |
-| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | iOS／iPadOSのrendererの現在の推奨(§20.6)。採用時は固定versionで再確認 |
+| [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | iOS／iPadOSのrenderer(確定、2026-11-10、§20.6)。Gate 2は1.99.3で計測した。固定versionで依存し、上げるときはlicenseを再確認する |
 | [tmux](https://github.com/tmux/tmux) | ISC | source組込みではなく外部CLIとして利用 |
 | [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | iOS／iPadOSのSSHの候補(§20.6)。CitadelはMIT(2026-11-10確認) |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | MIT | SQLite access候補 |
@@ -2474,6 +2481,8 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 - Hostのセッションとの同時attach
 
 **モバイル(§20.6)**: iPadの実機で`SSH → tmux attach → SwiftTerm`を確認し、iPhone、Androidへ広げる。
+
+**iPadは計測済み(2026-11-10)。** 手順と結果は`Spikes/gate2-ipad/README.md`。日本語の変換中の文字が見えないこととOptionの組み合わせを除いて通り、この結果を根拠にSwiftTermを確定した(§20.6)。無料の署名の期限が切れた後の挙動と入れ直しの手間は、期限(2026-11-17)の後に測る。host keyの不一致の拒否と承認の削除、iPad multi-window、tmux 3.4での`smallest`の見え方は未計測である。iPhoneとAndroidは未実施。
 
 確認事項:
 
@@ -2537,7 +2546,7 @@ SSHで呼んだ`hostctl`(§21.4)から、Project一覧・セッション・Overv
 
 ### PoC後の判断
 
-Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価する必要はない(§21.5で確定)。Gate 2のモバイルが不成立なら、端末部品を次の候補(`libghostty-vt`と自前の描画など)へ替えて測り直す。その間も外部の端末アプリからのSSH／Mosh接続は使える。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
+Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価する必要はない(§21.5で確定)。Gate 2のiPadでは、SwiftTermは2つの手当て(日本語の入力欄とOptionの組み合わせ)を条件に成立とした(§20.6)。手当てが成り立たなければ、端末部品を次の候補(libghosttyをiOSでも使う案、`libghostty-vt`と自前の描画など)へ替えて測り直す。その間も外部の端末アプリからのSSH／Mosh接続は使える。Gate 3で取得できない状態は推測で埋めず、`Unknown`として明示する。
 
 ## 25. Terminal本体の未確定事項一覧
 
@@ -2584,6 +2593,8 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - 1つのmacOSアプリのプロセスがHostとClientを兼ねるか(作業PCが自分のProjectのHostにもなるか)(§20.5)
 - モバイルへのPush通知の経路(§11.2。2026-11-08にCloudKitの確定を取り消した)
 - Tailscale SSHを鍵の代わりに使えるか(§20.6)
+- iOS／iPadOSのSSHライブラリ: Citadelをそのまま使うか(個人のフォーク`Wellz26/swift-nio-ssh`への依存)、SwiftNIO SSHを直接使うか(§20.6)
+- iPadの日本語の入力欄で、確定した文字を送る時点と、欄の出し方(現在の案: 確定ごとに送り、空欄のReturnはEnterを送る。補助キーバーのボタンとショートカットで開閉する。§20.6)
 - Androidの対応OSの下限と配布経路(§20.6)
 
 ### Storage
@@ -2987,12 +2998,14 @@ PR_READY
 - [x] iOS／iPadOSとAndroidはネイティブで別々に実装する(2026-11-10、§20.6)
 - [x] モバイルの接続はTailscale上のSSH(Androidを含む)。Moshは運用してSSHの接続性が悪ければ検討する(2026-11-10、§20.6)
 - [x] 当面はApple Developer Programに加入せず、無料のPersonal Teamで署名する(2026-11-10、§20.6)
+- [x] iOS／iPadOSの端末部品はSwiftTerm。日本語は別の入力欄で変換して確定した文字だけを端末へ送り、Optionの組み合わせはアプリ側で直す(2026-11-10、§20.6、Gate 2のiPad)
 - [x] macOSのSyntax highlightingはHighlighterSwiftをやめ、同梱のhighlight.jsをJavaScriptCoreで直接呼ぶ(2026-11-09、§21、Issue #751)
 
 # 付録B. 現在の推奨構成チェックリスト
 
 - [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
-- [ ] iOS／iPadOSはSwiftUI + SwiftTerm + Citadel、AndroidはKotlin + termlib + cbsshで作る — Gate 2 PoC待ち(§20.6)
+- [ ] iOS／iPadOSはSwiftUI + Citadel(SSH)で作る — Citadelのフォーク依存の判断待ち(§20.6、§25)
+- [ ] AndroidはKotlin + termlib + cbsshで作る — Android着手時に再評価(§20.6)
 - [ ] モバイルのCodeとDiffは`hostctl`のJSONを各OSのネイティブ画面で表示する(§20.6)
 - [ ] `window-size smallest`を維持し、モバイルは裏へ回ったらdetachする — Gate 2待ち(§20.7)
 - [ ] tmux CLI Adapterを正式採用 — version検証待ち

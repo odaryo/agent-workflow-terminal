@@ -122,11 +122,11 @@ iPad 実機から Tailscale 上の SSH → Host の tmux attach で測る。
 | 絵文字・全角の表示幅、true color、Claude Code / Codex の TUI 表示崩れを確認 | ✅ | 2026-11-10、`scripts/display-test.sh` を iPad の端末で実行。全角・半角カナ・絵文字・肌色修飾・国旗・ZWJ (家族)・異体字セレクタ付き ❤️ の各行で行末の `\|` がそろい、罫線も崩れず、true color の3本のグラデーションもなめらか (ユーザーの目視)。Claude Code は iPad から会話でき、表示崩れなし。Codex も iPad で起動して表示崩れなし (ユーザーの目視)。日本語入力は上の行と同じ |
 | 外付けキーボードの Esc・Ctrl・矢印・⌘ の組み合わせが端末へ届くか確認 | ⚠️ | 2026-11-10、`scripts/key-test.sh` (届いたバイト列を16進で表示) を iPad の端末で実行。画面は `evidence/02-key-test-option-cmd.png` (追跡しない)。**届いた**: Esc `1b`、Ctrl-C `03`、Ctrl-A `01`、矢印 `1b 5b 41`〜`44`、Tab `09`、Ctrl+矢印 `1b 5b 31 3b 35 4x`、Shift+矢印 `1b 5b 31 3b 32 4x`、Option-B `1b 62`、貼り付け。**ずれた**: Option-Shift-B が `1b 62` (期待は `1b 42`。Shift が落ちる)。**届かない**: Option-← (何も出ない。iPadOS が文字入力の語移動として先に処理しているのか、SwiftTerm の `pressesBegan` の分岐で送られずに終わるのかは切り分けていない)。⌘-K も何も出ない (SwiftTerm は kitty キーボードプロトコルが無効の間、⌘ を含むキーを端末へ送らない。`iOSTerminalView.swift` 3275〜3279 行の設計どおり) |
 | タッチのスクロール、選択、コピー・貼り付け、マウス・トラックパッドを確認 | ✅ | 2026-11-10、ユーザーの操作による。指のスワイプでスクロールできる。長押しで Paste のメニューが出て、Select を選ぶと範囲選択に入れる。貼り付けは長押しのメニューと ⌘-V の両方で端末へ届いた (`key-test.sh` で貼り付けた文字列のバイト列を確認)。トラックパッド・マウスのスクロールとクリックも効いた。スワイプで動くのが SwiftTerm 側の scrollback か tmux のコピーモードかは見分けていない |
-| host key の初回承認・一致・不一致の拒否・削除と、機器の鍵による公開鍵認証を確認 | | |
+| host key の初回承認・一致・不一致の拒否・削除と、機器の鍵による公開鍵認証を確認 | ✅ (一部) | 2026-11-10。機器で生成した ed25519 鍵 (`awt-gate2-ipad`) を Mac の `authorized_keys` に登録し、公開鍵認証で接続できた。host key は初回に指紋を承認し、以後の接続は一致として承認なしで進んだ。**不一致の拒否と承認の削除は操作していない** |
 | background / active での再接続・同一 session 再 attach、Wi-Fi / モバイル回線の切り替えを確認 | ✅ (回線が生きている間) | 2026-11-10、Wi-Fi、Tailscale 経由 (Host `100.108.213.118`)。アプリの接続ログ (UTC) による。**数分の background からの復帰では、同じ session へ自動で再 attach できた** (05:37:57 background → 05:40:20 再 attach、05:49:59 → 05:50:02)。**約10分以上 background にいた後は、TCP の接続段階で止まった**: 05:16:11 background → 05:26 の3回の接続は認証まで進まず、成功は 05:29:30。06:05:40 background → 06:11〜06:15 の5回はいずれも30秒で `NIOCore.ChannelError error 0` (認証より前)、成功は 06:21:50。**前面で使用中にも切れた**: 06:21:55 attach → 06:22:16 `ChannelError error 6`。その直後 (15:25 JST) の Mac 側では、`tailscale status` が iPad を `idle; offline, last seen 5m ago`、`tailscale ping` が応答なし、Mac のスリープ記録なし。ユーザーが iPad を確かめたところ、iPad のネットワークが止まっていた。つながらなかった時間帯はアプリではなく回線側の原因とみる (止まった理由は未確認)。Wi-Fi から iPhone のテザリング (モバイル回線) への切り替えも、ユーザーの操作で「問題なく出来た」(切り替えの瞬間に接続が保たれたのか、切れて再接続したのかは見分けていない) |
 | window-size smallest で iPad attach 中の Mac の見え方と detach 後の復元を確認 | ✅ | 2026-11-10、tmux 3.8、session `awt-agent-workflow-terminal-03b8ac7b-2` (アプリが current window に `window-size smallest` を設定済み。グローバルは `latest`)。Mac 側の `tmux display-message` / `list-clients` で測った。接続前 window 191×63 (Mac の Ghostty クライアント 191×64)。iPad attach 中 (15:44:21 JST) は window **180×53**、クライアントは Mac 191×64 `xterm-ghostty` と iPad 180×54 `xterm-256color` の2つ。iPad で「session 一覧へ」を押して切断した後 (15:44:48) は window 191×63、クライアントは Mac だけに戻った。Mac 側の表示もユーザーの目視で、iPad 接続中に tmux の表示が小さくなり、切断後に戻ったことを確認 |
 | Personal Team 署名の実際の期限と期限後の入れ直しの手間を記録 (段階0の記録も参照) | | |
-| 上記を根拠に SwiftTerm をそのまま使えるか判定し、不成立なら次の候補を提示 | ⚠️ 判定案 (決定はユーザー) | 下の「SwiftTerm の判定案」を参照 |
+| 上記を根拠に SwiftTerm をそのまま使えるか判定し、不成立なら次の候補を提示 | ⚠️ 手当て2つを条件に使い続ける (2026-11-10 にユーザーが決定) | 下の「SwiftTerm の判定案」を参照 |
 
 ## SwiftTerm の判定案
 
@@ -154,6 +154,7 @@ SSH 側 (Citadel 0.12.1) は、公開鍵認証・host key の TOFU・PTY・windo
 Apache-2.0、star 0) を使っている点と、pty-req と exec を組み合わせる公開 API が無いため shell に
 `exec tmux attach-session` を書き込んでいる点である。
 
-この判定案は `docs/architecture.md` の状態区分を変えない。SwiftTerm と Citadel は §20.6 の「現在の推奨」のままである。
+**決定 (2026-11-10、ユーザー)**: この案で進める。日本語は (b) のアプリ側の別の入力欄で受け、Option の組み合わせはアプリ側で直す。
+SwiftTerm は `docs/architecture.md` §20.6 で確定に移した。Citadel は「現在の推奨」のままである。
 
 実装側の作成物と API 確認の記録は [RESULT.md](RESULT.md) に記載する。

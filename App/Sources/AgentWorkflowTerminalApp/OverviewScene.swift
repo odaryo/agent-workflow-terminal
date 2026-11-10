@@ -75,6 +75,14 @@ struct OverviewView: View {
   }
 }
 
+struct OverviewDisplayedRowBackground: View {
+  var body: some View {
+    RoundedRectangle(cornerRadius: 6)
+      .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+      .padding(.horizontal, 4)
+  }
+}
+
 private struct OverviewProjectSection: View {
   @ObservedObject var model: AppModel
   @ObservedObject var store: PaneObservationStore
@@ -157,13 +165,13 @@ private struct OverviewProjectSection: View {
         reveal(worktree.session, nil)
       } label: {
         HStack {
-          Image(systemName: "chevron.right").opacity(isDisplayed ? 1 : 0)
           Text(title)
         }
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(isDisplayed ? .primary : .secondary)
       }
       .buttonStyle(.plain)
+      .listRowBackground(isDisplayed ? OverviewDisplayedRowBackground() : nil)
       .help("このセッションを表示")
       .accessibilityLabel(isDisplayed ? "表示中 \(title)" : title)
       .contextMenu {
@@ -195,13 +203,13 @@ private struct OverviewProjectSection: View {
           reveal(worktree.session, nil)
         } label: {
           HStack(spacing: 6) {
-            Image(systemName: "chevron.right").opacity(showsDisplayedMark ? 1 : 0)
             Text(rowTitle)
           }
-          .foregroundStyle(.secondary).padding(.leading, 12)
+          .foregroundStyle(.secondary)
           .frame(maxWidth: .infinity, alignment: .leading).contentShape(.rect)
         }
         .buttonStyle(.plain)
+        .listRowBackground(showsDisplayedMark ? OverviewDisplayedRowBackground() : nil)
         .accessibilityLabel(showsDisplayedMark ? "表示中 \(rowTitle)" : rowTitle)
         .contextMenu {
           if title == nil {

@@ -127,6 +127,8 @@ struct OverviewPaneRow: View {
   private var rowMenu: some View {
     OverviewPaneIDItems(panes: [pane])
     Divider()
+    OverviewPaneSummaryItems(
+      purpose: shownPurpose, title: pane.detail.title, status: pane.detail.status)
     Button("目的を編集") { startEditingPurpose() }
     if let sessionMenu {
       Divider()

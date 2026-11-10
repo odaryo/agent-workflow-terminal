@@ -109,7 +109,7 @@ iPad 実機から Tailscale 上の SSH → Host の tmux attach で測る。
 | 外付けキーボードの Esc・Ctrl・矢印・⌘ の組み合わせが端末へ届くか確認 | ⚠️ | 2026-11-10、`scripts/key-test.sh` (届いたバイト列を16進で表示) を iPad の端末で実行。画面は `evidence/02-key-test-option-cmd.png` (追跡しない)。**届いた**: Esc `1b`、Ctrl-C `03`、Ctrl-A `01`、矢印 `1b 5b 41`〜`44`、Tab `09`、Ctrl+矢印 `1b 5b 31 3b 35 4x`、Shift+矢印 `1b 5b 31 3b 32 4x`、Option-B `1b 62`、貼り付け。**ずれた**: Option-Shift-B が `1b 62` (期待は `1b 42`。Shift が落ちる)。**届かない**: Option-← (何も出ない。iPadOS が文字入力の語移動として先に処理しているのか、SwiftTerm の `pressesBegan` の分岐で送られずに終わるのかは切り分けていない)。⌘-K も何も出ない (SwiftTerm は kitty キーボードプロトコルが無効の間、⌘ を含むキーを端末へ送らない。`iOSTerminalView.swift` 3275〜3279 行の設計どおり) |
 | タッチのスクロール、選択、コピー・貼り付け、マウス・トラックパッドを確認 | | |
 | host key の初回承認・一致・不一致の拒否・削除と、機器の鍵による公開鍵認証を確認 | | |
-| background / active での再接続・同一 session 再 attach、Wi-Fi / モバイル回線の切り替えを確認 | | |
+| background / active での再接続・同一 session 再 attach、Wi-Fi / モバイル回線の切り替えを確認 | ⚠️ (計測中) | 2026-11-10、Wi-Fi、Tailscale 経由 (Host `100.108.213.118`)。アプリの接続ログ (UTC) による。**数分の background からの復帰では、同じ session へ自動で再 attach できた** (05:37:57 background → 05:40:20 再 attach、05:49:59 → 05:50:02)。**約10分以上 background にいた後は、TCP の接続段階で止まった**: 05:16:11 background → 05:26 の3回の接続は認証まで進まず、成功は 05:29:30。06:05:40 background → 06:11〜06:15 の5回はいずれも30秒で `NIOCore.ChannelError error 0` (認証より前)、成功は 06:21:50。**前面で使用中にも切れた**: 06:21:55 attach → 06:22:16 `ChannelError error 6`。その直後 (15:25 JST) の Mac 側では、`tailscale status` が iPad を `idle; offline, last seen 5m ago`、`tailscale ping` が応答なし、Mac のスリープ記録なし。iPad 側の Tailscale の経路が止まっていたとみられるが、iPad の Tailscale アプリの状態は未確認。Wi-Fi / モバイル回線の切り替えは未計測 |
 | window-size smallest で iPad attach 中の Mac の見え方と detach 後の復元を確認 | | |
 | Personal Team 署名の実際の期限と期限後の入れ直しの手間を記録 (段階0の記録も参照) | | |
 | 上記を根拠に SwiftTerm をそのまま使えるか判定し、不成立なら次の候補を提示 | | |

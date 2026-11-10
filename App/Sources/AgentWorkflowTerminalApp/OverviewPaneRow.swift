@@ -25,7 +25,6 @@ struct OverviewPaneRow: View {
       HStack(spacing: 8) {
         Button(action: reveal) {
           HStack(spacing: 6) {
-            Image(systemName: "chevron.right").opacity(showsDisplayedMark ? 1 : 0)
             AgentStateIcon(presentation: presentation)
             if pane.isMain {
               Text("メイン")
@@ -42,13 +41,31 @@ struct OverviewPaneRow: View {
           rowMenu
         }
 
-        TextField("目的", text: $draft, prompt: Text(pane.detail.title ?? "目的"))
-          .textFieldStyle(.roundedBorder)
-          .focused($isEditing)
-          .onSubmit(submit)
-          .onExitCommand { isEditing = false }
-          .accessibilityLabel("目的")
-          .frame(maxWidth: .infinity)
+        // 目的が空のときの title は placeholder ではなく重ねた Text で出す。placeholder の既定色 (約 25%) は
+        // 読みにくく、prompt の Text に付けた色はサイドバーの実画面で効かなかった (#794。画面外の描画では
+        // 効いたので、原因は切り分けていない)。色は入力済みの目的 (labelColor) と見分けが付く secondary。
+        // 編集中は重ねず placeholder に任せる。IME の未確定文字は draft に入らないので、重ねたままだと変換中の
+        // 文字と title が重なる (実画面で確認)。
+        TextField(
+          "目的", text: $draft,
+          prompt: Text(titleFallback == nil ? pane.detail.title ?? "目的" : "")
+        )
+        .textFieldStyle(.roundedBorder)
+        .focused($isEditing)
+        .onSubmit(submit)
+        .onExitCommand { isEditing = false }
+        // overlay より前に置く。後ろに置くと重ねた title にも「目的」の label が付き、title が読めなくなる (実測)。
+        .accessibilityLabel("目的")
+        .overlay(alignment: .leading) {
+          if let titleFallback {
+            // 11pt は実画面のサイドバーで placeholder の左端と一致する値 (macOS 27、スクリーンショットの画素で
+            // 比べた)。画面外の描画で測った 6pt は実画面と 5pt ずれた。
+            Text(titleFallback).foregroundStyle(.secondary).lineLimit(1)
+              .padding(.leading, 11).padding(.trailing, 6)
+              .allowsHitTesting(false)
+          }
+        }
+        .frame(maxWidth: .infinity)
 
         // 空の現在地にも幅を割くと、目的欄が狭いサイドバーで数文字分まで縮む (#604)。
         if pane.detail.status != nil || pane.detail.isTaskCompleted {
@@ -75,7 +92,7 @@ struct OverviewPaneRow: View {
         Text(error).font(.caption).foregroundStyle(.red)
       }
     }
-    .padding(.leading, 12)
+    .listRowBackground(showsDisplayedMark ? OverviewDisplayedRowBackground() : nil)
     .onAppear { draft = shownPurpose }
     // 編集中は観測で上書きしない。2 秒ごとの観測で打ちかけの文字が消える。
     // 書いた値と一致するかでは待たない。観測が書いた値と違う形で届いたとき (tmux の版による
@@ -97,6 +114,10 @@ struct OverviewPaneRow: View {
       Divider()
       sessionMenu
     }
+  }
+
+  private var titleFallback: String? {
+    draft.isEmpty && !isEditing ? pane.detail.title : nil
   }
 
   private var presentation: AgentStatePresentation {

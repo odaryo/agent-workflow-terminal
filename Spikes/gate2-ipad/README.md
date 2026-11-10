@@ -54,6 +54,20 @@ iPad 実機から Tailscale 上の SSH → Host の tmux attach で測る。
    ```
 
    DerivedData はこのディレクトリ内の `DerivedData/`。生成した `.xcodeproj/` とビルド成果物は追跡しない。
+
+   **初回のビルドで詰まった2点** (2026-11-10、Xcode 27.2):
+   - `Could not resolve package dependencies: …/org.swift.swiftpm/manifests/ManifestLoading already exists in file system`
+     で依存解決が止まった。原因は `~/Library/Caches/org.swift.swiftpm/manifests/ManifestLoading` に残っていた空のロック
+     ファイル (11/1 に途中で終わった `swift build` / `swift test` の残り。同じ時刻の「A Document Being Saved By swift-build」
+     ディレクトリも残っていた)。`xcodebuild -packageCachePath` を指定しても、この場所は変わらなかった。`lsof` で開いて
+     いるプロセスが無いことを確かめてから別の場所へ移すと、解決が通った。
+   - 次に `Validate plug-in "SwiftTermBuildInfoPlugin" in package "swiftterm"` で止まった。SwiftTerm のビルドプラグインは
+     初回に利用者の承認が要る。Xcode で `Gate2iPad.xcodeproj` を開き、実行先をシミュレータの iPad にして ⌘B を押し、
+     Issue ナビゲータ (⌘5) の「Plugin "SwiftTermBuildInfoPlugin" from package "SwiftTerm" must be enabled before it can be
+     used」を選んで「Trust & Enable」を押すと、以後はコマンドラインのビルドも通った。プラグインは SwiftTerm 自身の
+     ディレクトリで読み取りだけの git (`branch --show-current` / `describe` / `rev-parse HEAD` / `status --porcelain`) を
+     実行し、版の情報と XTGETTCAP の表を生成するだけである (v1.99.3 のソースで確認)。`-skipPackagePluginValidation` は
+     使っていない。
    初回の起動で開発者の信頼が求められたら、iPad の「設定 > 一般 > VPN とデバイス管理」で信頼・検証する。
    段階0で起動できるまでに行った入れ直しの記録は上記コメントを参照。
 
@@ -132,7 +146,10 @@ Esc・Ctrl・矢印、タッチとトラックパッド、貼り付け、`window
 確定済みで (設計書 §21.5)、Gate 1 では macOS で preedit の描画を確かめている (実際のかな漢字変換の操作は Gate 1 でも
 未検証のまま)。iOS 向けにビルドして組み込めるかは、このスパイクでは調べていない。
 
-SSH 側 (Citadel 0.12.1) は、公開鍵認証・host key の TOFU・PTY・window-change・再接続のいずれも問題なく動いた。
+SSH 側 (Citadel 0.12.1) は、公開鍵認証・host key の TOFU・PTY・window-change が問題なく動いた。前面に戻ったときの
+自動の再 attach も回線が生きていれば通った。一方、使用中に接続が切れたとき (06:22) は自動では戻らず「再接続」を
+押す必要があり、回線が止まっている間は接続のたびに30秒待って失敗した。§20.6 の「SSH の接続性が悪ければ Mosh を
+検討する」を判断するときの最初の材料になる (今回の切断は回線側の停止によるもので、SSH の弱さとは言えない)。
 本採用の前に判断が要るのは、Citadel が SSH の中核に個人のフォーク `Wellz26/swift-nio-ssh` (解決された版は 0.3.7、
 Apache-2.0、star 0) を使っている点と、pty-req と exec を組み合わせる公開 API が無いため shell に
 `exec tmux attach-session` を書き込んでいる点である。

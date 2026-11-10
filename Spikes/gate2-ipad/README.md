@@ -106,7 +106,7 @@ iPad 実機から Tailscale 上の SSH → Host の tmux attach で測る。
 | --- | --- | --- |
 | 日本語 IME: ソフトウェア / 外付けキーボードそれぞれで変換中表示、確定、候補窓を確認 | ⚠️ | 2026-11-10、iPadOS 27.0.1、日本語かな入力。**外付け・画面のキーボードとも、変換中の文字が端末に表示されない**。候補窓は出て、候補を選ぶ・確定すると文字は正しく入る。ユーザーの評価は「変換中の文字が見えないので使いづらい」。原因は SwiftTerm 1.99.3 の iOS 版が marked text を `textInputStorage` に保持するだけで描画しないこと (`Sources/SwiftTerm/iOS/iOSTextInput.swift` の `setMarkedText`。同ファイル冒頭のコメントに「setMarkedText could show an overlay of the text being composed」と未実装の案として書かれている)。画面のキーボードは、外付けキーボードの接続中は出ず、補助キーの列だけが出る (iPadOS の通常の挙動)。補助キーの列のキーボードボタンは SwiftTerm 独自の F キー・記号の画面と通常のキーボードを切り替える |
 | 絵文字・全角の表示幅、true color、Claude Code / Codex の TUI 表示崩れを確認 | ✅ (Codex は未確認) | 2026-11-10、`scripts/display-test.sh` を iPad の端末で実行。全角・半角カナ・絵文字・肌色修飾・国旗・ZWJ (家族)・異体字セレクタ付き ❤️ の各行で行末の `\|` がそろい、罫線も崩れず、true color の3本のグラデーションもなめらか (ユーザーの目視)。Claude Code は iPad から会話でき、表示崩れなし。日本語入力は上の行と同じ |
-| 外付けキーボードの Esc・Ctrl・矢印・⌘ の組み合わせが端末へ届くか確認 | | |
+| 外付けキーボードの Esc・Ctrl・矢印・⌘ の組み合わせが端末へ届くか確認 | ⚠️ | 2026-11-10、`scripts/key-test.sh` (届いたバイト列を16進で表示) を iPad の端末で実行。画面は `evidence/02-key-test-option-cmd.png` (追跡しない)。**届いた**: Esc `1b`、Ctrl-C `03`、Ctrl-A `01`、矢印 `1b 5b 41`〜`44`、Tab `09`、Ctrl+矢印 `1b 5b 31 3b 35 4x`、Shift+矢印 `1b 5b 31 3b 32 4x`、Option-B `1b 62`、貼り付け。**ずれた**: Option-Shift-B が `1b 62` (期待は `1b 42`。Shift が落ちる)。**届かない**: Option-← (何も出ない。iPadOS が文字入力の語移動として先に処理しているのか、SwiftTerm の `pressesBegan` の分岐で送られずに終わるのかは切り分けていない)。⌘-K も何も出ない (SwiftTerm は kitty キーボードプロトコルが無効の間、⌘ を含むキーを端末へ送らない。`iOSTerminalView.swift` 3275〜3279 行の設計どおり) |
 | タッチのスクロール、選択、コピー・貼り付け、マウス・トラックパッドを確認 | | |
 | host key の初回承認・一致・不一致の拒否・削除と、機器の鍵による公開鍵認証を確認 | | |
 | background / active での再接続・同一 session 再 attach、Wi-Fi / モバイル回線の切り替えを確認 | | |

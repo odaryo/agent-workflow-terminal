@@ -75,11 +75,13 @@ Spikes/**/zig-out/
 Spikes/**/.zig-cache/
 Spikes/**/zig-cache/
 Spikes/**/DerivedData/
+Spikes/gate2-ipad/*.xcodeproj/
 Spikes/**/*.xcframework/
 Spikes/**/.build-shim/
 Spikes/gate1/build/
 # 検証エビデンス(スクリーンショット・ログ・CSV)は容量が大きいため追跡しない。
 Spikes/gate1/evidence/
+Spikes/gate2-ipad/evidence/
 # Gate 3 の生記録 (pane 画面を毎フレーム保存するため 50MB を超える)。集計結果だけ追跡する。
 Spikes/gate3/evidence/runs/
 App/vendor/

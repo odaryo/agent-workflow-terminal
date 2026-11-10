@@ -1,0 +1,117 @@
+この文書は計測の記録であり、`docs/architecture.md` の状態区分は変更しない。
+
+# Gate 2 iPad スパイク
+
+## 目的
+
+設計書 §20.6・§24 の現在の推奨である SwiftUI + SwiftTerm + Citadel を、
+iPad 実機から Tailscale 上の SSH → Host の tmux attach で測る。
+使い捨てコードであり、lint・format・テスト・CI の対象外。本体へコピーしない。
+この段階は接続と端末の計測用アプリを用意する。実機の操作・結果記入・採否の判断はユーザーと Director が行う。
+
+## 環境
+
+- Director の事前計測 (2026-11-10): Xcode 27.2 (27B52)、Swift 6.4.2、iOS SDK 27.2。
+- iPad Air 13-inch (M3)、iPadOS 27.0.1。deployment target は iOS 18.0、アプリは Swift 5 モード。
+- Host: Mac、ログインシェル `/bin/zsh`、tmux 3.8 (`/opt/homebrew/bin/tmux`)。
+- XcodeGen 2.46.0 (MIT)、Personal Team の無料署名。
+- バンドル ID は段階0と同じ `dev.odaryo.awt.spike.gate2ipad`。team はファイルに固定しない。
+- 組み込み依存: Citadel 0.12.1 (MIT)、SwiftTerm v1.99.3 (MIT)。直接依存の版は `project.yml` で固定する。
+- Citadel の推移依存: Wellz26/swift-nio-ssh (`0.3.4..<0.4.0`、Apache-2.0、Joannis のフォーク由来)、
+  swift-nio、swift-log、swift-crypto (Apache-2.0)、BigInt、ColorizeSwift (MIT)。
+  SwiftTerm の manifest には swift-argument-parser、swift-docc-plugin、swift-png (いずれも Apache-2.0) もある。
+  実際に解決された推移依存の版は Director が生成・ビルドした `.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved` を証拠として保管する。
+  tmux は Host の外部 CLI。依存ソースはこのディレクトリへ複製していない。
+
+段階0の署名・導入・起動の実測は [Issue #789 の段階0コメント](https://github.com/odaryo/agent-workflow-terminal/issues/789#issuecomment-6759027077) を参照。
+同コメントの Xcode / SDK 26.5 表記は [訂正コメント](https://github.com/odaryo/agent-workflow-terminal/issues/789#issuecomment-6759053865) により 27.2 に訂正済み。
+7日間のプロファイルと初回の検証・入れ直しは段階0の記録にある。期限後の挙動はまだ測っていない。
+
+## 準備
+
+1. Host の「システム設定 > 一般 > 共有 > リモートログイン」を有効にし、接続するユーザーを許可する。
+2. Host と iPad で Tailscale に接続し、Host の Tailscale IP または MagicDNS 名を確認する。
+   本アプリは通常の SSH サーバーへ機器の鍵で認証する。Tailscale は到達経路として使う。
+   Tailscale SSH 自体の利用可否はこの段階では判定しない。
+3. Xcode の Accounts に Apple ID / Personal Team を登録する。USB 接続した iPad の信頼と Developer Mode を有効にする。
+4. 初回は次でプロジェクトを生成し、2種類の機器 ID を調べる (ユーザーまたは Director が実行)。
+
+   ```bash
+   cd Spikes/gate2-ipad
+   xcodegen generate
+   xcodebuild -project Gate2iPad.xcodeproj -scheme Gate2iPad -showdestinations
+   xcrun devicectl list devices
+   ```
+
+5. リポジトリ直下から次を実行する。スクリプトは生成 → Debug ビルド → 導入 → 起動を行う。
+   環境変数が1つでも空なら、調べ方を表示して処理を始めず終了する。
+
+   ```bash
+   export AWT_DEVELOPMENT_TEAM='<Personal Team の Team ID>'
+   export AWT_IPAD_XCODEBUILD_ID='<showdestinations の id>'
+   export AWT_IPAD_DEVICECTL_ID='<devicectl の Identifier (UUID)>'
+   Spikes/gate2-ipad/scripts/build-install.sh
+   ```
+
+   DerivedData はこのディレクトリ内の `DerivedData/`。生成した `.xcodeproj/` とビルド成果物は追跡しない。
+   初回の起動で開発者の信頼が求められたら、iPad の「設定 > 一般 > VPN とデバイス管理」で信頼・検証する。
+   段階0で起動できるまでに行った入れ直しの記録は上記コメントを参照。
+
+6. アプリに表示される公開鍵をコピーし、Host の接続ユーザーの `~/.ssh/authorized_keys` へ1行で追記する。
+   既存の行は保持する。`~/.ssh` は 700、`authorized_keys` は 600 にする。
+   秘密鍵は初回起動時に生成し、Keychain の `AfterFirstUnlockThisDeviceOnly` で同期せず保存する。
+   公開鍵の base64 は SSH wire 形式 (長さ付き `ssh-ed25519` + 長さ付き32バイト公開鍵)。
+7. host、port (既定22)、user、tmux の絶対パスを入力する。設定は UserDefaults に自動保存される。
+8. 「接続して session 一覧を更新」で初回の host key 指紋が出る。Host 上で次などを実行し、
+   **実際に提示された鍵と同じ種類**の SHA256 指紋を確認してから「この鍵を承認して再接続」を押す。
+
+   ```bash
+   for key in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$key" -E sha256; done
+   ```
+
+   未承認の接続は認証前に失敗させる。承認した wire 形式の鍵を host:port ごとに UserDefaults へ保存する。
+   鍵が変わると拒否し、保存済みと今回の指紋を両方表示する。
+   正当な変更だと Host 上で確認できた場合は、一度 session 一覧画面へ戻り、対象 host:port の保存した鍵を削除してから再接続する。
+
+## 計測の流れ
+
+1. Host で実験用の既存 tmux session を用意する。Host 側でも同じ session に attach し、
+   使用中の tmux の版、session 名、window-size 設定、接続前の端末サイズを記録する。
+2. アプリで一覧を更新し、対象 session を選ぶ。新規 session の作成や終了操作はアプリには無い。
+   PTY は `xterm-256color`、SwiftTerm の現在の cols / rows で要求する。サイズ変更は window-change で送る。
+3. Citadel 0.12.1 の公開 `withPTY` は PTY 要求後に shell を要求する。
+   PTY と exec を組み合わせる公開 API は確認できなかったため、shell に
+   `exec '<tmux の絶対パス>' attach-session -t '=<session 名>'` と改行を送る。
+   パスと session 名の単一引用符は shell 用にエスケープする。Host の shell 起動設定の影響も計測対象となる。
+4. shell、Claude Code、Codex の実際の TUI で下表の操作を行う。
+   キーボード・IME・選択・クリップボード・スクロール・マウス処理は SwiftTerm の既定に任せている。
+   OSC 52 などの delegate の既定動作も変更していない。画面のコピー操作とは分けて結果を記録する。
+5. 画面回転、ソフトウェアキーボードの開閉、iPad の画面サイズ変更で cols / rows が追従するか確認する。
+6. background へ移すと channel と SSH 接続を閉じ、active 復帰時は選択中の同じ session へ再接続する。
+   通信が切れた場合は状態表示と「再接続」で戻れるか確認する。tmux session 内のプロセス継続も Host で確認する。
+7. `window-size smallest` は Host 側で対象の実験用 window に設定して測る。
+   接続前、iPad attach 中、iPad background / 一覧へ戻る操作で detach した後の Host の表示とサイズを比較する。
+   既存の設定値を記録し、計測終了後に戻す。アプリは tmux の設定を変更しない。
+8. 「接続ログ」を展開し「ログ全文をコピー」で生ログを保存する。接続・認証・attach 要求・切断・再接続を時刻付きで記録する。
+   attach 要求送信は tmux の attach 成功を保証するイベントではないため、端末画面と Host の状態も証拠にする。
+   ログはアプリ実行中のメモリに保持し、アプリ終了前にコピーする。
+9. 各証拠に日時、ネットワーク、入力機器、対象 TUI / 版、再現操作を添え、下表に所在を記入する。
+
+## 結果
+
+[Issue #789 の完了条件](https://github.com/odaryo/agent-workflow-terminal/issues/789) の9項目。
+空欄は未計測。結果はユーザーと Director が実機確認後に記入する。
+
+| 手順 | 結果 (✅/⚠️/❌/❓) | 生の結果・証拠の所在 |
+| --- | --- | --- |
+| 日本語 IME: ソフトウェア / 外付けキーボードそれぞれで変換中表示、確定、候補窓を確認 | | |
+| 絵文字・全角の表示幅、true color、Claude Code / Codex の TUI 表示崩れを確認 | | |
+| 外付けキーボードの Esc・Ctrl・矢印・⌘ の組み合わせが端末へ届くか確認 | | |
+| タッチのスクロール、選択、コピー・貼り付け、マウス・トラックパッドを確認 | | |
+| host key の初回承認・一致・不一致の拒否・削除と、機器の鍵による公開鍵認証を確認 | | |
+| background / active での再接続・同一 session 再 attach、Wi-Fi / モバイル回線の切り替えを確認 | | |
+| window-size smallest で iPad attach 中の Mac の見え方と detach 後の復元を確認 | | |
+| Personal Team 署名の実際の期限と期限後の入れ直しの手間を記録 (段階0の記録も参照) | | |
+| 上記を根拠に SwiftTerm をそのまま使えるか判定し、不成立なら次の候補を提示 | | |
+
+実装側の作成物と API 確認の記録は [RESULT.md](RESULT.md) に記載する。

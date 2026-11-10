@@ -18,6 +18,7 @@ struct OverviewSessionMenu: View {
   @ObservedObject var model: AppModel
   let key: TerminalSessionKey
   let selectProject: () -> Void
+  let agentCommand: () -> String?
 
   var body: some View {
     Button("新規セッション") {
@@ -28,6 +29,15 @@ struct OverviewSessionMenu: View {
       }
     }
     .disabled(!model.canOpenSession(in: key.identity))
+    Button("新規セッションで Agent を起動") {
+      guard let command = agentCommand() else { return }
+      selectProject()
+      Task {
+        await model.openNewSession(in: key.identity, agentCommand: command)
+        model.paneObservations.requestTerminalFocus()
+      }
+    }
+    .disabled(!model.canOpenSession(in: key.identity) || agentCommand() == nil)
     Button("セッションを閉じる") {
       selectProject()
       model.requestCloseSession(key)
@@ -39,6 +49,7 @@ struct OverviewSessionMenu: View {
 struct OverviewProjectMenu: View {
   @ObservedObject var model: AppModel
   let selectProject: () -> Void
+  let agentCommand: () -> String?
   let onSetAgentCommand: (RegisteredProject) -> Void
   let requestUnregister: (WorktreeIdentity) async -> Void
 
@@ -52,6 +63,18 @@ struct OverviewProjectMenu: View {
       }
     }
     .disabled(model.projectRoot.map { !model.canOpenSession(in: $0.identity) } ?? true)
+    Button("新規セッションで Agent を起動 (Project Root)") {
+      guard let command = agentCommand() else { return }
+      selectProject()
+      guard let projectRoot = model.projectRoot else { return }
+      Task {
+        await model.openNewSession(in: projectRoot.identity, agentCommand: command)
+        model.paneObservations.requestTerminalFocus()
+      }
+    }
+    .disabled(
+      (model.projectRoot.map { !model.canOpenSession(in: $0.identity) } ?? true)
+        || agentCommand() == nil)
     Menu("Inactive の worktree を Active にする") {
       ForEach(model.inactiveWorktrees, id: \.identity) { worktree in
         Button(title(of: worktree)) {

@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
   @Published private(set) var sessionLayout = TerminalTabLayout() {
     didSet { paneObservations.observe(inventory, sessions: sessionKeys) }
   }
+  var pendingAgentCommands: [TerminalSessionKey: String] = [:]
   var newlyAddedSessions: Set<TerminalSessionKey> = []
   var restoredSessions: Set<TerminalSessionKey> = []
 
@@ -107,13 +108,16 @@ final class AppModel: ObservableObject {
       directories: [projectRoot?.identity].compactMap { $0 } + sessionWorktrees.map(\.identity))
   }
 
-  func selectNewSession(in identity: WorktreeIdentity, existingSessionNames: [String]) {
+  func selectNewSession(
+    in identity: WorktreeIdentity, existingSessionNames: [String], agentCommand: String? = nil
+  ) {
     guard canOpenSession(in: identity) else { return }
     guard let key = sessionLayout.addTab(in: identity, existingSessionNames: existingSessionNames)
     else {
       reportSessionWarning("セッション番号の上限 (9999) に達したため、新しいセッションを開けません。")
       return
     }
+    pendingAgentCommands[key] = agentCommand
     newlyAddedSessions.insert(key)
     restoredSessions.remove(key)
     select(key)
@@ -128,6 +132,7 @@ final class AppModel: ObservableObject {
   }
 
   func removeSession(_ key: TerminalSessionKey) {
+    pendingAgentCommands.removeValue(forKey: key)
     newlyAddedSessions.remove(key)
     restoredSessions.remove(key)
     openedSessions.remove(key)
@@ -135,6 +140,7 @@ final class AppModel: ObservableObject {
   }
 
   func removeSessions(in identity: WorktreeIdentity) {
+    pendingAgentCommands = pendingAgentCommands.filter { $0.key.identity != identity }
     newlyAddedSessions = newlyAddedSessions.filter { $0.identity != identity }
     restoredSessions = restoredSessions.filter { $0.identity != identity }
     for key in sessionLayout.tabs(in: identity) { sessionLayout.removeTab(key) }

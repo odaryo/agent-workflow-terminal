@@ -39,6 +39,7 @@ public enum TmuxSessionOperationError: Error, Sendable, Equatable {
   ///   (tmux 3.4 実測)。
   /// - 空文字: encoding とは無関係で、tmux は受け取ったうえで pane を client の cwd へ落とす。
   case invalidWorkingDirectory(String)
+  case invalidCommandLine(String)
   /// tmux が受け付けない `history-limit` (`TmuxSessionOperations.historyLimitRange`)。
   case invalidHistoryLimit(Int)
   /// `new-session -P -F '#{session_id}'` が `$N` 以外を返した。原文を捨てずに載せる。

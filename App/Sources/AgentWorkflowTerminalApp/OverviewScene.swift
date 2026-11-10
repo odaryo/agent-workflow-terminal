@@ -52,6 +52,13 @@ struct OverviewView: View {
               model: model, store: model.paneObservations, mainPanes: model.mainPanes,
               isSelectedProject: projects.registry.selection == model.project.commonDirectory,
               selectProject: { projects.select(model.project.commonDirectory) },
+              agentCommand: {
+                guard
+                  case .success(let command) = ProjectAgentCommand.normalized(
+                    projects.registry.project(model.project.commonDirectory)?.agentCommand ?? "")
+                else { return nil }
+                return command
+              },
               onSetAgentCommand: onSetAgentCommand,
               requestUnregister: { await projects.requestUnregister($0) },
               reveal: { session, pane in
@@ -91,6 +98,7 @@ private struct OverviewProjectSection: View {
     "[]"
   let isSelectedProject: Bool
   let selectProject: () -> Void
+  let agentCommand: () -> String?
   let onSetAgentCommand: (RegisteredProject) -> Void
   let requestUnregister: (WorktreeIdentity) async -> Void
   let reveal: (TerminalSessionKey, PaneID?) -> Void
@@ -122,7 +130,8 @@ private struct OverviewProjectSection: View {
       )
       .contextMenu {
         OverviewProjectMenu(
-          model: model, selectProject: selectProject, onSetAgentCommand: onSetAgentCommand,
+          model: model, selectProject: selectProject, agentCommand: agentCommand,
+          onSetAgentCommand: onSetAgentCommand,
           requestUnregister: requestUnregister)
       }
     }
@@ -185,7 +194,7 @@ private struct OverviewProjectSection: View {
         OverviewPaneRow(
           pane: pane, store: store, showsDisplayedMark: showsDisplayedMark,
           sessionMenu: title == nil
-            ? OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+            ? sessionMenu(worktree.session)
             : nil
         ) {
           reveal(worktree.session, pane.paneID)
@@ -213,7 +222,7 @@ private struct OverviewProjectSection: View {
         .accessibilityLabel(showsDisplayedMark ? "表示中 \(rowTitle)" : rowTitle)
         .contextMenu {
           if title == nil {
-            OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+            sessionMenu(worktree.session)
           }
         }
       }
@@ -230,7 +239,12 @@ private struct OverviewProjectSection: View {
       OverviewPaneIDItems(panes: panes)
       Divider()
     }
-    OverviewSessionMenu(model: model, key: worktree.session, selectProject: selectProject)
+    sessionMenu(worktree.session)
+  }
+
+  private func sessionMenu(_ key: TerminalSessionKey) -> OverviewSessionMenu {
+    OverviewSessionMenu(
+      model: model, key: key, selectProject: selectProject, agentCommand: agentCommand)
   }
 
   /// 初回配信待ちを除外すると、観測対象の Task が Overview から一時的に消える。

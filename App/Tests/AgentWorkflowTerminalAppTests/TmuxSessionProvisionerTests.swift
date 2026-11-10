@@ -181,7 +181,8 @@ struct TmuxSessionProvisionerTests {
       .init(exitCode: 0, stdout: "", stderr: ""),
     ])
 
-    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+    let result = try await makeProvisioner(process).attachCommand(
+      for: key, workingDirectory: "/", agentCommand: "agent")
 
     #expect(
       await process.calls == [
@@ -292,7 +293,8 @@ struct TmuxSessionProvisionerTests {
       .init(exitCode: 0, stdout: "", stderr: ""),
     ])
 
-    let result = try await makeProvisioner(process).attachCommand(for: key, workingDirectory: "/")
+    let result = try await makeProvisioner(process).attachCommand(
+      for: key, workingDirectory: "/", agentCommand: "agent")
 
     #expect(
       await process.calls == [
@@ -389,7 +391,7 @@ struct TmuxSessionProvisionerTests {
     }
   }
 
-  private static let cleanupInstruction =
+  static let cleanupInstruction =
     "手で `tmux kill-session -t '=awt-bootstrap-server-do-not-use'` を実行してください"
 
   private func bootstrapProcess(
@@ -417,12 +419,12 @@ struct TmuxSessionProvisionerTests {
     .init(exitCode: 0, stdout: "p4242\nn\(path)\n", stderr: "")
   }
 
-  private func makeKey(index: Int) throws -> TerminalSessionKey {
+  func makeKey(index: Int) throws -> TerminalSessionKey {
     let identity = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/task"))
     return try #require(TerminalSessionKey(identity: identity, index: index))
   }
 
-  private func makeProvisioner(
+  func makeProvisioner(
     _ process: TerminationProcessRunner,
     lsof: ProcessRunResult = .init(exitCode: 1, stdout: "", stderr: "")
   ) throws -> TmuxSessionProvisioner {
@@ -436,7 +438,7 @@ struct TmuxSessionProvisionerTests {
   }
 }
 
-private actor TerminationProcessRunner: ProcessRunning {
+actor TerminationProcessRunner: ProcessRunning {
   /// 呼ばれた順に返す。尽きたら最後の結果を返し続ける。
   let outcomes: [Result<ProcessRunResult, ProcessRunnerError>]
   private(set) var calls: [[String]] = []

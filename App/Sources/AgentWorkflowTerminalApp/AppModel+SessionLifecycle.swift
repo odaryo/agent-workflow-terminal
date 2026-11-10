@@ -44,7 +44,12 @@ extension AppModel {
     restoredSessions.remove(key)
   }
 
+  func consumeAgentCommand(for key: TerminalSessionKey) -> String? {
+    pendingAgentCommands.removeValue(forKey: key)
+  }
+
   func didPrepareSession(_ key: TerminalSessionKey) {
+    pendingAgentCommands.removeValue(forKey: key)
     newlyAddedSessions.remove(key)
     restoredSessions.remove(key)
   }

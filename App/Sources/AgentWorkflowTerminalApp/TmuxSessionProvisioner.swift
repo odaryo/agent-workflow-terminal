@@ -99,25 +99,27 @@ struct TmuxSessionProvisioner: Sendable {
 
   func attachCommand(
     for key: TerminalSessionKey,
-    workingDirectory: String
+    workingDirectory: String,
+    agentCommand: String? = nil
   ) async -> Result<TmuxSessionAttachment, TmuxSessionProvisionerError> {
     let session = TmuxSessionName(key: key)
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
+      return .success(await attachmentForCreatedSession(session, agentCommand: agentCommand))
     } catch .sessionAlreadyExists {
       // 設計書 §3.3 の Resume。`exists` で先に分けないのは、`exists` と `create` の間に
       // 他のクライアントが同じ名前を作る窓があり、そこで返るこの値も Resume だからである。
       await repairResumedSession(session)
     } catch .serverNotRunning {
       return await attachCommandBootstrappingServer(
-        session: session, workingDirectory: workingDirectory)
+        session: session, workingDirectory: workingDirectory, agentCommand: agentCommand)
     } catch .serverSocketMissing(let socketPath) {
       // 生存中の server の socket だけが消えた場合に起こすと、同じパスに2つ目の server ができ、
       // 古い server の session と Agent が辿れなくなる (Issue #500)。
       switch await orphanedServerProbe.probe(socketPath: socketPath) {
       case .absent:
         return await attachCommandBootstrappingServer(
-          session: session, workingDirectory: workingDirectory)
+          session: session, workingDirectory: workingDirectory, agentCommand: agentCommand)
       case let result:
         return .failure(.orphanedServer(socketPath: socketPath, result))
       }
@@ -125,6 +127,20 @@ struct TmuxSessionProvisioner: Sendable {
       return .failure(.operation(error))
     }
     return .success(.init(command: attachCommand(for: session)))
+  }
+
+  private func attachmentForCreatedSession(
+    _ session: TmuxSessionName, agentCommand: String?
+  ) async -> TmuxSessionAttachment {
+    var warning: String?
+    if let agentCommand {
+      do {
+        try await operations.typeCommandLine(agentCommand, into: session)
+      } catch {
+        warning = "Agent の起動コマンドを送れませんでした: \(error.agentCommandFailureReason)"
+      }
+    }
+    return .init(command: attachCommand(for: session), warning: warning)
   }
 
   /// 旧版やアプリ外で作られた session は設定が無いので、Resume のたびに入れ直す。`detach-on-destroy` は
@@ -176,7 +192,8 @@ struct TmuxSessionProvisioner: Sendable {
   ///   別プロセス (2つ目のアプリ) との競合は対象外。
   private func attachCommandBootstrappingServer(
     session: TmuxSessionName,
-    workingDirectory: String
+    workingDirectory: String,
+    agentCommand: String?
   ) async -> Result<TmuxSessionAttachment, TmuxSessionProvisionerError> {
     guard await Self.bootstrapGate.acquire() else {
       return .failure(.operation(.tmux(.process(.cancelled))))
@@ -186,13 +203,13 @@ struct TmuxSessionProvisioner: Sendable {
       return .failure(.operation(.tmux(.process(.cancelled))))
     }
     await startBootstrapSession()
-    let result: Result<[String], TmuxSessionOperationError>
+    let result: Result<TmuxSessionAttachment, TmuxSessionOperationError>
     do {
       try await operations.create(session: session, workingDirectory: workingDirectory)
-      result = .success(attachCommand(for: session))
+      result = .success(await attachmentForCreatedSession(session, agentCommand: agentCommand))
     } catch .sessionAlreadyExists {
       await repairResumedSession(session)
-      result = .success(attachCommand(for: session))
+      result = .success(.init(command: attachCommand(for: session)))
     } catch {
       result = .failure(error)
     }
@@ -202,9 +219,14 @@ struct TmuxSessionProvisioner: Sendable {
     let cleanupFailure = await Task { await cleanUpBootstrapSession() }.value
     await Self.bootstrapGate.release()
     switch result {
-    case .success(let command):
+    case .success(let attachment):
+      let warnings = [
+        attachment.warning, cleanupFailure.map { _ in Self.bootstrapCleanupWarning },
+      ].compactMap { $0 }
       return .success(
-        .init(command: command, warning: cleanupFailure.map { _ in Self.bootstrapCleanupWarning }))
+        .init(
+          command: attachment.command,
+          warning: warnings.isEmpty ? nil : warnings.joined(separator: "\n")))
     case .failure(let cause):
       if let cleanupFailure {
         return .failure(.leftoverBootstrapSession(cause: cause, cleanupFailure: cleanupFailure))
@@ -311,6 +333,21 @@ private actor TmuxBootstrapGate {
 }
 
 extension TmuxSessionOperationError {
+  var agentCommandFailureReason: String {
+    switch self {
+    case .sessionNotFound:
+      "送信先の tmux session が見つかりません。"
+    case .serverNotRunning:
+      "tmux server が動いていません。"
+    case .serverSocketMissing:
+      "tmux server の socket が見つかりません。"
+    case .invalidCommandLine:
+      "起動コマンドに使用できない文字が含まれているか、空です。"
+    default:
+      "\(self)"
+    }
+  }
+
   /// 画面に出す理由。原因ごとにユーザーの次の行動が違うので、1つの文言へ丸めない。
   var terminalSessionDescription: String {
     switch self {

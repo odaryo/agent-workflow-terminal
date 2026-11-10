@@ -121,11 +121,14 @@ struct RestoredSessionTests {
       try #require(WorktreeIdentity(rawValue: "/other/.git")))
     model.restoredSessions.insert(other)
     model.newlyAddedSessions = [key, other]
+    model.pendingAgentCommands = [key: "agent", other: "other-agent"]
 
     model.removeSessions(in: key.identity)
 
     #expect(model.restoredSessions == [other])
     #expect(model.newlyAddedSessions == [other])
+    #expect(model.consumeAgentCommand(for: key) == nil)
+    #expect(model.consumeAgentCommand(for: other) == "other-agent")
   }
 
   @Test("明示的な Active 化では復元の印を残さない")
@@ -147,6 +150,49 @@ struct RestoredSessionTests {
 
     #expect(!model.restoredSessions.contains(.primary(identity)))
     #expect(model.restoredSessions.contains(.primary(root.identity)))
+  }
+
+  @Test("Agent 起動予約は追加したセッションだけに付き、1回で消費する")
+  func consumesAgentCommandOnce() throws {
+    let model = try makeModel()
+    let original = try #require(model.sessionKeys.first)
+    model.selectNewSession(
+      in: original.identity, existingSessionNames: [], agentCommand: "agent --resume")
+    let added = try #require(model.displayedSession)
+
+    #expect(added != original)
+    #expect(model.consumeAgentCommand(for: original) == nil)
+    #expect(model.consumeAgentCommand(for: added) == "agent --resume")
+    #expect(model.consumeAgentCommand(for: added) == nil)
+  }
+
+  @Test("セッションを削除・破棄・準備完了にすると Agent 起動予約も消す", arguments: [0, 1, 2, 3])
+  func clearsAgentCommand(action: Int) throws {
+    let model = try makeModel()
+    let original = try #require(model.sessionKeys.first)
+    model.selectNewSession(
+      in: original.identity, existingSessionNames: [], agentCommand: "agent")
+    let added = try #require(model.displayedSession)
+    switch action {
+    case 0: model.removeSession(added)
+    case 1: model.discardSession(added)
+    case 2: model.removeSessions(in: added.identity)
+    default: model.didPrepareSession(added)
+    }
+    #expect(model.consumeAgentCommand(for: added) == nil)
+  }
+
+  @Test("通常の追加と追加不可の操作は Agent 起動を予約しない")
+  func doesNotReserveForUnaddedSession() throws {
+    let model = try makeModel()
+    let original = try #require(model.sessionKeys.first)
+    model.selectNewSession(in: original.identity, existingSessionNames: [])
+    let added = try #require(model.displayedSession)
+    #expect(model.consumeAgentCommand(for: added) == nil)
+
+    let unknown = try #require(WorktreeIdentity(rawValue: "/unknown/.git"))
+    model.selectNewSession(in: unknown, existingSessionNames: [], agentCommand: "agent")
+    #expect(model.pendingAgentCommands.isEmpty)
   }
 
   private func detected(

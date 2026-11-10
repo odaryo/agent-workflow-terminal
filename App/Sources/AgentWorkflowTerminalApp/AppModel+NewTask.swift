@@ -1,7 +1,7 @@
 import TerminalCore
 
 extension AppModel {
-  func openNewSession(in identity: WorktreeIdentity) async {
+  func openNewSession(in identity: WorktreeIdentity, agentCommand: String? = nil) async {
     guard canOpenSession(in: identity), let sessions else { return }
     let names: [String]
     do {
@@ -12,6 +12,6 @@ extension AppModel {
     }
     guard !Task.isCancelled, canOpenSession(in: identity) else { return }
     // 他クライアントが list から create までに同じ番号を作ると、Resume でその session を共有する。
-    selectNewSession(in: identity, existingSessionNames: names)
+    selectNewSession(in: identity, existingSessionNames: names, agentCommand: agentCommand)
   }
 }

@@ -18,6 +18,7 @@ struct TerminalSessionsView: View {
             sessions: model.sessions,
             shouldOpen: { await model.shouldOpenSession(key) },
             approveCreation: { model.approveSessionCreation(key) },
+            consumeAgentCommand: { model.consumeAgentCommand(for: key) },
             didPrepare: { model.didPrepareSession(key) },
             reportWarning: { model.reportSessionWarning($0) },
             didExit: { await model.handleSessionExit(key) },
@@ -45,6 +46,7 @@ private struct TerminalSessionContent: View {
   let sessions: TmuxSessionProvisioner?
   let shouldOpen: @MainActor () async -> TerminalTabOpening
   let approveCreation: @MainActor () -> Void
+  let consumeAgentCommand: @MainActor () -> String?
   let didPrepare: @MainActor () -> Void
   let reportWarning: @MainActor (String) -> Void
   let didExit: @MainActor () async -> Void
@@ -116,7 +118,7 @@ private struct TerminalSessionContent: View {
         return
       }
       let result = await sessions.attachCommand(
-        for: key, workingDirectory: worktree.worktreePath)
+        for: key, workingDirectory: worktree.worktreePath, agentCommand: consumeAgentCommand())
       // Why not 書いてしまう: cancel 後のこの task はもう古い世代のものであり、その結果で
       // 新しい世代の用意を上書きすると、表示と argv の世代が食い違う。
       guard !Task.isCancelled else { return }

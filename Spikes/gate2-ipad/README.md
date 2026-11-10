@@ -104,8 +104,8 @@ iPad 実機から Tailscale 上の SSH → Host の tmux attach で測る。
 
 | 手順 | 結果 (✅/⚠️/❌/❓) | 生の結果・証拠の所在 |
 | --- | --- | --- |
-| 日本語 IME: ソフトウェア / 外付けキーボードそれぞれで変換中表示、確定、候補窓を確認 | | |
-| 絵文字・全角の表示幅、true color、Claude Code / Codex の TUI 表示崩れを確認 | | |
+| 日本語 IME: ソフトウェア / 外付けキーボードそれぞれで変換中表示、確定、候補窓を確認 | ⚠️ | 2026-11-10、iPadOS 27.0.1、日本語かな入力。**外付け・画面のキーボードとも、変換中の文字が端末に表示されない**。候補窓は出て、候補を選ぶ・確定すると文字は正しく入る。ユーザーの評価は「変換中の文字が見えないので使いづらい」。原因は SwiftTerm 1.99.3 の iOS 版が marked text を `textInputStorage` に保持するだけで描画しないこと (`Sources/SwiftTerm/iOS/iOSTextInput.swift` の `setMarkedText`。同ファイル冒頭のコメントに「setMarkedText could show an overlay of the text being composed」と未実装の案として書かれている)。画面のキーボードは、外付けキーボードの接続中は出ず、補助キーの列だけが出る (iPadOS の通常の挙動)。補助キーの列のキーボードボタンは SwiftTerm 独自の F キー・記号の画面と通常のキーボードを切り替える |
+| 絵文字・全角の表示幅、true color、Claude Code / Codex の TUI 表示崩れを確認 | ✅ (Codex は未確認) | 2026-11-10、`scripts/display-test.sh` を iPad の端末で実行。全角・半角カナ・絵文字・肌色修飾・国旗・ZWJ (家族)・異体字セレクタ付き ❤️ の各行で行末の `\|` がそろい、罫線も崩れず、true color の3本のグラデーションもなめらか (ユーザーの目視)。Claude Code は iPad から会話でき、表示崩れなし。日本語入力は上の行と同じ |
 | 外付けキーボードの Esc・Ctrl・矢印・⌘ の組み合わせが端末へ届くか確認 | | |
 | タッチのスクロール、選択、コピー・貼り付け、マウス・トラックパッドを確認 | | |
 | host key の初回承認・一致・不一致の拒否・削除と、機器の鍵による公開鍵認証を確認 | | |

@@ -18,6 +18,10 @@ scripts/build-app.sh
 生成物は `App/build/AgentWorkflowTerminal.app` です。release build は
 `scripts/build-app.sh release` で作成できます。
 
+アプリのアイコンは `App/Resources/AppIcon/AppIcon.svg` が原本です。原本を変えたら
+`scripts/make-app-icon.sh` (要 `brew install librsvg`) で `AppIcon.icns` を作り直し、両方をコミットします。
+`scripts/build-app.sh` はコミット済みの `.icns` を写すだけで、作り直しません。
+
 この Release アセットは macos-arm64 専用です。x86_64 が必要になった場合は、publish 側も
 2アーキテクチャを扱えるように拡張する必要があります。
 

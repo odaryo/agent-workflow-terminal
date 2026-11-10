@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- macOS のアイコングリッド: 1024 の canvas に 824 のタイルを中央 (100, 100) に置き、外周は影の余白。
+       意匠は候補 D「Overview のサイドバー」(Issue #800)。.icns は scripts/make-app-icon.sh で作る。 -->
+  <defs>
+    <filter id="tileShadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7F8FA"/>
+      <stop offset="1" stop-color="#D6DCE4"/>
+    </linearGradient>
+    <clipPath id="window">
+      <rect x="168" y="232" width="688" height="560" rx="56"/>
+    </clipPath>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#tile)" filter="url(#tileShadow)"/>
+  <g clip-path="url(#window)">
+    <rect x="168" y="232" width="688" height="560" fill="#1B2230"/>
+    <rect x="168" y="232" width="232" height="560" fill="#262F41"/>
+    <rect x="184" y="384" width="200" height="72" rx="18" fill="#41557A"/>
+  </g>
+  <circle cx="226" cy="320" r="15" fill="#4FD1A5"/>
+  <rect x="256" y="310" width="108" height="20" rx="10" fill="#5B6680"/>
+  <circle cx="226" cy="420" r="15" fill="#F2A93B"/>
+  <rect x="256" y="410" width="96" height="20" rx="10" fill="#C9D3E6"/>
+  <circle cx="226" cy="520" r="15" fill="#5AB0FF"/>
+  <rect x="256" y="510" width="112" height="20" rx="10" fill="#5B6680"/>
+  <circle cx="226" cy="620" r="15" fill="#6C7486"/>
+  <rect x="256" y="610" width="88" height="20" rx="10" fill="#5B6680"/>
+  <polyline points="462,318 516,362 462,406" fill="none" stroke="#E9ECF2" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="548" y="350" width="200" height="24" rx="12" fill="#465169"/>
+  <rect x="462" y="460" width="300" height="24" rx="12" fill="#465169"/>
+  <rect x="462" y="510" width="240" height="24" rx="12" fill="#465169"/>
+  <rect x="462" y="600" width="44" height="70" rx="6" fill="#E9ECF2"/>
+</svg>

@@ -57,6 +57,7 @@ extension AppModel {
 
   func discardSession(_ key: TerminalSessionKey) {
     guard sessionKeys.contains(key) else { return }
+    pendingAgentCommands.removeValue(forKey: key)
     newlyAddedSessions.remove(key)
     restoredSessions.remove(key)
     if displayedSession == key {

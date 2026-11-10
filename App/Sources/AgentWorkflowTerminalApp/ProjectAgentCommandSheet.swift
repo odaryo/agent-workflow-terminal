@@ -22,7 +22,13 @@ struct ProjectAgentCommandSheet: View {
     VStack(alignment: .leading, spacing: 16) {
       Text("「\(project.displayName)」の Agent 起動コマンド")
         .font(.headline)
-      Text("hostctl worktree open の応答で Agent へ返します。コマンドの後ろに指示が1引数で付きます。空にすると未設定に戻ります。")
+      Text(
+        """
+        Overview の「新規セッションで Agent を起動」では、このコマンドをそのまま実行します。\
+        hostctl worktree open の応答でも Agent へ返し、そのときはコマンドの後ろに指示が1引数で付きます。\
+        空にすると未設定に戻ります。
+        """
+      )
       TextField("claude", text: $input)
         .accessibilityLabel("Agent 起動コマンド")
         .onChange(of: input) { error = nil }

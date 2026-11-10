@@ -204,6 +204,11 @@ jobs:
         timeout-minutes: 5
         run: scripts/check-handoff-script.sh
 
+      - name: Handoff hook - checks
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        timeout-minutes: 2
+        run: scripts/check-handoff-hook.sh
+
       - name: Check for leftover servers and sockets
         if: ${{ !cancelled() }}
         run: scripts/check-integration-leftovers.sh

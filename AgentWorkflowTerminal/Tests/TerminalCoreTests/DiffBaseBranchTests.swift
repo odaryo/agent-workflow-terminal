@@ -71,12 +71,15 @@ struct DiffBaseBranchTests {
 /// `recordedStartPoint` は reflog の `branch: Created from <ref>` の `<ref>`、`resolvedFullName` は
 /// それを今の repository で `rev-parse --verify --quiet --symbolic-full-name` した stdout (trim 済み)、
 /// `listedBranches` は `for-each-ref refs/heads/ refs/remotes/` の一覧。値は git 2.54.0 の隔離
-/// repository での実測 (Issue #829、#842)。
+/// repository での実測 (Issue #829、#842、#894)。
 @Suite("§9.1.1 分岐元の採否")
 struct DiffForkPointTests {
-  // 一覧で落ちたのではなく、それぞれの理由で落ちたことを示すため、解決先はすべて一覧に入れておく。
+  // アダプタが渡す一覧と同じく、`HEAD` / `@` / `@{-1}` / `origin/HEAD` の候補の綴りは入れない
+  // (`for-each-ref` は `refs/remotes/origin/HEAD` を出すが、`GitBranchRef(fullName:)` が `/HEAD` を
+  // 除く)。これらの行は一覧に無いことでも落ちるので、`rev-parse` との照合だけで落ちることは、
+  // 一覧に在る `alias` の行で示す。
   private static let listed: [GitBranchRef] = [
-    .local("main"), .local("日本語"), .local("feature"), .local("feat"), .local("b8"),
+    .local("main"), .local("日本語"), .local("feature"), .local("feat"), .local("b8"), .local("alias"),
     .remote("origin/main"), .remote("origin/feature"),
   ]
 
@@ -98,6 +101,7 @@ struct DiffForkPointTests {
   }
 
   // `HEAD` / `@` / `@{-1}` は記録時ではなく今の文脈で解決されるので、記録と名前が一致しない。
+  // `alias` は `refs/heads/main` を指す symbolic ref で、`rev-parse` は指す先の名前を返す (git 2.54.0)。
   @Test(
     "記録と名前が一致しない解決・branch でない解決・自分自身は分岐元にしない",
     arguments: [
@@ -105,6 +109,7 @@ struct DiffForkPointTests {
       ("@", "refs/heads/main", .local("feature")),
       ("@{-1}", "refs/heads/b8", .local("feature")),
       ("origin/HEAD", "refs/remotes/origin/main", .local("feature")),
+      ("alias", "refs/heads/main", .local("feature")),
       ("v1", "refs/tags/v1", .local("feature")),
       ("refs/tags/v1", "refs/tags/v1", .local("feature")),
       ("main~0", "", .local("feature")),

@@ -325,6 +325,13 @@ selftest() {
   SELFTEST_PROJECT="$SELFTEST_SCRATCH/project"
   mkdir -- "$SELFTEST_PROJECT"
   git -C "$SELFTEST_PROJECT" init -q
+  # 利用者の global の autocrlf + safecrlf では add が `LF would be replaced by CRLF` で止まり、
+  # excludesFile が `*.txt` を除外するとプローブが untracked に出ない (#862 の実測)。`-c` では
+  # 足りない。プローブを untracked と判定するのは `open` で起動したアプリの git で、`-c` も
+  # 環境変数も届かない。repo の config なら両方の git が global より優先して読む。
+  git -C "$SELFTEST_PROJECT" config core.autocrlf false
+  git -C "$SELFTEST_PROJECT" config core.safecrlf false
+  git -C "$SELFTEST_PROJECT" config core.excludesFile /dev/null
   printf 'verify-app-ui selftest\n' >"$SELFTEST_PROJECT/README"
   git -C "$SELFTEST_PROJECT" add README
   # 利用者の git 設定 (署名・hook・未設定の user) で commit が止まらないようにする。

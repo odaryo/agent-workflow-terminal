@@ -29,14 +29,8 @@ actor SyntaxHighlightingService {
   }
 
   func highlight(_ code: String, language: String, isDark: Bool) -> HighlightedCode? {
-    guard let context = javascriptContext(), let theme = theme(isDark: isDark) else { return nil }
-    let result = highlightResult(code, language: language, context: context)
-    // safe mode での再実行は内部の失敗を errorRaised に入れるため、素のテキストを成功として扱わない。
-    guard context.exception == nil,
-      let errorRaised = result?.objectForKeyedSubscript("errorRaised"),
-      errorRaised.isUndefined || errorRaised.isNull,
-      let value = result?.objectForKeyedSubscript("value"), value.isString,
-      let html = value.toString(), let runs = HighlightJSMarkup.parse(html)
+    guard let theme = theme(isDark: isDark),
+      let html = highlightedHTML(code, language: language), let runs = HighlightJSMarkup.parse(html)
     else { return nil }
     let reconstructed = runs.map(\.text).joined()
     guard reconstructed.unicodeScalars.elementsEqual(code.unicodeScalars) else { return nil }
@@ -57,6 +51,18 @@ actor SyntaxHighlightingService {
     return HighlightedCode(
       text: AttributedString(attributed),
       background: Color(nsColor: nsColor(theme.backgroundColor)))
+  }
+
+  func highlightedHTML(_ code: String, language: String) -> String? {
+    guard let context = javascriptContext() else { return nil }
+    let result = highlightResult(code, language: language, context: context)
+    // safe mode での再実行は内部の失敗を errorRaised に入れるため、素のテキストを成功として扱わない。
+    guard context.exception == nil,
+      let errorRaised = result?.objectForKeyedSubscript("errorRaised"),
+      errorRaised.isUndefined || errorRaised.isNull,
+      let value = result?.objectForKeyedSubscript("value"), value.isString
+    else { return nil }
+    return value.toString()
   }
 
   private func highlightResult(_ code: String, language: String, context: JSContext) -> JSValue? {

@@ -240,12 +240,14 @@ EOS
 }
 
 # socket 上で session_path が使い捨ての Project と一致する session を名前と改行で出す。
-# server が無いのは「消すものが無い」なので成功にする。それ以外の失敗は 1 を返す。
+# open が呼び出し元の TMUX_TMPDIR をアプリへ渡し、同じ socket ディレクトリを見るため (#861 の実測)、
+# server が無い場合も socket ファイルが無い場合も「消すものが無い」と判断できる。
 selftest_project_sessions() {
   local socket="$1" project="$2" output name path
   if ! output=$(env -u TMUX tmux -L "$socket" list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>&1); then
     case "$output" in
       *"no server running"*) return 0 ;;
+      *"error connecting to"*"(No such file or directory)"*) return 0 ;;
     esac
     info "tmux -L ${socket} の list-sessions に失敗しました: $output"
     return 1

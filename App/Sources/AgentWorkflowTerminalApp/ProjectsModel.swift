@@ -45,6 +45,7 @@ final class ProjectsModel: ObservableObject {
   private let startup = DetachedOnceTask()
   private var globalHotKey: GlobalHotKey?
   var hostControlServer: HostControlSocketServer?
+  var hostControlActivity: (any NSObjectProtocol)?
   var pendingHostControl: Task<HostControlResponse, Never>?
   let hostControlEnvironment = HostControlEnvironmentTask()
 

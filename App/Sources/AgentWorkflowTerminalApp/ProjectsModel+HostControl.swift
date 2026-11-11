@@ -25,6 +25,10 @@ extension ProjectsModel {
         return await self.enqueueHostControl(request)
       }
       hostControlServer = server
+      // App Nap 中に CPU が混むと scan と応答が進まず、hostctl が 30 秒の期限に当たる (#868 で実測)。
+      hostControlActivity = ProcessInfo.processInfo.beginActivity(
+        options: .userInitiatedAllowingIdleSystemSleep,
+        reason: "hostctl の要求に応答するため")
     } catch {
       let detail: String
       switch error as? HostControlSocketError {

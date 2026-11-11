@@ -111,24 +111,25 @@ private struct OverviewProjectSection: View {
     // Section の header にしない。.sidebar の header は .collapsible(false) を付けても、右クリックの
     // メニューの後にマウスを載せると標準の開閉マークを出した (実測 2026-11-11、macOS 27)。
     Section {
-      HStack {
-        Button {
-          isExpanded.wrappedValue.toggle()
-        } label: {
+      // onTapGesture にしない。System Events のクリックは onTapGesture を発火させず、UI 確認で押せない。
+      Button {
+        isExpanded.wrappedValue.toggle()
+      } label: {
+        HStack {
           Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
             .frame(width: 16, height: 16)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-        .help(disclosureLabel)
-        HStack {
-          Text(model.project.displayName)
-          Spacer()
-          if showsAttentionCount {
-            Text("要対応 \(attentionCount)")
+          HStack {
+            Text(model.project.displayName)
+            Spacer()
+            if showsAttentionCount {
+              Text("要対応 \(attentionCount)")
+            }
           }
         }
+        .contentShape(.rect)
       }
+      .buttonStyle(.plain)
+      .help(disclosureLabel)
       .font(.subheadline.weight(.bold))
       .foregroundStyle(.secondary)
       .accessibilityElement(children: .ignore)

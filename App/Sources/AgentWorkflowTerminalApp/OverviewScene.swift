@@ -107,32 +107,54 @@ private struct OverviewProjectSection: View {
     let overview = makeAgentPaneOverview([input]).first
     let attentionCount = needsAttentionCount(overview)
     let showsAttentionCount = !isExpanded.wrappedValue && attentionCount > 0
-    Section(isExpanded: isExpanded) {
-      ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
-        worktreeRows(projectRoot, title: nil)
-      }
-      ForEach(overview?.tasks ?? [], id: \.session) { task in
-        worktreeRows(task, title: model.sessionTitle(task.session))
-      }
-    } header: {
+    let disclosureLabel = "\(model.project.displayName) を\(isExpanded.wrappedValue ? "閉じる" : "開く")"
+    // Section の header にしない。.sidebar の header は .collapsible(false) を付けても、右クリックの
+    // メニューの後にマウスを載せると標準の開閉マークを出した (実測 2026-11-11、macOS 27)。
+    Section {
       HStack {
-        Text(model.project.displayName)
-        Spacer()
-        if showsAttentionCount {
-          Text("要対応 \(attentionCount)")
+        Button {
+          isExpanded.wrappedValue.toggle()
+        } label: {
+          Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
+            .frame(width: 16, height: 16)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .help(disclosureLabel)
+        HStack {
+          Text(model.project.displayName)
+          Spacer()
+          if showsAttentionCount {
+            Text("要対応 \(attentionCount)")
+          }
         }
       }
+      .font(.subheadline.weight(.bold))
+      .foregroundStyle(.secondary)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         showsAttentionCount
           ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
           : model.project.displayName
       )
+      .accessibilityAddTraits(.isHeader)
+      .accessibilityAction(named: disclosureLabel) {
+        isExpanded.wrappedValue.toggle()
+      }
+      .contentShape(.rect)
       .contextMenu {
         OverviewProjectMenu(
           model: model, selectProject: selectProject, agentCommand: agentCommand,
           onSetAgentCommand: onSetAgentCommand,
           requestUnregister: requestUnregister)
+      }
+      if isExpanded.wrappedValue {
+        ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
+          worktreeRows(projectRoot, title: nil)
+        }
+        ForEach(overview?.tasks ?? [], id: \.session) { task in
+          worktreeRows(task, title: model.sessionTitle(task.session))
+        }
       }
     }
   }
@@ -180,15 +202,14 @@ private struct OverviewProjectSection: View {
         .foregroundStyle(isDisplayed ? .primary : .secondary)
       }
       .buttonStyle(.plain)
-      .listRowBackground(isDisplayed ? OverviewDisplayedRowBackground() : nil)
       .help("このセッションを表示")
-      .accessibilityLabel(isDisplayed ? "表示中 \(title)" : title)
+      .accessibilityLabel(title)
       .contextMenu {
         sessionHeadingMenu(worktree)
       }
     }
     ForEach(worktree.rows, id: \.rowID) { row in
-      let showsDisplayedMark = title == nil && isDisplayed && row == worktree.rows.first
+      let showsDisplayedMark = isDisplayed && row == worktree.rows.first
       switch row {
       case .pane(let pane):
         OverviewPaneRow(

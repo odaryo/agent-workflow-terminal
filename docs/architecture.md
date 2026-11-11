@@ -484,8 +484,11 @@ refが更新されることに依存する。worktreeはrefを共有するので
   この条件を掛けない(squashの検出は、branchの変更内容が空でないことを既に求めている)。この条件が覆うのは、
   既定branchのfirst-parentの列の上から作ったbranchだけである。列の外のcommit(`--no-ff`でmerge済みの
   branchの先端など)から作ったcommitの無いbranchや、既定branchが第1親を別の系列とするmerge(foxtrot merge)をfast-forwardで取り込んだ後の
-  branchには印が出る。逆に、無関係な履歴を取り込んだbranchなどでは、マージ済みでも印が出ないことがある
-  (Issue #912、#913)。
+  branchには印が出る。逆に、shallowなrepositoryでは、`git rev-list --first-parent`の列がshallowの境界で
+  途切れて列の上にあるかを決められないため、マージ済みでも印が出ないことがある(Issue #912)。
+  既定branchから先端までのfirst-parentの列が長い大きなrepositoryでも、同じく印が出ないことがある
+  (Issue #913)。無関係な履歴を`--allow-unrelated-histories`で取り込んだbranchや、commit日時のずれで走査が
+  rootまで行き過ぎたbranchには、印が出る(git 2.54.0で計測、Issue #912)。
 - 判定不能も、branch先端と既定branch先端の組が前回と同じ間は判定し直さない。判定不能のworktreeで数秒の
   走査が観測のたびに回り続けるのを避けるためである。取り消しで終わった判定は記録しない。
 - 重い判定はアプリ全体で1件ずつ順に回し、UIを止めない。判定の1周の始めに全worktreeのbranch先端を読み、

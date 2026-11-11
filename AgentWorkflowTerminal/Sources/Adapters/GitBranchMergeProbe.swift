@@ -59,19 +59,39 @@ public struct GitBranchMergeProbe: BranchMergeProbing {
     } catch {
       return nil
     }
-    return Self.isFirstParent(tip, ofLastLineIn: output)
+    switch Self.isFirstParent(tip, ofLastLineIn: output) {
+    case .onChain(let result): return result
+    case .parentless:
+      do {
+        let shallow = try await judge.runner.run(.isShallowRepository()).stdout
+        return shallow.trimmingCharacters(in: .whitespacesAndNewlines) == "false" ? false : nil
+      } catch {
+        return nil
+      }
+    case nil: return nil
+    }
   }
 
-  /// 出力が空 (destination が tip の祖先) と親の無い行は、`false` ではなく判定できなかった (`nil`)
-  /// として扱い、印を出さない側へ倒す。親の無い行は ancestor でマージ済みの後でも起きる —— 無関係な
-  /// 履歴を `--allow-unrelated-histories` で取り込んだ branch や、commit 日時のずれで走査が root まで
-  /// 行き過ぎた場合で、正しい答えは `false` だった (git 2.54.0 で計測、#879 のレビュー。#912)。
-  static func isFirstParent(_ tip: CommitObjectID, ofLastLineIn output: String) -> Bool? {
+  private enum FirstParentResult {
+    case onChain(Bool)
+    case parentless
+  }
+
+  /// tip が first-parent の列の上にあれば、除外側の tip の子で walk は止まる。そのため最後が親の無い
+  /// 行なら、shallow でないと確かめられた場合に限り、tip は列の上に無い (`false`) と確定できる。
+  /// 親の無い行は、無関係な履歴を `--allow-unrelated-histories` で merge した場合や、commit 日時の
+  /// ずれで走査が root まで行き過ぎた場合に現れる。shallow の境界も親の無い行に見えるので、shallow
+  /// なら判定不能にする。`DiffSnapshotBuilder` が共通祖先の不在を断定する前に shallow でないことを
+  /// 求めるのと同じ向き (Issue #912)。
+  private static func isFirstParent(
+    _ tip: CommitObjectID, ofLastLineIn output: String
+  ) -> FirstParentResult? {
     guard let line = output.split(separator: "\n").last else { return nil }
     let fields = line.split(separator: " ", omittingEmptySubsequences: false)
       .map { CommitObjectID(String($0)) }
-    guard fields.count >= 2, fields.allSatisfy({ $0 != nil }) else { return nil }
-    return fields[1] == tip
+    guard fields.allSatisfy({ $0 != nil }) else { return nil }
+    guard fields.count >= 2 else { return .parentless }
+    return .onChain(fields[1] == tip)
   }
 
   private func resolve(_ revision: GitRevision) async -> CommitObjectID? {

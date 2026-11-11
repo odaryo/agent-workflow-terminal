@@ -187,6 +187,10 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["merge-base", "--is-ancestor", ancestor.rawValue, descendant.rawValue])
   }
 
+  static func isShallowRepository() -> Self {
+    Self(arguments: ["rev-parse", "--is-shallow-repository"])
+  }
+
   public static func log(
     range: GitRevisionRange? = nil,
     maxCount: Int? = nil,

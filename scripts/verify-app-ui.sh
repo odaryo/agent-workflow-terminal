@@ -32,6 +32,7 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「De
   value <部分文字列>     フォーカス中の要素の値にその文字列があれば成功、無ければ失敗
   quit                  起動したアプリを終了する
   selftest [--no-build] 行選択が効くところまでを1コマンドで通す (ハーネス自身の動作確認)
+                        自分が起動したインスタンスだけを終了する。
                         実行ごとに /private/tmp/awt-ui-verify/<$PWD の basename>/selftest.XXXXXX へ
                         使い捨てのリポジトリと Application Support を作り、終わったら socket 上の
                         その Project の session とともに消す。AWT_UI_APPLICATION_SUPPORT_DIR は
@@ -57,6 +58,8 @@ EOF
 }
 
 APP_NAME="AgentWorkflowTerminalApp"
+APP_BUNDLE_COPY=""
+APP_LAUNCH_STARTED=0
 SELFTEST_SCRATCH=""
 SELFTEST_PROJECT=""
 SELFTEST_TMUX_SOCKET=""
@@ -175,6 +178,22 @@ app_quit() {
   sleep 1
 }
 
+# 名前一致では別のレーンや開発版のインスタンスも止めてしまうため、写しの実行パスで絞る (#863)。
+selftest_quit_app() {
+  [ "$APP_LAUNCH_STARTED" -eq 1 ] || return 0
+  local pids pid executable found=0
+  pids=$(pgrep -x "$APP_NAME" || true)
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    executable=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+    [ "$executable" = "$APP_BUNDLE_COPY/Contents/MacOS/$APP_NAME" ] || continue
+    kill -TERM "$pid" 2>/dev/null || true
+    found=1
+  done <<<"$pids"
+  [ "$found" -eq 1 ] || return 0
+  sleep 1
+}
+
 # 権限の拒否 (-25211) は待っても直らず、アプリは起動しているので「ウィンドウが開かない」と
 # 区別する。$(...) の中の die は subshell しか終わらせないので、結果はグローバルで返す。
 read_app_window_count() {
@@ -207,7 +226,8 @@ app_launch() {
   # 逸らせない。写しの bundle id を変えて、開発版と別のレーンの設定に書かないようにする (#598)。
   local bundle_id
   bundle_id="dev.local.agentworkflowterminal.ui-verify.$(printf '%s' "$lane" | LC_ALL=C tr -c 'A-Za-z0-9.-' '-')"
-  local bundle_copy="/private/tmp/awt-ui-verify/${lane}/AgentWorkflowTerminal.app"
+  APP_BUNDLE_COPY="/private/tmp/awt-ui-verify/${lane}/AgentWorkflowTerminal.app"
+  local bundle_copy="$APP_BUNDLE_COPY"
   mkdir -p "$(dirname -- "$bundle_copy")"
   rm -rf -- "$bundle_copy"
   cp -R "$PWD/$BUNDLE_REL" "$bundle_copy"
@@ -216,6 +236,8 @@ app_launch() {
   info "Application Support: $application_support"
   info "UserDefaults: defaults read $bundle_id で観測できます"
   info "tmux server: env -u TMUX tmux -L $tmux_socket_name list-sessions で観測できます"
+  # 起動後のウィンドウ待ちでも die し得るので、成功後ではなく open の直前に印を立てる (#863)。
+  APP_LAUNCH_STARTED=1
   open -n -a "$bundle_copy" --env AWT_APPLICATION_SUPPORT_DIR="$application_support" \
     --env AWT_TMUX_SOCKET_NAME="$tmux_socket_name" --args --project "$project"
   # プロセスの存在ではなくウィンドウの数で待つ。`count of windows` はプロセスさえあれば
@@ -309,7 +331,7 @@ selftest() {
   __awt_finished=0
   __awt_on_exit() {
     local rc=$?
-    app_quit
+    selftest_quit_app || true
     selftest_kill_project_sessions || { [ "$rc" -ne 0 ] || rc=1; }
     selftest_remove_scratch || { [ "$rc" -ne 0 ] || rc=1; }
     [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1

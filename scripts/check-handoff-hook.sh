@@ -9,8 +9,11 @@ source "$SCRIPT_DIR/lib.sh"
 require_cmd tmux python3 git
 
 # 利用者の core.hooksPath / init.templateDir が fixture の作成で hook を動かし、system や global の設定が hook の判定も左右するため。
+# 環境変数で渡る設定 (GIT_CONFIG_PARAMETERS / GIT_CONFIG_COUNT) と、git の hook の中から呼ばれたときの
+# GIT_INDEX_FILE なども、同じく fixture の外へ書き込ませたり hook を動かしたりする (#820 のレビューの計測)。
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
-unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_TEMPLATE_DIR
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_TEMPLATE_DIR GIT_INDEX_FILE GIT_OBJECT_DIRECTORY \
+  GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_NAMESPACE GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT
 
 HOOK="$SCRIPT_DIR/../plugins/awt-handoff/hooks/session-start.sh"
 CONFIG="$SCRIPT_DIR/../plugins/awt-handoff/hooks/hooks.json"
@@ -171,7 +174,7 @@ expect_hook 'GIT_DIR を付けた linked worktree では出力しない' "$work_
   "$work_dir/input" GIT_DIR="$work_dir/project/.git"
 expect_hook 'GIT_DIR を付けた git の外では出力しない' "$work_dir/outside" "$work_dir/empty" \
   "$work_dir/input" GIT_DIR="$work_dir/project/.git"
-expect_hook '空の GIT_DIR を付けた Project Root では出力しない' "$work_dir/project" "$work_dir/empty" \
+expect_hook '空の GIT_DIR を付けた Project Root では出力しない (git 自身が失敗する)' "$work_dir/project" "$work_dir/empty" \
   "$work_dir/input" GIT_DIR=
 expect_hook 'GIT_WORK_TREE を付けた Project Root では出力しない' "$work_dir/project" "$work_dir/empty" \
   "$work_dir/input" GIT_WORK_TREE="$work_dir/project"

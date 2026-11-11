@@ -1321,16 +1321,39 @@ group_tempfile_trap_reset() {
 
 # bash 3.2 の ERR trap の中の $LINENO は、関数の定義行など失敗した行ではない値を返すので出さない。
 # 呼び出しの連鎖の行番号 (BASH_LINENO) は正しい。
+# 実測 bash 3.2.57: 単純コマンドで終わるパイプラインで止まると、BASH_COMMAND は最後の要素になり、
+# 失敗した要素とは限らない。関数の return で止まると BASH_COMMAND は return の文になり、連鎖は返した
+# 関数ではなく、その呼び出し元かそれより上で終わるので、返した関数の名前は trap からは取れない。
 record_stop() {
   trap - ERR
-  local status="$1" command="$2" chain="" i
+  local status="$1" command="$2" pipestatus="${3:-}" chain="" note="" rightmost="" i
+  local -a codes=()
   # set -E の ERR trap は、外側が失敗を許す $(...) の中でも発火する。止まっていない群に誤報を出さない。
   [[ "$BASH_SUBSHELL" -eq "$group_subshell" ]] || return 0
   for ((i = ${#FUNCNAME[@]} - 1; i >= 2; i--)); do
     chain+="${FUNCNAME[i]} ${BASH_LINENO[i - 1]}行 → "
   done
   chain+="${FUNCNAME[1]:-}"
-  printf '止まったコマンド: %s (exit %s)、呼び出し: %s\n' "${command//$'\n'/ }" "$status" "$chain" \
+  read -r -a codes <<<"$pipestatus" || true
+  if [[ "${#codes[@]}" -ge 2 ]]; then
+    for ((i = ${#codes[@]} - 1; i >= 0; i--)); do
+      if [[ "${codes[i]}" != 0 ]]; then
+        rightmost="${codes[i]}"
+        break
+      fi
+    done
+  fi
+  # PIPESTATUS が止まった status と合わないときは、どの要素で止まったかを確かめられないので足さない。
+  if [[ "${#codes[@]}" -ge 2 && "$rightmost" == "$status" ]]; then
+    note="。パイプラインの最後の要素で、各要素の exit は ${pipestatus}"
+  elif [[ "$command" == return || "$command" == "return "* ]]; then
+    if [[ -n "${FUNCNAME[1]:-}" ]]; then
+      note="。${FUNCNAME[1]} から呼んだ先のどこかの関数の return で、その関数の名前は出せない"
+    else
+      note="。どこかの関数の return で、その関数の名前は出せない"
+    fi
+  fi
+  printf '止まったコマンド: %s (exit %s%s)、呼び出し: %s\n' "${command//$'\n'/ }" "$status" "$note" "$chain" \
     >"$AWT_TEST_DIR/stopped" || true
 }
 
@@ -1344,7 +1367,8 @@ run_group() {
   failures=0
   group_subshell=$BASH_SUBSHELL
   set -E
-  trap 'record_stop "$?" "$BASH_COMMAND"' ERR
+  # PIPESTATUS は record_stop の中では trap - ERR などで上書きされるので、trap の文字列で展開する。
+  trap 'record_stop "$?" "$BASH_COMMAND" "${PIPESTATUS[*]}"' ERR
   "$@"
   printf '%s %s\n' "$checked" "$failures" >"$AWT_TEST_DIR/result"
 }

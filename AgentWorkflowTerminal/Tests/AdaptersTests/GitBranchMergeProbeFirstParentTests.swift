@@ -15,14 +15,12 @@ private let sideHex = String(repeating: "e", count: 40)
 @Suite("Issue #879 先端が既定 branch の first-parent の列の上にあるかを git で読む")
 struct GitBranchMergeProbeFirstParentTests {
   @Test(
-    "最後の行の第1親が先端なら true、第2親以降・別の commit・親の無い行なら false",
+    "最後の行の第1親が先端なら true、第2親以降・別の commit なら false",
     arguments: [
       ("\(destinationHex) \(middleHex)\n\(middleHex) \(tipHex)\n", true),
       ("\(destinationHex) \(middleHex) \(sideHex)\n\(middleHex) \(tipHex) \(sideHex)\n", true),
       ("\(destinationHex) \(middleHex) \(tipHex)\n", false),
       ("\(destinationHex) \(middleHex)\n\(middleHex) \(sideHex)\n", false),
-      ("\(destinationHex) \(middleHex)\n\(middleHex)\n", false),
-      ("\(destinationHex)\n", false),
     ] as [(String, Bool)])
   func readsFirstParentOfTheLastLine(output: String, expected: Bool) async throws {
     let git = FirstParentGit(revList: .init(exitCode: 0, stdout: output, stderr: ""))
@@ -38,6 +36,54 @@ struct GitBranchMergeProbeFirstParentTests {
       ])
   }
 
+  @Test(
+    "親の無い最後の行は shallow でないと確認できたときだけ false (#912)",
+    arguments: [
+      "\(destinationHex) \(middleHex)\n\(middleHex)\n",
+      "\(destinationHex)\n",
+    ])
+  func confirmsParentlessLineInFullRepository(output: String) async throws {
+    let git = FirstParentGit(
+      revList: .init(exitCode: 0, stdout: output, stderr: ""),
+      revParse: .init(exitCode: 0, stdout: "false\n", stderr: ""))
+    let probe = try Self.probe(git)
+
+    #expect(
+      await probe.isOnFirstParentChain(
+        tip: try Self.oid(tipHex), destination: try Self.oid(destinationHex)) == false)
+    #expect(
+      await git.commands == [
+        ["rev-list", "--first-parent", "--parents", destinationHex, "^" + tipHex],
+        ["rev-parse", "--is-shallow-repository"],
+      ])
+  }
+
+  @Test(
+    "親の無い最後の行は shallow・判定失敗・未知のオプションなら nil (#912)",
+    arguments: [
+      "\(destinationHex) \(middleHex)\n\(middleHex)\n",
+      "\(destinationHex)\n",
+    ],
+    [
+      ProcessRunResult(exitCode: 0, stdout: "true\n", stderr: ""),
+      ProcessRunResult(exitCode: 128, stdout: "", stderr: "fatal: not a git repository\n"),
+      ProcessRunResult(exitCode: 0, stdout: "--is-shallow-repository\n", stderr: ""),
+    ])
+  func leavesParentlessLineUndetermined(output: String, revParse: ProcessRunResult) async throws {
+    let git = FirstParentGit(
+      revList: .init(exitCode: 0, stdout: output, stderr: ""), revParse: revParse)
+    let probe = try Self.probe(git)
+
+    #expect(
+      await probe.isOnFirstParentChain(
+        tip: try Self.oid(tipHex), destination: try Self.oid(destinationHex)) == nil)
+    #expect(
+      await git.commands == [
+        ["rev-list", "--first-parent", "--parents", destinationHex, "^" + tipHex],
+        ["rev-parse", "--is-shallow-repository"],
+      ])
+  }
+
   @Test("先端と既定 branch の先端が同じなら true")
   func sameCommitIsOnTheChain() async throws {
     let git = FirstParentGit(revList: .init(exitCode: 0, stdout: "", stderr: ""))
@@ -45,6 +91,7 @@ struct GitBranchMergeProbeFirstParentTests {
     let tip = try Self.oid(tipHex)
 
     #expect(await probe.isOnFirstParentChain(tip: tip, destination: tip) == true)
+    #expect(await git.commands.isEmpty)
   }
 
   /// 出力が空なら既定 branch が先端の祖先である可能性があり、first-parent の列の上にあるかは
@@ -63,6 +110,10 @@ struct GitBranchMergeProbeFirstParentTests {
     #expect(
       await probe.isOnFirstParentChain(
         tip: try Self.oid(tipHex), destination: try Self.oid(destinationHex)) == nil)
+    #expect(
+      await git.commands == [
+        ["rev-list", "--first-parent", "--parents", destinationHex, "^" + tipHex]
+      ])
   }
 
   @Test("replace ref と grafts を無効にして rev-list を呼ぶ")
@@ -99,14 +150,16 @@ struct GitBranchMergeProbeFirstParentTests {
   }
 }
 
-/// `rev-list` にだけ決めた結果を返し、ほかのコマンドは起動の失敗にする git。
+/// 想定外のコマンドを成功させると、不要な問い合わせをテストが見逃すため起動の失敗にする。
 private actor FirstParentGit: ProcessRunning {
   private let revList: ProcessRunResult
+  private let revParse: ProcessRunResult?
   private(set) var commands: [[String]] = []
   private(set) var environments: [[String: String]] = []
 
-  init(revList: ProcessRunResult) {
+  init(revList: ProcessRunResult, revParse: ProcessRunResult? = nil) {
     self.revList = revList
+    self.revParse = revParse
   }
 
   func run(
@@ -116,9 +169,8 @@ private actor FirstParentGit: ProcessRunning {
     let command = commandArguments(arguments)
     commands.append(command)
     environments.append(environment)
-    guard command.first == "rev-list" else {
-      throw .launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: "")
-    }
-    return revList
+    if command.first == "rev-list" { return revList }
+    if command == ["rev-parse", "--is-shallow-repository"], let revParse { return revParse }
+    throw .launchFailed(executableURL: URL(fileURLWithPath: "/unexpected"), message: "")
   }
 }

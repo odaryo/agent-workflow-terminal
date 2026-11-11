@@ -74,9 +74,12 @@ struct GitBranchMergeProbeIntegrationTests {
 
 /// branch は `topic`。`Advanced` の付く場合は、最後に既定 branch を1つ進め、先端と既定 branch の
 /// 先端が同じという近道を通らずに rev-list の経路を通す。
-/// `noffAdvanced` と `octopus` は複数行、`unrelated` と `skewedNoff` は親の無い最終行を
-/// 扱う。日時のずれは7 commit で root まで行き過ぎ、6以下では行き過ぎなかったため、
-/// 余裕を取って10 commit にする (git 2.54.0 で計測、#912)。
+/// `noffAdvanced`・`octopus`・`skewedOnChain`・`shallowSecondPath` は複数行、`unrelated`・
+/// `skewedNoff`・`shallowSecondPath` は親の無い最終行を扱う。`shallowSecondPath` の最終行は
+/// root ではなく shallow の境界なので、列の上に無いと確定できない (#912)。
+/// `skewedNoff` の日時のずれは7 commit で root まで行き過ぎ、6以下では行き過ぎなかったため、
+/// 余裕を取って10 commit にする。`skewedOnChain` は未来の tip から過去へ12 commit 進めても
+/// tip の子で止まる対照 (git 2.54.0 で計測)。
 enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sendable {
   case fresh
   case freshAdvanced
@@ -86,7 +89,8 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
   case octopus
   case unrelated
   case skewedNoff
-  case skewedFfmergeAdvanced
+  case skewedOnChain
+  case shallowSecondPath
   case ffmerge
   case ffmergeAdvanced
   case squash
@@ -98,16 +102,17 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
     self == .squash ? .squash : .ancestor
   }
 
-  var expectedOnFirstParentChain: Bool {
+  var expectedOnFirstParentChain: Bool? {
     switch self {
     case .noff, .noffAdvanced, .octopus, .unrelated, .skewedNoff, .squash: false
-    case .fresh, .freshAdvanced, .ffsync, .ffmerge, .ffmergeAdvanced, .skewedFfmergeAdvanced,
+    case .fresh, .freshAdvanced, .ffsync, .ffmerge, .ffmergeAdvanced, .skewedOnChain,
       .nolog:
       true
+    case .shallowSecondPath: nil
     }
   }
 
-  var expectedMark: Bool { !expectedOnFirstParentChain }
+  var expectedMark: Bool { expectedOnFirstParentChain == false || self == .squash }
 
   func arrange(in repository: GitTestRepository) async throws {
     switch self {
@@ -127,8 +132,8 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
       if self == .noffAdvanced {
         try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
       }
-    case .octopus, .unrelated, .skewedNoff, .skewedFfmergeAdvanced:
-      try await arrangeSideHistoryMerge(in: repository)
+    case .octopus, .unrelated, .skewedNoff, .skewedOnChain, .shallowSecondPath:
+      try await arrangeHistoryEdgeCase(in: repository)
     case .ffmerge, .ffmergeAdvanced:
       try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.git(["merge", "-q", "--ff-only", "topic"])
@@ -147,10 +152,19 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
     }
   }
 
-  private func arrangeSideHistoryMerge(in repository: GitTestRepository) async throws {
+  private func arrangeHistoryEdgeCase(in repository: GitTestRepository) async throws {
+    if self == .shallowSecondPath {
+      try await arrangeShallowSecondPath(in: repository)
+      return
+    }
+    if self == .skewedOnChain {
+      try await arrangeSkewedOnChain(in: repository)
+      return
+    }
     if self == .octopus {
       try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.addProbeBranchWorktree("other", commits: [["b.txt": "b1"]])
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
       try await repository.git(["merge", "-q", "--no-ff", "-m", "oct", "topic", "other"])
       return
     }
@@ -165,18 +179,57 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
         ["merge", "-q", "--allow-unrelated-histories", "--no-ff", "-m", "merge", "topic"])
       return
     }
-    if self == .skewedNoff {
-      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
-    }
+    try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
     try await repository.addProbeBranchWorktree(
       "topic", commits: (1...10).map { ["a.txt": "a\($0)"] },
       commitDate: "2001-01-01T00:00:00Z")
-    if self == .skewedNoff {
-      try await repository.git(["merge", "-q", "--no-ff", "-m", "merge topic", "topic"])
-    } else {
-      try await repository.git(["merge", "-q", "--ff-only", "topic"])
-      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+    try await repository.git(["merge", "-q", "--no-ff", "-m", "merge topic", "topic"])
+  }
+
+  private func arrangeSkewedOnChain(in repository: GitTestRepository) async throws {
+    try await repository.git(
+      ["commit", "-q", "--allow-empty", "-m", "future topic tip"],
+      additionalEnvironment: [
+        "GIT_COMMITTER_DATE": "2035-01-01T00:00:00Z",
+        "GIT_AUTHOR_DATE": "2035-01-01T00:00:00Z",
+      ])
+    try await repository.git(["branch", "topic"])
+    for index in 1...12 {
+      try await repository.git(
+        ["commit", "-q", "--allow-empty", "-m", "past main commit \(index)"],
+        additionalEnvironment: [
+          "GIT_COMMITTER_DATE": "2001-01-01T00:00:00Z",
+          "GIT_AUTHOR_DATE": "2001-01-01T00:00:00Z",
+        ])
     }
+  }
+
+  private func arrangeShallowSecondPath(in repository: GitTestRepository) async throws {
+    let origin = repository.root.appending(path: "origin")
+    try FileManager.default.createDirectory(at: origin, withIntermediateDirectories: true)
+    try await repository.git(["init", "-q", "-b", "main"], in: "origin")
+    for message in ["init", "A", "T"] {
+      try await repository.git(
+        ["commit", "-q", "--allow-empty", "-m", message], in: "origin")
+    }
+    try await repository.git(["branch", "topic"], in: "origin")
+    let result = try await repository.gitExitCode(["rev-parse", "topic"], in: "origin")
+    try #require(result.exitCode == 0)
+    let tip = try #require(CommitObjectID(result.stdout.trimmingCharacters(in: .newlines)))
+    for index in 1...4 {
+      try await repository.git(
+        ["commit", "-q", "--allow-empty", "-m", "B\(index)"], in: "origin")
+    }
+    try await repository.git(["checkout", "-q", "-b", "side", "topic"], in: "origin")
+    try await repository.git(["commit", "-q", "--allow-empty", "-m", "X"], in: "origin")
+    try await repository.git(["checkout", "-q", "main"], in: "origin")
+    try await repository.git(["merge", "-q", "--no-ff", "-m", "M", "side"], in: "origin")
+
+    try await repository.git([
+      "fetch", "-q", "--depth", "3", origin.absoluteString, "main", "topic",
+    ])
+    try await repository.git(["reset", "-q", "--hard", "FETCH_HEAD"])
+    try await repository.git(["branch", "topic", tip.rawValue])
   }
 }
 

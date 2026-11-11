@@ -113,6 +113,61 @@ struct HostControlTests {
     #expect(try HostControlProtocol.decodeResponse(responseLine).get() == response)
   }
 
+  @Test("呼び出し元paneを持つ要求はfromPaneをキー順に入れて往復する")
+  func requestWithFromPaneRoundTrip() throws {
+    let request = HostControlRequest.openWorktree(
+      directory: "/path", fromPane: PaneID(rawValue: "%22"))
+    let line = #"{"command":"worktree.open","directory":"/path","fromPane":"%22","version":1}"#
+    #expect(HostControlProtocol.encode(request) == line)
+    #expect(try HostControlProtocol.decodeRequest(line).get() == request)
+    #expect(
+      try HostControlProtocol.decodeRequest(HostControlProtocol.encode(request)).get() == request)
+  }
+
+  @Test("呼び出し元paneが無い要求はfromPaneのキーを省く")
+  func requestWithoutFromPaneOmitsKey() {
+    let line = #"{"command":"worktree.open","directory":"/path","version":1}"#
+    #expect(
+      HostControlProtocol.encode(.openWorktree(directory: "/path", fromPane: nil)) == line)
+    #expect(HostControlProtocol.encode(.openWorktree(directory: "/path")) == line)
+  }
+
+  @Test("fromPaneがnullの要求は呼び出し元paneなしとして受け付ける")
+  func acceptsNullFromPane() throws {
+    let line = #"{"command":"worktree.open","directory":"/path","fromPane":null,"version":1}"#
+    #expect(
+      try HostControlProtocol.decodeRequest(line).get()
+        == .openWorktree(directory: "/path", fromPane: nil))
+  }
+
+  @Test(
+    "fromPaneの形式が%と10進数字でなければ項目名を示して拒否する",
+    arguments: [
+      #""""#,
+      #""%""#,
+      #""22""#,
+      #""%2a""#,
+      #""%２""#,
+      #""%-1""#,
+      #""%22\n""#,
+      #""%22 ""#,
+      #"" %22""#,
+      #""%%22""#,
+      "22",
+      "true",
+      #"["%22"]"#,
+    ]
+  )
+  func rejectsInvalidFromPane(wireValue: String) {
+    let line =
+      #"{"command":"worktree.open","directory":"/path","fromPane":"# + wireValue + #","version":1}"#
+    guard case .failure(let error) = HostControlProtocol.decodeRequest(line) else {
+      Issue.record("不正なfromPaneを受け付けた: \(line)")
+      return
+    }
+    #expect(error.message.contains("fromPane"))
+  }
+
   @Test("不正JSONのエラーにデコーダの内部表現を出さない", arguments: ["{", "{}"])
   func readableDecodingErrors(line: String) {
     guard case .failure(let requestError) = HostControlProtocol.decodeRequest(line),
@@ -128,7 +183,9 @@ struct HostControlTests {
   @Test("必須引数を解釈する")
   func parsesDirectory() throws {
     let result = HostControlCommandLine.parse(["worktree", "open", "--directory", "/two words/日本語"])
-    #expect(try result.get() == .openWorktree(directory: "/two words/日本語", socket: nil))
+    #expect(
+      try result.get()
+        == .openWorktree(directory: "/two words/日本語", socket: nil, fromPane: nil))
   }
 
   @Test("socket指定を解釈する")
@@ -136,7 +193,48 @@ struct HostControlTests {
     let result = HostControlCommandLine.parse(
       ["worktree", "open", "--directory", "/path", "--socket", "/private/tmp/host.sock"])
     #expect(
-      try result.get() == .openWorktree(directory: "/path", socket: "/private/tmp/host.sock"))
+      try result.get()
+        == .openWorktree(directory: "/path", socket: "/private/tmp/host.sock", fromPane: nil))
+  }
+
+  @Test(
+    "呼び出し元paneの指定を前後どちらに置いても解釈する",
+    arguments: [
+      ["worktree", "open", "--from-pane", "%22", "--directory", "/path"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%22"],
+      ["worktree", "open", "--directory", "/path", "--socket", "/s.sock", "--from-pane", "%22"],
+      ["worktree", "open", "--from-pane", "%22", "--socket", "/s.sock", "--directory", "/path"],
+    ]
+  )
+  func parsesFromPane(arguments: [String]) throws {
+    let socket: String? = arguments.contains("--socket") ? "/s.sock" : nil
+    #expect(
+      try HostControlCommandLine.parse(arguments).get()
+        == .openWorktree(directory: "/path", socket: socket, fromPane: PaneID(rawValue: "%22")))
+  }
+
+  @Test(
+    "呼び出し元paneの重複、値の欠落、不正な形式を拒否する",
+    arguments: [
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%22", "--from-pane", "%22"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%22", "--from-pane", "%23"],
+      ["worktree", "open", "--directory", "/path", "--from-pane"],
+      ["worktree", "open", "--from-pane", "--directory", "/path"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", ""],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "22"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%2a"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%２"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%-1"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%22\n"],
+      ["worktree", "open", "--directory", "/path", "--from-pane", "%22 "],
+    ]
+  )
+  func rejectsInvalidFromPaneArguments(arguments: [String]) {
+    guard case .failure = HostControlCommandLine.parse(arguments) else {
+      Issue.record("不正な呼び出し元paneの指定を受け付けた: \(arguments)")
+      return
+    }
   }
 
   @Test(

@@ -90,8 +90,20 @@ cat >"$work_dir/hostctl" <<'HOSTCTL'
 #!/usr/bin/env bash
 set -eu
 printf 'called\n' >>"$AWT_TEST_DIR/calls"
+from_pane=""
+from_pane_set=0
+if [[ $# -eq 8 && "$7" == --from-pane ]]; then
+  from_pane="$8"
+  from_pane_set=1
+  set -- "$1" "$2" "$3" "$4" "$5" "$6"
+fi
+printf '%s\n' "$from_pane" >>"$AWT_TEST_DIR/from-pane"
 [[ $# -eq 6 && "$1" == worktree && "$2" == open && "$3" == --directory &&
   "$4" == "$AWT_TEST_DIR" && "$5" == --socket && "$6" == test-socket ]] || exit 2
+if [[ "$from_pane_set" -eq 1 && "${AWT_TEST_OLD_HOSTCTL:-0}" == 1 ]]; then
+  printf '%s\n' '不正な引数です: --from-pane' >&2
+  exit 2
+fi
 if [[ "$AWT_TEST_MODE" == unavailable ]]; then
   printf '%s\n' '{"ok":false,"version":1,"code":"unavailable","message":"app is not running"}' >&2
   exit 69
@@ -149,9 +161,14 @@ export AWT_TEST_DIR="$work_dir"
 export AWT_TEST_MODE=success
 export AWT_TEST_SESSION=success
 export AWT_TEST_AGENT="$work_dir/agent"
+export AWT_TEST_OLD_HOSTCTL=0
+
+# この検査自体が tmux pane の中で動くことがあるので、継承した TMUX_PANE を渡さない。
+# bash 3.2 は set -u の下で空の配列の展開を未定義の参照として止まるので、要素を必ず1つ以上にする。
+pane_env=(-u TMUX_PANE)
 
 H() {
-  env TMUX="$socket_path,0,0" AWT_HOSTCTL=/missing/hostctl AWT_HOSTCTL_SOCKET=wrong-socket "$HANDOFF" "$@"
+  env "${pane_env[@]}" TMUX="$socket_path,0,0" AWT_HOSTCTL=/missing/hostctl AWT_HOSTCTL_SOCKET=wrong-socket "$HANDOFF" "$@"
 }
 
 ng() {
@@ -275,6 +292,136 @@ if [[ ! -s "$work_dir/stdout" && "$(cat "$work_dir/stderr")" == 'invalid argumen
 else
   ng 'hostctl の失敗時の出力が期待と異なります'
 fi
+
+# 引数は呼び出しごとに偽 hostctl が受け取る --from-pane の値 (無ければ空)。末尾の改行まで比べる。
+expect_hostctl_calls() {
+  local label="$1" pane
+  shift
+  : >"$work_dir/want-calls"
+  : >"$work_dir/want-from-pane"
+  for pane in "$@"; do
+    printf 'called\n' >>"$work_dir/want-calls"
+    printf '%s\n' "$pane" >>"$work_dir/want-from-pane"
+  done
+  checked=$((checked + 1))
+  if cmp -s "$work_dir/want-calls" "$work_dir/calls" &&
+    cmp -s "$work_dir/want-from-pane" "$work_dir/from-pane"; then
+    info "OK: $label (hostctl を $# 回呼んだ)"
+  else
+    ng "$label: hostctl の呼び出しが期待と異なります"
+    cat "$work_dir/calls" "$work_dir/from-pane" 2>/dev/null || true
+  fi
+}
+
+reset_hostctl_calls() {
+  rm -f "$work_dir/calls" "$work_dir/from-pane" "$work_dir/argv"
+}
+
+expect_agent_prompt() {
+  local label="$1" want="$2"
+  checked=$((checked + 1))
+  if wait_for_argv && python3 -I -c '
+import pathlib
+import sys
+assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
+' "$work_dir/argv" "$want"; then
+    info "OK: $label (Agent に指示が届いた)"
+  else
+    ng "$label: Agent に指示が届いていません"
+  fi
+}
+
+expect_no_old_hostctl_error() {
+  local label="$1"
+  checked=$((checked + 1))
+  if rg -q -F '不正な引数です' "$work_dir/stderr"; then
+    ng "$label: 古い hostctl の拒否が stderr に出ています"
+  else
+    info "OK: $label (古い hostctl の拒否を出さない)"
+  fi
+}
+
+AWT_TEST_MODE=success
+AWT_TEST_AGENT="$work_dir/agent"
+
+reset_hostctl_calls
+pane_env=(TMUX_PANE=%22)
+AWT_TEST_SESSION=from-pane-valid
+sessions+=(from-pane-valid)
+expect_exit 0 'TMUX_PANE を --from-pane で渡す' --directory "$work_dir" --prompt from-pane
+expect_hostctl_calls 'TMUX_PANE を --from-pane で渡す' %22
+expect_agent_prompt 'TMUX_PANE を --from-pane で渡す' from-pane
+
+reset_hostctl_calls
+pane_env=(-u TMUX_PANE)
+AWT_TEST_SESSION=from-pane-unset
+sessions+=(from-pane-unset)
+expect_exit 0 'TMUX_PANE が無ければ --from-pane を足さない' --directory "$work_dir" --prompt from-pane
+expect_hostctl_calls 'TMUX_PANE が無ければ --from-pane を足さない' ''
+expect_agent_prompt 'TMUX_PANE が無ければ --from-pane を足さない' from-pane
+
+invalid_index=0
+for invalid_pane in 22 %2a ''; do
+  invalid_index=$((invalid_index + 1))
+  reset_hostctl_calls
+  pane_env=("TMUX_PANE=$invalid_pane")
+  AWT_TEST_SESSION="from-pane-invalid-$invalid_index"
+  sessions+=("$AWT_TEST_SESSION")
+  expect_exit 0 "不正な TMUX_PANE '${invalid_pane}' は渡さない" --directory "$work_dir" --prompt from-pane
+  expect_hostctl_calls "不正な TMUX_PANE '${invalid_pane}' は渡さない" ''
+  expect_agent_prompt "不正な TMUX_PANE '${invalid_pane}' は渡さない" from-pane
+done
+
+reset_hostctl_calls
+AWT_TEST_OLD_HOSTCTL=1
+pane_env=(TMUX_PANE=%22)
+AWT_TEST_SESSION=from-pane-old
+sessions+=(from-pane-old)
+expect_exit 0 '古い hostctl には --from-pane を外して呼び直す' --directory "$work_dir" --prompt from-pane
+expect_hostctl_calls '古い hostctl には --from-pane を外して呼び直す' %22 ''
+expect_agent_prompt '古い hostctl には --from-pane を外して呼び直す' from-pane
+expect_no_old_hostctl_error '古い hostctl には --from-pane を外して呼び直す'
+
+reset_hostctl_calls
+AWT_TEST_MODE=existing
+expect_exit 3 '古い hostctl の呼び直しでも既存セッションには送らない' --directory "$work_dir" --prompt from-pane-existing
+expect_hostctl_calls '古い hostctl の呼び直しでも既存セッションには送らない' %22 ''
+expect_no_old_hostctl_error '古い hostctl の呼び直しでも既存セッションには送らない'
+AWT_TEST_OLD_HOSTCTL=0
+
+reset_hostctl_calls
+AWT_TEST_MODE=unavailable
+expect_exit 69 '--from-pane 付きの呼び出しの exit 69 を保つ' --directory "$work_dir" --prompt from-pane-unavailable
+expect_hostctl_calls '--from-pane 付きの呼び出しの exit 69 を保つ' %22
+checked=$((checked + 1))
+if [[ ! -s "$work_dir/stdout" ]] && rg -q 'app is not running' "$work_dir/stderr"; then
+  info 'OK: --from-pane 付きの呼び出しの失敗応答を stderr に出した'
+else
+  ng '--from-pane 付きの呼び出しの失敗応答が stderr にありません'
+fi
+
+reset_hostctl_calls
+AWT_TEST_MODE=argument-error
+pane_env=(-u TMUX_PANE)
+expect_exit 1 '--from-pane 無しの exit 2 は呼び直さない' --directory "$work_dir" --prompt arguments
+expect_hostctl_calls '--from-pane 無しの exit 2 は呼び直さない' ''
+
+reset_hostctl_calls
+pane_env=(TMUX_PANE=%22)
+expect_exit 1 '呼び直しの exit 2 も exit 1 にする' --directory "$work_dir" --prompt arguments
+expect_hostctl_calls '呼び直しの exit 2 も exit 1 にする' %22 ''
+checked=$((checked + 1))
+if [[ ! -s "$work_dir/stdout" && "$(cat "$work_dir/stderr")" == 'invalid arguments' ]]; then
+  info 'OK: 呼び直しの出力だけを stderr に出した'
+else
+  ng '呼び直しの失敗時の出力が期待と異なります'
+fi
+
+pane_env=(-u TMUX_PANE)
+AWT_TEST_MODE=success
+AWT_TEST_SESSION=success
+AWT_TEST_AGENT="$work_dir/agent"
+rm -f "$work_dir/argv"
 
 rm -f "$work_dir/calls"
 expect_exit 2 '改行を拒否する' --directory "$work_dir" --prompt $'first\nsecond'

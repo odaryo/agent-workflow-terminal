@@ -141,7 +141,9 @@ struct OverviewPaneRow: View {
   }
 
   private var presentation: AgentStatePresentation {
-    AgentStatePresentation(state: pane.display.state, category: pane.display.category)
+    AgentStatePresentation(
+      state: pane.display.state, category: pane.display.category,
+      isHandedOff: pane.detail.isHandedOff)
   }
 
   private var statusAccessibilityLabel: String {

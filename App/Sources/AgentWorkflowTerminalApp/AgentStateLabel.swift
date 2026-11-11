@@ -27,11 +27,16 @@ struct AgentStatePresentation: Equatable {
   /// accessibility label。
   let label: String
 
+  /// `isHandedOff` は `hostctl worktree open` で作業を渡し終えた pane (§13)。ターンが終わった
+  /// 状態 (`completed` / `idle`) のときだけ印を置き換え、Question などの対応が要る状態は隠さない。
+  ///
   /// - Important: `unknown` でも大分類が `needsAttention` なら Unknown の形にしない。adapter が
   ///   「人間の対応が要る」とだけ判定できた状態 (§12.4.3) を、注意の要らない Unknown と同じ形で
   ///   見せると見落とされる。
-  init(state: AgentState, category: WorktreeStateCategory) {
+  init(state: AgentState, category: WorktreeStateCategory, isHandedOff: Bool = false) {
     switch state {
+    case .completed where isHandedOff, .idle where isHandedOff:
+      self.init("arrowshape.turn.up.right.circle", .gray, "引き渡し済み")
     case .working: self.init("ellipsis.circle.fill", .accentColor, state.displayLabel)
     case .question: self.init("questionmark.bubble.fill", .orange, state.displayLabel)
     case .permission: self.init("hand.raised.fill", .orange, state.displayLabel)

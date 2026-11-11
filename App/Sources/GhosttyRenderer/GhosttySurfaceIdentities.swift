@@ -45,8 +45,9 @@ final class GhosttySurfaceIdentities: Sendable {
   }
 
   func id(forAddress address: UInt) -> GhosttySurfaceID? {
-    // Why 未登録なら生成中の ID: 生成は main で同期に1つずつ行い、生存中はすべて登録済みで、
-    // free 後も drain まで登録を残すため、未登録アドレスの action は生成中の surface に限られる。
+    // Why 未登録なら生成中の ID: 生成は main で同期に1つずつ行い、生存中の surface はすべて登録済み。
+    // free は旧 surface のスレッドを join し、mailbox に残ったメッセージは libghostty の hasSurface
+    // が捨てるので、free 済みの surface の action は未登録のアドレスでは届かない。
     state.withLock { $0.identities[address] ?? $0.creatingID }
   }
 }

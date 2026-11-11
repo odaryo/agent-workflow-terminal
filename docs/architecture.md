@@ -1014,7 +1014,8 @@ Base Diffのbase branchは次の順で決める — 確定(2026-11-11、Issue #8
 もそのまま残る)、解決は記録時ではなく今の文脈で行われる。例えば`HEAD`は今のbranch自身に、`@{-1}`は今の直前の
 branchに解決されるので、一致を確かめずに使うと別のbranchを比較元にしてしまう(git 2.54.0で計測)。
 最古の項目が作成の項目でない場合(reflogの一部が失効した場合)、reflogが無い場合、今は解決できない場合、
-detached HEADの場合も分岐元は無いものとする。
+detached HEADの場合も分岐元は無いものとする。ただし最古の項目が作成の項目でなくても、下記の条件を満たす
+`branch: Reset to <ref>`が残っていれば、それを分岐元とする。
 
 **今のbranchと同名のremote-tracking refは分岐元にしない — 確定(2026-11-11、Issue #838)。** リモートにしか無い
 branchを`git switch <name>`や`git switch -c <name> origin/<name>`で取ってくると、分岐元として自分と同名の

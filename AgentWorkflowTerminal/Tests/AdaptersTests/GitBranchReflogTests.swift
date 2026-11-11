@@ -93,6 +93,57 @@ struct GitBranchReflogTests {
     #expect(GitBranchReflog.createdFromStartPoint(subjects: output) == nil)
   }
 
+  @Test(
+    "付け替えの記録を新しい順に読み、作成の記録の判定は変えない",
+    arguments: [
+      ("reset-to", ["dev"], Optional("main")),
+      ("reset-to-twice-renamed", ["other", "dev"], Optional("main")),
+      ("reset-to-creation-deleted", ["dev"], nil),
+      ("rebase-onto", [], Optional("main")),
+    ])
+  func readsResetFixtures(name: String, expected: [String], createdFrom: String?) throws {
+    let output = try fixture(named: "git-2.54.0-reflog-show-gs-" + name + ".txt")
+
+    #expect(GitBranchReflog.resetToStartPoints(subjects: output) == expected)
+    #expect(GitBranchReflog.createdFromStartPoint(subjects: output) == createdFrom)
+  }
+
+  @Test(
+    "既存の記録から付け替えの起点を読まない",
+    arguments: [
+      "created", "commits", "renamed", "copied", "created-from-reflog-selector",
+      "created-from-at", "created-from-japanese", "creation-deleted", "expired",
+      "no-reflog", "created-from-empty-message",
+    ])
+  func ignoresFixturesWithoutReset(name: String) throws {
+    let output = try fixture(named: "git-2.54.0-reflog-show-gs-" + name + ".txt")
+
+    #expect(GitBranchReflog.resetToStartPoints(subjects: output) == [])
+  }
+
+  @Test("同じ付け替え先は最も新しい出現だけを残す")
+  func deduplicatesResetStartPoints() {
+    #expect(
+      GitBranchReflog.resetToStartPoints(
+        subjects: "branch: Reset to dev\nbranch: Reset to other\nbranch: Reset to dev\n")
+        == ["dev", "other"])
+  }
+
+  @Test("末尾の改行が無くても付け替えの記録を読む")
+  func readsResetWithoutTrailingNewline() {
+    #expect(GitBranchReflog.resetToStartPoints(subjects: "branch: Reset to dev") == ["dev"])
+  }
+
+  @Test(
+    "付け替えの項目の形をしていない行は読まない",
+    arguments: [
+      "Branch: Reset to dev", "reset: moving to dev", "branch: Reset to",
+      "branch: Reset to \n", "",
+    ])
+  func ignoresOtherResetShapes(output: String) {
+    #expect(GitBranchReflog.resetToStartPoints(subjects: output) == [])
+  }
+
   private func fixture(named name: String) throws -> String {
     let url = try #require(
       Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures"))

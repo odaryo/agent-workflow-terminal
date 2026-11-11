@@ -85,21 +85,36 @@ public struct DiffSnapshotBuilder: Sendable {
   }
 
   /// detached HEAD では `symbolic-ref --quiet HEAD` が rc=1 で終わり、元の branch の分岐元は使わない。
+  /// 作成後に起点を付け替えた場合に備え、適格な `Reset to` を優先する。`Created from` と違い、
+  /// 作成の項目が失効しても採れる。`rebase --onto` は commit ID しか残さず、分岐元の ref は読めない (§9.1.1)。
   private func forkPoint() async -> GitBranchRef? {
     guard
       let head = (try? await run(.headReference())).flatMap({ GitBranchRef(fullName: $0.trimmed) }),
       case .local = head,
-      let subjects = try? await run(.branchReflogSubjects(head)),
-      let recorded = GitBranchReflog.createdFromStartPoint(subjects: subjects),
-      let revision = GitRevision(recorded),
-      let resolved = (try? await run(.symbolicFullName(revision)))?.trimmed, !resolved.isEmpty,
+      let subjects = try? await run(.branchReflogSubjects(head))
+    else { return nil }
+    var candidates = GitBranchReflog.resetToStartPoints(subjects: subjects)
+    if let created = GitBranchReflog.createdFromStartPoint(subjects: subjects),
+      !candidates.contains(created)
+    {
+      candidates.append(created)
+    }
+    guard !candidates.isEmpty,
       let listed = try? await run(.listRefs()),
       let remotes = try? await run(.remoteNames())
     else { return nil }
-    return DiffForkPoint.branch(
-      recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: head,
-      listedBranches: GitRefNameList.parse(output: listed).all,
-      remoteNames: GitRemoteNames.parse(output: remotes))
+    let listedBranches = GitRefNameList.parse(output: listed).all
+    let remoteNames = GitRemoteNames.parse(output: remotes)
+    for candidate in candidates {
+      guard let revision = GitRevision(candidate),
+        let resolved = (try? await run(.symbolicFullName(revision)))?.trimmed, !resolved.isEmpty,
+        let branch = DiffForkPoint.branch(
+          recordedStartPoint: candidate, resolvedFullName: resolved, currentBranch: head,
+          listedBranches: listedBranches, remoteNames: remoteNames)
+      else { continue }
+      return branch
+    }
+    return nil
   }
 
   public func refNames() async throws(GitRunnerError) -> GitRefNames {

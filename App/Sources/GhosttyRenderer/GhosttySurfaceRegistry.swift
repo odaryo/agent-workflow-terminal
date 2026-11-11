@@ -35,11 +35,8 @@ final class GhosttySurfaceRegistry {
     entries.removeAll { $0.value == nil || $0.value === view }
   }
 
-  func view(forSurfaceAddress address: UInt) -> GhosttySurfaceView? {
-    liveViews().first { view in
-      guard let surface = view.surface else { return false }
-      return UInt(bitPattern: surface) == address
-    }
+  func view(for surfaceID: GhosttySurfaceID) -> GhosttySurfaceView? {
+    liveViews().first { $0.surfaceID == surfaceID }
   }
 
   func notifyEnvironmentMayHaveChanged() {

@@ -110,10 +110,11 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         accepted = true
         if target.tag == GHOSTTY_TARGET_SURFACE,
           let surface = target.target.surface,
+          let surfaceID = GhosttySurfaceIdentities.shared.id(forAddress: UInt(bitPattern: surface)),
           let title = action.action.set_title.title
         {
           pendingAction = .setTitle(
-            surfaceAddress: UInt(bitPattern: surface),
+            surfaceID: surfaceID,
             title: String(cString: title)
           )
         } else {
@@ -146,8 +147,11 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         // Why not accept: 握り潰すと libghostty 自身の "Process exited." 表示が消える。
         // 出典: App/vendor/ghostty/macos/Sources/Ghostty/Ghostty.App.swift:664。
         accepted = false
-        if target.tag == GHOSTTY_TARGET_SURFACE, let surface = target.target.surface {
-          pendingAction = .childExited(surfaceAddress: UInt(bitPattern: surface))
+        if target.tag == GHOSTTY_TARGET_SURFACE,
+          let surface = target.target.surface,
+          let surfaceID = GhosttySurfaceIdentities.shared.id(forAddress: UInt(bitPattern: surface))
+        {
+          pendingAction = .childExited(surfaceID: surfaceID)
         } else {
           pendingAction = nil
         }
@@ -399,6 +403,15 @@ private final class GhosttyRuntime {
     ghostty_app_set_focus(app, focused)
   }
 
+  func drainMailboxAfterSurfaceFree() {
+    guard let app else { return }
+    // Why not アプリ側の ID だけで防ぐ: libghostty 内部に残った旧世代のメッセージは、
+    // アドレス再利用後には新しい surface のポインタで action_cb に届く (Issue #125 の計測2)。
+    // free は IO / renderer スレッドを join するため、次の生成前に tick すれば、
+    // hasSurface が false の間に旧世代のメッセージを捨て切れる。
+    ghostty_app_tick(app)
+  }
+
   private func keyboardChanged() {
     guard let app else { return }
     ghostty_app_keyboard_changed(app)
@@ -486,12 +499,12 @@ private final class GhosttyRuntime {
 
   fileprivate static func handleAction(_ action: PendingGhosttyAction) {
     switch action {
-    case .setTitle(let surfaceAddress, let title):
-      GhosttySurfaceRegistry.shared.view(forSurfaceAddress: surfaceAddress)?.window?.title = title
-    case .childExited(let surfaceAddress):
+    case .setTitle(let surfaceID, let title):
+      GhosttySurfaceRegistry.shared.view(for: surfaceID)?.window?.title = title
+    case .childExited(let surfaceID):
       // Why not action を信用する: action は表示用の通知であり、届いた時点の surface の状態を
       // 保証しない。受け側で ghostty_surface_process_exited を読み直す。
-      GhosttySurfaceRegistry.shared.view(forSurfaceAddress: surfaceAddress)?.pollProcessExit()
+      GhosttySurfaceRegistry.shared.view(for: surfaceID)?.pollProcessExit()
     case .setLinkCursor(let isLink):
       (isLink ? NSCursor.pointingHand : NSCursor.arrow).set()
     case .openURL(let value):
@@ -502,8 +515,8 @@ private final class GhosttyRuntime {
 }
 
 private enum PendingGhosttyAction: Sendable {
-  case setTitle(surfaceAddress: UInt, title: String)
-  case childExited(surfaceAddress: UInt)
+  case setTitle(surfaceID: GhosttySurfaceID, title: String)
+  case childExited(surfaceID: GhosttySurfaceID)
   case setLinkCursor(Bool)
   case openURL(String)
 }
@@ -545,6 +558,7 @@ private enum GhosttyRendererError: LocalizedError {
 @MainActor
 public final class GhosttySurfaceView: NSView, TerminalRenderer {
   private(set) var surface: ghostty_surface_t?
+  private(set) var surfaceID: GhosttySurfaceID?
 
   public private(set) var size = TerminalSize(columns: 0, rows: 0)
   public var state: TerminalRendererState { lifecycle.state }
@@ -793,6 +807,11 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     textAccumulator = nil
     guard let surface else { return }
     ghostty_surface_free(surface)
+    GhosttyRuntime.shared.drainMailboxAfterSurfaceFree()
+    if let surfaceID {
+      GhosttySurfaceIdentities.shared.unregister(address: UInt(bitPattern: surface), id: surfaceID)
+    }
+    surfaceID = nil
     self.surface = nil
     size = TerminalSize(columns: 0, rows: 0)
   }
@@ -864,11 +883,12 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
       }
     }
 
-    guard surface != nil else {
+    guard let surface else {
       NSLog("[app] ghostty_surface_new が失敗しました。画面復帰後に再試行できます")
       send(.creationFailed)
       return
     }
+    surfaceID = GhosttySurfaceIdentities.shared.register(address: UInt(bitPattern: surface))
 
     updateContentScaleFromWindow()
     updateSurfaceSize()

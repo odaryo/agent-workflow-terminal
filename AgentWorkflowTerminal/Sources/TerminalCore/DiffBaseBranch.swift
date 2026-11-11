@@ -55,16 +55,31 @@ public enum DiffBaseBranchResolver {
 public enum DiffForkPoint {
   /// `resolvedFullName` は `<ref>` の `rev-parse --verify --quiet --symbolic-full-name` の stdout
   /// (trim 済み)。OID・`main~0`・曖昧な名前では空になる。
+  ///
+  /// `resolvedFullName` と候補は `String ==` (正準等価) で比べる。`Process` は argv を NFD へ分解して
+  /// 渡し、`rev-parse` はそれを NFC へ戻さないので、既定の設定 (`core.precomposeunicode=true`) でも
+  /// NFC の記録から NFD の完全名が返る (git 2.54.0 で計測、Issue #842)。
+  ///
+  /// 採る名前は、`listedBranches` (`for-each-ref refs/heads/ refs/remotes/` の一覧) にバイト列で在る
+  /// 候補の綴りにし、`resolvedFullName` の綴りは採らない。大文字小文字や正規化を区別しない volume では、
+  /// `rev-parse` は一覧に無い綴り (`Main` や、`core.precomposeunicode=false` での NFD) でも loose ref を
+  /// 開けて解決し、その名前は `pack-refs` の後には解決できなくなる。`String ==` は NFC と NFD を同じと
+  /// みなすので、一覧との照合はバイト列で行う。近い綴りの ref には寄せない。
   public static func branch(
     recordedStartPoint: String,
     resolvedFullName: String,
-    currentBranch: GitBranchRef
+    currentBranch: GitBranchRef,
+    listedBranches: [GitBranchRef]
   ) -> GitBranchRef? {
     let candidates = [
       recordedStartPoint, "refs/heads/" + recordedStartPoint, "refs/remotes/" + recordedStartPoint,
     ]
-    guard candidates.contains(resolvedFullName),
-      let branch = GitBranchRef(fullName: resolvedFullName), branch != currentBranch
+    guard
+      let listed = candidates.first(where: { candidate in
+        candidate == resolvedFullName
+          && listedBranches.contains { $0.fullName.utf8.elementsEqual(candidate.utf8) }
+      }),
+      let branch = GitBranchRef(fullName: listed), branch != currentBranch
     else { return nil }
     return branch
   }

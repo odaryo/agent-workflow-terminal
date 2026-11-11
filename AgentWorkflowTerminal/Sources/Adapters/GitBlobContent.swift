@@ -57,7 +57,7 @@ enum GitBlobContent {
     thresholds: FileViewThresholds,
     confirmation: FileOpenConfirmation
   ) -> FileContentReadResult {
-    if isBinaryAfterReplacement(data) {
+    if isBinaryAfterReplacement(data, byteCount: byteCount) {
       return result(.binary(byteCount: byteCount), text: nil, thresholds: thresholds)
     }
     if byteCount > thresholds.maximumByteCount, confirmation == .notConfirmed {
@@ -70,7 +70,8 @@ enum GitBlobContent {
       thresholds: thresholds)
   }
 
-  private static func isBinaryAfterReplacement(_ data: Data) -> Bool {
+  private static func isBinaryAfterReplacement(_ data: Data, byteCount: Int) -> Bool {
+    guard data.count >= byteCount else { return true }
     guard data.range(of: Data([0xEF, 0xBF, 0xBD])) != nil else { return true }
     guard let nulPosition = data.firstIndex(of: 0) else { return false }
     if nulPosition < BinaryFileDetection.sampleByteCount { return true }
@@ -79,7 +80,8 @@ enum GitBlobContent {
       .unicodeScalars.reduce(into: 0) { count, scalar in
         if scalar.value == 0xFFFD { count += 1 }
       }
-    return nulPosition - 2 * replacementCount < BinaryFileDetection.sampleByteCount
+    let growth = data.count - byteCount
+    return nulPosition - min(2 * replacementCount, growth) < BinaryFileDetection.sampleByteCount
   }
 
   /// hash 算法は OID の桁数で選ぶ (SHA-1 は 40 桁、SHA-256 は 64 桁)。

@@ -46,6 +46,13 @@ struct GitBlobContentTests {
       "不正バイト10個の後、元の位置 8195 の NUL",
       (Array(repeating: 0xFF, count: 10) + Array(repeating: 65, count: 8_185) + [0], false)
     ),
+    (
+      "正しい U+FFFD が10個あっても全体の伸びから元の NUL 位置を判定できる",
+      (
+        Array(String(repeating: "\u{FFFD}", count: 10).utf8) + [0xFF]
+          + Array(repeating: 65, count: 8_192 - 31) + [0], false
+      )
+    ),
     ("サイズ閾値超過", (Array(repeating: 65, count: 100) + [0xFF, 0x0A], false)),
   ]
 
@@ -94,8 +101,8 @@ struct GitBlobContentTests {
     "置換文字で NUL の元の位置が決まらない過去版は binary に留める",
     arguments: [FileOpenConfirmation.notConfirmed, .confirmed])
   func keepsAmbiguousNULPositionBinary(confirmation: FileOpenConfirmation) throws {
-    let prefix = Array(String(repeating: "\u{FFFD}", count: 10).utf8) + [0xFF]
-    let bytes = prefix + Array(repeating: UInt8(65), count: 8_192 - prefix.count) + [0]
+    let bytes: [UInt8] =
+      [0xEF, 0xBF, 0xBD, 0xE3, 0x81] + Array(repeating: 65, count: 8_192 - 5) + [0, 0xFF]
     let thresholds = FileViewThresholds(maximumByteCount: 10_000, maximumLineCount: 3)
     let url = FileManager.default.temporaryDirectory
       .appending(path: "awt-blob-\(UUID().uuidString)")
@@ -110,6 +117,18 @@ struct GitBlobContentTests {
     #expect(current.observation == .undecodable(byteCount: bytes.count, lineCount: 1))
     #expect(historical.observation == .binary(byteCount: bytes.count))
     #expect(historical.text == nil)
+  }
+
+  @Test("置換後のバイト数が元より小さい不一致は binary に留める")
+  func keepsShorterReplacementBinary() {
+    let stdout = "\u{FFFD}\n"
+    let byteCount = stdout.utf8.count + 1
+    let actual = GitBlobContent.classify(
+      stdout: stdout, byteCount: byteCount, objectID: Self.blobID(of: Array(stdout.utf8)),
+      thresholds: Self.thresholds, confirmation: .confirmed)
+
+    #expect(actual.observation == .binary(byteCount: byteCount))
+    #expect(actual.text == nil)
   }
 
   @Test(

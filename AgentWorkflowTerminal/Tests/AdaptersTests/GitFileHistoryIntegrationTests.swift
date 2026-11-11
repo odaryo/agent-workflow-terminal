@@ -205,7 +205,7 @@ struct GitFileHistoryIntegrationTests {
     }
   }
 
-  @Test("過去版がバイナリ・不正 UTF-8 なら本文を出さない", .timeLimit(.minutes(1)))
+  @Test("過去版のバイナリは本文を出さず、不正 UTF-8 は確認後に置換して表示する", .timeLimit(.minutes(1)))
   func pastBinaryVersions() async throws {
     try await withGitRepository { repository in
       let root = repository.mainWorktree
@@ -222,8 +222,13 @@ struct GitFileHistoryIntegrationTests {
       let latin = try await reader.version(commitID: head.commitID, path: "latin.txt")
 
       #expect(observation(of: image) == .binary(byteCount: binary.count))
-      #expect(observation(of: latin) == .binary(byteCount: invalid.count))
+      #expect(observation(of: latin) == .undecodable(byteCount: invalid.count, lineCount: 1))
       #expect(text(of: image) == nil)
+      #expect(text(of: latin) == nil)
+
+      let confirmedLatin = try await reader.version(
+        commitID: head.commitID, path: "latin.txt", confirmation: .confirmed)
+      #expect(text(of: confirmedLatin) == String(decoding: invalid, as: UTF8.self))
     }
   }
 

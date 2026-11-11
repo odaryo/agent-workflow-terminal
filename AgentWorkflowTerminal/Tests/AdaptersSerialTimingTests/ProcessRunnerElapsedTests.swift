@@ -8,7 +8,7 @@ import Testing
 /// 起動を並行に浴びて 1.036s / 1.327s と予算を超えた (Issue #176)。
 /// `closesStandardInput` はプロセス全体の STDIN を差し替えるため、その一点だけでも
 /// 並行実行から外れている必要がある。
-@Suite("Foundation.Process 実行層の所要時間")
+@Suite("外部プロセス実行層の所要時間")
 struct ProcessRunnerElapsedTests {
   private let runner = FoundationProcessRunner()
 

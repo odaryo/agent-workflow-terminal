@@ -164,7 +164,7 @@ enum SocketIO {
       // libghosttyの子は/usr/bin/loginが閉じるが、閉じるのは子のsoft RLIMIT_NOFILE付近までで、
       // libghosttyはsoftを起動時の値 (launchdなら256) へ戻すので、それより大きい番号は残る。
       // passwdを読めずlogin無しの経路と素のposix_spawnは継承する (2026-11-11実測)。
-      // Foundation.Processの子へは渡らない (2026-11-09)。
+      // ProcessRunnerの子へは渡らない (POSIX_SPAWN_CLOEXEC_DEFAULT。Foundation.Processだった頃も2026-11-09に確認)。
       guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
         Darwin.close(descriptor)
         continue

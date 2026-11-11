@@ -169,8 +169,9 @@ struct DiffForkPointTests {
     #expect(Array(adopted.fullName.utf8) == Array(("refs/heads/" + name).utf8))
   }
 
-  // 既定の設定では、記録と一覧は NFC だが、`Process` が argv を NFD へ分解するので `rev-parse` は
-  // NFD を返す (git 2.54.0 で計測、Issue #842)。
+  // 実行層が `Foundation.Process` だった頃は、記録と一覧が NFC でも argv が NFD へ分解され、`rev-parse` は
+  // NFD を返した (git 2.54.0 で計測、Issue #842)。今の実行層は NFC のまま渡す (#875) が、照合は一覧の
+  // バイト列で行うので、解決の綴りが違っても一覧の綴りを採る。
   @Test("記録と一覧が NFC なら、解決が NFD でも一覧の NFC の綴りで分岐元にする")
   func adoptsListedSpellingOverDecomposedResolution() {
     let adopted = DiffForkPoint.branch(

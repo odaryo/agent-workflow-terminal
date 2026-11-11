@@ -56,9 +56,8 @@ public enum DiffForkPoint {
   /// `resolvedFullName` は `<ref>` の `rev-parse --verify --quiet --symbolic-full-name` の stdout
   /// (trim 済み)。OID・`main~0`・曖昧な名前では空になる。
   ///
-  /// `resolvedFullName` と候補は `String ==` (正準等価) で比べる。`Process` は argv を NFD へ分解して
-  /// 渡し、`rev-parse` はそれを NFC へ戻さないので、既定の設定 (`core.precomposeunicode=true`) でも
-  /// NFC の記録から NFD の完全名が返る (git 2.54.0 で計測、Issue #842)。
+  /// `resolvedFullName` と候補は `String ==` (正準等価) で比べる。解決した名前自体のバイト列ではなく、
+  /// 一覧に候補の綴りが在ることを下記の照合で保証するため、ここでは正規化の違いを許容する。
   ///
   /// 採る名前は、`listedBranches` (`for-each-ref refs/heads/ refs/remotes/` の一覧) にバイト列で在る
   /// 候補の綴りにし、`resolvedFullName` の綴りは採らない。大文字小文字や正規化を区別しない volume では、

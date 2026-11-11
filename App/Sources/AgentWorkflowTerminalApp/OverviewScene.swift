@@ -108,7 +108,6 @@ private struct OverviewProjectSection: View {
     let attentionCount = needsAttentionCount(overview)
     let showsAttentionCount = !isExpanded.wrappedValue && attentionCount > 0
     let disclosureLabel = "\(model.project.displayName) を\(isExpanded.wrappedValue ? "閉じる" : "開く")"
-    // macOS 14 以降は isExpanded のない initializer で標準の開閉 UI を抑止する。
     Section {
       if isExpanded.wrappedValue {
         ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
@@ -124,6 +123,8 @@ private struct OverviewProjectSection: View {
           isExpanded.wrappedValue.toggle()
         } label: {
           Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
+            .frame(width: 16, height: 16)
+            .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(disclosureLabel)
@@ -142,6 +143,7 @@ private struct OverviewProjectSection: View {
             : model.project.displayName
         )
       }
+      .accessibilityElement(children: .contain)
       .contentShape(.rect)
       .contextMenu {
         OverviewProjectMenu(
@@ -150,6 +152,9 @@ private struct OverviewProjectSection: View {
           requestUnregister: requestUnregister)
       }
     }
+    // isExpanded のない Section でも .sidebar では見出しの hover 時に標準の開閉マークが出る
+    // (実測 2026-11-11、macOS 27) ため、明示的に抑止する。
+    .collapsible(false)
   }
 
   private var isExpanded: Binding<Bool> {

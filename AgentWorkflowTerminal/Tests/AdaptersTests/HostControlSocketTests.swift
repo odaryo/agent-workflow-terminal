@@ -298,6 +298,29 @@ struct HostControlSocketTests {
     )
   }
 
+  @Test("purpose付きの要求をそのままhandlerへ渡す")
+  func deliversPurpose() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let expected = HostControlRequest.openWorktree(
+      directory: "/path", fromPane: PaneID(rawValue: "%22"), purpose: "Issue の概要 #837")
+    try await withServer(
+      HostControlSocketServer(path: path),
+      handler: { request in
+        #expect(request == expected)
+        return Self.response
+      },
+      body: {
+        let actual = try await HostControlSocketClient.send(
+          expected, to: path, timeout: .seconds(30))
+        #expect(actual == Self.response)
+      }
+    )
+  }
+
   @Test("104バイト以上のパスをserverとclientが拒否する", arguments: [104, 105, 200])
   func rejectsLongPath(byteCount: Int) async {
     let path = "/private/tmp/" + String(repeating: "x", count: byteCount - 13)

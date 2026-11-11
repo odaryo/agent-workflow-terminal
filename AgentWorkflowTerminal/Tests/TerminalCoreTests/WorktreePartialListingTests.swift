@@ -132,16 +132,77 @@ struct WorktreePartialListingTests {
     #expect(result.disappeared.isEmpty)
   }
 
+  @Test("部分一覧で、保持していた Task と同じパスに別の安定 ID が現れたら、保持していた側を消失にする")
+  func detectedWorktreeAtRetainedPathReplacesIt() throws {
+    let removed = try detected("reused", worktreePath: "/wt/reused")
+    let replacement = try detected("reused1", worktreePath: "/wt/reused")
+    let other = try detected("other")
+    let previous = WorktreeInventory(
+      projectRoot: nil,
+      taskWorktrees: [
+        TaskWorktree(detected: removed, activation: .active),
+        TaskWorktree(detected: other, activation: .active),
+      ])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [replacement], previous: previous, isListingComplete: false)
+
+    #expect(result.disappeared == [removed.identity])
+    #expect(result.unobserved == [other.identity])
+    #expect(result.appeared == [replacement.identity])
+    #expect(
+      result.inventory.taskWorktrees.map(\.identity) == [other.identity, replacement.identity])
+    #expect(
+      result.inventory.taskWorktrees.filter { $0.detected.worktreePath == "/wt/reused" }.count == 1)
+  }
+
+  @Test("部分一覧でも、git が prunable と明示した未検出の Task は消失にする")
+  func prunableTaskDisappearsInPartialListing() throws {
+    let pruned = try detected("pruned")
+    let missing = try detected("missing")
+    let previous = WorktreeInventory(
+      projectRoot: nil,
+      taskWorktrees: [
+        TaskWorktree(detected: pruned, activation: .active),
+        TaskWorktree(detected: missing, activation: .active),
+      ])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [], previous: previous, isListingComplete: false, prunable: [pruned.identity])
+
+    #expect(result.disappeared == [pruned.identity])
+    #expect(result.unobserved == [missing.identity])
+    #expect(result.inventory.taskWorktrees.map(\.identity) == [missing.identity])
+  }
+
+  /// 入れないだけの到達不能は prunable でも保持する (設計書 §3.2.1、Issue #496)。
+  @Test("prunable でも今回検出した Task は消失にせず、検出した値へ更新する")
+  func detectedPrunableTaskIsRetained() throws {
+    let before = try detected("locked-out")
+    let unreachable = try detected("locked-out", observation: .unreachable)
+    let previous = WorktreeInventory(
+      projectRoot: nil, taskWorktrees: [TaskWorktree(detected: before, activation: .active)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [unreachable], previous: previous, isListingComplete: false,
+      prunable: [before.identity])
+
+    #expect(result.disappeared.isEmpty)
+    #expect(
+      result.inventory.taskWorktrees == [TaskWorktree(detected: unreachable, activation: .active)])
+  }
+
   private func detected(
     _ name: String,
     branch: String? = nil,
     isProjectRoot: Bool = false,
-    observation: WorktreeObservation = .reachable
+    observation: WorktreeObservation = .reachable,
+    worktreePath: String? = nil
   ) throws -> DetectedWorktree {
     DetectedWorktree(
       identity: try #require(
         WorktreeIdentity(rawValue: isProjectRoot ? "/repo/.git" : "/repo/.git/worktrees/\(name)")),
-      worktreePath: isProjectRoot ? "/repo" : "/wt/\(name)",
+      worktreePath: worktreePath ?? (isProjectRoot ? "/repo" : "/wt/\(name)"),
       branch: branch, isProjectRoot: isProjectRoot, observation: observation)
   }
 }

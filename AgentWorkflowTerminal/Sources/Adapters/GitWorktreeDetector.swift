@@ -5,7 +5,8 @@ import TerminalCore
 /// entry 単位に還元できない失敗。これだけが `scan()` から throw される。
 public enum GitWorktreeScanError: Error, Sendable, Equatable {
   /// `commandFailed` 以外の一覧取得失敗、または部分 stdout の完結 record に有効な entry が
-  /// 1件も無い場合に throw する。`commandFailed` で有効な entry があれば部分出力で続け、
+  /// 1件も無い場合に throw する。bare の entry は検出対象にならない (`isScannable`) ので有効に
+  /// 数えない。`commandFailed` で有効な entry があれば部分出力で続け、
   /// 元の失敗を `listingFailure` に残す。ただし完結 record に解析失敗があれば
   /// `malformedListOutput` を throw する。stderr の文言は git の版と locale に依存するため使わない。
   case list(GitRunnerError)
@@ -28,27 +29,6 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
   /// git を一度も起動できていない状況をその判定に混ぜると、git 実行ファイルの消失が
   /// 「作業ツリーが消えた」に化ける。
   case gitRunnerUnavailable(worktreePath: String, GitRunnerError)
-}
-
-/// - Important: `failures` を捨てて `detected` だけを `reconcileDetectedWorktrees` へ渡すと、
-///   失敗した worktree は消失扱いになる (`GitWorktreeDetector` の契約を参照)。
-///   `listingFailure` が非 nil のときは `detected` が不完全であり、`isListingComplete: false`
-///   も渡さないと、部分出力より後の未検出 worktree が消失扱いになる。
-public struct GitWorktreeScanResult: Sendable, Equatable {
-  public let listingFailure: GitRunnerError?
-  /// `worktree list` に現れた順。
-  public let detected: [DetectedWorktree]
-  /// 検出順。同じスキャンで `detected` と同時に立ち得る。
-  public let failures: [GitWorktreeEntryFailure]
-
-  init(
-    detected: [DetectedWorktree], failures: [GitWorktreeEntryFailure],
-    listingFailure: GitRunnerError? = nil
-  ) {
-    self.detected = detected
-    self.failures = failures
-    self.listingFailure = listingFailure
-  }
 }
 
 /// `git worktree list --porcelain -z` の結果から `DetectedWorktree` の一覧を作る (設計書 §3.2)。
@@ -192,17 +172,16 @@ public struct GitWorktreeDetector: Sendable {
   ///   呼び出し側へ伝えない (`isScannable` / `describe`)。
   public func scan() async throws(GitWorktreeScanError) -> GitWorktreeScanResult {
     let parsed: GitWorktreeListParseResult
-    let listingFailure: GitRunnerError?
+    var listingFailure: GitWorktreeListingFailure?
     do {
       let output = try await projectRunner.run(.worktreeList()).stdout
       parsed = GitWorktreeList.parse(output: output)
-      listingFailure = nil
     } catch {
       guard case .commandFailed(_, let output, _) = error else { throw .list(error) }
       let partial = GitWorktreeList.parseCompletedRecords(output: output)
-      guard !partial.entries.isEmpty else { throw .list(error) }
+      guard partial.entries.contains(where: { !$0.isBare }) else { throw .list(error) }
       parsed = partial
-      listingFailure = error
+      listingFailure = .command(error)
     }
 
     guard parsed.failures.isEmpty else {
@@ -211,6 +190,11 @@ public struct GitWorktreeDetector: Sendable {
     // scannable な entry が0件でも撃つ。判定基準を引けない Project は「0件検出」ではなく
     // 「判定不能」であり、entry の顔ぶれ次第で成功したり失敗したりするほうが追いにくい。
     let commonDirectory = try await projectCommonDirectory()
+    if listingFailure == nil {
+      listingFailure = Self.omission(
+        linkedRecords: max(parsed.entries.count - 1, 0), commonDirectory: commonDirectory
+      ).map(GitWorktreeListingFailure.omittedRecords)
+    }
 
     var detected: [DetectedWorktree] = []
     var failures: [GitWorktreeEntryFailure] = []
@@ -229,7 +213,19 @@ public struct GitWorktreeDetector: Sendable {
       detected: detected, failures: failures, commonDirectory: commonDirectory,
       findAdministrativeDirectory: findAdministrativeDirectory)
     return GitWorktreeScanResult(
-      detected: resolved.detected, failures: resolved.failures, listingFailure: listingFailure)
+      detected: resolved.detected, failures: resolved.failures, listingFailure: listingFailure,
+      prunable: prunableIdentities(parsed.entries, commonDirectory: commonDirectory))
+  }
+
+  /// Task の安定 ID と同じ関数で引く (`describeUnreachable`)。別の照合規則を使うと、同じ
+  /// worktree に2つの ID が付き、prunable と明示されても消失にできない。
+  private func prunableIdentities(
+    _ entries: [GitWorktreeEntry], commonDirectory: WorktreeIdentity
+  ) -> [WorktreeIdentity] {
+    entries.compactMap { entry in
+      guard !entry.isBare, entry.prunableReason != nil else { return nil }
+      return findAdministrativeDirectory(entry.path, commonDirectory)
+    }
   }
 
   /// 除外した entry は返り値に載せず、除外したこと自体も呼び出し側へ伝えない。

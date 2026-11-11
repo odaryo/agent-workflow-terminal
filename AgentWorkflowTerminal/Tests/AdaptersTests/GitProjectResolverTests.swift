@@ -190,6 +190,58 @@ struct GitProjectResolverTests {
     #expect(failures.map(\.recordNumber) == [1])
   }
 
+  @Test("exit 128 の部分一覧で完了済み record を解釈できなければ先頭を信用せず失敗する")
+  func malformedPartialWorktreeListFails() async throws {
+    let output = "worktree /repo\0branch refs/heads/main\0\0HEAD abc\0\0worktree /wt/cut\0"
+    let stub = ProcessRunnerStub(
+      revParse: success("\(commonDirectory)\n"),
+      worktreeList: .success(
+        .init(exitCode: 128, stdout: output, stderr: "fatal: incomplete listing\n")))
+
+    let error = await resolutionError(makeResolver(stub), directory: selectedDirectory)
+
+    #expect(
+      error
+        == .malformedWorktreeList([
+          GitWorktreeParseFailure(recordNumber: 2, record: "HEAD abc", error: .missingWorktree)
+        ]))
+  }
+
+  /// git 2.54.0 実測: bare の entry だけが完結し、最初の linked worktree の record は途切れる。
+  /// resolver が要るのは先頭の entry だけなので、`GitWorktreeDetector.scan()` と違い bare の entry で
+  /// 解決してよい (Issue #774)。
+  @Test("bare で最初の linked worktree が途切れても、完結した bare の entry で Project を解決する")
+  func partialListingWithOnlyBareRecordResolvesToBareDirectory() async throws {
+    let output = try fixture(
+      named: "git-2.54.0-worktree-list-porcelain-z-bare-locked-unreadable.txt")
+    let barePath = try #require(
+      GitWorktreeList.parseCompletedRecords(output: output).entries.first?.path)
+    let stub = ProcessRunnerStub(
+      revParse: success("\(barePath)\n"),
+      worktreeList: .success(
+        .init(
+          exitCode: 128, stdout: output,
+          stderr: "fatal: failed to read 'worktrees/wt1/locked': Permission denied\n")))
+
+    let project = try await makeResolver(stub).resolve(
+      directory: URL(fileURLWithPath: selectedDirectory))
+
+    #expect(project.directory == barePath)
+    #expect(project.commonDirectory.rawValue == barePath)
+  }
+
+  @Test("exit 0 の bare だけの一覧では bare ディレクトリを起点にする")
+  func resolvesBareOnlyCompleteListing() async throws {
+    let output = try fixture(named: "git-2.50.1-worktree-list-porcelain-z-bare.txt")
+    let barePath = try #require(GitWorktreeList.parse(output: output).entries.first?.path)
+    let stub = ProcessRunnerStub(
+      revParse: success("\(barePath)\n"), worktreeList: success(output))
+
+    let project = try await makeResolver(stub).resolve(directory: URL(fileURLWithPath: barePath))
+
+    #expect(project.directory == barePath)
+  }
+
   // MARK: - 登録済み Project の再確認
 
   @Test("登録したディレクトリが同じ repository のままなら利用できる")

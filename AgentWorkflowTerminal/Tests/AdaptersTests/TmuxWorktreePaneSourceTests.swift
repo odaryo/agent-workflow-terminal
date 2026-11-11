@@ -243,6 +243,31 @@ struct TmuxWorktreePaneSourceTests {
     #expect(await spy.invocations.count == 2)
   }
 
+  @Test("s9: list-panes の失敗も、TTL は読み始めた時刻から数える")
+  func failureTimeToLiveStartsAtReadStart() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/failure"))
+    let clock = ManualTimeSource()
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 1, stdout: "partial", stderr: "other\n"),
+      duringRun: { clock.advance(by: .milliseconds(1500)) })
+    let source = try makeSource(spy, clock: clock)
+
+    await #expect(
+      throws: TmuxWorktreePaneSourceError.tmux(
+        TmuxRunnerError.commandFailed(exitCode: 1, stdout: "partial", stderr: "other\n"))
+    ) {
+      try await source.panes(of: worktree)
+    }
+    // 読み終えてからは TTL 内だが、読み始めてからは TTL (1s) を過ぎている。
+    await #expect(
+      throws: TmuxWorktreePaneSourceError.tmux(
+        TmuxRunnerError.commandFailed(exitCode: 1, stdout: "partial", stderr: "other\n"))
+    ) {
+      try await source.panes(of: worktree)
+    }
+    #expect(await spy.invocations.count == 2)
+  }
+
   @Test("番号ごとに、その番号の session の pane だけを返す (設計書 §12.2)")
   func selectsPanesBySessionKey() async throws {
     let sessions = try SessionsOfTwoWorktrees()

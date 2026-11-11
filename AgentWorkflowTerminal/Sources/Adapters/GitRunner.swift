@@ -141,7 +141,12 @@ public struct GitReadCommand: Sendable, Equatable {
   /// OID・`main~0` は stdout が空で rc=0、曖昧な名前も空で rc=0 (stderr に `ambiguous`)、
   /// 解決できなければ rc=1 (git 2.54.0 で計測)。
   static func symbolicFullName(_ revision: GitRevision) -> Self {
-    Self(arguments: ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", revision.rawValue])
+    // user config の `core.warnAmbiguousRefs=false` では、曖昧な名前が空にならず `refs/heads/` へ
+    // 解決され、local branch を分岐元に採ってしまう (git 2.54.0 で計測、Issue #840)。
+    Self(arguments: [
+      "-c", "core.warnAmbiguousRefs=true", "rev-parse", "--verify", "--quiet",
+      "--symbolic-full-name", revision.rawValue,
+    ])
   }
 
   /// `--is-ancestor` は真偽しか返さないので、range を組むための OID はこちらで取る (§9.1.2)。

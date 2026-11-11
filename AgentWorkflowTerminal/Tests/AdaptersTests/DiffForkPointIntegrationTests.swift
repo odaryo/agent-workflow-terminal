@@ -196,6 +196,35 @@ struct DiffForkPointIntegrationTests {
     }
   }
 
+  // 製品の子 git は `HOME` を引き継ぐので、`~/.gitconfig` の `core.warnAmbiguousRefs=false` が効く。
+  // そのとき曖昧な名前は警告されずに `refs/heads/` へ解決され、local branch を分岐元に採ってしまう
+  // (git 2.54.0 で計測)。偽の `HOME` を使うのは、その config を製品と同じ経路で読ませるため。
+  // 対照は `-c` で与え、開発者の `~/.gitconfig` に頼らずに git の振る舞いを確かめる。
+  @Test(
+    "user config の core.warnAmbiguousRefs=false でも、local と remote に在る同名の分岐元を解決しない",
+    .timeLimit(.minutes(1)))
+  func ignoresAmbiguousStartPointUnderUserConfig() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["update-ref", "refs/remotes/origin/main", "HEAD"])
+      try await repository.git(["branch", "origin/main", "main"])
+      let refs = try await repository.refNameLines()
+      try #require(refs.contains(Array("refs/heads/origin/main".utf8)))
+      try #require(refs.contains(Array("refs/remotes/origin/main".utf8)))
+      let control = try await repository.gitExitCode([
+        "-c", "core.warnAmbiguousRefs=false",
+        "rev-parse", "--verify", "--quiet", "--symbolic-full-name", "origin/main",
+      ])
+      try #require(control.exitCode == 0)
+      try #require(control.stdout == "refs/heads/origin/main\n")
+
+      let originMain = try #require(GitRevision("origin/main"))
+      let runner = try repository.runner(
+        globalConfig: "[core]\n\twarnAmbiguousRefs = false\n")
+      let result = try await runner.run(.symbolicFullName(originMain))
+      #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+  }
+
   @Test("`git worktree add -b` で作った worktree の分岐元を使う", .timeLimit(.minutes(1)))
   func resolvesForkPointInLinkedWorktree() async throws {
     try await withGitRepository { repository in

@@ -283,6 +283,25 @@ if ! foreground_before=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ') ||
   exit 6
 fi
 
+if ! pane_tty=$(ps -o tty= -p "$pane_pid"); then
+  printf 'session=%s pane の前景プロセスを読めません。\n' "$session" >&2
+  exit 6
+fi
+pane_tty=${pane_tty//[[:space:]]/}
+if [[ -z "$pane_tty" || "$pane_tty" == '??' ]] ||
+  ! tty_groups_output=$(ps -t "$pane_tty" -o pgid=); then
+  printf 'session=%s pane の前景プロセスを読めません。\n' "$session" >&2
+  exit 6
+fi
+tty_groups=" "
+while read -r tty_group; do
+  if [[ ! "$tty_group" =~ ^[0-9]+$ ]]; then
+    printf 'session=%s pane の前景プロセスを読めません。\n' "$session" >&2
+    exit 6
+  fi
+  tty_groups+="$tty_group "
+done <<< "$tty_groups_output"
+
 if ! tmux send-keys -t "=$session:" -l -- "$line" ||
   ! tmux send-keys -t "=$session:" Enter; then
   printf 'session=%s セッションへの送信に失敗しました。\n' "$session" >&2
@@ -298,11 +317,11 @@ command_samples=0
 for ((attempt = 0; attempt < 65; attempt++)); do
   sleep 0.2
   foreground_now=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ')
-  # zsh は rc の外部コマンドを別のプロセスグループで前景に置くので、送信が rc の待ちの間だと、待ちが終わって
-  # シェルへ戻ることが前景の変化に見える。pane の PID のシェルが前景に戻るのは Agent の起動ではない。
-  # 除くのはそのシェルの pgid だけで、rc から exec せずに起動した子のシェルへ戻る変化は除けない。
+  # rc の待ちの間に送ると、待ち明けにシェルへ戻ることが前景の変化に見える (exec せず起動した子のシェルも含む)。
+  # 送信前から tty 上にいたプロセスグループは Agent ではない。
+  # 控えた後に生まれたプロセスグループ (rc の2つ目の外部コマンド、rc の待ちの後に起動した子のシェル) は起動と数えてしまう (#776)。
   if [[ ! "$foreground_now" =~ ^[0-9]+$ || "$foreground_now" == "$foreground_before" ||
-    "$foreground_now" == "$shell_group" ]]; then
+    "$foreground_now" == "$shell_group" || " $tty_groups " == *" $foreground_now "* ]]; then
     foreground_candidate=""
     foreground_samples=0
   else

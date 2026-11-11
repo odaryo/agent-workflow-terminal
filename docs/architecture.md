@@ -473,10 +473,24 @@ refが更新されることに依存する。worktreeはrefを共有するので
   「マージ済み」で消すとcommitを失うためである。そのため、既定branchが巻き戻ったときや、squash mergeの
   commitが走査上限より古くなったときは、Overviewに印が残ったままCloseでは未マージと判定され、選択肢4が
   出ないことがある(安全側)。既定branchの巻き戻りは印の側では検出せず、受け入れる。
+- **ancestor判定でマージ済みとなったbranchでも、先端が既定branchのfirst-parentの列の上にあれば印を出さない。**
+  作っただけでcommitの無いbranchは既定branchの祖先なので、ancestor判定ではマージ済みになる。実装役がcommit
+  せず最後にまとめてcommitする運用では、作業中のworktreeの大半に印が出てしまう(Issue #879のレビューで計測)。
+  先端が作成時のcommitから動いたかでは見分けられない。commitの無いbranchを既定branchへfast-forwardで追従させる
+  (`scripts/wf-sync-main.sh`など)と先端は動くが、既定branchのfirst-parentの列の上に留まるためである。
+  first-parentの列の上にあるかで見ると、作っただけ・commitなしでの追従・reflogの無いbranchでは出ず、
+  `--no-ff`のmergeとsquash mergeでは出る(git 2.54.0で計測)。**fast-forwardでmergeしたbranchにも印は出ない**
+  (commitが既定branchのfirst-parentの列に並ぶため)。これは受け入れる制約とする。squash mergeの根拠には
+  この条件を掛けない(squashの検出は、branchの変更内容が空でないことを既に求めている)。
 - 判定不能も、branch先端と既定branch先端の組が前回と同じ間は判定し直さない。判定不能のworktreeで数秒の
   走査が観測のたびに回り続けるのを避けるためである。取り消しで終わった判定は記録しない。
-- 重い判定はアプリ全体で1件ずつ順に回し、UIを止めない。観測(§3.2のworktreeのスキャン)のたびに、先に
-  全worktreeのbranch先端を読み、先端が変わったworktreeの印は判定し直しを待たずに外す。
+- 重い判定はアプリ全体で1件ずつ順に回し、UIを止めない。判定の1周の始めに全worktreeのbranch先端を読み、
+  先端が変わったworktreeの印は判定し直しを待たずに外す。周の途中に来た観測の要求は最後の1つにまとめ、
+  その周の後に回す。既定branchが動いた直後の周は、未マージのworktreeの数だけ約5秒の走査が並ぶので、
+  その間に積んだcommitで印が外れるのは次の周になり、数十秒遅れうる。
+- マージ済みと判定した先端の記憶はアプリの寿命だけ持ち、worktreeが一時的に見えなくなっても捨てない
+  (件数の上限を超えたら古いものから捨てる)。アプリを再起動すると判定し直すので、squash mergeのcommitが
+  走査上限より古くなっていれば、印は出なくなる。
 
 ### 3.5 安定IDとtmux session命名
 
@@ -743,7 +757,7 @@ branchが既定branchへマージ済み(§3.4の判定)なら、タイトルの�
 ようにするためである。ancestor判定とsquash mergeの検出で印を分けない。見出しのaccessibility labelは
 「<タイトル> マージ済み」とする。
 
-- 判定不能・未マージ・detached HEAD(branchが無い)では印を出さない。印が無いことは「マージ済みと確かめられて
+- 判定不能・未マージ・detached HEAD(branchが無い)では印を出さない。既定branchへ取り込まれた自分のcommitが無いbranch(作っただけのものなど)と、fast-forwardでmergeしたbranchにも出さない(§3.4)。印が無いことは「マージ済みと確かめられて
   いない」という意味で、未マージを主張しない。判定不能に専用の印を出さないのは、Closeを開けば検査の結果と
   理由が出る(§3.4)うえ、判定不能は既定branchを特定できないProjectで全worktreeに並びうるためである。
 - 同じworktreeの複数のセッションの見出しには、どれにも同じ印を出す。Project Rootには見出しが無い(上記)ので
@@ -3109,7 +3123,7 @@ PR_READY
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
 - [ ] `hostctl worktree open`の`--from-pane`で引き渡し元のpaneを記録し、Overviewで`Completed`／`Idle`のときだけ「引き渡し済み」の印を出す。記録の後に`Completed`／`Idle`を経た`Working`で解除し、記録はアプリの寿命だけ持つ(§3.1、§5.3、§13、§21.4、Issue #828)
 - [ ] `hostctl worktree open`の`--purpose`でIssueのタイトルを渡し、アプリはセッションを作る前に検査して、新しく作ったセッションのpaneにだけ書く。作った後の書き込みの失敗は引き渡しを失敗にしない(§3.1、§21.4、Issue #837)
-- [ ] Overviewのworktreeのセッションの見出しに、branchがマージ済みならタイトルの右に`arrow.triangle.merge`と「マージ済み」を出し、判定不能・未マージ・detached HEADでは出さない。Closeの選択肢4は先端だけの使い回しを使わず判定し直す。判定不能も同じ先端の組では判定し直さず、重い判定はアプリ全体で1件ずつ回し、先端が変わった印はすぐ外す(§3.4、§5.3、§13、Issue #879)
+- [ ] Overviewのworktreeのセッションの見出しに、branchがマージ済みならタイトルの右に`arrow.triangle.merge`と「マージ済み」を出し、判定不能・未マージ・detached HEAD・既定branchのfirst-parentの列の上にある先端(commitの無いbranchとfast-forwardのmerge)では出さない。Closeの選択肢4は先端だけの使い回しを使わず判定し直す。判定不能も同じ先端の組では判定し直さず、重い判定はアプリ全体で1件ずつ回し、先端が変わった印はすぐ外す(§3.4、§5.3、§13、Issue #879)
 - [ ] Agentも起動する新規セッションは、起動コマンドを対話シェルに打ち込み、tmux sessionを新しく作れたときだけ1回実行する。起動コマンドが未設定なら項目を無効にする — ユーザー確認待ち(§3.1、Issue #805)
 - [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)
 - [ ] 同じディレクトリの2つ目以降のsession名の接尾辞を`-<n>`(作る時点の最大値+1、2〜9999)にする — ユーザー確認待ち(§3.5)

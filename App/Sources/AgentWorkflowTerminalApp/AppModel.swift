@@ -293,8 +293,11 @@ final class AppModel: ObservableObject {
       // Active の切り替えは await の間にも起こるので、`previous` は await の後に読む。
       // ID を増減させるのはスキャンだけなので、ID はここで取っても食い違わない。
       let knownIdentities = worktrees.map(\.identity)
+      let reusable = reusableObservations(isRequestedScan: !waiters.isEmpty)
       // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
-      guard case .success(let scan) = await scan(with: detector, knownIdentities: knownIdentities)
+      guard
+        case .success(let scan) = await scan(
+          with: detector, knownIdentities: knownIdentities, reusableObservations: reusable)
       else {
         reconcileFailedScan()
         continue
@@ -321,26 +324,6 @@ final class AppModel: ObservableObject {
       }
       // 一覧が同じでも branch の先端は進むので、スキャンのたびに頼む。
       await requestMergedMarks()
-    }
-  }
-
-  private func scan(
-    with detector: GitWorktreeDetector,
-    knownIdentities: [WorktreeIdentity] = []
-  ) async -> Result<GitWorktreeScanResult, GitWorktreeScanError> {
-    do {
-      let scan = try await detector.scan(knownIdentities: knownIdentities)
-      // 失敗した entry は `detected` に載らないため、呼び出し側が `unobserved` として渡す。
-      // 原因の原文はバナーに載せきれないので、ここに残す。
-      for failure in scan.failures {
-        NSLog("[app] worktree の検出に失敗: \(String(describing: failure))")
-      }
-      if let listingFailure = scan.listingFailure {
-        NSLog("[app] worktree の一覧取得に失敗: \(String(describing: listingFailure))")
-      }
-      return .success(scan)
-    } catch {
-      return .failure(error)
     }
   }
 

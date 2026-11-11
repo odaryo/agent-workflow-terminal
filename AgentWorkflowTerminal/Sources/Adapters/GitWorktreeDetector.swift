@@ -46,7 +46,7 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
 ///   検出できない entry は `failures` に残す。ただし bare、到達不能と確認できない
 ///   `prunable`、common dir が別 Project の entry は対象外として除外する (`isScannable` /
 ///   `describe`)。`prunable` だけでは不在の証拠にならない (Issue #496)。除外自体の代償は Issue #137。
-/// - Important: 到達可能な作業ツリーの安定 ID は git に問い合わせる。`git rev-parse --path-format=absolute` の
+/// - Important: 到達可能な作業ツリーの安定 ID は初回に git に問い合わせる。`git rev-parse --path-format=absolute` の
 ///   出力は symlink 解決とディスク上の大小文字への矯正を経た正規形であり、`WorktreeIdentity` が
 ///   正規化しない設計はこの出力をそのまま渡すことで成立している。作業ツリーのパスと
 ///   `worktrees/<name>` を文字列連結して組み立てると、その前提が消える。git は管理ディレクトリ名を
@@ -73,8 +73,6 @@ public struct GitWorktreeDetector: Sendable {
   private static let commonDirectoryArguments = [
     "rev-parse", "--path-format=absolute", "--git-common-dir",
   ]
-
-  private static let branchRefPrefix = "refs/heads/"
 
   /// `git -C <path>` は chdir するので、ディレクトリとして開けるかどうかがそのまま到達可能性に
   /// なる。git 2.50.1 実測では、パスが消えていれば `No such file or directory`、パスがファイル
@@ -171,7 +169,7 @@ public struct GitWorktreeDetector: Sendable {
   /// - Returns: 対象外として除外した entry はどちらの配列にも載せず、除外したこと自体も
   ///   呼び出し側へ伝えない (`isScannable` / `describe`)。
   public func scan(
-    knownIdentities: [WorktreeIdentity] = []
+    knownIdentities: [WorktreeIdentity] = [], reusableObservations: [DetectedWorktree] = []
   ) async throws(GitWorktreeScanError) -> GitWorktreeScanResult {
     let parsed: GitWorktreeListParseResult
     var listingFailure: GitWorktreeListingFailure?
@@ -203,7 +201,8 @@ public struct GitWorktreeDetector: Sendable {
     // main として最初に現れるので、scannable で絞る前の順序で決める。
     for (index, entry) in parsed.entries.enumerated() where isScannable(entry) {
       switch try await describe(
-        entry, isMainWorktree: index == 0, projectCommonDirectory: commonDirectory)
+        entry, isMainWorktree: index == 0, projectCommonDirectory: commonDirectory,
+        reusableObservations: reusableObservations)
       {
       case .detected(let worktree): detected.append(worktree)
       case .absent: continue
@@ -296,8 +295,15 @@ public struct GitWorktreeDetector: Sendable {
   private func describe(
     _ entry: GitWorktreeEntry,
     isMainWorktree: Bool,
-    projectCommonDirectory: WorktreeIdentity
+    projectCommonDirectory: WorktreeIdentity,
+    reusableObservations: [DetectedWorktree]
   ) async throws(GitWorktreeScanError) -> EntryOutcome {
+    if let reused = Self.reusedObservation(
+      entry, isMainWorktree: isMainWorktree, commonDirectory: projectCommonDirectory,
+      observations: reusableObservations, findAdministrativeDirectory: findAdministrativeDirectory)
+    {
+      return .detected(reused)
+    }
     if entry.prunableReason != nil {
       return describeUnreachable(entry, projectCommonDirectory: projectCommonDirectory)
     }
@@ -491,10 +497,4 @@ public struct GitWorktreeDetector: Sendable {
     return identity
   }
 
-  /// `refs/heads/` が付かない値は加工せずに返す。branch 名は `feat/a` のように `/` を含み得るので、
-  /// 最後の要素を取る短縮はできない。
-  private static func shortBranchName(_ reference: String) -> String {
-    guard reference.hasPrefix(branchRefPrefix) else { return reference }
-    return String(reference.dropFirst(branchRefPrefix.count))
-  }
 }

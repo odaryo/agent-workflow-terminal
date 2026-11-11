@@ -192,6 +192,87 @@ struct WorktreePartialListingTests {
       result.inventory.taskWorktrees == [TaskWorktree(detected: unreachable, activation: .active)])
   }
 
+  @Test("§3.2 管理ディレクトリの消失を挟んで同じ安定 ID が再出現したら Inactive にする (#870 T1)")
+  func removedTaskReappearsInactiveDuringPersistentIncompleteListing() throws {
+    let wt1 = try detected("wt1")
+    let wt2 = try detected("wt2")
+    let wt3 = try detected("wt3")
+    let previous = WorktreeInventory(
+      projectRoot: nil,
+      taskWorktrees: [wt1, wt2, wt3].map { TaskWorktree(detected: $0, activation: .active) })
+
+    let omitted = reconcileDetectedWorktrees(
+      detected: [wt1, wt3], previous: previous, isListingComplete: false, removed: [])
+
+    #expect(omitted.inventory == previous)
+    #expect(omitted.unobserved == [wt2.identity])
+    #expect(omitted.disappeared.isEmpty)
+
+    let removed = reconcileDetectedWorktrees(
+      detected: [wt1], previous: omitted.inventory, isListingComplete: false,
+      removed: [wt3.identity])
+
+    #expect(removed.disappeared == [wt3.identity])
+    #expect(removed.unobserved == [wt2.identity])
+    #expect(
+      removed.inventory.taskWorktrees
+        == [wt1, wt2].map {
+          TaskWorktree(detected: $0, activation: .active)
+        })
+
+    let fresh = try detected("wt3", branch: "fresh")
+    let recreated = reconcileDetectedWorktrees(
+      detected: [wt1, fresh], previous: removed.inventory, isListingComplete: false, removed: [])
+
+    #expect(recreated.appeared == [wt3.identity])
+    #expect(recreated.unobserved == [wt2.identity])
+    #expect(recreated.disappeared.isEmpty)
+    #expect(
+      recreated.inventory.taskWorktrees == [
+        TaskWorktree(detected: wt1, activation: .active),
+        TaskWorktree(detected: wt2, activation: .active),
+        TaskWorktree(detected: fresh, activation: .inactive),
+      ])
+  }
+
+  @Test(
+    "removed でも今回検出した Task は検出値へ更新し activation を保つ (#870 T2)",
+    arguments: [WorktreeActivation.active, .inactive])
+  func detectedRemovedTaskIsUpdated(activation: WorktreeActivation) throws {
+    let before = try detected("wt3", branch: "old", observation: .unreachable)
+    let updated = try detected("wt3", branch: "fresh")
+    let previous = WorktreeInventory(
+      projectRoot: nil, taskWorktrees: [TaskWorktree(detected: before, activation: activation)])
+
+    let result = reconcileDetectedWorktrees(
+      detected: [updated], previous: previous, isListingComplete: false,
+      removed: [before.identity])
+
+    #expect(result.disappeared.isEmpty)
+    #expect(result.unobserved.isEmpty)
+    #expect(result.appeared.isEmpty)
+    #expect(
+      result.inventory.taskWorktrees == [TaskWorktree(detected: updated, activation: activation)])
+  }
+
+  @Test("完全な一覧で removed を渡しても結果は変わらない (#870 T3)")
+  func removedDoesNotChangeCompleteListing() throws {
+    let wt1 = try detected("wt1")
+    let wt2 = try detected("wt2")
+    let previous = WorktreeInventory(
+      projectRoot: nil,
+      taskWorktrees: [wt1, wt2].map { TaskWorktree(detected: $0, activation: .active) })
+
+    let withoutRemoved = reconcileDetectedWorktrees(
+      detected: [wt1], previous: previous, isListingComplete: true)
+    let withRemoved = reconcileDetectedWorktrees(
+      detected: [wt1], previous: previous, isListingComplete: true,
+      removed: [wt1.identity, wt2.identity])
+
+    #expect(withRemoved == withoutRemoved)
+    #expect(withRemoved.disappeared == [wt2.identity])
+  }
+
   private func detected(
     _ name: String,
     branch: String? = nil,

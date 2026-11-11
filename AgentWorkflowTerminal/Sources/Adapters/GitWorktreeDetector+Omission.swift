@@ -3,6 +3,31 @@ import Foundation
 import TerminalCore
 
 extension GitWorktreeDetector {
+  /// git 2.54.0 実測 (#870): `worktree remove` は管理ディレクトリを消し、同名で add すると
+  /// 同じパスを再利用する。exit 128 で一覧が途切れても管理ディレクトリは残り、その間に remove
+  /// したものだけが消える。作業ツリーだけを消すと prunable になり、管理ディレクトリは prune
+  /// まで残る。最後の linked worktree を remove すると `<common>/worktrees` 自体も消える。
+  ///
+  /// - Important: EACCES 等は不在の証拠にならないため、ENOENT だけを採る。common dir の
+  ///   lstat も失敗した回は、ボリュームの切断等で全 Task を消失にしないため何も返さない。
+  ///   この保護が効くのは common dir と同じボリュームの ID だけである。symlink の管理
+  ///   ディレクトリをたどった先の ID は common dir の外にあり得る (#870 のレビューの実測)。
+  ///   symlink 自体の存在を尊重し、リンク先の不在を消失にしないため stat ではなく lstat を使う。
+  ///   安定 ID は正規化も連結も readdir との照合もしない。`administrativeDirectory` の doc にある
+  ///   `/private` や NFC/NFD の綴り差を消失と誤認すると、Active 指定を失うためである。
+  /// - Note: `omission` と同じく、打ち切る手段の無い同期 FS I/O を行う。
+  static func removedAdministrativeDirectories(
+    _ identities: [WorktreeIdentity], commonDirectory: WorktreeIdentity
+  ) -> [WorktreeIdentity] {
+    var info = stat()
+    guard lstat(commonDirectory.rawValue, &info) == 0 else { return [] }
+    var seen: Set<WorktreeIdentity> = []
+    return identities.filter { identity in
+      guard seen.insert(identity).inserted else { return false }
+      return lstat(identity.rawValue, &info) == -1 && errno == ENOENT
+    }
+  }
+
   /// exit 0 の一覧が record を黙って欠いたかを、Project Root 側の管理ディレクトリと数で照らす
   /// (Issue #774)。欠けたのがどの worktree かは分からないので、一覧全体を不完全として扱う。
   ///

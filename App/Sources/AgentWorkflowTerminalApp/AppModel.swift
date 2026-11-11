@@ -290,8 +290,12 @@ final class AppModel: ObservableObject {
       guard !Task.isCancelled else { return }
       let waiters = hostControlRescan.beginScan()
       defer { hostControlRescan.finishScan(waiters) }
+      // Active の切り替えは await の間にも起こるので、`previous` は await の後に読む。
+      // ID を増減させるのはスキャンだけなので、ID はここで取っても食い違わない。
+      let knownIdentities = worktrees.map(\.identity)
       // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
-      guard case .success(let scan) = await scan(with: detector) else {
+      guard case .success(let scan) = await scan(with: detector, knownIdentities: knownIdentities)
+      else {
         reconcileFailedScan()
         continue
       }
@@ -299,12 +303,14 @@ final class AppModel: ObservableObject {
       report(scanFailures: scan.failures, listingFailure: scan.listingFailure)
       // 観測に失敗した entry を捨てて `detected` だけを渡すと、その worktree は消失扱いになり、
       // ユーザーの Active 指定が保存から消える (Issue #243)。
+      // 一覧が不完全でも消失を確認できた Task は残さない。同名で作り直すと Active を引き継ぐため (#870)。
       let updated = reconcileDetectedWorktrees(
         detected: scan.detected,
         previous: inventory,
         unobserved: scan.failures.map(\.worktreePath),
         isListingComplete: scan.listingFailure == nil,
-        prunable: scan.prunable
+        prunable: scan.prunable,
+        removed: scan.removed
       )
       if updated.inventory != inventory {
         projectRoot = updated.inventory.projectRoot
@@ -319,10 +325,11 @@ final class AppModel: ObservableObject {
   }
 
   private func scan(
-    with detector: GitWorktreeDetector
+    with detector: GitWorktreeDetector,
+    knownIdentities: [WorktreeIdentity] = []
   ) async -> Result<GitWorktreeScanResult, GitWorktreeScanError> {
     do {
-      let scan = try await detector.scan()
+      let scan = try await detector.scan(knownIdentities: knownIdentities)
       // 失敗した entry は `detected` に載らないため、呼び出し側が `unobserved` として渡す。
       // 原因の原文はバナーに載せきれないので、ここに残す。
       for failure in scan.failures {

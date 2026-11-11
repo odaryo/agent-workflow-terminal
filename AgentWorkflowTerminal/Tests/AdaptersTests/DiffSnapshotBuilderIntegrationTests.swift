@@ -191,7 +191,9 @@ struct DiffSnapshotBuilderIntegrationTests {
     }
   }
 
-  @Test("base branch は upstream、無ければ origin/HEAD、どちらも無ければ未決定", .timeLimit(.minutes(1)))
+  @Test(
+    "base branch はユーザーの選択、分岐元、origin/HEAD の順で決め、upstream は使わない",
+    .timeLimit(.minutes(1)))
   func resolvesBaseBranch() async throws {
     try await withGitRepository { repository in
       let root = repository.mainWorktree
@@ -213,11 +215,27 @@ struct DiffSnapshotBuilderIntegrationTests {
         await builder.resolveBaseBranch(userSelection: nil)
           == .resolved(branch: .remote("origin/main"), source: .originHead))
 
+      // 起点を省くと `branch: Created from HEAD` が残り、今の HEAD (feature 自身) に解決される。
       try await repository.git(["checkout", "-q", "-b", "feature"])
       try await repository.git(["push", "-q", "-u", "origin", "feature"])
+      try await repository.requireUpstream("refs/remotes/origin/feature")
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from HEAD", of: "refs/heads/feature")
       #expect(
         await builder.resolveBaseBranch(userSelection: nil)
-          == .resolved(branch: .remote("origin/feature"), source: .upstream))
+          == .resolved(branch: .remote("origin/main"), source: .originHead))
+
+      try await repository.git(["checkout", "-q", "-b", "topic", "origin/main"])
+      try await repository.git(["push", "-q", "-u", "origin", "topic"])
+      try await repository.requireUpstream("refs/remotes/origin/topic")
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from origin/main", of: "refs/heads/topic")
+      #expect(
+        await builder.resolveBaseBranch(userSelection: nil)
+          == .resolved(branch: .remote("origin/main"), source: .forkPoint))
+      #expect(
+        await builder.resolveBaseBranch(userSelection: .local("main"))
+          == .resolved(branch: .local("main"), source: .userSelection))
     }
   }
 

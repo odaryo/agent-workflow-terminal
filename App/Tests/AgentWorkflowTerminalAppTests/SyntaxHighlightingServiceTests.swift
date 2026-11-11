@@ -54,7 +54,7 @@ struct SyntaxHighlightingServiceTests {
   func highlightJSInternalError() async {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
     // 600 段 (highlight.js が成功した実測の深さ) では HighlightJSMarkup の深さの上限 32 で nil になり、
-    // errorRaised の経路を通らない。4000 段では RangeError を内部で捕まえて errorRaised を立てる (#771 の実測)。
+    // JS の失敗を検証できないため、debugMode で RangeError が例外として抜ける実測の深さ 4000 を使う (#866)。
     let depth = 4000
     let nested =
       String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)
@@ -62,6 +62,36 @@ struct SyntaxHighlightingServiceTests {
     #expect(failed == nil)
     let known = await service.highlight("func f() {}", language: "swift", isDark: false)
     #expect(known != nil)
+  }
+
+  @Test("HTML の script 内で深い入れ子が失敗したら nil を返し、次のハイライトは成功する")
+  func nestedScriptInternalError() async {
+    let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
+    // 600 段以下では HighlightJSMarkup の深さの上限 32 によって別の理由で nil になるため、
+    // script の subLanguage 内で RangeError が起きた実測の深さ 4000 を使う (#866)。
+    let depth = 4000
+    let nested =
+      String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)
+    let code = "<div class=\"a\">x</div>\n<script>\nlet a = \(nested);\n</script>\n<p>y</p>\n"
+    let failed = await service.highlight(code, language: "xml", isDark: false)
+    #expect(failed == nil)
+    let known = await service.highlight("func f() {}", language: "swift", isDark: false)
+    #expect(known != nil)
+  }
+
+  @Test("HTML の小さな script 内のキーワードにテーマの色を付ける")
+  func colorsScriptKeyword() async throws {
+    let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
+    let code = "<div class=\"a\">x</div>\n<script>let a = 1;</script>\n"
+    let result = try #require(await service.highlight(code, language: "xml", isDark: false))
+    let attributed = NSAttributedString(result.text)
+    let keywordRange = try #require(code.range(of: "let"))
+    let range = NSRange(keywordRange, in: code)
+    for index in range.location..<(range.location + range.length) {
+      let color = try #require(
+        attributed.attribute(.foregroundColor, at: index, effectiveRange: nil) as? NSColor)
+      try expectColor(color, red: 0xAA, green: 0x0D, blue: 0x91)
+    }
   }
 
   @Test("存在しないリソースでは繰り返し呼んでも nil を返す")

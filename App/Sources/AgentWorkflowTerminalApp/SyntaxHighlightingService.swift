@@ -35,8 +35,7 @@ actor SyntaxHighlightingService {
     // 協調スレッドのスタック上限で素のテキストへ退避できるよう、JS 呼び出しはこの actor 内に留める。
     let result = context.objectForKeyedSubscript("hljs")?.invokeMethod(
       "highlight", withArguments: [code, ["language": language, "ignoreIllegals": true]])
-    // highlight.js は内部の失敗 (深い入れ子の RangeError など) を例外にせず errorRaised に入れ、
-    // value には色の無い素のテキストを返すので、成功として扱わない (#771)。
+    // debugMode が効いていない場合も、errorRaised を伴う素のテキストを成功として扱わないため。
     guard context.exception == nil,
       let errorRaised = result?.objectForKeyedSubscript("errorRaised"),
       errorRaised.isUndefined || errorRaised.isNull,
@@ -76,6 +75,9 @@ actor SyntaxHighlightingService {
     guard created.exception == nil,
       let hljs = created.objectForKeyedSubscript("hljs"), !hljs.isUndefined, !hljs.isNull
     else { return nil }
+    // 配列 subLanguage の内側の失敗はトップレベルの errorRaised に出ないため、例外として受け取る (#866)。
+    hljs.invokeMethod("debugMode", withArguments: [])
+    guard created.exception == nil else { return nil }
     context = created
     return created
   }

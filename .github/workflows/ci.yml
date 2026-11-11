@@ -65,6 +65,9 @@ jobs:
       # (run 42969024871)、TerminalCore の1ファイル変更で 5s (run 42969898424) になった。
       # key の toolchain は xcodebuild / swift の版の出力のハッシュで、版が変われば復元しない。
       # 末尾の sha は、保存ごとに新しい key にするため (同じ key は上書きできない)。
+      # 復元すると増分ビルドになる。import するモジュールを Package.swift で直接の依存として宣言して
+      # いない target は、依存先の公開型が変わっても再コンパイルされず、古い layout のまま結合される
+      # (Issue #930。キャッシュではなく native build system の性質で、CLAUDE.md に記録)。
       - name: Set source mtimes from content
         timeout-minutes: 5
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" .

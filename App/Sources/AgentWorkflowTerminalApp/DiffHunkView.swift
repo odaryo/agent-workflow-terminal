@@ -139,7 +139,7 @@ private struct DiffLineRow: View {
         // 修飾キーは gesture ではなく click 時点の実キー状態で見る。
         // Why not `TapGesture().modifiers(.shift)` との合成: `.exclusively(before:)` で組むと
         // **shift 無しの click まで届かなくなり、行が一切選べなくなる** (実測: 同じ画面で
-        // Reviewing/Reviewed のラジオは合成クリックで切り替わるのに、行の tap だけ無反応)。
+        // (当時あった) Reviewing/Reviewed のラジオは合成クリックで切り替わるのに、行の tap だけ無反応)。
         if NSEvent.modifierFlags.contains(.shift) {
           model.extendSelection(to: number, side: side)
         } else {

@@ -32,4 +32,14 @@ extension DiffViewerModel {
     }
     return lineSelection.range.lineNumbers.contains(line)
   }
+
+  var currentSnapshot: DiffSnapshot? {
+    guard let currentSnapshotID else { return history.latest }
+    return history.snapshot(currentSnapshotID)
+  }
+
+  var isViewingOldSnapshot: Bool {
+    guard let current = currentSnapshot, let latest = history.latest else { return false }
+    return current.id != latest.id
+  }
 }

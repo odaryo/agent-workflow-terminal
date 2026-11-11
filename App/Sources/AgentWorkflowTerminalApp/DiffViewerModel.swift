@@ -82,16 +82,6 @@ final class DiffViewerModel: ObservableObject {
     self.sendCoalescer = DiffCommentSendCoalescer(timeSource: timeSource)
   }
 
-  var currentSnapshot: DiffSnapshot? {
-    guard let currentSnapshotID else { return history.latest }
-    return history.snapshot(currentSnapshotID)
-  }
-
-  var isViewingOldSnapshot: Bool {
-    guard let current = currentSnapshot, let latest = history.latest else { return false }
-    return current.id != latest.id
-  }
-
   // MARK: - 行選択とコメント (§9.2)
 
   var currentFileComments: [DiffReviewComment] {
@@ -345,22 +335,25 @@ final class DiffViewerModel: ObservableObject {
 
   // MARK: - 読み込み
 
+  /// 読み込みに失敗・キャンセルされたときは立てず、次に開いたときに読み直す。比較元が未決定でも
+  /// 読み込み自体は成功なので読み直さない。
   func loadContextIfNeeded() async {
     guard !didLoadContext else { return }
-    didLoadContext = true
-    await loadContext()
+    didLoadContext = await loadContext()
   }
 
   /// ペインが現れるたびに呼ぶ。snapshot が既にあれば作り直さない (§9.3: レビュー中の表示と
-  /// コメント位置を勝手に動かさない)。`didLoadContext` の内側に置かないのは、前回比較元を
-  /// 決められなかった・失敗したときも、次に開いたときにもう一度試すため。
+  /// コメント位置を勝手に動かさない)。context の読み込みや build が失敗・キャンセルされていれば、
+  /// 次に開いたときにもう一度試す。`isLoading` を見ないのは、古いビューの build が走っていても
+  /// `openSnapshot()` の世代番号で後勝ちにできるため。
   func prepareForDisplay() async {
     await loadContextIfNeeded()
-    guard currentSnapshot == nil, !isLoading, currentRequest() != nil else { return }
+    guard currentSnapshot == nil, currentRequest() != nil else { return }
     await openSnapshot()
   }
 
-  func loadContext() async {
+  @discardableResult
+  func loadContext() async -> Bool {
     let outcome = await Self.readContext(
       worktreeRoot: worktreeRoot, userSelection: userSelectedBaseBranch)
     switch outcome {
@@ -372,8 +365,10 @@ final class DiffViewerModel: ObservableObject {
       if selectedCommit == nil { selectedCommit = context.commits.first }
       if selectedBranch == nil { selectedBranch = context.baseBranch.branch }
       errorMessage = nil
+      return true
     case .failure(let failure):
       errorMessage = failure.message
+      return false
     }
   }
 
@@ -405,6 +400,7 @@ final class DiffViewerModel: ObservableObject {
       // 走っている build は選び直す前の種別のものなので、結果を反映させない。
       openGeneration += 1
       isLoading = false
+      errorMessage = nil
       return
     }
     await openSnapshot()
@@ -434,6 +430,8 @@ final class DiffViewerModel: ObservableObject {
     // 古い呼び出しの結果は捨てる。誰も表示していないのでコメントも付いていない。
     guard generation == openGeneration else { return }
     isLoading = false
+    // ビューが消えて build がキャンセルされた。失敗として出さず、次に開いたときに作り直す。
+    guard !Task.isCancelled else { return }
     switch outcome {
     case .success(let result):
       history.append(result.snapshot)

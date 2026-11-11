@@ -260,7 +260,7 @@ struct DiffViewerPane: View {
   @ViewBuilder
   private var otherUnsentCommentsBanner: some View {
     let summary = model.unsentCommentSummary
-    if summary.hasOtherUnsentComments, let snapshot = summary.latestOtherSnapshot {
+    if summary.hasOtherUnsentComments, let snapshot = summary.nextOtherSnapshot {
       VStack(alignment: .leading, spacing: 2) {
         banner(Self.unsentCommentsMessage(summary, snapshot: snapshot), icon: "text.bubble")
         Button("その snapshot を開く") { model.showSnapshot(snapshot.id) }

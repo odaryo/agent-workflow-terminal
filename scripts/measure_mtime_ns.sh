@@ -5,7 +5,12 @@
 set -euo pipefail
 
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+cleanup() {
+  local status=$?
+  rm -rf "$work"
+  exit "$status"
+}
+trap cleanup EXIT
 cd "$work"
 mkdir -p Sources/Probe
 cat > Package.swift <<'EOF'
@@ -45,14 +50,14 @@ step() { # step <label> <value> <seconds> <nanoseconds> <expect-if-recompiled>
   local before after out
   before="$(obj_mtime)"
   sleep 1
-  swift build "${build_flags[@]}" >build.log 2>&1 || { cat build.log; exit 1; }
+  swift build ${build_flags[@]+"${build_flags[@]}"} >build.log 2>&1 || { cat build.log; exit 1; }
   after="$(obj_mtime)"
-  out="$(swift run "${build_flags[@]}" --skip-build Probe)"
+  out="$(swift run ${build_flags[@]+"${build_flags[@]}"} --skip-build Probe)"
   echo "$1: source mtime=$(stat -f '%Fm' Sources/Probe/Value.swift) printed=$out (recompiled would print $5) obj_before=$before obj_after=$after"
 }
 
 swift --version 2>&1 | head -1
-echo "build flags: ${build_flags[*]:-(none)}"
+echo "build flags: ${build_flags[*]+${build_flags[*]}}"
 step "0 initial          (S, 0)          " 1 "$S" 0 1
 step "A same s, same ns  (S, 0)          " 2 "$S" 0 2
 step "B same s, other ns (S, 123456789)  " 3 "$S" 123456789 3

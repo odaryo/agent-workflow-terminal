@@ -3,7 +3,7 @@ import Testing
 
 @testable import TerminalCore
 
-/// 偽の pane source・adapter・時計は `WorktreePaneAgentStateFeedTests.swift` のものを使う。
+/// 偽の pane source・adapter・時計は `WorktreePaneFeedTestDoubles.swift` のものを使う。
 @Suite("worktree 単位の pane Agent 状態列の揃い (#387)")
 struct WorktreePaneAgentStatesSnapshotTests {
   @Test("全 pane の最初の結果 (observation か absent) が揃うまでは未完として配信する")
@@ -37,6 +37,7 @@ struct WorktreePaneAgentStatesSnapshotTests {
     let context = try makeContext(panes: [.success([]), .success([pane("%1")])])
     var iterator = context.stream.makeAsyncIterator()
     #expect(await iterator.next() == WorktreePaneAgentStates(panes: [], isComplete: true))
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
     #expect(await iterator.next() == WorktreePaneAgentStates(panes: [], isComplete: false))
     await context.channel.waitForSubscriber(PaneID(rawValue: "%1"))
@@ -76,6 +77,7 @@ struct WorktreePaneAgentStatesSnapshotTests {
     await context.channel.send(.absent, to: PaneID(rawValue: "%1"))
     let absent = try #require(await iterator.next())
     #expect(absent.agentAbsentPanes == [PaneID(rawValue: "%1")])
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
     let pending = try #require(await iterator.next())
     #expect(pending.agentAbsentPanes.isEmpty)

@@ -14,6 +14,7 @@ allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/handoff.sh *)
    空なら Project Root と判定する。1つ目が `true` でなければ作業ツリーの外、2つ目と3つ目が違えば linked worktree、
    4つ目の出力が空でなければ submodule の中なので、この手順を使わない。
 2. `${CLAUDE_SKILL_DIR}/scripts/handoff.sh --check` が exit 0 になることを確認する。
+   登録された Project でないとき、アプリが起動していないとき、登録を確かめられないときも exit 69 になる。
    使えないときは、このセッションの中で通常どおり worktree を作って移動して作業する。
 3. `CLAUDE.md` など Project の規則に従って worktree を作る。
 4. 新しい Agent は今の会話を引き継がない。指示を単体で読める形で Issue コメントやファイルに書き出す。

@@ -193,6 +193,25 @@ SHIM
 cat >"$work_dir/hostctl" <<'HOSTCTL'
 #!/usr/bin/env bash
 set -eu
+if [[ $# -ge 2 && "$1" == project && "$2" == check ]]; then
+  printf 'called\n' >>"$AWT_TEST_DIR/calls"
+  printf '%s\0' "$#" "$@" >>"$AWT_TEST_DIR/check-calls"
+  [[ $# -eq 6 && "$3" == --directory && "$5" == --socket && "$6" == test-socket ]] || exit 2
+  case "${AWT_TEST_HOSTCTL_CHECK:-registered}" in
+    registered)
+      printf '%s\n' '{"ok":true,"registered":true,"version":1}'
+      exit 0
+      ;;
+    not-registered)
+      printf '%s\n' '{"code":"not_registered","message":"not registered","ok":false,"version":1}'
+      exit 1
+      ;;
+    old) exit 2 ;;
+    unavailable) exit 69 ;;
+    communication-error) exit 74 ;;
+    *) exit 2 ;;
+  esac
+fi
 # AWT_TEST_HOSTCTL_KIND: new は --from-pane と --purpose を、from-pane は --from-pane だけを知る。old はどちらも知らない。
 command_ok=0
 if [[ $# -ge 2 && "$1" == worktree && "$2" == open ]]; then
@@ -329,6 +348,7 @@ export AWT_TEST_MODE=success
 export AWT_TEST_SESSION=success
 export AWT_TEST_AGENT="$work_dir/agent"
 export AWT_TEST_HOSTCTL_KIND=new
+export AWT_TEST_HOSTCTL_CHECK=registered
 mkdir "$AWT_TEST_DIR"
 
 # この検査自体が tmux pane の中で動くことがあるので、継承した TMUX_PANE を渡さない。
@@ -424,7 +444,29 @@ expect_hostctl_calls() {
 
 reset_hostctl_calls() {
   rm -f "$AWT_TEST_DIR/calls" "$AWT_TEST_DIR/from-pane" "$AWT_TEST_DIR/sends" "$AWT_TEST_DIR/last-send" \
-    "$AWT_TEST_DIR/argv"
+    "$AWT_TEST_DIR/argv" "$AWT_TEST_DIR/check-calls"
+}
+
+expect_project_check() {
+  local label="$1"
+  checked=$((checked + 1))
+  if [[ ! -s "$AWT_TEST_DIR/stdout" && ! -e "$AWT_TEST_DIR/sends" ]] &&
+    python3 -I - "$AWT_TEST_DIR" "$(pwd -P)" <<'PYTHON'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+assert (root / "calls").read_bytes() == b"called\n"
+assert (root / "check-calls").read_bytes().split(b"\0") == [
+    b"6", b"project", b"check", b"--directory", sys.argv[2].encode(),
+    b"--socket", b"test-socket", b"",
+]
+PYTHON
+  then
+    info "OK: $label (登録確認は1回、引数と空の stdout が期待どおり、worktree open は呼ばれない)"
+  else
+    ng "$label: 登録確認の呼び出しまたは stdout が期待と異なります"
+  fi
 }
 
 expect_agent_prompt() {
@@ -1060,7 +1102,18 @@ start_group() {
 
 # 直列の段。tmux の global environment を変える区間を、並列の群と重ねない (重なると群が exit 69 になる)。
 expect_exit 0 '環境変数と異なる tmux global の窓口で --check が使える' --check
-expect_no_call '--check'
+expect_project_check '--check'
+expect_stderr_contains '--check の応答' '{"ok":true,"registered":true,"version":1}'
+reset_hostctl_calls
+
+for check_mode in not-registered old unavailable communication-error; do
+  export AWT_TEST_HOSTCTL_CHECK="$check_mode"
+  expect_exit 69 "登録確認が $check_mode なら --check は使えない" --check
+  expect_project_check "$check_mode"
+  expect_stderr_contains "$check_mode" 'このディレクトリがアプリに登録された Project か確かめられません'
+  reset_hostctl_calls
+done
+export AWT_TEST_HOSTCTL_CHECK=registered
 
 expect_exit 2 '改行を拒否する' --directory "$AWT_TEST_DIR" --prompt $'first\nsecond'
 expect_no_call '改行'
@@ -1109,11 +1162,13 @@ expect_exit 69 '--check が使えない' --check
 expect_no_call '窓口が無い'
 checked=$((checked + 1))
 if env TMUX="$socket_path,0,0" AWT_HOSTCTL="$work_dir/hostctl" \
-  AWT_HOSTCTL_SOCKET=test-socket "$HANDOFF" --check; then
+  AWT_HOSTCTL_SOCKET=test-socket "$HANDOFF" --check >"$AWT_TEST_DIR/stdout" 2>"$AWT_TEST_DIR/stderr"; then
   info 'OK: 同名の環境変数にフォールバックする'
 else
   ng '同名の環境変数へのフォールバックが失敗しました'
 fi
+expect_project_check '環境変数へのフォールバック'
+reset_hostctl_calls
 T set-environment -g AWT_HOSTCTL "$work_dir/hostctl"
 
 # 次の2件は hostctl を呼ぶので、calls が無いことに頼る上の検査より後に置く。

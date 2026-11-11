@@ -23,8 +23,10 @@ enum IsolatedTmuxServer {
   private static let stopCommandTimeout: Duration = .seconds(10)
   private static let terminationWaitTimeout: Duration = .seconds(5)
 
-  /// `PATH` を既定の候補より先に見る。tmux の版差 (ローカル 3.4 / CI 3.7c) を1台で測るとき、
-  /// 隔離展開した別版を `PATH` の先頭に置いて差し替えられるようにするため。
+  /// `PATH` を既定の候補より先に見る。tmux の版差 (ローカルと CI の版の違いや、最小対応版との
+  /// 違い) を1台で測るとき、隔離展開した別版を `PATH` の先頭に置いて差し替えられるようにするため。
+  /// CI は brew の最新の bottle を入れるので版が黙って変わる。今の版はここに書かず、ジョブログの
+  /// `Show external CLI versions` で確かめる。
   static func executableURL() -> URL? {
     let pathCandidates = (ProcessInfo.processInfo.environment["PATH"] ?? "")
       .split(separator: ":")

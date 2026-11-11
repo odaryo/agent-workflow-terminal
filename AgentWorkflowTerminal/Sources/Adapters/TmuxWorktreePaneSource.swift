@@ -5,8 +5,8 @@ public enum TmuxWorktreePaneSourceError: Error, Sendable, Equatable {
   case unparsableOutput(failedLineCount: Int)
 }
 
-/// 全 worktree の pane 一覧を `list-panes -a` 1回にまとめ、短い TTL の間だけ共有する
-/// (Issue #239 R3)。worktree ごとに `-t <session>` で撃つと、外部プロセス起動が worktree 数に
+/// 全 worktree の pane 一覧を `list-panes -a` 1回にまとめ、その結果を読み取りの失敗も含めて
+/// 短い TTL の間だけ共有する (Issue #239 R3、失敗の共有は #781)。worktree ごとに `-t <session>` で撃つと、外部プロセス起動が worktree 数に
 /// 線形に増える。
 ///
 /// - Important: TTL は呼び出し側の pane 一覧の再取得周期の**半分以下**を渡す。周期に近い値だと
@@ -24,7 +24,7 @@ actor TmuxAllSessionPaneListCache {
   /// `capturedAt` は読み始めた時刻で TTL に使い、`listedAt` は読み終えた時刻で
   /// `PaneSnapshot.listedAt` に渡す。
   private struct CachedListing {
-    let panes: [TmuxPane]
+    let result: Result<[TmuxPane], TmuxWorktreePaneSourceError>
     let capturedAt: ContinuousClock.Instant
     let listedAt: ContinuousClock.Instant
   }
@@ -63,7 +63,7 @@ actor TmuxAllSessionPaneListCache {
     panes: [TmuxPane], listedAt: ContinuousClock.Instant
   ) {
     if let latest, timeSource.now < latest.capturedAt.advanced(by: timeToLive) {
-      return (latest.panes, latest.listedAt)
+      return (try latest.result.get(), latest.listedAt)
     }
     let read: InFlightRead
     if let inFlight {
@@ -84,9 +84,11 @@ actor TmuxAllSessionPaneListCache {
 
   private func complete(_ outcome: ReadOutcome, capturedAt: ContinuousClock.Instant) {
     inFlight = nil
-    // 失敗はキャッシュしない。次の呼び出しで再試行できるようにする。
-    guard case .success(let panes) = outcome.result else { return }
-    latest = CachedListing(panes: panes, capturedAt: capturedAt, listedAt: outcome.listedAt)
+    // 失敗も成功と同じ TTL の間共有する。捨てると、失敗が続く間 session ごとの poll がそれぞれ
+    // `list-panes` を起動する。再試行は TTL ぶん遅れるだけで、TTL は pane 一覧周期の半分以下
+    // なので、feed が数える「連続2回の失敗」は別々の読み取りのままである。
+    latest = CachedListing(
+      result: outcome.result, capturedAt: capturedAt, listedAt: outcome.listedAt)
   }
 
   private static func read(
@@ -104,10 +106,20 @@ actor TmuxAllSessionPaneListCache {
     } catch {
       // server ごと居ない場合は「pane が無い」であって障害ではない。`-t` を渡していた頃に
       // 必要だった `can't find window:` の分岐は、`-a` が session を指さないので要らなくなった
-      // (session 不在は「その名前の行が0件」として現れる)。socket 欠落も不在へ畳む
+      // (session が1つでもある server では、目的の session の不在は「その名前の行が0件」として
+      // 現れる。session が0個の server は下の分岐)。socket 欠落も不在へ畳む
       // (Issue #500、Director 決定4、2026-11-02)。attach 済みの client は fd で繋がったままで、
       // 誤った書き込みは bootstrap と Close で止める。観測のたびの lsof 起動コストを避ける。
       if error.isServerAbsent { return .success([]) }
+      // server は生きているが session が0個 (`exit-empty off` で起きる) だと、`-a` を付けても
+      // tmux は既定の target を解決しようとして解決できず、exit 1 と `no current target\n` を
+      // 返す (tmux 3.8 実測。同じ server で `display-message` は成功する。Issue #781)。
+      // exit code と stderr の完全一致の両方で絞るのは、それ以外の失敗まで空へ畳むと pane 一覧が
+      // 黙って消えるため。`isServerAbsent` に足さないのは、server は生きており、同じ述語を使う
+      // 注入や画面読み取りの経路まで不在扱いにしないため。
+      if case .commandFailed(exitCode: 1, _, stderr: "no current target\n") = error {
+        return .success([])
+      }
       return .failure(.tmux(error))
     }
   }

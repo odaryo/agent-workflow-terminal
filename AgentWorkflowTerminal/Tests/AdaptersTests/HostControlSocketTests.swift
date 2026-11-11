@@ -480,6 +480,27 @@ extension HostControlSocketTests {
       #expect(response == Self.response)
     }
   }
+
+  // bindは親の中の一時パス (親+8バイト) で行うため、利用者のパスが収まっても一時パスが溢れうる。
+  @Test(
+    "一時パスだけが長すぎるとき、pathTooLongは利用者のパスを持ち一時ディレクトリを残さない",
+    arguments: [1, 7])
+  func reportsUserPathWhenTemporaryPathIsTooLong(basenameCount: Int) async throws {
+    let parent = try makeParent(byteCount: 96)
+    defer { try? FileManager.default.removeItem(atPath: parent) }
+    let path = parent + String(repeating: "s", count: basenameCount)
+    #expect(path.utf8.count == 96 + basenameCount)
+    let server = HostControlSocketServer(path: path)
+    do {
+      try await server.start { _ in Self.response }
+      Issue.record("一時パスが長すぎるのにserverが起動できた")
+    } catch {
+      #expect(error == .pathTooLong(path))
+    }
+    await server.stop()
+    let entries = try FileManager.default.contentsOfDirectory(atPath: parent)
+    #expect(entries.allSatisfy { $0.hasSuffix(".lock") })
+  }
 }
 
 extension HostControlSocketTests {
@@ -489,6 +510,15 @@ extension HostControlSocketTests {
 
   private func uniquePath() -> String {
     "/private/tmp/awt-hc-\(UUID().uuidString).sock"
+  }
+
+  // byteCountは末尾の"/"を含む親の長さ。並列のレーンと衝突しないよう一意な名前で作る。
+  private func makeParent(byteCount: Int) throws -> String {
+    let prefix = "/private/tmp/awt-hc-\(UUID().uuidString)-"
+    try #require(prefix.utf8.count < byteCount)
+    let parent = prefix + String(repeating: "d", count: byteCount - 1 - prefix.utf8.count)
+    try FileManager.default.createDirectory(atPath: parent, withIntermediateDirectories: false)
+    return parent + "/"
   }
 
   private func withServer(

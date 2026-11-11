@@ -26,8 +26,9 @@ extension ProjectsModel {
       }
       hostControlServer = server
       // App Nap 中に CPU が混むと scan と応答が進まず、hostctl が 30 秒の期限に当たる (#868 で実測)。
+      // userInitiated だけでは隠すと cpu / disk の絞りが残り、負荷時の応答が約 2.4 倍遅かった (#868 で実測)。
       hostControlActivity = ProcessInfo.processInfo.beginActivity(
-        options: .userInitiatedAllowingIdleSystemSleep,
+        options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
         reason: "hostctl の要求に応答するため")
     } catch {
       let detail: String

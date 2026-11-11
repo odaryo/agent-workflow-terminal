@@ -18,6 +18,10 @@ extension ProjectsModel {
         guard let self else {
           return .failure(code: .notRegistered, message: "アプリの窓口を利用できません")
         }
+        if case .checkProject = request {
+          // open の完了を待つと、hook の問い合わせ期限に間に合わない。
+          return await self.handleHostControl(request)
+        }
         return await self.enqueueHostControl(request)
       }
       hostControlServer = server
@@ -103,32 +107,48 @@ extension ProjectsModel {
 
   private func handleHostControl(_ request: HostControlRequest) async -> HostControlResponse {
     switch request {
+    case .checkProject(let directory):
+      switch await resolveHostControlProject(directory: directory) {
+      case .available: return .projectRegistered
+      case .failure(let response): return response
+      }
     case .openWorktree(let directory, _, let purpose):
-      guard directory.hasPrefix("/"), !directory.utf8.contains(0) else {
-        return .failure(code: .invalidRequest, message: "directory は空でない絶対パスを指定してください")
+      let result = await resolveHostControlProject(
+        directory: directory, rejectCancellation: true,
+        beforeResolve: { hostControlPurposeFailure(purpose) })
+      switch result {
+      case .failure(let response): return response
+      case .available(let project, let model):
+        return await openWorktreeWithValidatedAgentCommand(
+          agentCommand: project.agentCommand,
+          open: { await model.openWorktreeForAgent(directory: directory, purpose: purpose) },
+          isRegistered: { self.registry.project(project.commonDirectory) != nil })
       }
-      if let failure = hostControlPurposeFailure(purpose) { return failure }
-      let project: RegisteredProject
-      do {
-        project = try await resolver.resolve(directory: URL(fileURLWithPath: directory))
-      } catch GitProjectResolutionError.directoryUnreachable {
-        return .failure(code: .unreachable, message: "worktree へ到達できません")
-      } catch {
-        return .failure(code: .notRegistered, message: "登録済みの Project を解決できません")
-      }
-      guard !Task.isCancelled else {
-        return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
-      }
-      guard let registeredProject = registry.project(project.commonDirectory),
-        case .available(let model) = slots[project.commonDirectory]
-      else {
-        return .failure(code: .notRegistered, message: "利用可能な登録済み Project が見つかりません")
-      }
-      return await openWorktreeWithValidatedAgentCommand(
-        agentCommand: registeredProject.agentCommand,
-        open: { await model.openWorktreeForAgent(directory: directory, purpose: purpose) },
-        isRegistered: { self.registry.project(project.commonDirectory) != nil })
     }
+  }
+
+  private func resolveHostControlProject(
+    directory: String, rejectCancellation: Bool = false,
+    beforeResolve: () -> HostControlResponse? = { nil }
+  ) async -> HostControlProjectLookup {
+    guard directory.hasPrefix("/"), !directory.utf8.contains(0) else {
+      return .failure(
+        .failure(code: .invalidRequest, message: "directory は空でない絶対パスを指定してください"))
+    }
+    if let failure = beforeResolve() { return .failure(failure) }
+    let project: RegisteredProject
+    do {
+      project = try await resolver.resolve(directory: URL(fileURLWithPath: directory))
+    } catch GitProjectResolutionError.directoryUnreachable {
+      return .failure(.failure(code: .unreachable, message: "worktree へ到達できません"))
+    } catch {
+      return .failure(.failure(code: .notRegistered, message: "登録済みの Project を解決できません"))
+    }
+    guard !rejectCancellation || !Task.isCancelled else {
+      return .failure(.failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした"))
+    }
+    return hostControlProjectLookup(
+      commonDirectory: project.commonDirectory, registry: registry, slots: slots)
   }
 
   private func publishHostControlEnvironment(socketPath: String) async {
@@ -151,6 +171,24 @@ extension ProjectsModel {
       }
     }
   }
+}
+
+enum HostControlProjectLookup {
+  case available(RegisteredProject, AppModel)
+  case failure(HostControlResponse)
+}
+
+func hostControlProjectLookup(
+  commonDirectory: WorktreeIdentity, registry: ProjectRegistry,
+  slots: [WorktreeIdentity: ProjectSlot]
+) -> HostControlProjectLookup {
+  guard let project = registry.project(commonDirectory),
+    case .available(let model) = slots[commonDirectory]
+  else {
+    return .failure(
+      .failure(code: .notRegistered, message: "利用可能な登録済み Project が見つかりません"))
+  }
+  return .available(project, model)
 }
 
 /// セッションを作ってから目的だけ弾くと、作ったセッションが残るので、作る前に検査する。

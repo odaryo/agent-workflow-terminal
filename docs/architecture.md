@@ -485,8 +485,8 @@ refが更新されることに依存する。worktreeはrefを共有するので
   既定branchのfirst-parentの列の上から作ったbranchだけである。次の2つの形では、commitの無いbranchにも
   印が出る(Issue #913)。これも受け入れる制約とする。
   - 列の外のcommitから作ったbranch。`--no-ff`でmerge済みのbranchの先端から作ったbranch(git 2.54.0で計測)や、
-    squash merge済みのbranchの先端から作ったstacked branch(マージ済みのbranchと同じ先端なので同じ答えになる)
-    がこれに当たる。印は作った直後から出る。
+    squash merge済みのbranchの先端から作ったstacked branch(元のbranchと同じ先端なので、元のbranchに印が出て
+    いれば同じく出る)がこれに当たる。`--no-ff`の形では、印は作った直後から出る。
   - 既定branchが、第1親を別の系列とするmerge(foxtrot merge)をfast-forwardで取り込んだ後のbranch。
     取り込む前は列の上にあって印が出なかったbranchも、取り込んだ後の判定し直しで列から外れて印が出る
     (git 2.54.0で計測)。
@@ -494,13 +494,14 @@ refが更新されることに依存する。worktreeはrefを共有するので
   どちらの印も、先端が動くまで残る(マージ済みの答えは先端で覚えるため)。受け入れる理由は3つある。
   1つ目に、列の外の形はグラフから見分けられない。判定の入力は2つの先端だけで、答えも先端を鍵に覚える
   (上記の確定事項)。そのため、マージ済みのbranchと同じ先端を指すbranchは、必ず同じ答えになる。
-  2つ目に、foxtrot mergeは既定branchにmerge commitをfast-forwardで載せる運用でしか起きない。squash merge
-  しか使わない運用では起きない。3つ目に、印を見てCloseの選択肢4で消しても、元のbranchをCloseするときより
-  多くは失われない。`--no-ff`とfoxtrot mergeの形では先端が既定branchの祖先なので、既定branchに無いcommitは
-  消えない。squash merge済みのbranchから作った形で消えるのは、squash mergeで内容が既定branchに入った
-  commitだけである。branchのreflogで「作ってからcommitしていない」を
-  見分ける案は採らない。reflogの無いbranchでは見分けられないうえ、先端で答えを使い回す確定事項を
-  worktreeごとの判定に変えることになるためである。
+  2つ目に、foxtrot mergeは既定branchにmerge commitをfast-forwardで載せる運用(`git pull`のmergeをpushする
+  など)で起きる。squash mergeしか使わないこのリポジトリの運用では起きにくい。3つ目に、印を見てCloseの
+  選択肢4で消しても、元のbranchをCloseするときより多くは失われない。`--no-ff`とfoxtrot mergeの形では先端が
+  既定branchの祖先なので、既定branchに無いcommitは消えない。squash merge済みのbranchから作った形で消える
+  のは、squash mergeで内容が既定branchに入ったcommitだけである。作業ツリーの未commit変更は、Closeの3と4が
+  上の安全確認で検査して警告する。branchのreflogで「作ってからcommitしていない」を見分ける案は採らない。
+  reflogの無いbranchでは見分けられないうえ、先端で答えを使い回す確定事項をworktreeごとの判定に変えることに
+  なるためである。
 
   逆に、shallowなrepositoryでは、`git rev-list --first-parent`の列がshallowの境界で途切れて列の上に
   あるかを決められないため、マージ済みでも印が出ないことがある(Issue #912)。この問い合わせの出力が

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum HostControlRequest: Sendable, Equatable {
-  case openWorktree(directory: String)
+  case openWorktree(directory: String, fromPane: PaneID? = nil)
 }
 
 public struct HostControlOpenedWorktree: Sendable, Equatable {
@@ -36,8 +36,13 @@ public enum HostControlProtocol {
 
   public static func encode(_ request: HostControlRequest) -> String {
     switch request {
-    case .openWorktree(let directory):
-      return encodeObject(["command": "worktree.open", "directory": directory, "version": version])
+    case .openWorktree(let directory, let fromPane):
+      var object: [String: Any] = [
+        "command": "worktree.open", "directory": directory, "version": version,
+      ]
+      // 省くのは、古いhostctlが送る要求と同じバイト列に保つため。
+      if let fromPane { object["fromPane"] = fromPane.rawValue }
+      return encodeObject(object)
     }
   }
 
@@ -49,10 +54,30 @@ public enum HostControlProtocol {
       guard wire.version == version, wire.command == "worktree.open" else {
         return .failure(HostControlProtocolError(message: "未対応のcommandまたはversionです"))
       }
-      return .success(.openWorktree(directory: wire.directory))
+      // fromPaneは別に読む。同じwireで読むと、文字列でない値が総称のJSON形式の誤りになり、
+      // どの項目が不正かを示せない。
+      let fromPane: PaneID?
+      do {
+        fromPane = try JSONDecoder().decode(FromPaneWire.self, from: Data(line.utf8)).fromPane
+      } catch {
+        return .failure(invalidFromPane)
+      }
+      return .success(.openWorktree(directory: wire.directory, fromPane: fromPane))
     } catch {
       return .failure(HostControlProtocolError(message: "要求のJSON形式が不正です"))
     }
+  }
+
+  static let invalidFromPane = HostControlProtocolError(message: "fromPaneの形式が不正です")
+
+  /// tmux の `#{pane_id}` の形 (`%` と ASCII の10進数字) だけを受け付ける。要求の `fromPane` と
+  /// `--from-pane` で共有する。
+  static func callerPane(_ value: String) -> PaneID? {
+    let bytes = Array(value.utf8)
+    guard bytes.count >= 2, bytes[0] == UInt8(ascii: "%"),
+      bytes.dropFirst().allSatisfy({ (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) })
+    else { return nil }
+    return PaneID(rawValue: value)
   }
 
   public static func encode(_ response: HostControlResponse) -> String {
@@ -96,6 +121,26 @@ public enum HostControlProtocol {
     let directory: String
   }
 
+  private struct FromPaneWire: Decodable {
+    let fromPane: PaneID?
+
+    private enum CodingKeys: String, CodingKey {
+      case fromPane
+    }
+
+    init(from decoder: any Decoder) throws {
+      let values = try decoder.container(keyedBy: CodingKeys.self)
+      guard let raw = try values.decodeIfPresent(String.self, forKey: .fromPane) else {
+        fromPane = nil
+        return
+      }
+      guard let pane = HostControlProtocol.callerPane(raw) else {
+        throw HostControlProtocol.invalidFromPane
+      }
+      fromPane = pane
+    }
+  }
+
   private struct ResponseWire: Decodable {
     let response: HostControlResponse
 
@@ -135,7 +180,7 @@ public struct HostControlProtocolError: Error, Sendable, Equatable {
 }
 
 public enum HostControlCommand: Sendable, Equatable {
-  case openWorktree(directory: String, socket: String?)
+  case openWorktree(directory: String, socket: String?, fromPane: PaneID?)
 }
 
 public enum HostControlCommandLine {
@@ -148,6 +193,7 @@ public enum HostControlCommandLine {
     }
     var directory: String?
     var socket: String?
+    var fromPane: PaneID?
     var index = 2
     while index < arguments.count {
       let option = arguments[index]
@@ -161,6 +207,11 @@ public enum HostControlCommandLine {
       switch option {
       case "--directory" where directory == nil: directory = value
       case "--socket" where socket == nil: socket = value
+      case "--from-pane" where fromPane == nil:
+        guard let pane = HostControlProtocol.callerPane(value) else {
+          return .failure(HostControlProtocolError(message: "不正な引数の値です: \(option)"))
+        }
+        fromPane = pane
       default:
         return .failure(HostControlProtocolError(message: "不正な引数です: \(option)"))
       }
@@ -169,6 +220,6 @@ public enum HostControlCommandLine {
     guard let directory else {
       return .failure(HostControlProtocolError(message: "--directoryが必要です"))
     }
-    return .success(.openWorktree(directory: directory, socket: socket))
+    return .success(.openWorktree(directory: directory, socket: socket, fromPane: fromPane))
   }
 }

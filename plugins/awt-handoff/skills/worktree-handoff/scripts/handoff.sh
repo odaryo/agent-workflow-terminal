@@ -85,8 +85,21 @@ if [[ -z "$hostctl" || ! -f "$hostctl" || ! -x "$hostctl" || -z "$socket" ]]; th
 fi
 [[ "$check" -eq 0 ]] || exit 0
 
-response=$("$hostctl" worktree open --directory "$directory" --socket "$socket")
-rc=$?
+open_plain=1
+if [[ "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]] && errors=$(mktemp "${TMPDIR:-/tmp}/awt-handoff.XXXXXX"); then
+  response=$("$hostctl" worktree open --directory "$directory" --socket "$socket" --from-pane "$TMUX_PANE" 2>"$errors")
+  rc=$?
+  # --from-pane を知らない古い hostctl は、要求を送る前に exit 2 で拒否する。exit 2 なら呼び直しても二重には開かない。
+  if [[ "$rc" -ne 2 ]]; then
+    cat "$errors" >&2
+    open_plain=0
+  fi
+  rm -f "$errors"
+fi
+if [[ "$open_plain" -eq 1 ]]; then
+  response=$("$hostctl" worktree open --directory "$directory" --socket "$socket")
+  rc=$?
+fi
 if [[ "$rc" -ne 0 ]]; then
   [[ -z "$response" ]] || printf '%s\n' "$response" >&2
   [[ "$rc" -ne 2 ]] || rc=1

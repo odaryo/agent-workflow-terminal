@@ -11,6 +11,8 @@ struct WorktreeCloseContext {
   let projectRootBranch: String?
   /// 実行の直前に、いまの一覧からもう一度引く。消えていれば `nil`。
   let currentTarget: @MainActor () -> DetectedWorktree?
+  let executionWillBegin: @MainActor () -> Void
+  let executionDidFinish: @MainActor () -> Void
   let didClose: @MainActor (WorktreeIdentity) -> Void
 }
 
@@ -152,6 +154,7 @@ final class WorktreeCloseSession: ObservableObject {
       return
     }
     phase = .executing(review)
+    context.executionWillBegin()
     let target = target
     let tmuxRunner = tmuxRunner
     let processRunner = processRunner
@@ -162,6 +165,7 @@ final class WorktreeCloseSession: ObservableObject {
       let result = await Self.runExecution(
         plan, target: target, tmuxRunner: tmuxRunner, processRunner: processRunner,
         repositoryDirectory: repositoryDirectory)
+      context.executionDidFinish()
       if result.closedWorktree {
         context.didClose(target.identity)
       }

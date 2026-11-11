@@ -240,12 +240,18 @@ EOS
 }
 
 # socket 上で session_path が使い捨ての Project と一致する session を名前と改行で出す。
-# server が無いのは「消すものが無い」なので成功にする。それ以外の失敗は 1 を返す。
+# server が居ない場合と socket ファイルが無い場合は「消すものが無い」として成功にし、それ以外の失敗は 1 を返す。
+# socket ファイルの不在をそう読めるのは、open がスクリプトの TMUX_TMPDIR をアプリへ渡し、両者が
+# 同じ socket ディレクトリを見るから (#861 の実測)。launchctl setenv TMUX_TMPDIR だけで設定した環境では崩れうる。
+# 生きている server の socket ファイルだけが消えても同じ ENOENT になり区別できない (#492) が、
+# selftest の1回の実行中にそれを起こすものは知られていないので受け入れる。
+# 前置きでなく errno の文言で一致させるのは、File name too long も同じ前置きで始まり、1 に残すため。
 selftest_project_sessions() {
   local socket="$1" project="$2" output name path
   if ! output=$(env -u TMUX tmux -L "$socket" list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>&1); then
     case "$output" in
       *"no server running"*) return 0 ;;
+      "error connecting to "*" (No such file or directory)") return 0 ;;
     esac
     info "tmux -L ${socket} の list-sessions に失敗しました: $output"
     return 1

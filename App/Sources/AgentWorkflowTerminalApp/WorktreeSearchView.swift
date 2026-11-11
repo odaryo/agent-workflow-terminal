@@ -100,19 +100,25 @@ struct WorktreeSearchResultsList: View {
           .padding(.horizontal, 8)
           .padding(.vertical, 2)
       }
+      // Why not 固有サイズのまま: ContentUnavailableView は固有サイズを返すので、残りの高さを
+      // 埋めないと親の VStack ごと中央へ寄り、検索窓まで下がる (#831)。
       switch model.state {
       case .idle:
         Spacer(minLength: 0)
       case .running:
         ContentUnavailableView("検索中です", systemImage: "hourglass")
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
       case .failed(let error):
         // 「見つからなかった」ではなく「調べられなかった」(§12.3)。
         ContentUnavailableView(
           "検索できませんでした", systemImage: "exclamationmark.triangle",
-          description: Text(message(for: error)))
+          description: Text(message(for: error))
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       case .fullText(let report):
         if report.outcome.matches.isEmpty {
           ContentUnavailableView("一致する行はありませんでした", systemImage: "magnifyingglass")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           List(report.outcome.matches) { match in
             fullTextRow(match)
@@ -122,6 +128,7 @@ struct WorktreeSearchResultsList: View {
       case .fileNames(let results):
         if results.matches.isEmpty {
           ContentUnavailableView("一致するファイルはありませんでした", systemImage: "magnifyingglass")
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
           List(results.matches) { match in
             fileNameRow(match)

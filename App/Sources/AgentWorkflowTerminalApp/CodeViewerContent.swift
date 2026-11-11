@@ -11,7 +11,7 @@ struct CodeViewerContent: View {
   var body: some View {
     VStack(alignment: .leading, spacing: 0) {
       if let selection = model.selection {
-        header(name: selection.name)
+        header(for: selection)
         Divider()
         switch history.mode {
         case .current:
@@ -48,10 +48,10 @@ struct CodeViewerContent: View {
   }
 
   @ViewBuilder
-  private func header(name: String) -> some View {
+  private func header(for selection: FileBrowserSelection) -> some View {
     VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 8) {
-        Text(name).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+        Text(selection.name).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
         if history.mode == .current, let observation = model.content?.result.observation {
           Text(FileViewText.summary(of: observation))
             .font(.caption)
@@ -68,6 +68,15 @@ struct CodeViewerContent: View {
           .labelStyle(.iconOnly)
           .help("既定のアプリで開く")
         }
+      }
+      // worktree の root 直下では名前と同じ文字列になるので出さない。
+      if selection.id != selection.name {
+        Text(selection.id)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .help(selection.id)
       }
       if let reason = externalOpening.failureReason {
         Label(reason, systemImage: "exclamationmark.triangle")

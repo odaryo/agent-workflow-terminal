@@ -794,6 +794,62 @@ use_test_zsh() {
   AWT_TEST_SHELL=$(command -v zsh)
 }
 
+# watcher は背景の subshell なので、記録はファイルで親へ渡す。失敗しても watcher を非0で終わらせない
+# (wait "$watcher" が非0を返すと、群が途中で止まったことになる)。
+record_rc_wait_state() {
+  local pane=""
+  pane=$(T display-message -p -t "=$AWT_TEST_SESSION:" '#{pane_pid} #{pane_tty}' 2>/dev/null) || pane=""
+  {
+    printf 'pane_pid %s\n' "${pane%% *}"
+    [[ "$pane" != *" "* ]] || ps -t "${pane#* }" -o pid=,ppid=,pgid=,tpgid=,comm= 2>&1 || true
+  } >"$AWT_TEST_DIR/rc-wait-state" 2>/dev/null || true
+}
+
+# 陰性の群が効くのは、rc を実行する zsh が rc の外部コマンドを別の pgid で前景に置くときだけである
+# (`unsetopt monitor` では同じ pgid になり、修正前の handoff.sh でも OK になる)。bash-child-zsh-rc では
+# pane の PID は bash で、その pgid とは常に異なるので、比べる相手は子の zsh にする。
+expect_rc_wait_foreground() {
+  local label="$1" mode="$2"
+  checked=$((checked + 1))
+  if python3 -I - "$AWT_TEST_DIR/rc-wait-state" "$mode" <<'PYTHON'
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+mode = sys.argv[2]
+if not path.exists():
+    sys.exit("記録がありません")
+lines = path.read_text(errors="replace").splitlines()
+if not lines or not lines[0].startswith("pane_pid "):
+    sys.exit("pane_pid の記録がありません")
+pane_pid = lines[0][len("pane_pid "):]
+if not pane_pid.isdigit():
+    sys.exit("pane_pid が数値ではありません")
+processes = []
+for line in lines[1:]:
+    fields = line.split(None, 4)
+    if len(fields) == 5:
+        processes.append(fields)
+if mode == "zsh-rc":
+    shells = [fields for fields in processes if fields[0] == pane_pid]
+else:
+    shells = [fields for fields in processes if fields[1] == pane_pid and fields[4].endswith("zsh")]
+if len(shells) != 1:
+    sys.exit("rc を実行する zsh が1つに決まりません (" + str(len(shells)) + " 件)")
+pid, _, pgid, tpgid, _ = shells[0]
+if not pgid.isdigit() or not tpgid.isdigit():
+    sys.exit("zsh " + pid + " の pgid か tpgid が数値ではありません")
+if pgid == tpgid:
+    sys.exit("zsh " + pid + " の pgid と前景の pgid が同じ " + pgid + " です")
+PYTHON
+  then
+    info "OK: $label (rc の待ちの間、前景は rc を実行する zsh とは別の pgid だった)"
+  else
+    ng "$label: rc の待ちの間の前景が、rc を実行する zsh とは別の pgid だったことを確かめられません"
+    cat "$AWT_TEST_DIR/rc-wait-state" 2>/dev/null || true
+  fi
+}
+
 # 送った指示は、rc の待ちの間は tty の echo で画面に出る。それを見てから rc-marker を作るので、待ちが rc-marker で
 # 終わったなら (rc-timeout が無ければ) 送信は待ちの間だった。待ちの後に送信されたなら rc-timeout が先にできる。
 watch_rc_wait() {
@@ -802,6 +858,8 @@ watch_rc_wait() {
     [[ ! -e "$AWT_TEST_DIR/rc-timeout" && ! -e "$AWT_TEST_DIR/watch-stop" ]] || return 0
     screen=$(T capture-pane -p -J -t "=$AWT_TEST_SESSION:" 2>/dev/null) || screen=""
     if [[ "$screen" == *"$text"* ]]; then
+      # rc-marker の後は待ちが明けて前景が rc を実行する zsh に戻るので、その前に記録する。
+      record_rc_wait_state || true
       touch "$AWT_TEST_DIR/rc-marker"
       return 0
     fi
@@ -837,6 +895,7 @@ group_zsh_rc() {
     ng "$label: 送信が rc の待ちの間ではありません"
     T capture-pane -p -J -t "=$AWT_TEST_SESSION:" 2>/dev/null || true
   fi
+  expect_rc_wait_foreground "$label" "$mode"
   if [[ "$mode" == bash-child-zsh-rc ]]; then
     expect_bash_child_zsh "$label"
   fi
@@ -900,15 +959,24 @@ if index != len(fields):
 problems = []
 kinds = {"display-message #{cursor_x}": 0, "capture-pane": 0, "display-message #{pane_pid}": 0,
          "send-keys -l": 0, "send-keys Enter": 0}
+# tmux は -pt のような束ねた指定と、-t=<値> のように残りを値とする連結形を受け付ける。束ねた中の t が
+# 別のオプションの値の一部 (-Ft) でも -t とみなす。誤って NG になる向きにだけ倒し、漏れる向きを作らない。
+# -- で始まる引数は tmux のオプションではない (偽 hostctl の new-session の /bin/bash --norc など)。
 for args in calls:
-    options = args[:args.index("--")] if "--" in args else args
+    rest = args[1:]
+    options = rest[:rest.index("--")] if "--" in rest else rest
     targeted = False
     for position, arg in enumerate(options):
-        if arg == "-t":
-            targeted = True
-            if position + 1 >= len(options) or options[position + 1] != want:
+        if arg == "-" or not arg.startswith("-") or arg.startswith("--") or "t" not in arg[1:]:
+            continue
+        targeted = True
+        value = arg[arg.index("t", 1) + 1:]
+        if value == "":
+            if position + 1 >= len(options):
                 problems.append(args)
-        elif arg.startswith("-t"):
+                continue
+            value = options[position + 1]
+        if value != want:
             problems.append(args)
     if not targeted or not args:
         continue

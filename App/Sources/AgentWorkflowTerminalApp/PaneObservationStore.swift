@@ -134,9 +134,10 @@ final class PaneObservationStore: ObservableObject {
     for (session, current) in observed {
       let raw = current.latestPaneStates?.first { $0.id == pane }
       guard raw != nil || current.details[pane] != nil else { continue }
+      // 直近の生の状態では update しない。記録より前の古い Completed / Idle を渡すと、
+      // 記録したターンの Working で解除される。
       handoffs.record(paneID: pane, processID: current.processIDs[pane])
-      let isHandedOff = handoffs.update(paneID: pane, agentState: raw?.state)
-      observed[session]?.details[pane, default: OverviewPaneDetail()].isHandedOff = isHandedOff
+      observed[session]?.details[pane, default: OverviewPaneDetail()].isHandedOff = true
       return true
     }
     return false

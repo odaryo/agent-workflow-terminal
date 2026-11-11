@@ -709,7 +709,7 @@ Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
   ないため。
 - 到達不能・観測失敗のセッションは、状態の記号を流用せず`exclamationmark.triangle`と文言で示す(§12.3)。
 
-**引き渡し済みの印 — 現在の推奨(2026-11-11、Issue #828)。** worktreeへ作業を渡し終えたProject Rootのpane(§3.1)は、状態が`Completed`か`Idle`のときだけ、状態の記号の代わりに`arrowshape.turn.up.right.circle`(灰、accessibility label「引き渡し済み」)を出す。レビュー待ちの応答終了と、役目を終えた窓口を見分けるためである。`Question`／`Permission`／`Error`／要対応(種別不明)は隠さず、その状態の記号を出す。`AgentState`の語彙(§12.2)は増やさず、通知(§11.2)も変えない。
+**引き渡し済みの印 — 現在の推奨(2026-11-11、Issue #828)。** 上の対応表(確定)の例外として、worktreeへ作業を渡し終えたProject Rootのpane(§3.1)は、状態が`Completed`か`Idle`のときだけ、状態の記号の代わりに`arrowshape.turn.up.right.circle`(灰、accessibility label「引き渡し済み」)を出す。レビュー待ちの応答終了と、役目を終えた窓口を見分けるためである。`Question`／`Permission`／`Error`／要対応(種別不明)は隠さず、その状態の記号を出す。`AgentState`の語彙(§12.2)は増やさず、通知(§11.2)も変えない。
 
 **作業概要の右クリック一覧の廃止 — 現在の推奨(2026-11-08、Issue #672)。** 2026-11-01に確定し、2026-11-02(Issue #438)に細部を推奨した全セッションの作業概要一覧は、Overviewと重複するため廃止する。目的と状態の一覧および切り替えはOverviewで行う。
 
@@ -1715,7 +1715,7 @@ Gate 3の記録にはIssue #725のこれらの画面は無いため、§12.5に�
 **観測と表示の保持 — 確定(2026-11-08、Issue #387)。**
 
 - paneごとに§12.2と同じ安定化(`Idle`／`Unknown`へ入る遷移を9秒保持)を掛けた状態を表示する。タスク完了表示の解除(§12.7)は生の状態で判定し、保持で遅らせない。
-- 引き渡し済みの印(§3.1、§5.3)の解除 — 現在の推奨(2026-11-11、Issue #828)。`hostctl worktree open`はAgentのターンの途中(`Working`)で呼ばれるので、そのターンの`Working`では解除しない。記録の後に観測した直前の既知の状態が`Completed`か`Idle`で、`Working`に入った遷移で解除する。`Unknown`と観測なしは直前の既知の状態を保ち、`Question`／`Permission`／`Error`からの`Working`では解除しない(§12.7のタスク完了表示の解除と同じ考え方)。解除も生の状態で判定する。paneが消えたとき、Agentの不在が確定したとき、`pane_pid`が記録したときと変わったとき(tmux serverの再起動で`%N`が別のpaneへ振り直されたとき)にも記録を消す。ターンの途中で誤った`Completed`／`Idle`を観測すると、そのターンの`Working`で解除されうる(§12.7と同じ残存挙動)。
+- 引き渡し済みの印(§3.1、§5.3)の解除 — 現在の推奨(2026-11-11、Issue #828)。`hostctl worktree open`はAgentのターンの途中(`Working`)で呼ばれるので、そのターンの`Working`では解除しない。記録の後に観測した直前の既知の状態が`Completed`か`Idle`で、`Working`に入った遷移で解除する。`Unknown`と観測なしは直前の既知の状態を保ち、`Question`／`Permission`／`Error`からの`Working`では解除しない(§12.7のタスク完了表示の解除と同じ考え方)。解除も生の状態で判定する。paneが消えたとき、Agentの不在が確定したとき、`pane_pid`が記録したときと変わったとき(tmux serverの再起動で`%N`が別のpaneへ振り直されたとき)にも記録を消す。ターンの途中で誤った`Completed`／`Idle`を観測すると、そのターンの`Working`で解除されうる(§12.7と同じ残存挙動)。逆に、`Working`を一度も観測しないまま終わった短いターンでは解除されず、印が残る。放置中に誤った`Working`を一度観測すると解除され、戻らない。アプリのpaneの中で別のtmux serverを起動し、その中のAgentが引き渡すと、そのserverの`%N`が届き、アプリのserverで同じ番号のpaneに印が付きうる(pane IDはserverごとに振られ、`pane_pid`の照合では弾けない)。
 - 最終更新時刻による順序は用いないため、初回の全pane観測が揃う時点や`Unknown`から初めて状態が決まる時点を並び順に使う規則は撤回する(2026-11-08、Issue #672)。
 - 観測から消えたpaneは9秒の間だけ前の状態のまま、前と同じ位置に行を保つ。その間に再び現れたpaneは初出として扱わない。
 - 右クリックのメニューに出す`window.pane`の位置は、状態より最大約3秒古いことがある。位置は概要の`list-panes`から読み、状態とは別の読み取りだからである。移動先は`%N`で決めるので誤ったpaneへは移らず、これを受け入れる。
@@ -3039,6 +3039,7 @@ PR_READY
 - [ ] 作業PCのClientの`+ New Task`もモバイルと同じ扱いにし、sessionは`hostctl`を通してHostに作らせる(§3.1、§20.3)
 - [ ] Androidの接続鍵もKeystoreで機器内に生成・保持し、外へ出さない(§20.6)
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
+- [ ] `hostctl worktree open`の`--from-pane`で引き渡し元のpaneを記録し、Overviewで`Completed`／`Idle`のときだけ「引き渡し済み」の印を出す。記録の後に`Completed`／`Idle`を経た`Working`で解除し、記録はアプリの寿命だけ持つ(§3.1、§5.3、§13、§21.4、Issue #828)
 - [ ] Agentも起動する新規セッションは、起動コマンドを対話シェルに打ち込み、tmux sessionを新しく作れたときだけ1回実行する。起動コマンドが未設定なら項目を無効にする — ユーザー確認待ち(§3.1、Issue #805)
 - [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)
 - [ ] 同じディレクトリの2つ目以降のsession名の接尾辞を`-<n>`(作る時点の最大値+1、2〜9999)にする — ユーザー確認待ち(§3.5)

@@ -29,7 +29,8 @@ struct GitRunnerTests {
       ])
     #expect(
       GitReadCommand.symbolicFullName(main).arguments == [
-        "rev-parse", "--verify", "--quiet", "--symbolic-full-name", "main",
+        "-c", "core.warnAmbiguousRefs=true", "rev-parse", "--verify", "--quiet",
+        "--symbolic-full-name", "main",
       ])
   }
 

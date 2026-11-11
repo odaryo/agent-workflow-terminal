@@ -69,10 +69,17 @@ struct DiffBaseBranchTests {
 }
 
 /// `recordedStartPoint` は reflog の `branch: Created from <ref>` の `<ref>`、`resolvedFullName` は
-/// それを今の repository で `rev-parse --verify --quiet --symbolic-full-name` した stdout (trim 済み)。
-/// 値は git 2.54.0 の隔離 repository での実測 (Issue #829)。
+/// それを今の repository で `rev-parse --verify --quiet --symbolic-full-name` した stdout (trim 済み)、
+/// `listedBranches` は `for-each-ref refs/heads/ refs/remotes/` の一覧。値は git 2.54.0 の隔離
+/// repository での実測 (Issue #829、#842)。
 @Suite("§9.1.1 分岐元の採否")
 struct DiffForkPointTests {
+  // 一覧で落ちたのではなく、それぞれの理由で落ちたことを示すため、解決先はすべて一覧に入れておく。
+  private static let listed: [GitBranchRef] = [
+    .local("main"), .local("日本語"), .local("feature"), .local("feat"), .local("b8"),
+    .remote("origin/main"), .remote("origin/feature"),
+  ]
+
   @Test(
     "記録どおりの名前で branch に解決できれば分岐元にする",
     arguments: [
@@ -86,7 +93,7 @@ struct DiffForkPointTests {
     #expect(
       DiffForkPoint.branch(
         recordedStartPoint: recorded, resolvedFullName: resolved,
-        currentBranch: .local("feature"))
+        currentBranch: .local("feature"), listedBranches: Self.listed)
         == expected)
   }
 
@@ -110,7 +117,8 @@ struct DiffForkPointTests {
   func rejects(recorded: String, resolved: String, current: GitBranchRef) {
     #expect(
       DiffForkPoint.branch(
-        recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: current)
+        recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: current,
+        listedBranches: Self.listed)
         == nil)
   }
 
@@ -120,7 +128,63 @@ struct DiffForkPointTests {
       DiffForkPoint.branch(
         recordedStartPoint: "refs/remotes/origin/feature",
         resolvedFullName: "refs/remotes/origin/feature",
-        currentBranch: .local("origin/feature"))
+        currentBranch: .local("origin/feature"), listedBranches: Self.listed)
         == .remote("origin/feature"))
+  }
+
+  // 大文字小文字を区別しない volume では、`rev-parse` が一覧に無い綴りの完全名を返す。
+  // NFD と NFC の行は `String ==` では等しいので、照合が正準等価に戻ると通ってしまう。
+  @Test(
+    "一覧に無い綴りの完全名は、近い綴りの branch が在っても分岐元にしない",
+    arguments: [
+      ("Main", "refs/heads/Main", [GitBranchRef.local("main")]),
+      ("origin/Main", "refs/remotes/origin/Main", [.remote("origin/main")]),
+      ("\u{304B}\u{3099}", "refs/heads/\u{304B}\u{3099}", [.local("\u{304C}")]),
+      ("\u{304C}", "refs/heads/\u{304C}", [.local("\u{304B}\u{3099}")]),
+      ("main", "refs/heads/main", []),
+    ])
+  func rejectsUnlistedSpelling(recorded: String, resolved: String, listed: [GitBranchRef]) {
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: recorded, resolvedFullName: resolved,
+        currentBranch: .local("feature"), listedBranches: listed)
+        == nil)
+  }
+
+  @Test(
+    "一覧にバイト列として在る綴りなら、NFC でも NFD でも分岐元にする",
+    arguments: ["\u{304C}", "\u{304B}\u{3099}"])
+  func adoptsListedSpelling(name: String) throws {
+    let adopted = try #require(
+      DiffForkPoint.branch(
+        recordedStartPoint: name, resolvedFullName: "refs/heads/" + name,
+        currentBranch: .local("feature"),
+        listedBranches: [.local("\u{304C}"), .local("\u{304B}\u{3099}")]))
+    #expect(Array(adopted.fullName.utf8) == Array(("refs/heads/" + name).utf8))
+  }
+
+  // 既定の設定では、記録と一覧は NFC だが、`Process` が argv を NFD へ分解するので `rev-parse` は
+  // NFD を返す (git 2.54.0 で計測、Issue #842)。
+  @Test("記録と一覧が NFC なら、解決が NFD でも一覧の NFC の綴りで分岐元にする")
+  func adoptsListedSpellingOverDecomposedResolution() {
+    let adopted = DiffForkPoint.branch(
+      recordedStartPoint: "\u{304C}", resolvedFullName: "refs/heads/\u{304B}\u{3099}",
+      currentBranch: .local("feature"), listedBranches: [.local("\u{304C}")])
+    #expect(adopted == .local("\u{304C}"))
+    #expect(adopted.map { Array($0.fullName.utf8) } == Array("refs/heads/\u{304C}".utf8))
+  }
+
+  @Test(
+    "一覧に別の名前空間の同名 branch しか無ければ分岐元にしない",
+    arguments: [
+      ("refs/heads/origin/main", GitBranchRef.remote("origin/main")),
+      ("refs/remotes/origin/main", .local("origin/main")),
+    ])
+  func rejectsOtherNamespace(resolved: String, listed: GitBranchRef) {
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: resolved, resolvedFullName: resolved,
+        currentBranch: .local("feature"), listedBranches: [listed])
+        == nil)
   }
 }

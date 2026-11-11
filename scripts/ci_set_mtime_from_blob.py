@@ -8,8 +8,12 @@ actions/checkout は全ファイルの mtime を checkout した時刻にする�
 run 42969024871)。
 
 コミット時刻ではなく blob の SHA を使うのは、checkout の既定の fetch-depth: 1 では各ファイルの
-最終コミットを辿れないため。時刻は 2000-01-01 から SHA の先頭 7 桁 (16 進) 秒後で、内容が変わった
-ファイルが偶然同じ時刻になる確率は 2^-28 である。
+最終コミットを辿れないため。時刻は 2000-01-01 から SHA の先頭 7 桁 (16 進) 秒後で、ナノ秒の部分に
+次の 7 桁 (最大 268,435,455 で 10^9 未満) を入れる。mtime が変更前と一致すると swift-driver は
+再コンパイルせず古い `.o` のまま通る。CI の Swift 6.1.2 では、秒が同じで ns だけが 1 進む・1 戻る
+ソースも再コンパイルされ、ns が 0 以外でも変わっていないソースは再コンパイルされなかった (Issue #859、
+run 43014259744 ほか)。この比較のもとで、内容が変わった Swift ソースが偶然同じ mtime になる確率は
+2^-56 である。
 
 引数は git ls-files に渡す pathspec。symlink と submodule は触らない。
 依存は標準ライブラリのみ。
@@ -37,7 +41,7 @@ def main(pathspecs):
         if mode not in (b"100644", b"100755"):
             continue
         seconds = EPOCH_2000 + int(sha[:7], 16)
-        nanoseconds = seconds * 1_000_000_000
+        nanoseconds = seconds * 1_000_000_000 + int(sha[7:14], 16)
         os.utime(path, ns=(nanoseconds, nanoseconds))
         count += 1
     print(f"mtime を揃えたファイル: {count} 件", file=sys.stderr)

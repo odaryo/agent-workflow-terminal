@@ -141,7 +141,13 @@ public struct GitReadCommand: Sendable, Equatable {
   /// OID・`main~0` は stdout が空で rc=0、曖昧な名前も空で rc=0 (stderr に `ambiguous`)、
   /// 解決できなければ rc=1 (git 2.54.0 で計測)。
   static func symbolicFullName(_ revision: GitRevision) -> Self {
-    Self(arguments: ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", revision.rawValue])
+    // user config の `core.warnAmbiguousRefs=false` では、曖昧な名前が空にならず DWIM の最初の一致
+    // (tag が無ければ `refs/heads/`) へ解決される (git 2.54.0 で計測、Issue #840)。作成時から曖昧
+    // だったか後から曖昧になったかは reflog から区別できないので、曖昧なら分岐元にしない。
+    Self(arguments: [
+      "-c", "core.warnAmbiguousRefs=true", "rev-parse", "--verify", "--quiet",
+      "--symbolic-full-name", revision.rawValue,
+    ])
   }
 
   /// `--is-ancestor` は真偽しか返さないので、range を組むための OID はこちらで取る (§9.1.2)。

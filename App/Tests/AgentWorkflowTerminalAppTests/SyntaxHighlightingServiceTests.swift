@@ -65,6 +65,7 @@ struct SyntaxHighlightingServiceTests {
     _ = try #require(await service.highlight(markdown, language: "markdown", isDark: false))
     let failed = await service.highlight(Self.nestedScriptCode(), language: "xml", isDark: false)
     #expect(failed == nil)
+    #expect(await service.highlightedHTML(Self.nestedScriptCode(), language: "xml") == nil)
     let known = await service.highlight("func f() {}", language: "swift", isDark: false)
     #expect(known != nil)
   }
@@ -82,13 +83,15 @@ struct SyntaxHighlightingServiceTests {
   @Test("highlight.js が内部で失敗した入力は nil を返し、次のハイライトは成功する")
   func highlightJSInternalError() async {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
-    // 600 段 (highlight.js が成功した実測の深さ) では HighlightJSMarkup の深さの上限 32 で nil になり、
-    // JS の失敗を検証できないため、debugMode で RangeError が例外として抜ける実測の深さ 4000 を使う (#866)。
+    // 協調スレッドのスタック (512 KiB) の上では RangeError のしきい値が macOS 27 の実測で 600〜700 段なので、4000 段を使う。
+    // 大きなスタックでは 4000 段でも JS が成功し、highlight は HighlightJSMarkup の深さの上限 32 で nil になって
+    // JS の失敗を確かめないまま通る。そのときは highlightedHTML の #expect が落ちる (#867)。
     let depth = 4000
     let nested =
       String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)
     let failed = await service.highlight(nested, language: "javascript", isDark: false)
     #expect(failed == nil)
+    #expect(await service.highlightedHTML(nested, language: "javascript") == nil)
     let known = await service.highlight("func f() {}", language: "swift", isDark: false)
     #expect(known != nil)
   }
@@ -98,6 +101,7 @@ struct SyntaxHighlightingServiceTests {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
     let failed = await service.highlight(Self.nestedScriptCode(), language: "xml", isDark: false)
     #expect(failed == nil)
+    #expect(await service.highlightedHTML(Self.nestedScriptCode(), language: "xml") == nil)
     let known = await service.highlight("func f() {}", language: "swift", isDark: false)
     #expect(known != nil)
   }
@@ -137,8 +141,9 @@ struct SyntaxHighlightingServiceTests {
   }
 
   private static func nestedScriptCode() -> String {
-    // 600 段では HighlightJSMarkup の深さの上限 32 によって別の理由で nil になるため、
-    // script の subLanguage 内で RangeError が起きた実測の深さ 4000 を使う (#866)。
+    // 協調スレッドのスタック (512 KiB) の上では RangeError のしきい値が macOS 27 の実測で 600〜700 段なので、4000 段を使う。
+    // 大きなスタックでは 4000 段でも JS が成功し、highlight は HighlightJSMarkup の深さの上限 32 で nil になって
+    // JS の失敗を確かめないまま通る。そのときは highlightedHTML の #expect が落ちる (#867)。
     let depth = 4000
     let nested =
       String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)

@@ -257,17 +257,57 @@ struct ObservationSnapshotSharingTests {
     #expect(firstListing.listedAt == secondListing.listedAt)
   }
 
-  @Test("list-panes の失敗はキャッシュせず次の呼び出しで取り直す")
-  func paneListDoesNotCacheFailure() async throws {
+  /// 失敗が続く間も、session ごとの poll がそれぞれ list-panes を起動しないようにする (#781)。
+  @Test("list-panes の失敗も TTL の内側は起動せず、同じエラーを返す")
+  func paneListSharesFailureWithinTimeToLive() async throws {
     let spy = ObservationProcessSpy(
       listPanesFailure: ProcessRunResult(exitCode: 1, stdout: "", stderr: "boom\n"))
+    let clock = ManualTimeSource()
     let cache = TmuxAllSessionPaneListCache(
       runner: try makeTmuxRunner(socketName: "share-test", processRunner: spy),
-      timeToLive: .seconds(10), timeSource: ManualTimeSource())
+      timeToLive: .seconds(10), timeSource: clock)
+    let failure = TmuxWorktreePaneSourceError.tmux(
+      .commandFailed(exitCode: 1, stdout: "", stderr: "boom\n"))
 
-    for _ in 0..<2 {
-      await #expect(throws: TmuxWorktreePaneSourceError.self) { try await cache.listing() }
-    }
+    await #expect(throws: failure) { try await cache.listing() }
+    clock.advance(by: .seconds(9))
+    await #expect(throws: failure) { try await cache.listing() }
+
+    #expect(await spy.count(of: .listPanes) == 1)
+  }
+
+  @Test("list-panes の失敗は TTL を越えたら取り直す")
+  func paneListRetriesFailureAfterTimeToLive() async throws {
+    let spy = ObservationProcessSpy(
+      listPanesFailure: ProcessRunResult(exitCode: 1, stdout: "", stderr: "boom\n"))
+    let clock = ManualTimeSource()
+    let cache = TmuxAllSessionPaneListCache(
+      runner: try makeTmuxRunner(socketName: "share-test", processRunner: spy),
+      timeToLive: .seconds(10), timeSource: clock)
+
+    await #expect(throws: TmuxWorktreePaneSourceError.self) { try await cache.listing() }
+    clock.advance(by: .seconds(10))
+    await #expect(throws: TmuxWorktreePaneSourceError.self) { try await cache.listing() }
+
+    #expect(await spy.count(of: .listPanes) == 2)
+  }
+
+  @Test("TTL を越えた後に読み取りが成功したら、キャッシュした失敗ではなく成功を返す")
+  func paneListReturnsSuccessAfterCachedFailureExpires() async throws {
+    let spy = ObservationProcessSpy(
+      listPanesOutput: makeListPanesLine(session: "recovered", paneID: "%7", panePID: 70),
+      listPanesFailure: ProcessRunResult(exitCode: 1, stdout: "", stderr: "boom\n"))
+    let clock = ManualTimeSource()
+    let cache = TmuxAllSessionPaneListCache(
+      runner: try makeTmuxRunner(socketName: "share-test", processRunner: spy),
+      timeToLive: .seconds(10), timeSource: clock)
+
+    await #expect(throws: TmuxWorktreePaneSourceError.self) { try await cache.listing() }
+    await spy.setListPanesFailure(nil)
+    clock.advance(by: .seconds(10))
+    let listing = try await cache.listing()
+
+    #expect(listing.panes.map(\.snapshot.id) == [PaneID(rawValue: "%7")])
     #expect(await spy.count(of: .listPanes) == 2)
   }
 }

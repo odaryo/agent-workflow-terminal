@@ -31,7 +31,7 @@ struct DiffViewerPane: View {
       content
         .layoutPriority(1)
     }
-    .task { await model.loadContextIfNeeded() }
+    .task { await model.prepareForDisplay() }
     .task {
       // Drawer を閉じるとこのビューが階層から外れ、`task` ごと監視が止まる。
       while !Task.isCancelled {
@@ -79,19 +79,7 @@ struct DiffViewerPane: View {
         }
       }
       subjectSelector
-      if let snapshot = model.currentSnapshot {
-        VStack(alignment: .leading, spacing: 6) {
-          Picker("レビュー状態", selection: reviewStateBinding(snapshot)) {
-            Text("Reviewing").tag(DiffReviewState.reviewing)
-            Text("Reviewed").tag(DiffReviewState.reviewed)
-          }
-          .pickerStyle(.segmented)
-          .labelsHidden()
-          .frame(maxWidth: 200)
-          if model.history.count > 1 {
-            snapshotHistoryMenu
-          }
-        }
+      if model.currentSnapshot != nil {
         sendControls
       }
     }
@@ -99,7 +87,11 @@ struct DiffViewerPane: View {
   }
 
   private var kindPicker: some View {
-    Picker("種別", selection: $model.kind) {
+    Picker(
+      "種別",
+      selection: Binding(
+        get: { model.kind }, set: { kind in Task { await model.selectKind(kind) } })
+    ) {
       Text("Commit").tag(DiffViewerModel.Kind.commit)
       Text("Base").tag(DiffViewerModel.Kind.base)
       Text("Branch").tag(DiffViewerModel.Kind.branch)
@@ -109,11 +101,11 @@ struct DiffViewerPane: View {
   }
 
   private var refreshButton: some View {
-    Button(model.currentSnapshot == nil ? "開く" : "Refresh", systemImage: "arrow.clockwise") {
+    Button("Refresh", systemImage: "arrow.clockwise") {
       Task { await model.openSnapshot() }
     }
     .labelStyle(.iconOnly)
-    .help(model.currentSnapshot == nil ? "開く" : "Refresh")
+    .help("Refresh")
     .disabled(model.isLoading)
   }
 
@@ -163,10 +155,6 @@ struct DiffViewerPane: View {
     return "送信先: pane \(pane.rawValue)"
   }
 
-  private func reviewStateBinding(_ snapshot: DiffSnapshot) -> Binding<DiffReviewState> {
-    Binding(get: { snapshot.reviewState }, set: { model.setReviewState($0) })
-  }
-
   @ViewBuilder
   private var subjectSelector: some View {
     switch model.kind {
@@ -177,7 +165,7 @@ struct DiffViewerPane: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        branchMenu(title: "選び直す") { model.selectBaseBranch($0) }
+        branchMenu(title: "選び直す") { branch in Task { await model.selectBaseBranch(branch) } }
       }
     case .branch:
       HStack {
@@ -186,7 +174,7 @@ struct DiffViewerPane: View {
           .lineLimit(1)
           .truncationMode(.tail)
           .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-        branchMenu(title: "選ぶ") { model.selectBranch($0) }
+        branchMenu(title: "選ぶ") { branch in Task { await model.selectBranch(branch) } }
       }
     case .commit:
       HStack {
@@ -200,7 +188,7 @@ struct DiffViewerPane: View {
             // merge commit は Diff を作らない (§9.1.2 は比べる親を定めていない)。
             let merge = commit.isMerge ? " (merge: 未対応)" : ""
             Button("\(commit.abbreviatedHash) \(commit.subject)\(merge)") {
-              model.selectCommit(commit)
+              Task { await model.selectCommit(commit) }
             }
           }
           if model.canLoadMoreCommits {
@@ -225,26 +213,6 @@ struct DiffViewerPane: View {
       choose: action)
   }
 
-  private var snapshotHistoryMenu: some View {
-    let summary = model.unsentCommentSummary
-    return Menu("履歴 (\(model.history.count))") {
-      ForEach(model.history.snapshots.reversed(), id: \.id) { snapshot in
-        Button(Self.snapshotLabel(snapshot, unsentCount: summary.count(in: snapshot.id))) {
-          model.showSnapshot(snapshot.id)
-        }
-      }
-    }
-    .menuStyle(.borderlessButton)
-    .fixedSize()
-  }
-
-  private static func snapshotLabel(_ snapshot: DiffSnapshot, unsentCount: Int) -> String {
-    let time = snapshot.createdAt.formatted(date: .omitted, time: .standard)
-    let state = snapshot.reviewState == .reviewed ? "Reviewed" : "Reviewing"
-    let unsent = unsentCount > 0 ? " — 未送信 \(unsentCount)" : ""
-    return "\(time) — \(state)\(unsent)"
-  }
-
   // MARK: - 通知
 
   @ViewBuilder
@@ -257,7 +225,14 @@ struct DiffViewerPane: View {
         banner(error, icon: "exclamationmark.triangle")
       }
       if model.isViewingOldSnapshot {
-        banner("過去の snapshot を表示しています。", icon: "clock.arrow.circlepath")
+        VStack(alignment: .leading, spacing: 2) {
+          banner("過去の snapshot を表示しています。", icon: "clock.arrow.circlepath")
+          Button("最新へ戻る") { model.showLatestSnapshot() }
+            .buttonStyle(.link)
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 3)
+        }
       }
       otherUnsentCommentsBanner
       if let comparison = model.changeSinceOpened, comparison.hasChanges {
@@ -285,7 +260,7 @@ struct DiffViewerPane: View {
   @ViewBuilder
   private var otherUnsentCommentsBanner: some View {
     let summary = model.unsentCommentSummary
-    if summary.hasOtherUnsentComments, let snapshot = summary.latestOtherSnapshot {
+    if summary.hasOtherUnsentComments, let snapshot = summary.nextOtherSnapshot {
       VStack(alignment: .leading, spacing: 2) {
         banner(Self.unsentCommentsMessage(summary, snapshot: snapshot), icon: "text.bubble")
         Button("その snapshot を開く") { model.showSnapshot(snapshot.id) }
@@ -346,7 +321,7 @@ struct DiffViewerPane: View {
     } else {
       ContentUnavailableView(
         "Diff", systemImage: "arrow.left.arrow.right",
-        description: Text("種別と比較先を選んで「開く」を押すと、その時点で固定した Diff を表示します。")
+        description: Text("種別と比較先を選ぶと、その時点で固定した Diff を表示します。")
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

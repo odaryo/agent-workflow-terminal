@@ -95,14 +95,6 @@ struct DiffSnapshotTests {
     #expect(!snapshot.isEmpty)
   }
 
-  @Test("Review 状態は Reviewing から始まり Reviewed へ移せる")
-  func tracksReviewState() {
-    var snapshot = makeSnapshot()
-    #expect(snapshot.reviewState == .reviewing)
-    snapshot.reviewState = .reviewed
-    #expect(snapshot.reviewState == .reviewed)
-  }
-
   private func makeSnapshot() -> DiffSnapshot {
     let file = UnifiedDiffFile(
       oldPath: "a.txt", newPath: "a.txt", changeKind: .modified,

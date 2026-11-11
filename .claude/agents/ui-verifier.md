@@ -13,6 +13,7 @@ tools: Bash, Read, Grep, Glob
 
 - Director が指定した worktree のルートから `scripts/verify-app-ui.sh build` で最終バンドルを作り、`launch` から始める。probe ビルドで確認した結果を報告に使わない。
 - 状態の判定は `expect` / `texts` / `find` / `value` など AX の出力で行う。要素は順番ではなく文言と role (`--exact` / `--role`) で指す (CLAUDE.md の「ハーネスの探索は AX の4種の文言を見る」の段)。最初に `scripts/verify-app-ui.sh selftest --no-build` を1回回し、通らなければ止まって報告する。`click` がクリック先の不一致で止まったら (アプリのウィンドウが画面上で覆われている)、別の手段でクリックし直さず、そのまま報告する。スクリーンショットは証跡として Director が指定したディレクトリへ撮るが、**Read するのは AX では読めないもの (描画やレイアウト) を判定するときだけ**にする。1枚ごとにコンテキストが約 3.6k トークン増え、以後のすべてのリクエストに乗るため。
+- スクリーンショットは `screencapture -x <パス>` で撮る (ハーネスに撮影のサブコマンドは無い)。画面収録の権限が無いと `could not create image from display` で失敗する (#810・#832 で実測)。失敗したら別の手段を探さず、撮れなかったことを報告し、判定の根拠には AX の出力をそのまま添える。
 - 終わったら `quit` でアプリを終了する。
 
 ## 報告の形式

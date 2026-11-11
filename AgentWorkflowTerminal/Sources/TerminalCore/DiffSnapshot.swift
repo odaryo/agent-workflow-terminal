@@ -38,11 +38,6 @@ public struct DiffOriginSection: Sendable, Equatable {
   }
 }
 
-public enum DiffReviewState: Sendable, Equatable, Hashable, CaseIterable {
-  case reviewing
-  case reviewed
-}
-
 /// snapshot を開いた時点の観測値。`fingerprint` は内容の同一性だけを表す不透明値で、
 /// 中身の意味 (OID かハッシュか) に依存しない。
 public struct DiffFileObservation: Sendable, Equatable, Hashable {
@@ -175,7 +170,6 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
   /// `nil` は HEAD を観測できなかったこと。Commit Diff では `observation.headObject` が
   /// 選んだ commit を指すので、HEAD はこちらだけが持つ。
   public let head: DiffSnapshotHead?
-  public var reviewState: DiffReviewState
 
   public init(
     id: DiffSnapshotID,
@@ -183,8 +177,7 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
     createdAt: Date,
     sections: [DiffOriginSection],
     observation: DiffSnapshotObservation,
-    head: DiffSnapshotHead? = nil,
-    reviewState: DiffReviewState = .reviewing
+    head: DiffSnapshotHead? = nil
   ) {
     self.id = id
     self.subject = subject
@@ -192,7 +185,6 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
     self.sections = sections
     self.observation = observation
     self.head = head
-    self.reviewState = reviewState
   }
 
   public var isEmpty: Bool { sections.allSatisfy(\.files.isEmpty) }
@@ -215,7 +207,7 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
 
 /// §9.3 の「Refresh は既存 snapshot の上書きではなく新しい snapshot の作成であり、
 /// 古い snapshot は破棄しない」を型で保つ列。要素は追加されるだけで、既存の内容は
-/// `reviewState` 以外は変わらない (#208 のコメントが古い snapshot を参照し続けるため)。
+/// 変わらない (#208 のコメントが古い snapshot を参照し続けるため)。
 public struct DiffSnapshotHistory: Sendable, Equatable {
   public private(set) var snapshots: [DiffSnapshot] = []
 
@@ -234,13 +226,6 @@ public struct DiffSnapshotHistory: Sendable, Equatable {
   public mutating func append(_ snapshot: DiffSnapshot) -> Bool {
     guard !snapshots.contains(where: { $0.id == snapshot.id }) else { return false }
     snapshots.append(snapshot)
-    return true
-  }
-
-  @discardableResult
-  public mutating func setReviewState(_ state: DiffReviewState, for id: DiffSnapshotID) -> Bool {
-    guard let index = snapshots.firstIndex(where: { $0.id == id }) else { return false }
-    snapshots[index].reviewState = state
     return true
   }
 }

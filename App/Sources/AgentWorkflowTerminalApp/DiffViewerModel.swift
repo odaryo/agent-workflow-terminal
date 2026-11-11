@@ -348,7 +348,8 @@ final class DiffViewerModel: ObservableObject {
   /// `openSnapshot()` の世代番号で後勝ちにできるため。
   func prepareForDisplay() async {
     await loadContextIfNeeded()
-    guard currentSnapshot == nil, currentRequest() != nil else { return }
+    // `openSnapshot()` も同じ。キャンセル済みの呼び出しが世代を進めると、走っている生きた呼び出しの結果が捨てられる。
+    guard !Task.isCancelled, currentSnapshot == nil, currentRequest() != nil else { return }
     await openSnapshot()
   }
 
@@ -400,7 +401,8 @@ final class DiffViewerModel: ObservableObject {
       // 走っている build は選び直す前の種別のものなので、結果を反映させない。
       openGeneration += 1
       isLoading = false
-      errorMessage = nil
+      // context の読み込み失敗の文言は、読み込みに成功するまで消さない。
+      if didLoadContext { errorMessage = nil }
       return
     }
     await openSnapshot()
@@ -421,7 +423,7 @@ final class DiffViewerModel: ObservableObject {
 
   /// Diff を開く / Refresh する。どちらも新しい snapshot を作り、古いものは残す (§9.3)。
   func openSnapshot() async {
-    guard let request = currentRequest() else { return }
+    guard !Task.isCancelled, let request = currentRequest() else { return }
     let context = rangeContext()
     openGeneration += 1
     let generation = openGeneration

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import TerminalCore
 
@@ -46,6 +47,12 @@ struct DiffCommentPanel: View {
       Text(selectionLabel)
         .font(.caption)
         .foregroundStyle(.secondary)
+      Button("選択した行をコピー") {
+        guard let text = model.selectedLinesText else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+      }
+      .disabled(model.selectedLinesText == nil)
       TextEditor(text: $model.commentDraft)
         .focused($isEditorFocused)
         .font(.callout)

@@ -130,6 +130,10 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
   }
 
+  static func remoteNames() -> Self {
+    Self(arguments: ["remote"])
+  }
+
   /// reflog が無い・全部失効したときは stdout が空で rc=0、branch が無いときは rc=128
   /// (git 2.54.0 で計測)。読み方は `GitBranchReflog`。
   static func branchReflogSubjects(_ branch: GitBranchRef) -> Self {

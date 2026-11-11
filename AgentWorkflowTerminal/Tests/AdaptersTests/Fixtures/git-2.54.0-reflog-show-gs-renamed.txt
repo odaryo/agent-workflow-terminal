@@ -1,0 +1,4 @@
+Branch: renamed refs/heads/b1 to refs/heads/d2
+commit: c2
+commit: c1
+branch: Created from origin/main

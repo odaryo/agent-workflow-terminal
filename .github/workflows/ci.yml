@@ -202,30 +202,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: "$GITHUB_WORKSPACE/scripts/check-integration-leftovers.sh"
 
-      # TEMP: Issue #930 の計測用。マージ前に消す。
-      - name: "TEMP #930 incremental rebuild probe"
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        timeout-minutes: 10
-        run: |
-          python3 - <<'EOF'
-          p = 'Sources/TerminalCore/HostControl.swift'
-          s = open(p).read()
-          a = ("  case checkProject(directory: String)\n"
-               "  case openWorktree(directory: String, fromPane: PaneID? = nil, purpose: String? = nil)\n")
-          b = ("  case openWorktree(directory: String, fromPane: PaneID? = nil, purpose: String? = nil)\n"
-               "  case checkProject(directory: String)\n")
-          assert s.count(a) == 1, 'swap target not found'
-          open(p, 'w').write(s.replace(a, b))
-          EOF
-          git diff --stat
-          swift build --build-tests 2>&1 | tee "$RUNNER_TEMP/probe930.log"
-          echo "--- AdaptersTests compile command inputs"
-          grep -A40 '"C.AdaptersTests-' .build/debug.yaml | grep -m1 'inputs:' | grep -oE 'Modules/[A-Za-z]+\.swiftmodule' || true
-          echo "--- recompiled files"
-          grep -E 'Compiling|Emitting' "$RUNNER_TEMP/probe930.log" || true
-          git checkout -- Sources/TerminalCore/HostControl.swift
-          grep -q 'Compiling AdaptersTests HostControlSocketTests.swift' "$RUNNER_TEMP/probe930.log"
-
       # 成否にかかわらず保存する。条件付きにすると、書き間違えたときに一番必要な回のログが
       # 消える (762 件中 1 件だけ落ちた回を 2 度取り逃している: Issue #272)。
       - name: Upload test logs

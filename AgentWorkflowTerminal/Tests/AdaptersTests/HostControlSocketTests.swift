@@ -198,8 +198,8 @@ struct HostControlSocketTests {
         return Self.response
       },
       body: {
-        let line = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
-        let response = try HostControlProtocol.decodeResponse(line).get()
+        let reply = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
+        let response = try HostControlProtocol.decodeResponse(reply.line).get()
         guard case .failure(let code, _) = response else {
           Issue.record("不正UTF-8の要求が成功した")
           return
@@ -236,8 +236,8 @@ struct HostControlSocketTests {
       try? FileManager.default.removeItem(atPath: path + ".lock")
     }
     try await withServer(HostControlSocketServer(path: path)) {
-      let line = try await Self.offPool { try Self.sendRequest(Array("{}\n".utf8), to: path) }
-      let response = try HostControlProtocol.decodeResponse(line).get()
+      let reply = try await Self.offPool { try Self.sendRequest(Array("{}\n".utf8), to: path) }
+      let response = try HostControlProtocol.decodeResponse(reply.line).get()
       guard case .failure(let code, let message) = response else {
         Issue.record("不正要求が成功した")
         return
@@ -264,8 +264,8 @@ struct HostControlSocketTests {
         return Self.response
       },
       body: {
-        let line = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
-        let response = try HostControlProtocol.decodeResponse(line).get()
+        let reply = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
+        let response = try HostControlProtocol.decodeResponse(reply.line).get()
         guard case .failure(let code, _) = response else {
           Issue.record("不正なfromPaneの要求が成功した")
           return
@@ -387,8 +387,11 @@ struct HostControlSocketTests {
         return Self.response
       },
       body: {
-        try await Self.offPool {
+        let closing = try await Self.offPool {
           try Self.sendOversizedRequest(to: path)
+        }
+        if let closing {
+          #expect(closing.received == 0 || (closing.received == -1 && closing.errno == ECONNRESET))
         }
       }
     )
@@ -452,11 +455,12 @@ extension HostControlSocketTests {
       body: {
         let bytes = Array(
           (HostControlProtocol.encode(.openWorktree(directory: "/path")) + "\n").utf8)
-        let line = try await Self.offPool {
+        let reply = try await Self.offPool {
           try Self.sendRequest(bytes, to: path, expectClosed: true)
         }
+        #expect(reply.afterNewline?.received == 0)
         #expect(
-          try HostControlProtocol.decodeResponse(line).get()
+          try HostControlProtocol.decodeResponse(reply.line).get()
             == .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした"))
         gate.continuation.finish()
         var iterator = finished.stream.makeAsyncIterator()
@@ -521,11 +525,45 @@ extension HostControlSocketTests {
     }
   }
 
+  private struct SocketFailure: Error, CustomStringConvertible {
+    let description: String
+  }
+
+  private struct Received: Sendable {
+    let received: Int
+    let errno: Int32
+  }
+
+  private struct Reply: Sendable {
+    let line: String
+    let afterNewline: Received?
+  }
+
+  // offPool の GCD スレッドには Swift Testing のテストの文脈 (task-local) が無いので、そこで #require /
+  // #expect を評価すると issue が «unknown» に記録され、呼び出し元は passed になる (Issue #824)。
+  // offPool の中から呼ぶ補助関数は Error を投げ、判定に要る値は戻り値でテストの Task へ返す。
   private static func makeSocket() throws -> Int32 {
     let descriptor = Darwin.socket(AF_UNIX, SOCK_STREAM, 0)
-    try #require(descriptor >= 0)
+    let socketError = errno
+    guard descriptor >= 0 else {
+      throw SocketFailure(description: "socket=\(descriptor) errno=\(socketError)")
+    }
     return descriptor
   }
+
+  private static func setTimeout(_ descriptor: Int32, _ option: Int32, _ name: String) throws {
+    var timeout = timeval(tv_sec: socketTimeoutSeconds, tv_usec: 0)
+    let result = setsockopt(
+      descriptor, SOL_SOCKET, option, &timeout, socklen_t(MemoryLayout<timeval>.size))
+    let optionError = errno
+    guard result == 0 else {
+      throw SocketFailure(description: "setsockopt(\(name))=\(result) errno=\(optionError)")
+    }
+  }
+
+  // 2 秒では協調プールの空き待ちで応答前に切れた (LIBDISPATCH_COOPERATIVE_POOL_STRICT=1 で
+  // 1694〜5828 ms、Issue #824)。本番の hostctl と HostControlSocketClient.send のテストと同じ 30 秒にする。
+  private static let socketTimeoutSeconds = 30
 
   private static func withAddress(
     _ path: String, body: (UnsafePointer<sockaddr>, socklen_t) -> Int32
@@ -555,51 +593,64 @@ extension HostControlSocketTests {
 
   private static func sendRequest(
     _ bytes: [UInt8], to path: String, expectClosed: Bool = false
-  ) throws -> String {
+  ) throws -> Reply {
     let descriptor = try makeSocket()
     defer { Darwin.close(descriptor) }
-    var timeout = timeval(tv_sec: 2, tv_usec: 0)
-    try #require(
-      setsockopt(
-        descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-        socklen_t(MemoryLayout<timeval>.size)) == 0)
-    try #require(withAddress(path) { Darwin.connect(descriptor, $0, $1) } == 0)
+    try setTimeout(descriptor, SO_RCVTIMEO, "SO_RCVTIMEO")
+    let connected = withAddress(path) { Darwin.connect(descriptor, $0, $1) }
+    let connectError = errno
+    guard connected == 0 else {
+      throw SocketFailure(description: "connect=\(connected) errno=\(connectError)")
+    }
     let sent = bytes.withUnsafeBytes { Darwin.send(descriptor, $0.baseAddress, $0.count, 0) }
-    try #require(sent == bytes.count)
+    let sendError = errno
+    guard sent == bytes.count else {
+      throw SocketFailure(
+        description: "send=\(sent) errno=\(sendError) expected=\(bytes.count)")
+    }
     var response: [UInt8] = []
     var byte: UInt8 = 0
     while true {
       let received = Darwin.recv(descriptor, &byte, 1, 0)
-      try #require(received == 1, "recv=\(received) errno=\(errno) bytes=\(response.count)")
+      let receiveError = errno
+      guard received == 1 else {
+        throw SocketFailure(
+          description: "recv=\(received) errno=\(receiveError) bytes=\(response.count)")
+      }
       if byte == 10 {
-        if expectClosed { #expect(Darwin.recv(descriptor, &byte, 1, 0) == 0) }
-        return String(decoding: response, as: UTF8.self)
+        var afterNewline: Received?
+        if expectClosed {
+          let closing = Darwin.recv(descriptor, &byte, 1, 0)
+          afterNewline = Received(received: closing, errno: errno)
+        }
+        return Reply(
+          line: String(decoding: response, as: UTF8.self), afterNewline: afterNewline)
       }
       response.append(byte)
     }
   }
 
-  private static func sendOversizedRequest(to path: String) throws {
+  // nil は送信の途中で接続を閉じられた場合で、接続が閉じたことの判定は要らない。
+  private static func sendOversizedRequest(to path: String) throws -> Received? {
     let descriptor = try makeSocket()
     defer { Darwin.close(descriptor) }
-    var timeout = timeval(tv_sec: 2, tv_usec: 0)
     var noSignal: Int32 = 1
-    try #require(
-      setsockopt(
-        descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal,
-        socklen_t(MemoryLayout<Int32>.size)) == 0)
-    try #require(
-      setsockopt(
-        descriptor, SOL_SOCKET, SO_SNDTIMEO, &timeout,
-        socklen_t(MemoryLayout<timeval>.size)) == 0)
-    try #require(
-      setsockopt(
-        descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
-        socklen_t(MemoryLayout<timeval>.size)) == 0)
+    let noSignalResult = setsockopt(
+      descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+    let noSignalError = errno
+    guard noSignalResult == 0 else {
+      throw SocketFailure(
+        description: "setsockopt(SO_NOSIGPIPE)=\(noSignalResult) errno=\(noSignalError)")
+    }
+    try setTimeout(descriptor, SO_SNDTIMEO, "SO_SNDTIMEO")
+    try setTimeout(descriptor, SO_RCVTIMEO, "SO_RCVTIMEO")
     let connected = withAddress(path) { address, length in
       Darwin.connect(descriptor, address, length)
     }
-    try #require(connected == 0)
+    let connectError = errno
+    guard connected == 0 else {
+      throw SocketFailure(description: "connect=\(connected) errno=\(connectError)")
+    }
     let line =
       #"{"version":1,"command":"worktree.open","directory":"/"#
       + String(repeating: "x", count: 65_537) + "\"}\n"
@@ -609,16 +660,19 @@ extension HostControlSocketTests {
       let written = bytes.withUnsafeBytes { buffer in
         Darwin.send(descriptor, buffer.baseAddress?.advanced(by: offset), bytes.count - offset, 0)
       }
-      if written < 0 && (errno == EPIPE || errno == ECONNRESET) {
-        return
+      let sendError = errno
+      if written < 0 && (sendError == EPIPE || sendError == ECONNRESET) {
+        return nil
       }
-      try #require(written > 0)
+      guard written > 0 else {
+        throw SocketFailure(
+          description: "send=\(written) errno=\(sendError) offset=\(offset) of \(bytes.count)")
+      }
       offset += written
     }
     var byte: UInt8 = 0
     let received = Darwin.recv(descriptor, &byte, 1, 0)
-    let receiveError = errno
-    #expect(received == 0 || (received == -1 && receiveError == ECONNRESET))
+    return Received(received: received, errno: errno)
   }
   // 回帰テストの追加先が指定されているため、別ファイルへの分割はしない。
   // swiftlint:disable:next file_length

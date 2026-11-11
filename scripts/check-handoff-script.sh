@@ -182,6 +182,12 @@ PS1='handoff> '
 "$AWT_TEST_SHELL" -f -i
 RC
 
+# rc の待ちが明けた前景が子 zsh の pgid に戻る形を作るため、exec しない。
+cat >"$work_dir/bash-child-zsh-rc.rc" <<'RC'
+PS1='handoff> '
+ZDOTDIR="$AWT_TEST_DIR" "$AWT_TEST_SHELL" -i
+RC
+
 # 引数の数と各引数を NUL 区切りで書くので、空白や改行を含む引数も呼び出しの境界も崩れない。
 cat >"$work_dir/tmux-shim" <<'SHIM'
 #!/bin/bash
@@ -318,6 +324,11 @@ case "$AWT_TEST_MODE" in
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
       env AWT_TEST_SHELL="$AWT_TEST_SHELL" AWT_TEST_ARGV="$AWT_TEST_DIR/argv" \
       /bin/bash --noprofile --rcfile "$AWT_TEST_DIR/bash-child-zsh.rc" -i
+    ;;
+  bash-child-zsh-rc)
+    tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
+      env AWT_TEST_DIR="$AWT_TEST_DIR" AWT_TEST_SHELL="$AWT_TEST_SHELL" AWT_TEST_ARGV="$AWT_TEST_DIR/argv" \
+      /bin/bash --noprofile --rcfile "$AWT_TEST_DIR/bash-child-zsh-rc.rc" -i
     ;;
   *)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
@@ -800,10 +811,13 @@ watch_rc_wait() {
 
 # 引数の agent は missing (存在しないパス) か agent ($work_dir/agent)。
 group_zsh_rc() {
-  local want="$1" agent="$2" label="$3" watcher
+  local want="$1" agent="$2" label="$3" mode="${4:-zsh-rc}" watcher
   use_test_zsh || return 0
   cp "$work_dir/zsh-rc-wait.zshrc" "$AWT_TEST_DIR/.zshrc"
-  AWT_TEST_MODE=zsh-rc
+  if [[ "$mode" == bash-child-zsh-rc ]]; then
+    cp "$work_dir/bash-child-zsh-rc.rc" "$AWT_TEST_DIR/"
+  fi
+  AWT_TEST_MODE="$mode"
   AWT_TEST_SESSION=$(basename -- "$AWT_TEST_DIR")
   if [[ "$agent" == missing ]]; then
     AWT_TEST_AGENT="$AWT_TEST_DIR/no-such-agent"
@@ -823,20 +837,28 @@ group_zsh_rc() {
     ng "$label: 送信が rc の待ちの間ではありません"
     T capture-pane -p -J -t "=$AWT_TEST_SESSION:" 2>/dev/null || true
   fi
+  if [[ "$mode" == bash-child-zsh-rc ]]; then
+    expect_bash_child_zsh "$label"
+  fi
   [[ "$agent" == missing ]] || expect_agent_prompt "$label" "$AWT_TEST_SESSION"
 }
 
 group_bash_child_zsh() {
-  local label='bash の rc から起動した子の対話 zsh の pane へ送信する' pane_pid children
+  local label='bash の rc から起動した子の対話 zsh の pane へ送信する'
   use_test_zsh || return 0
   cp "$work_dir/bash-child-zsh.rc" "$AWT_TEST_DIR/"
   AWT_TEST_MODE=bash-child-zsh
   AWT_TEST_SESSION=bash-child-zsh
   expect_exit 0 "$label" --directory "$AWT_TEST_DIR" --prompt "$prompt"
   expect_agent_prompt "$label" "$prompt"
-  # pane の PID が bash のままで、その子に zsh がいることを確かめる。exec されると陽性の検査にならない。
+  expect_bash_child_zsh "$label"
+}
+
+expect_bash_child_zsh() {
+  local label="$1" pane_pid children
+  # exec されると、子 zsh の pgid と pane の PID の pgid が異なる前提を満たさない。
   checked=$((checked + 1))
-  pane_pid=$(T display-message -p -t '=bash-child-zsh:' '#{pane_pid}') || pane_pid=""
+  pane_pid=$(T display-message -p -t "=$AWT_TEST_SESSION:" '#{pane_pid}') || pane_pid=""
   children=$(ps -A -o ppid=,comm= | awk -v parent="$pane_pid" '$1 == parent { print $2 }') || children=""
   if [[ "$pane_pid" =~ ^[0-9]+$ && "$(ps -o comm= -p "$pane_pid")" == *bash && "$children" == *zsh* ]]; then
     info "OK: $label (pane の PID は bash で、子に zsh がいる)"
@@ -1201,6 +1223,8 @@ AWT_TEST_AGENT="$work_dir/agent"
 
 # 並列の段。タイムアウトを待つ群 (13〜15 秒) を先に起動し、その間に成功系を回す。
 start_group zsh-rc-no-agent group_zsh_rc 7 missing 'zsh の rc の待ちの間に送信しても、Agent が居なければ起動とみなさない'
+start_group bash-child-zsh-rc-no-agent group_zsh_rc 7 missing \
+  'bash の rc から起動した子の zsh の rc の待ちの間に送信しても、Agent が居なければ起動とみなさない' bash-child-zsh-rc
 start_group prompt-command group_prompt_command
 start_group no-agent group_no_agent
 start_group short-lived-exec group_short_lived_exec
@@ -1221,6 +1245,8 @@ start_group default-whitespace group_default_agent '   '
 start_group zsh group_shell zsh
 start_group fish group_shell fish
 start_group zsh-rc-agent group_zsh_rc 0 agent 'zsh の rc の待ちの間に送信しても、Agent の起動を検出する'
+start_group bash-child-zsh-rc-agent group_zsh_rc 0 agent \
+  'bash の rc から起動した子の zsh の rc の待ちの間に送信しても、Agent の起動を検出する' bash-child-zsh-rc
 start_group bash-child-zsh group_bash_child_zsh
 start_group tmux-targets group_tmux_targets
 for kind in new from-pane old; do

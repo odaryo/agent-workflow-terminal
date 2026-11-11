@@ -1070,8 +1070,8 @@ Issue #842・#895)。** 上の「一致」は次のように判定する。`Crea
 これを意図した挙動とする(Issue #895)。この組は、NFDの名前のbranchを起点に
 `git -c core.precomposeunicode=true switch -c <branch> <NFDの名前>`で作ると生じる。gitは引数をNFCに直して
 記録し、`rev-parse`はpackの前はNFCの完全名を返し、packの後は解決できない。どちらでも一覧のNFDとバイト列で
-一致しない(git 2.54.0、APFSで計測)。`git init`は`core.precomposeunicode=true`を書くので既定の設定では生じない。
-実運用でこの組が生じる経路は測っていない。
+一致しない(git 2.54.0、APFSで計測)。この計測では、`git init`が書いた`core.precomposeunicode=true`を`false`に
+変えてから作った。既定の設定のまま生じる経路があるかを含め、実運用でこの組が生じる経路は測っていない。
 
 次の2つは限界として残す — 確定(2026-11-11)。どちらも、比較元とそれを決めた経路がDiffの上部に出ており(§9.1.4)、
 ユーザーが選び直せる。

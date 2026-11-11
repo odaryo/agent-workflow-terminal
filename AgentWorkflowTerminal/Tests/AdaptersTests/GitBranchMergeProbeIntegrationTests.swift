@@ -47,10 +47,10 @@ struct GitBranchMergeProbeIntegrationTests {
     }
   }
 
-  /// 印を出すのは `--no-ff` と squash の2つだけ (git 2.54.0 で計測)。nil の答えでも印は出ないので、
-  /// 印の有無だけでなく `isOnFirstParentChain` の生の答えも比べる。
+  /// nil の答えでも印は出ないので、印の有無だけでは親の無い行を誤って判定不能にした退行を
+  /// 見逃す。`isOnFirstParentChain` の生の答えも比べる (#912)。
   @Test(
-    "first-parent の列の上にある先端を拾い、印を出すのは --no-ff と squash だけ",
+    "first-parent の列の上にある先端を拾い、--no-ff・octopus・無関係な履歴の merge・squash に印を出す",
     arguments: FirstParentScenario.allCases)
   func judgesFirstParentChainPerScenario(scenario: FirstParentScenario) async throws {
     try await withGitRepository { repository in
@@ -74,11 +74,19 @@ struct GitBranchMergeProbeIntegrationTests {
 
 /// branch は `topic`。`Advanced` の付く場合は、最後に既定 branch を1つ進め、先端と既定 branch の
 /// 先端が同じという近道を通らずに rev-list の経路を通す。
+/// `noffAdvanced` と `octopus` は複数行、`unrelated` と `skewedNoff` は親の無い最終行を
+/// 扱う。日時のずれは7 commit で root まで行き過ぎ、6以下では行き過ぎなかったため、
+/// 余裕を取って10 commit にする (git 2.54.0 で計測、#912)。
 enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sendable {
   case fresh
   case freshAdvanced
   case ffsync
   case noff
+  case noffAdvanced
+  case octopus
+  case unrelated
+  case skewedNoff
+  case skewedFfmergeAdvanced
   case ffmerge
   case ffmergeAdvanced
   case squash
@@ -92,12 +100,14 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
 
   var expectedOnFirstParentChain: Bool {
     switch self {
-    case .noff, .squash: false
-    case .fresh, .freshAdvanced, .ffsync, .ffmerge, .ffmergeAdvanced, .nolog: true
+    case .noff, .noffAdvanced, .octopus, .unrelated, .skewedNoff, .squash: false
+    case .fresh, .freshAdvanced, .ffsync, .ffmerge, .ffmergeAdvanced, .skewedFfmergeAdvanced,
+      .nolog:
+      true
     }
   }
 
-  var expectedMark: Bool { self == .noff || self == .squash }
+  var expectedMark: Bool { !expectedOnFirstParentChain }
 
   func arrange(in repository: GitTestRepository) async throws {
     switch self {
@@ -111,9 +121,14 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
       try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
       try await repository.git(["merge", "-q", "--ff-only", "main"], in: "topic")
       try await repository.commit(file: "m2.txt", contents: "m2", in: nil)
-    case .noff:
+    case .noff, .noffAdvanced:
       try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.git(["merge", "-q", "--no-ff", "-m", "merge topic", "topic"])
+      if self == .noffAdvanced {
+        try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+      }
+    case .octopus, .unrelated, .skewedNoff, .skewedFfmergeAdvanced:
+      try await arrangeSideHistoryMerge(in: repository)
     case .ffmerge, .ffmergeAdvanced:
       try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
       try await repository.git(["merge", "-q", "--ff-only", "topic"])
@@ -131,12 +146,44 @@ enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sen
         ["-c", "core.logAllRefUpdates=false", "branch", "topic", "main~1"])
     }
   }
+
+  private func arrangeSideHistoryMerge(in repository: GitTestRepository) async throws {
+    if self == .octopus {
+      try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
+      try await repository.addProbeBranchWorktree("other", commits: [["b.txt": "b1"]])
+      try await repository.git(["merge", "-q", "--no-ff", "-m", "oct", "topic", "other"])
+      return
+    }
+    if self == .unrelated {
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+      let result = try await repository.gitExitCode(
+        ["commit-tree", "HEAD^{tree}", "-m", "unrelated"])
+      try #require(result.exitCode == 0)
+      let tip = result.stdout.trimmingCharacters(in: .newlines)
+      try await repository.git(["branch", "topic", tip])
+      try await repository.git(
+        ["merge", "-q", "--allow-unrelated-histories", "--no-ff", "-m", "merge", "topic"])
+      return
+    }
+    if self == .skewedNoff {
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+    }
+    try await repository.addProbeBranchWorktree(
+      "topic", commits: (1...10).map { ["a.txt": "a\($0)"] },
+      commitDate: "2001-01-01T00:00:00Z")
+    if self == .skewedNoff {
+      try await repository.git(["merge", "-q", "--no-ff", "-m", "merge topic", "topic"])
+    } else {
+      try await repository.git(["merge", "-q", "--ff-only", "topic"])
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+    }
+  }
 }
 
 extension GitTestRepository {
   /// `commits` の 1 要素が 1 commit で、値はそのパスへ書く内容。
   fileprivate func addProbeBranchWorktree(
-    _ branch: String, commits: [[String: String]]
+    _ branch: String, commits: [[String: String]], commitDate: String? = nil
   ) async throws {
     try await git(["worktree", "add", "-q", "-b", branch, "../\(branch)"])
     for files in commits {
@@ -145,7 +192,11 @@ extension GitTestRepository {
           to: root.appending(path: "\(branch)/\(name)"), atomically: true, encoding: .utf8)
       }
       try await git(["add", "-A"], in: branch)
-      try await git(["commit", "-q", "-m", "commit on \(branch)"], in: branch)
+      try await git(
+        ["commit", "-q", "-m", "commit on \(branch)"], in: branch,
+        additionalEnvironment: commitDate.map {
+          ["GIT_COMMITTER_DATE": $0, "GIT_AUTHOR_DATE": $0]
+        } ?? [:])
     }
   }
 

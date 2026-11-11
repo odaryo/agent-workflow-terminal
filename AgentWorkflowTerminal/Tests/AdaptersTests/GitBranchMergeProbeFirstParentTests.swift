@@ -15,12 +15,14 @@ private let sideHex = String(repeating: "e", count: 40)
 @Suite("Issue #879 先端が既定 branch の first-parent の列の上にあるかを git で読む")
 struct GitBranchMergeProbeFirstParentTests {
   @Test(
-    "最後の行の第1親が先端なら true、第2親以降や別の commit なら false",
+    "最後の行の第1親が先端なら true、第2親以降・別の commit・親の無い行なら false",
     arguments: [
       ("\(destinationHex) \(middleHex)\n\(middleHex) \(tipHex)\n", true),
       ("\(destinationHex) \(middleHex) \(sideHex)\n\(middleHex) \(tipHex) \(sideHex)\n", true),
       ("\(destinationHex) \(middleHex) \(tipHex)\n", false),
       ("\(destinationHex) \(middleHex)\n\(middleHex) \(sideHex)\n", false),
+      ("\(destinationHex) \(middleHex)\n\(middleHex)\n", false),
+      ("\(destinationHex)\n", false),
     ] as [(String, Bool)])
   func readsFirstParentOfTheLastLine(output: String, expected: Bool) async throws {
     let git = FirstParentGit(revList: .init(exitCode: 0, stdout: output, stderr: ""))
@@ -45,17 +47,14 @@ struct GitBranchMergeProbeFirstParentTests {
     #expect(await probe.isOnFirstParentChain(tip: tip, destination: tip) == true)
   }
 
-  /// 出力が空 (既定 branch が先端の祖先) と、最後が親の無い行は、印を出さない側へ倒すため判定できな
-  /// かったものとして扱う。親の無い行は ancestor でマージ済みの後でも起き、そのときの正しい答えは
-  /// false である (#912)。ここで固定しているのは今の安全側の扱いであって、正しさではない。
+  /// 出力が空なら既定 branch が先端の祖先である可能性があり、first-parent の列の上にあるかは
+  /// 決められない。git の失敗や解釈できない行も、false と区別して判定不能のまま残す。
   @Test(
-    "git が失敗したとき・行を解釈できないとき・出力が空のとき・最後が親の無い行のときは nil",
+    "git が失敗したとき・行を解釈できないとき・出力が空のときは nil",
     arguments: [
       ProcessRunResult(exitCode: 128, stdout: "", stderr: "fatal: bad revision\n"),
       ProcessRunResult(exitCode: 0, stdout: "garbage line\n", stderr: ""),
       ProcessRunResult(exitCode: 0, stdout: "", stderr: ""),
-      ProcessRunResult(
-        exitCode: 0, stdout: "\(destinationHex) \(middleHex)\n\(middleHex)\n", stderr: ""),
     ])
   func leavesUnreadableOutputUndetermined(revList: ProcessRunResult) async throws {
     let git = FirstParentGit(revList: revList)

@@ -240,7 +240,7 @@ EOS
 }
 
 # socket 上で session_path が使い捨ての Project と一致する session を名前と改行で出す。
-# server も socket ファイルも無いのは「消すものが無い」として成功にし、それ以外の失敗は 1 を返す。
+# server が居ない場合と socket ファイルが無い場合は「消すものが無い」として成功にし、それ以外の失敗は 1 を返す。
 # socket ファイルの不在をそう読めるのは、open がスクリプトの TMUX_TMPDIR をアプリへ渡し、両者が
 # 同じ socket ディレクトリを見るから (#861 の実測)。launchctl setenv TMUX_TMPDIR だけで設定した環境では崩れうる。
 # 生きている server の socket ファイルだけが消えても同じ ENOENT になり区別できない (#492) が、

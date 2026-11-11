@@ -38,8 +38,9 @@ jobs:
   build-and-test:
     name: Build & Test (SwiftPM, unit + integration)
     runs-on: macos-15
-    # 段ごとの上限は 600 + 300 (単体) + 600 (統合) = 1500s。CI 実測 (run 41304065113) の
-    # 固定費は setup+checkout+toolchain 約 10s / brew 14s / build 69s、wrapper の停止処理は 17s
+    # 段ごとの上限は 600 + 300 (単体) + 600 (統合) = 1500s。CI 実測の固定費は
+    # setup+checkout+toolchain 約 10s / brew 14s / build はキャッシュが当たれば 4s
+    # (run 42971839848)、外れれば 126s (run 42966688963)、wrapper の停止処理は 17s
     # (run 34245198762)。
     # 固定費を 420s、停止処理を 3 本分 180s まで見積もっても 2100s = 35 分で、45 分に届かない。
     # 3 本ともハングした回でも、どれも exit 124 とスタックを書き終えてから job が終わる。
@@ -51,18 +52,67 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Show toolchain
+        id: toolchain
         run: |
           xcodebuild -version
           swift --version
+          echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # `.build` を main の push で保存し、PR と後の push で復元する (Issue #851)。actions/checkout は
+      # 全ファイルの mtime を checkout した時刻にし、swift-driver は mtime がビルド記録と違うソースを
+      # 変更とみなす。素の復元ではほぼ全部を再コンパイルし、Build は 102s だった (cold は 126s、
+      # run 42967335184)。内容から決まる mtime に揃えると変わったファイルだけになり、変更なしで 5s
+      # (run 42969024871)、TerminalCore の1ファイル変更で 5s (run 42969898424) になった。
+      # key の toolchain は xcodebuild / swift の版の出力のハッシュで、版が変われば復元しない。
+      # 末尾の sha は、保存ごとに新しい key にするため (同じ key は上書きできない)。
+      - name: Set source mtimes from content
+        timeout-minutes: 5
+        run: python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" .
+
+      - name: Restore build cache
+        id: build-cache
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: AgentWorkflowTerminal/.build
+          key: swiftpm-core-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('AgentWorkflowTerminal/Package.swift', 'AgentWorkflowTerminal/Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            swiftpm-core-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('AgentWorkflowTerminal/Package.swift', 'AgentWorkflowTerminal/Package.resolved') }}-
 
       # 段の上限は #475 の計測による: 時間切れの段は cancelled ではなく failure になり、後に続く
       # `!cancelled()` の段は走る (run 41343741887)。job の上限だけでは、ハングした段で job ごと
-      # cancel され、後の段の結果が同じ run に残らない。実測は Build 96s / brew 17s (run 41342303849)。
+      # cancel され、後の段の結果が同じ run に残らない。実測は Build 4s (キャッシュあり、run 42971839848)・
+      # 126s (キャッシュなし、run 42966688963) / brew 14〜17s。
       # run-swift-test.sh を挟む段は、自前の --timeout とスタックの書き出しに任せて上限を付けない。
+      #
+      # 復元した `.build` の中身が壊れていると、同じ `.build` で何度ビルドし直しても落ちる (reviewer の
+      # ローカル計測: 空にした .o で `ld: file is empty`)。そのまま main で保存されないと、後の run も
+      # 同じ entry を復元して落ち続けるので、キャッシュが当たった回に限り `.build` を消して cold で
+      # やり直す。ソースの誤りで落ちる回は、やり直しの分だけ遅くなる。
       - name: Build
         id: build
         timeout-minutes: 15
-        run: swift build --build-tests
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        run: |
+          swift build --build-tests && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
+          rm -rf .build
+          swift build --build-tests
+
+      # 保存は main の push だけで、PR は main のキャッシュを復元するだけにする。PR ごとに保存すると
+      # リポジトリあたり 10GB の枠を食い潰す (1回の保存は core 82MB・App 152MB・checks 40MB)。
+      # キャッシュの段は、失敗しても止まっても CI を落とさない (continue-on-error)。
+      - name: Save build cache
+        if: ${{ github.event_name == 'push' && !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: AgentWorkflowTerminal/.build
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
 
       # 経過時間とポーリングの観測回数を測る AdaptersSerialTimingTests は、同一プロセス内で
       # 並行実行されると他テストの負荷を観測してしまうため分けて走らせる。
@@ -170,24 +220,64 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Show toolchain
+        id: toolchain
         run: |
           xcodebuild -version
           swift --version
+          echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Fetch GhosttyKit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/fetch-ghostty.sh
 
+      # キャッシュの方式は build-and-test の注釈のとおり。App は ../AgentWorkflowTerminal に path 依存する。
+      # App/vendor は追跡外だが、fetch-ghostty.sh の tar 展開は Release アセットの中の mtime を保つので、
+      # 同じアセット (ghostty-kit.sha256) なら run 間で同じ mtime になる。
+      - name: Set source mtimes from content
+        timeout-minutes: 5
+        run: python3 scripts/ci_set_mtime_from_blob.py App AgentWorkflowTerminal
+
+      - name: Restore build cache
+        id: build-cache
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: App/.build
+          key: swiftpm-app-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('App/Package.swift', 'App/Package.resolved', 'AgentWorkflowTerminal/Package.swift', 'App/ghostty-kit.sha256') }}-${{ github.sha }}
+          restore-keys: |
+            swiftpm-app-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('App/Package.swift', 'App/Package.resolved', 'AgentWorkflowTerminal/Package.swift', 'App/ghostty-kit.sha256') }}-
+
+      # 壊れたキャッシュからのやり直しは build-and-test の Build と同じ。テスト target もここで
+      # ビルドし、Test の段では壊れたキャッシュで落ちないようにする。
       - name: Build
+        id: build
         working-directory: App
-        run: swift build
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        run: |
+          swift build --build-tests && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
+          rm -rf .build
+          swift build --build-tests
 
       # UI 層は unit test の対象外 (docs/coding-guidelines.md) だが、libghostty の設定
       # 読み込み経路だけは window も GHOSTTY_RESOURCES_DIR も無しに検証できる (Issue #236)。
       - name: Test
         working-directory: App
         run: swift test
+
+      # 保存の条件は build-and-test と同じ。
+      - name: Save build cache
+        if: ${{ github.event_name == 'push' && !cancelled() && steps.build.outcome == 'success' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: App/.build
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}
 
       # Handoff の検査は、ケースを並列の群で回し、後始末も1回にまとめている (#852)。CI の実測は
       # 220 件で後始末込み 36〜43 秒 (並列にする前は 5 分 4 秒)。
@@ -222,8 +312,9 @@ jobs:
   # どれかの段が落ちればジョブは失敗する。
   #
   # 1つの段がハングしても残りの段の結果を得るため、段ごとに上限を付ける。時間切れの段は failure
-  # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 0〜40 秒
-  # (run 41342303849) で、brew で導入しうる段は 10 分、それ以外は 5 分、iOS のビルドは 15 分とする。
+  # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 1〜17 秒
+  # (ビルドのキャッシュが当たった回、run 42971839848) で、brew で導入しうる段は 10 分、それ以外は
+  # 5 分、iOS のビルドは 15 分とする。
   checks:
     name: Static checks & iOS build
     runs-on: macos-15
@@ -234,12 +325,32 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Show toolchain
+        id: toolchain
         run: |
           xcodebuild -version
           swift --version
           python3 --version
           git --version
           bash --version | head -1
+          echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Session name parity の harness と iOS のビルドが使う。方式は build-and-test の注釈のとおり。
+      - name: Set source mtimes from content
+        timeout-minutes: 5
+        run: python3 scripts/ci_set_mtime_from_blob.py AgentWorkflowTerminal scripts/tests/session-name-parity
+
+      - name: Restore build cache
+        id: build-cache
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            AgentWorkflowTerminal/.build
+            scripts/tests/session-name-parity/.build
+          key: swiftpm-checks-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('AgentWorkflowTerminal/Package.swift', 'scripts/tests/session-name-parity/Package.swift') }}-${{ github.sha }}
+          restore-keys: |
+            swiftpm-checks-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('AgentWorkflowTerminal/Package.swift', 'scripts/tests/session-name-parity/Package.swift') }}-
 
       # swift-format は Swift 6 toolchain 同梱のため追加インストール不要
       # (docs/coding-guidelines.md §7)。
@@ -358,7 +469,15 @@ jobs:
       - name: Session name parity - naming rule (bash vs Swift)
         if: ${{ !cancelled() }}
         timeout-minutes: 5
-        run: scripts/check-session-name-parity.sh
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        # 壊れたキャッシュからのやり直しは build-and-test の Build と同じ。
+        run: |
+          scripts/check-session-name-parity.sh && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build で検査が落ちたので、harness の .build を消して検査し直す"
+          rm -rf scripts/tests/session-name-parity/.build
+          scripts/check-session-name-parity.sh
 
       - name: Session name parity - stable ID (worktree admin dir)
         if: ${{ !cancelled() }}
@@ -366,10 +485,33 @@ jobs:
         run: scripts/check-worktree-admin-dir.sh
 
       - name: Build (iOS Simulator)
+        id: ios-build
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         working-directory: AgentWorkflowTerminal
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        # 壊れたキャッシュからのやり直しは build-and-test の Build と同じ。
         run: |
-          swift build \
-            --triple arm64-apple-ios17.0-simulator \
-            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          build_ios() {
+            swift build \
+              --triple arm64-apple-ios17.0-simulator \
+              --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          }
+          build_ios && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
+          rm -rf .build
+          build_ios
+
+      # 保存の条件は build-and-test と同じ。
+      - name: Save build cache
+        if: ${{ github.event_name == 'push' && !cancelled() && steps.ios-build.outcome == 'success' }}
+        timeout-minutes: 5
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            AgentWorkflowTerminal/.build
+            scripts/tests/session-name-parity/.build
+          key: ${{ steps.build-cache.outputs.cache-primary-key }}

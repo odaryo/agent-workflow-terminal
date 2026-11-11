@@ -23,6 +23,7 @@ struct SyntaxHighlightLanguageTests {
     #expect(SyntaxHighlightLanguage.name(forFileName: "data.bin") == nil)
     #expect(SyntaxHighlightLanguage.name(forFileName: "notes.h") == nil)
     #expect(SyntaxHighlightLanguage.name(forFileName: "old.m") == nil)
+    #expect(SyntaxHighlightLanguage.name(forFileName: "build.zig") == nil)
   }
 
   @Test("拡張子が無いファイル名は言語を持たない")

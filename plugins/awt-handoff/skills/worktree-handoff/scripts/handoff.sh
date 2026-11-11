@@ -75,8 +75,8 @@ if reason is not None:
   rc=$?
   [[ "$rc" -eq 0 ]] || exit "$rc"
   if [[ "$purpose_set" -eq 1 ]]; then
-    # 上限・Cc/Zl/Zp・末尾の ; はアプリが @awt_purpose に書く前の検査 (§12.7) に揃える。ここで弾かないと、
-    # セッションは作られたのに目的だけが黙って書かれない。
+    # 上限・Cc/Zl/Zp・末尾の ; はアプリがセッションを作る前に行う検査 (§12.7、§21.4) に揃える。ここで弾かないと、
+    # アプリが invalid_request を返し、exit 2 ではなく exit 1 で引き渡しが止まる。
     printf '%s' "$purpose" | python3 -I -c '
 import sys
 import unicodedata

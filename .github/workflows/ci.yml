@@ -399,10 +399,15 @@ jobs:
 
       # SC1091 は lib.sh を source する既存スクリプトが一律に出す info で、
       # 静的解析からは追跡できないパスを指す (各スクリプト先頭の注釈のとおり)。
+      # plugins/ の *.sh は階層が深く、glob では拾えない (macOS の /bin/bash 3.2 には globstar が無い)。
+      # find の -exec {} + は、shellcheck が1回でも失敗すれば find 自身が非 0 で終わる (BSD find で実測)。
+      # -print は、検査したファイルをログに残すため (#916)。
       - name: ShellCheck
         if: ${{ !cancelled() }}
         timeout-minutes: 5
-        run: shellcheck -e SC1091 scripts/*.sh
+        run: |
+          shellcheck -e SC1091 scripts/*.sh
+          find plugins -name '*.sh' -type f -print -exec shellcheck -e SC1091 {} +
 
       # bash 3.2 は変数名の直後のマルチバイト文字を名前の一部として読み、set -u の下で止まる。
       # EXIT の trap と重なると exit 0 になり、壊れた検査が緑に見える (Issue #572)。
@@ -410,7 +415,9 @@ jobs:
       - name: Shell scripts - multibyte after variable name
         if: ${{ !cancelled() }}
         timeout-minutes: 5
-        run: scripts/check-var-multibyte.sh
+        run: |
+          scripts/check-var-multibyte.sh
+          scripts/check-var-multibyte.sh plugins
 
       # 判定本体に構文エラーがあると python3 自身が exit 1 を返し、フックは block しない
       # (= 素通り) 側へ落ちる。コンパイルだけは必ず通っていることを別段で確かめる。

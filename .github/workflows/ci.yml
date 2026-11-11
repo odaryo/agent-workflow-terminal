@@ -189,8 +189,9 @@ jobs:
         working-directory: App
         run: swift test
 
-      # Handoff の検査は単独実行の実測で最後の検査まで 105 秒、後始末込みで 132 秒かかる。
-      # fish の導入時間は未測定。Swift のビルドを待たないので、
+      # Handoff の検査は、ケースを並列の群で回し、後始末も1回にまとめている (#852)。CI の実測は
+      # 220 件で後始末込み 43 秒 (並列にする前は 5 分 4 秒)。
+      # fish の導入時間は 16〜21 秒 (#852 の CI 実測)。Swift のビルドを待たないので、
       # 全体の長さを決める build-and-test から、短いこのジョブへ移した (#719)。単体テストを CLI の
       # 無い環境で走らせるため、導入は App の Test の後にする。
       - name: Install tmux, ripgrep and fish
@@ -201,8 +202,9 @@ jobs:
 
       - name: Handoff script - checks
         if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
-        # 220 件 (#837) で検査に 4 分 36 秒、続く後始末に session 1 つあたり約 1 秒かかり、
-        # 5 分では後始末の途中で打ち切られて隔離 server が残った (2026-11-11 の CI 実測)。
+        # 並列にする前は、220 件 (#837) を直列に回して 4 分 36 秒、後始末に session 1 つあたり約 1 秒
+        # かかった。5 分では後始末の途中で打ち切られ、隔離 server が残った (2026-11-11 の CI 実測)。
+        # 並列にした後は 43 秒 (#852)。並列度を下げて直列に近づけても後始末まで終わるよう、10 分を保つ。
         timeout-minutes: 10
         run: scripts/check-handoff-script.sh
 

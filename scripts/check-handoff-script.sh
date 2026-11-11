@@ -16,8 +16,10 @@ SOCK="awt-handoff-$$-$RANDOM"
 work_dir=$(mktemp -d)
 failures=0
 checked=0
-# 同時に走らせる群の数。CI の runner は 3 コアで、成功系は「前景の変化が 3 秒続く」ことを数えるので、
-# 負荷で判定が揺れたらここを下げる (Issue #852)。
+# 同時に走らせる群の数。CI の runner は 3 コアで、負荷で揺れやすいのは次の2つである。
+# - changing-screen: 0.05 秒ごとの出力が 0.2 秒止まると、安定と判定されて送信してしまう。
+# - gone-other: 作成から 0.5 秒でプロンプトが出ている前提に頼っている。
+# どちらも誤って NG になる向きに揺れるので、NG が出たらここを下げる (Issue #852)。
 max_jobs=8
 group_names=()
 group_pids=()

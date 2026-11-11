@@ -25,6 +25,8 @@ public enum GitWorktreeOmission: Sendable, Equatable {
 ///   `listingFailure` が非 nil のときは `detected` が不完全であり、`isListingComplete: false`
 ///   も渡さないと、部分出力より後の未検出 worktree が消失扱いになる。
 ///   `prunable` も渡さないと、不完全な一覧の回に git が prunable と明示した worktree が残る。
+///   `removed` も渡さないと、不完全な一覧の回に管理ディレクトリの不在を確認した Task が残り、
+///   同じ安定 ID で再作成されたときに前の Active 指定を受け継ぐ (#870)。
 public struct GitWorktreeScanResult: Sendable, Equatable {
   public let listingFailure: GitWorktreeListingFailure?
   /// `worktree list` に現れた順。
@@ -34,14 +36,20 @@ public struct GitWorktreeScanResult: Sendable, Equatable {
   /// git が `prunable` を付けた entry の安定 ID (設計書 §3.2.1)。`detected` にも載り得る
   /// (入れないだけの到達不能。Issue #496)。管理ディレクトリを特定できなかった entry は載らない。
   public let prunable: [WorktreeIdentity]
+  /// 前回の安定 ID のうち管理ディレクトリの不在を確認できたもの。完全な一覧の回は常に空。
+  /// 完全な一覧では未検出が既に消失になるため、この確認の FS I/O は行わない。
+  /// EACCES 等で確認できなかったものは含めない (`removedAdministrativeDirectories`)。
+  public let removed: [WorktreeIdentity]
 
   init(
     detected: [DetectedWorktree], failures: [GitWorktreeEntryFailure],
-    listingFailure: GitWorktreeListingFailure? = nil, prunable: [WorktreeIdentity] = []
+    listingFailure: GitWorktreeListingFailure? = nil, prunable: [WorktreeIdentity] = [],
+    removed: [WorktreeIdentity] = []
   ) {
     self.detected = detected
     self.failures = failures
     self.listingFailure = listingFailure
     self.prunable = prunable
+    self.removed = removed
   }
 }

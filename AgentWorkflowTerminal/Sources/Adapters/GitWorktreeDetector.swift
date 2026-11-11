@@ -170,7 +170,9 @@ public struct GitWorktreeDetector: Sendable {
 
   /// - Returns: 対象外として除外した entry はどちらの配列にも載せず、除外したこと自体も
   ///   呼び出し側へ伝えない (`isScannable` / `describe`)。
-  public func scan() async throws(GitWorktreeScanError) -> GitWorktreeScanResult {
+  public func scan(
+    knownIdentities: [WorktreeIdentity] = []
+  ) async throws(GitWorktreeScanError) -> GitWorktreeScanResult {
     let parsed: GitWorktreeListParseResult
     var listingFailure: GitWorktreeListingFailure?
     do {
@@ -195,7 +197,6 @@ public struct GitWorktreeDetector: Sendable {
         linkedRecords: max(parsed.entries.count - 1, 0), commonDirectory: commonDirectory
       ).map(GitWorktreeListingFailure.omittedRecords)
     }
-
     var detected: [DetectedWorktree] = []
     var failures: [GitWorktreeEntryFailure] = []
     // main worktree は `worktree list` の最初の entry (git-worktree(1))。bare の entry も
@@ -214,7 +215,10 @@ public struct GitWorktreeDetector: Sendable {
       findAdministrativeDirectory: findAdministrativeDirectory)
     return GitWorktreeScanResult(
       detected: resolved.detected, failures: resolved.failures, listingFailure: listingFailure,
-      prunable: prunableIdentities(parsed.entries, commonDirectory: commonDirectory))
+      prunable: prunableIdentities(parsed.entries, commonDirectory: commonDirectory),
+      removed: listingFailure == nil
+        ? []
+        : Self.removedAdministrativeDirectories(knownIdentities, commonDirectory: commonDirectory))
   }
 
   /// Task の安定 ID と同じ関数で引く (`describeUnreachable`)。別の照合規則を使うと、同じ

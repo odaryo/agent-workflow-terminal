@@ -269,7 +269,7 @@ struct GitWorktreeSilentOmissionTests {
 
 /// `administrativeDirectories` が `nil` なら `worktrees` ディレクトリ自体を作らない。各管理
 /// ディレクトリには git と同じく `gitdir` を置く。権限を落としたものは後始末の前に戻す。
-private func withCommonDirectory(
+func withCommonDirectory(
   administrativeDirectories: [String]?,
   _ body: (URL) async throws -> Void
 ) async throws {
@@ -300,7 +300,7 @@ private func moveBehindSymlink(_ common: URL, name: String, into parent: URL? = 
     atPath: original.path, withDestinationPath: moved.path)
 }
 
-private func setPermissions(_ mode: Int16, _ url: URL) throws {
+func setPermissions(_ mode: Int16, _ url: URL) throws {
   try FileManager.default.setAttributes(
     [.posixPermissions: NSNumber(value: mode)], ofItemAtPath: url.path)
 }
@@ -324,7 +324,7 @@ private func restoreOwnerPermissions(under url: URL) {
   }
 }
 
-private func silentOmissionRunner(
+func silentOmissionRunner(
   _ directory: URL, _ processRunner: SilentOmissionProcessStub
 ) throws(GitRunnerError) -> GitRunner {
   try GitRunner(
@@ -335,13 +335,15 @@ private func silentOmissionRunner(
 
 /// `worktree list` には exit 0 で `listing` を返し、`rev-parse` には実在する一時ディレクトリの
 /// common dir を返す。entry の管理ディレクトリは作業ツリー名から `<common>/worktrees/<name>` とする。
-private actor SilentOmissionProcessStub: ProcessRunning {
+actor SilentOmissionProcessStub: ProcessRunning {
   private let commonDirectory: String
   private let listing: String
+  private let exitCode: Int32
 
-  init(commonDirectory: String, listing: String) {
+  init(commonDirectory: String, listing: String, exitCode: Int32 = 0) {
     self.commonDirectory = commonDirectory
     self.listing = listing
+    self.exitCode = exitCode
   }
 
   func run(
@@ -349,7 +351,8 @@ private actor SilentOmissionProcessStub: ProcessRunning {
     timeout: Duration, outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     if arguments.contains("worktree") {
-      return .init(exitCode: 0, stdout: listing, stderr: "")
+      return .init(
+        exitCode: exitCode, stdout: listing, stderr: exitCode == 0 ? "" : "fatal: locked\n")
     }
     guard arguments.contains("--git-dir") else {
       return .init(exitCode: 0, stdout: "\(commonDirectory)\n", stderr: "")

@@ -189,6 +189,8 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   `false` でも、今回検出されなかったものは消失にする (設計書 §3.2.1「作業ツリーのディレクトリが
 ///   存在せずgitが`prunable`とするworktreeは消失」)。今回検出されたものは、入れないだけの到達不能
 ///   (Issue #496) として検出した値で保持する。
+/// - Important: `removed` は管理ディレクトリの不在が確認された安定 ID。`prunable` と同じく、
+///   不完全な一覧でも今回検出されなかったものは消失にし、今回検出されたものは検出した値で保持する。
 /// - Important: 不完全な一覧で未検出の Task を保持するとき、今回検出した worktree と作業ツリーの
 ///   パスが同じものは保持せず消失にする。一覧が壊れている間に消して同じパスへ作り直した worktree は
 ///   別の安定 ID で現れ、保持すると同じパスの Task が2つ並ぶ (Issue #774)。
@@ -216,7 +218,8 @@ public func reconcileDetectedWorktrees(
   previous: WorktreeInventory?,
   unobserved: [String] = [],
   isListingComplete: Bool = true,
-  prunable: [WorktreeIdentity] = []
+  prunable: [WorktreeIdentity] = [],
+  removed: [WorktreeIdentity] = []
 ) -> WorktreeScanResult {
   var projectRoot: DetectedWorktree?
   var taskWorktrees: [TaskWorktree] = []
@@ -254,11 +257,11 @@ public func reconcileDetectedWorktrees(
       unobservedIdentities.append(retainedRoot.identity)
     }
 
-    let prunableIdentities = Set(prunable)
+    let absentIdentities = Set(prunable).union(removed)
     let retainedTasks = retainedTaskWorktrees(
       previous: previous, seen: seen, unobservedPaths: unobservedPaths
     ) { task in
-      !isListingComplete && !prunableIdentities.contains(task.identity)
+      !isListingComplete && !absentIdentities.contains(task.identity)
         && !detectedPaths.contains(task.detected.worktreePath)
     }
     taskWorktrees.append(contentsOf: retainedTasks)

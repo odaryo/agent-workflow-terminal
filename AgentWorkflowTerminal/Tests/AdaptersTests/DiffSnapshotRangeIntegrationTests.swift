@@ -270,41 +270,45 @@ struct DiffSnapshotRangeIntegrationTests {
   }
 
   @Test(
-    "upstream の local と remote の名前空間を保持する", .timeLimit(.minutes(1)),
+    "分岐元の local と remote の名前空間を保持し、分岐元が消えたら使わない", .timeLimit(.minutes(1)),
     arguments: [GitBranchRef.local("local-base"), .remote("origin/main")])
-  func resolvesTypedUpstream(upstream: GitBranchRef) async throws {
+  func resolvesTypedForkPoint(forkPoint: GitBranchRef) async throws {
     try await withGitRepository { repository in
-      switch upstream {
+      switch forkPoint {
       case .local(let name):
         try await repository.git(["branch", name])
       case .remote:
         try await repository.git([
           "remote", "add", "origin", repository.root.appending(path: "remote.git").path,
         ])
-        try await repository.git(["update-ref", upstream.fullName, "HEAD"])
+        try await repository.git(["update-ref", forkPoint.fullName, "HEAD"])
       }
-      try await repository.git(["branch", "--set-upstream-to=" + upstream.shortName])
+      try await repository.git(["checkout", "-q", "-b", "feature", forkPoint.shortName])
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from " + forkPoint.shortName, of: "refs/heads/feature")
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
       #expect(
         await builder.resolveBaseBranch(userSelection: nil)
-          == .resolved(branch: upstream, source: .upstream))
+          == .resolved(branch: forkPoint, source: .forkPoint))
 
-      try await repository.git(["update-ref", "-d", upstream.fullName])
-      #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
-      try write("", to: repository.mainWorktree, "@{upstream}")
+      try await repository.git(["update-ref", "-d", forkPoint.fullName])
       #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
     }
   }
 
-  @Test("detached HEAD では元の branch の upstream を使わない", .timeLimit(.minutes(1)))
-  func doesNotResolveUpstreamForDetachedHead() async throws {
+  @Test("detached HEAD では元の branch の分岐元を使わない", .timeLimit(.minutes(1)))
+  func doesNotResolveForkPointForDetachedHead() async throws {
     try await withGitRepository { repository in
       try await repository.git(["branch", "local-base"])
-      try await repository.git(["branch", "--set-upstream-to=local-base"])
-      try await repository.git(["checkout", "-q", "--detach"])
+      try await repository.git(["checkout", "-q", "-b", "feature", "local-base"])
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(
+        await builder.resolveBaseBranch(userSelection: nil)
+          == .resolved(branch: .local("local-base"), source: .forkPoint))
+
+      try await repository.git(["checkout", "-q", "--detach"])
       #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
     }
   }

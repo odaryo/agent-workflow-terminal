@@ -382,7 +382,7 @@ final class DiffViewerModel: ObservableObject {
   func selectBaseBranch(_ branch: GitBranchRef) async {
     userSelectedBaseBranch = branch
     baseBranch = DiffBaseBranchResolver.resolve(
-      userSelection: branch, upstream: nil, originHead: nil)
+      userSelection: branch, forkPoint: nil, originHead: nil)
     await openSnapshotIfPossible()
   }
 

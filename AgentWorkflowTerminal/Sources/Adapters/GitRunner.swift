@@ -1,4 +1,5 @@
 import Foundation
+import TerminalCore
 
 public enum GitRunnerError: Error, Sendable, Equatable {
   case binaryNotFound(candidates: [URL])
@@ -129,8 +130,18 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"])
   }
 
-  public static func upstream() -> Self {
-    Self(arguments: ["rev-parse", "--verify", "--symbolic-full-name", "@{upstream}"])
+  /// reflog が無い・全部失効したときは stdout が空で rc=0、branch が無いときは rc=128
+  /// (git 2.54.0 で計測)。読み方は `GitBranchReflog`。
+  static func branchReflogSubjects(_ branch: GitBranchRef) -> Self {
+    Self(arguments: [
+      "reflog", "show", "--no-show-signature", "--format=%gs", branch.fullName, "--",
+    ])
+  }
+
+  /// OID・`main~0` は stdout が空で rc=0、曖昧な名前も空で rc=0 (stderr に `ambiguous`)、
+  /// 解決できなければ rc=1 (git 2.54.0 で計測)。
+  static func symbolicFullName(_ revision: GitRevision) -> Self {
+    Self(arguments: ["rev-parse", "--verify", "--quiet", "--symbolic-full-name", revision.rawValue])
   }
 
   /// `--is-ancestor` は真偽しか返さないので、range を組むための OID はこちらで取る (§9.1.2)。

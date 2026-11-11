@@ -23,16 +23,18 @@ public struct OverviewPaneDetail: Sendable, Hashable {
   /// 応答終了 (`AgentState.completed`) とは別 (§12.7)。
   public var isTaskCompleted: Bool
   public var title: String?
+  public var isHandedOff: Bool
 
   public init(
     location: PaneLocation? = nil, purpose: String? = nil, status: String? = nil,
-    isTaskCompleted: Bool = false, title: String? = nil
+    isTaskCompleted: Bool = false, title: String? = nil, isHandedOff: Bool = false
   ) {
     self.location = location
     self.purpose = purpose
     self.status = status
     self.isTaskCompleted = isTaskCompleted
     self.title = title
+    self.isHandedOff = isHandedOff
   }
 
   /// 1行に出せない値を表示しないため、前後の空白と改行を除いた後に残った制御文字 (Cc) と行区切りを拒否する

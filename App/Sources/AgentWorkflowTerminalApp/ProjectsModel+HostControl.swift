@@ -49,10 +49,26 @@ extension ProjectsModel {
     let previous = pendingHostControl
     let task = Task {
       _ = await previous?.value
-      return await handleHostControlWithDeadline(request)
+      let response = await handleHostControlWithDeadline(request)
+      recordHandoffIfOpened(request, response)
+      return response
     }
     pendingHostControl = task
     return await task.value
+  }
+
+  /// 期限切れや登録解除で差し替えた失敗は `.opened` にならないので、確定した応答だけを見る。
+  /// `created == false` は既存セッションで、handoff.sh は指示を送らない。
+  private func recordHandoffIfOpened(_ request: HostControlRequest, _ response: HostControlResponse)
+  {
+    guard case .openWorktree(_, let fromPane?) = request,
+      case .opened(let opened) = response, opened.created
+    else { return }
+    for slot in slots.values {
+      if case .available(let model) = slot, model.paneObservations.recordHandoff(fromPane) {
+        return
+      }
+    }
   }
 
   private func handleHostControlWithDeadline(
@@ -87,7 +103,7 @@ extension ProjectsModel {
 
   private func handleHostControl(_ request: HostControlRequest) async -> HostControlResponse {
     switch request {
-    case .openWorktree(let directory):
+    case .openWorktree(let directory, _):
       guard directory.hasPrefix("/"), !directory.utf8.contains(0) else {
         return .failure(code: .invalidRequest, message: "directory は空でない絶対パスを指定してください")
       }

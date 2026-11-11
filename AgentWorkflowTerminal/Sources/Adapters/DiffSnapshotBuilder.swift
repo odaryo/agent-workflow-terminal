@@ -67,10 +67,12 @@ public struct DiffSnapshotBuilder: Sendable {
 
   // MARK: - base branch (§9.1.1)
 
-  /// upstream と `origin/HEAD` を観測して渡すだけで、優先順位の判断は `DiffBaseBranchResolver`
+  /// 分岐元と `origin/HEAD` を観測して渡すだけで、優先順位の判断は `DiffBaseBranchResolver`
   /// が持つ。どちらも「無い」ことが正常系なので、解決できない command 失敗はエラーにしない。
+  /// `@{upstream}` は観測しない。push 済みの作業 branch では自分と同名の `origin/<branch>` になり、
+  /// 分岐元にならないため (§9.1.1)。
   public func resolveBaseBranch(userSelection: GitBranchRef?) async -> DiffBaseBranch {
-    let upstream = (try? await run(.upstream())).flatMap { GitBranchRef(fullName: $0.trimmed) }
+    let forkPoint = await forkPoint()
     // `origin/HEAD` が無いと `symbolic-ref --quiet` は終了コード 1 で終わる (git 2.50.1 で実測)。
     let originHead = (try? await run(.originHead())).flatMap { output -> GitBranchRef? in
       guard let branch = GitBranchRef(fullName: output.trimmed), case .remote = branch else {
@@ -79,7 +81,21 @@ public struct DiffSnapshotBuilder: Sendable {
       return branch
     }
     return DiffBaseBranchResolver.resolve(
-      userSelection: userSelection, upstream: upstream, originHead: originHead)
+      userSelection: userSelection, forkPoint: forkPoint, originHead: originHead)
+  }
+
+  /// detached HEAD では `symbolic-ref --quiet HEAD` が rc=1 で終わり、元の branch の分岐元は使わない。
+  private func forkPoint() async -> GitBranchRef? {
+    guard
+      let head = (try? await run(.headReference())).flatMap({ GitBranchRef(fullName: $0.trimmed) }),
+      case .local = head,
+      let subjects = try? await run(.branchReflogSubjects(head)),
+      let recorded = GitBranchReflog.createdFromStartPoint(subjects: subjects),
+      let revision = GitRevision(recorded),
+      let resolved = (try? await run(.symbolicFullName(revision)))?.trimmed, !resolved.isEmpty
+    else { return nil }
+    return DiffForkPoint.branch(
+      recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: head)
   }
 
   public func refNames() async throws(GitRunnerError) -> GitRefNames {

@@ -248,6 +248,56 @@ struct HostControlSocketTests {
     }
   }
 
+  @Test("fromPaneの形式が不正な要求はhandlerに渡さずinvalid_requestを返す")
+  func rejectsInvalidFromPane() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let bytes = Array(
+      (#"{"command":"worktree.open","directory":"/path","fromPane":"x","version":1}"# + "\n").utf8)
+    try await withServer(
+      HostControlSocketServer(path: path),
+      handler: { _ in
+        Issue.record("不正なfromPaneの要求がhandlerに渡った")
+        return Self.response
+      },
+      body: {
+        let line = try await Self.offPool { try Self.sendRequest(bytes, to: path) }
+        let response = try HostControlProtocol.decodeResponse(line).get()
+        guard case .failure(let code, _) = response else {
+          Issue.record("不正なfromPaneの要求が成功した")
+          return
+        }
+        #expect(code == .invalidRequest)
+      }
+    )
+  }
+
+  @Test("fromPane付きの要求をそのままhandlerへ渡す")
+  func deliversFromPane() async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let expected = HostControlRequest.openWorktree(
+      directory: "/path", fromPane: PaneID(rawValue: "%22"))
+    try await withServer(
+      HostControlSocketServer(path: path),
+      handler: { request in
+        #expect(request == expected)
+        return Self.response
+      },
+      body: {
+        let actual = try await HostControlSocketClient.send(
+          expected, to: path, timeout: .seconds(30))
+        #expect(actual == Self.response)
+      }
+    )
+  }
+
   @Test("104バイト以上のパスをserverとclientが拒否する", arguments: [104, 105, 200])
   func rejectsLongPath(byteCount: Int) async {
     let path = "/private/tmp/" + String(repeating: "x", count: byteCount - 13)

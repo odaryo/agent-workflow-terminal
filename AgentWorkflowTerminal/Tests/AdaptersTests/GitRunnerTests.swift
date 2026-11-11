@@ -1,4 +1,5 @@
 import Foundation
+import TerminalCore
 import Testing
 
 @testable import Adapters
@@ -19,6 +20,19 @@ struct GitRunnerTests {
     #expect(GitPathspec(":(glob)**/*.swift") != nil)
   }
 
+  @Test("§9.1.1 分岐元を読む2つのコマンドを組む")
+  func buildsForkPointCommands() throws {
+    let main = try #require(GitRevision("main"))
+    #expect(
+      GitReadCommand.branchReflogSubjects(.local("feature/x")).arguments == [
+        "reflog", "show", "--no-show-signature", "--format=%gs", "refs/heads/feature/x", "--",
+      ])
+    #expect(
+      GitReadCommand.symbolicFullName(main).arguments == [
+        "rev-parse", "--verify", "--quiet", "--symbolic-full-name", "main",
+      ])
+  }
+
   @Test("factory が range と pathspec を -- の後ろへ置く")
   func buildsCommands() throws {
     let main = try #require(GitRevision("main"))
@@ -31,10 +45,6 @@ struct GitRunnerTests {
         "--untracked-files=normal", "-z", "--ignored=matching",
       ])
     #expect(GitReadCommand.worktreeList().arguments == ["worktree", "list", "--porcelain", "-z"])
-    #expect(
-      GitReadCommand.upstream().arguments == [
-        "rev-parse", "--verify", "--symbolic-full-name", "@{upstream}",
-      ])
     #expect(
       GitReadCommand.originHead().arguments == [
         "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD",

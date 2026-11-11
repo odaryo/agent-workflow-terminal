@@ -43,6 +43,40 @@ struct PaneObservationStoreTests {
     #expect(store.observed[session]?.details[pane]?.isTaskCompleted == remainsCompleted)
   }
 
+  @Test("Issue #828 引き渡しの記録は応答終了の後の Working で解除され、不在で消える")
+  func releasesHandoffOnWorkingAfterTurnEnd() async throws {
+    let fixture = try CompletionObservationFixture()
+    defer { fixture.stop() }
+    let store = fixture.store
+    let session = fixture.session
+    let pane = fixture.pane
+    #expect(store.recordHandoff(pane) == false)
+
+    let working = PaneAgentState(id: pane, state: .working, lastUpdatedAt: .distantPast)
+    fixture.states.continuation.yield(.init(panes: [working], isComplete: true))
+    try await waitUntil { store.observed[session]?.latestPaneStates == [working] }
+    #expect(store.recordHandoff(pane))
+    #expect(store.observed[session]?.details[pane]?.isHandedOff == true)
+
+    fixture.states.continuation.yield(.init(panes: [fixture.completed], isComplete: true))
+    try await waitUntil { store.observed[session]?.latestPaneStates == [fixture.completed] }
+    #expect(store.observed[session]?.details[pane]?.isHandedOff == true)
+
+    fixture.summaryGate.continuation.finish()
+    try await waitUntil { store.observed[session]?.details[pane]?.isTaskCompleted == true }
+    #expect(store.observed[session]?.details[pane]?.isHandedOff == true)
+
+    fixture.states.continuation.yield(.init(panes: [working], isComplete: true))
+    try await waitUntil { store.observed[session]?.latestPaneStates == [working] }
+    #expect(store.observed[session]?.details[pane]?.isHandedOff == false)
+
+    #expect(store.recordHandoff(pane))
+    fixture.states.continuation.yield(
+      .init(panes: [], isComplete: true, agentAbsentPanes: [pane]))
+    try await waitUntil { store.observed[session]?.latestPaneStates == [] }
+    #expect(store.observed[session]?.details[pane]?.isHandedOff == false)
+  }
+
   @Test("Issue #650 Agent の不在が確定したら完了表示の記憶を消す", arguments: [true, false])
   func forgetsCompletionWhenAgentIsAbsent(isComplete: Bool) async throws {
     let fixture = try CompletionObservationFixture()

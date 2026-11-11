@@ -31,15 +31,17 @@ defaults:
 # そのまま総時間に乗るので、検査を足すときは既存のジョブへ段として足す。
 #
 # 空き待ちが起きたときに一番長いジョブが後回しにならないよう、クリティカルパスの
-# build-and-test を先頭に置く。
+# build-and-test を先頭に置く。ただしビルドをキャッシュした後 (#851) は build-app の方が長い
+# (run 42971839848)。並びはまだ変えていない。
 jobs:
   # 単体テストと、実 tmux / git / ripgrep を起動する統合テスト。同じパッケージを2つのジョブで
   # ビルドしていた (各 77〜96 秒) のを1回にまとめている。
   build-and-test:
     name: Build & Test (SwiftPM, unit + integration)
     runs-on: macos-15
-    # 段ごとの上限は 600 + 300 (単体) + 600 (統合) = 1500s。CI 実測 (run 41304065113) の
-    # 固定費は setup+checkout+toolchain 約 10s / brew 14s / build 69s、wrapper の停止処理は 17s
+    # 段ごとの上限は 600 + 300 (単体) + 600 (統合) = 1500s。CI 実測の固定費は
+    # setup+checkout+toolchain 約 10s / brew 14s / build はキャッシュが当たれば 4s
+    # (run 42971839848)、外れれば 126s (run 42966688963)、wrapper の停止処理は 17s
     # (run 34245198762)。
     # 固定費を 420s、停止処理を 3 本分 180s まで見積もっても 2100s = 35 分で、45 分に届かない。
     # 3 本ともハングした回でも、どれも exit 124 とスタックを書き終えてから job が終わる。
@@ -65,6 +67,7 @@ jobs:
       # key の toolchain は xcodebuild / swift の版の出力のハッシュで、版が変われば復元しない。
       # 末尾の sha は、保存ごとに新しい key にするため (同じ key は上書きできない)。
       - name: Set source mtimes from content
+        timeout-minutes: 5
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" .
 
       - name: Restore build cache
@@ -80,12 +83,35 @@ jobs:
 
       # 段の上限は #475 の計測による: 時間切れの段は cancelled ではなく failure になり、後に続く
       # `!cancelled()` の段は走る (run 41343741887)。job の上限だけでは、ハングした段で job ごと
-      # cancel され、後の段の結果が同じ run に残らない。実測は Build 96s / brew 17s (run 41342303849)。
+      # cancel され、後の段の結果が同じ run に残らない。実測は Build 4s (キャッシュあり、run 42971839848)・
+      # 126s (キャッシュなし、run 42966688963) / brew 14〜17s。
       # run-swift-test.sh を挟む段は、自前の --timeout とスタックの書き出しに任せて上限を付けない。
+      #
+      # 復元した `.build` の中身が壊れていると、同じ `.build` で何度ビルドし直しても落ちる (reviewer の
+      # ローカル計測: 空にした .o で `ld: file is empty`)。そのまま main で保存されないと、後の run も
+      # 同じ entry を復元して落ち続けるので、キャッシュが当たった回に限り `.build` を消して cold で
+      # やり直す。ソースの誤りで落ちる回は、やり直しの分だけ遅くなる。
+      - name: Probe - corrupt restored object file
+        if: ${{ steps.build-cache.outputs.cache-matched-key != '' }}
+        run: |
+          o=$(find .build -path '*TerminalCore.build/AgentAdapter.swift.o' | head -1)
+          [[ -n "$o" ]] || { echo "対象の .o がありません"; exit 1; }
+          touch -r "$o" "$RUNNER_TEMP/o-ref"
+          : > "$o"
+          touch -r "$RUNNER_TEMP/o-ref" "$o"
+          ls -lT "$o"
+
       - name: Build
         id: build
         timeout-minutes: 15
-        run: swift build --build-tests
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        run: |
+          swift build --build-tests && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
+          rm -rf .build
+          swift build --build-tests
 
       # 保存は main の push だけで、PR は main のキャッシュを復元するだけにする。PR ごとに保存すると
       # リポジトリあたり 10GB の枠を食い潰す (1回の保存は core 82MB・App 152MB・checks 40MB)。
@@ -220,6 +246,7 @@ jobs:
       # App/vendor は追跡外だが、fetch-ghostty.sh の tar 展開は Release アセットの中の mtime を保つので、
       # 同じアセット (ghostty-kit.sha256) なら run 間で同じ mtime になる。
       - name: Set source mtimes from content
+        timeout-minutes: 5
         run: python3 scripts/ci_set_mtime_from_blob.py App AgentWorkflowTerminal
 
       - name: Restore build cache
@@ -233,10 +260,19 @@ jobs:
           restore-keys: |
             swiftpm-app-${{ runner.os }}-${{ steps.toolchain.outputs.key }}-${{ hashFiles('App/Package.swift', 'App/Package.resolved', 'AgentWorkflowTerminal/Package.swift', 'App/ghostty-kit.sha256') }}-
 
+      # 壊れたキャッシュからのやり直しは build-and-test の Build と同じ。テスト target もここで
+      # ビルドし、Test の段では壊れたキャッシュで落ちないようにする。
       - name: Build
         id: build
         working-directory: App
-        run: swift build
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        run: |
+          swift build --build-tests && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
+          rm -rf .build
+          swift build --build-tests
 
       # UI 層は unit test の対象外 (docs/coding-guidelines.md) だが、libghostty の設定
       # 読み込み経路だけは window も GHOSTTY_RESOURCES_DIR も無しに検証できる (Issue #236)。
@@ -244,7 +280,7 @@ jobs:
         working-directory: App
         run: swift test
 
-      # 保存の条件は build-and-test と同じ。テスト target の成果物も含めるため Test の後に保存する。
+      # 保存の条件は build-and-test と同じ。
       - name: Save build cache
         if: ${{ github.event_name == 'push' && !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5
@@ -254,10 +290,11 @@ jobs:
           path: App/.build
           key: ${{ steps.build-cache.outputs.cache-primary-key }}
 
-      # Handoff の検査は単独実行の実測で最後の検査まで 105 秒、後始末込みで 132 秒かかる。
-      # fish の導入時間は未測定。Swift のビルドを待たないので、
+      # Handoff の検査は CI の実測で 311〜323 秒、tmux / ripgrep / fish の導入は 20〜26 秒かかる
+      # (run 42970849157 / 42971839848)。Swift のビルドを待たないので、
       # 全体の長さを決める build-and-test から、短いこのジョブへ移した (#719)。単体テストを CLI の
-      # 無い環境で走らせるため、導入は App の Test の後にする。
+      # 無い環境で走らせるため、導入は App の Test の後にする。ビルドをキャッシュした後 (#851) は、
+      # Handoff の検査のためにこのジョブが一番長い (run 42971839848: 392s、build-and-test は 80s)。
       - name: Install tmux, ripgrep and fish
         id: install-clis
         if: ${{ !cancelled() }}
@@ -285,8 +322,9 @@ jobs:
   # どれかの段が落ちればジョブは失敗する。
   #
   # 1つの段がハングしても残りの段の結果を得るため、段ごとに上限を付ける。時間切れの段は failure
-  # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 0〜40 秒
-  # (run 41342303849) で、brew で導入しうる段は 10 分、それ以外は 5 分、iOS のビルドは 15 分とする。
+  # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 1〜17 秒
+  # (ビルドのキャッシュが当たった回、run 42971839848) で、brew で導入しうる段は 10 分、それ以外は
+  # 5 分、iOS のビルドは 15 分とする。
   checks:
     name: Static checks & iOS build
     runs-on: macos-15
@@ -441,7 +479,15 @@ jobs:
       - name: Session name parity - naming rule (bash vs Swift)
         if: ${{ !cancelled() }}
         timeout-minutes: 5
-        run: scripts/check-session-name-parity.sh
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        # 壊れたキャッシュからのやり直しは build-and-test の Build と同じ。
+        run: |
+          scripts/check-session-name-parity.sh && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build で検査が落ちたので、harness の .build を消して検査し直す"
+          rm -rf scripts/tests/session-name-parity/.build
+          scripts/check-session-name-parity.sh
 
       - name: Session name parity - stable ID (worktree admin dir)
         if: ${{ !cancelled() }}
@@ -453,10 +499,20 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 15
         working-directory: AgentWorkflowTerminal
+        env:
+          CACHE_MATCHED_KEY: ${{ steps.build-cache.outputs.cache-matched-key }}
+        # 壊れたキャッシュからのやり直しは build-and-test の Build と同じ。
         run: |
-          swift build \
-            --triple arm64-apple-ios17.0-simulator \
-            --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          build_ios() {
+            swift build \
+              --triple arm64-apple-ios17.0-simulator \
+              --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
+          }
+          build_ios && exit 0
+          [[ -n "$CACHE_MATCHED_KEY" ]] || exit 1
+          echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
+          rm -rf .build
+          build_ios
 
       # 保存の条件は build-and-test と同じ。
       - name: Save build cache

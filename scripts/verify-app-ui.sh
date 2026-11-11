@@ -32,6 +32,10 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「De
   value <部分文字列>     フォーカス中の要素の値にその文字列があれば成功、無ければ失敗
   quit                  起動したアプリを終了する
   selftest [--no-build] 行選択が効くところまでを1コマンドで通す (ハーネス自身の動作確認)
+                        実行ごとに /private/tmp/awt-ui-verify/<$PWD の basename>/selftest.XXXXXX へ
+                        使い捨てのリポジトリと Application Support を作り、終わったら socket 上の
+                        その Project の session とともに消す。AWT_UI_APPLICATION_SUPPORT_DIR は
+                        無視する (前回までに登録した Project を引き継がないため)
   -h, --help            このヘルプを表示
 
 launch の Application Support は /private/tmp/awt-ui-verify/<$PWD の basename>/application-support。
@@ -53,7 +57,9 @@ EOF
 }
 
 APP_NAME="AgentWorkflowTerminalApp"
-SELFTEST_PROBE=""
+SELFTEST_SCRATCH=""
+SELFTEST_PROJECT=""
+SELFTEST_TMUX_SOCKET=""
 BUNDLE_REL="App/build/AgentWorkflowTerminal.app"
 
 # 前面でないウィンドウへの最初のクリックは**ウィンドウのアクティブ化に消費され、
@@ -233,29 +239,100 @@ EOS
   sleep 3
 }
 
+# socket 上で session_path が使い捨ての Project と一致する session を名前と改行で出す。
+# server が無いのは「消すものが無い」なので成功にする。それ以外の失敗は 1 を返す。
+selftest_project_sessions() {
+  local socket="$1" project="$2" output name path
+  if ! output=$(env -u TMUX tmux -L "$socket" list-sessions -F "#{session_name}"$'\t'"#{session_path}" 2>&1); then
+    case "$output" in
+      *"no server running"*) return 0 ;;
+    esac
+    info "tmux -L ${socket} の list-sessions に失敗しました: $output"
+    return 1
+  fi
+  while IFS=$'\t' read -r name path; do
+    [ "$path" = "$project" ] && printf '%s\n' "$name"
+  done <<<"$output"
+  return 0
+}
+
+# trap の中から `|| …` の形で呼ぶので set -e は効かない。失敗は戻り値で返す。
+# kill-server は使わない。同じ socket に別の作業の session があり得るため、自分の Project の
+# session だけを `=` の完全一致で消す。
+selftest_kill_project_sessions() {
+  local socket="${SELFTEST_TMUX_SOCKET:-}" project="${SELFTEST_PROJECT:-}" sessions remaining name
+  [ -n "$socket" ] && [ -n "$project" ] || return 0
+  sessions=$(selftest_project_sessions "$socket" "$project") || return 1
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    env -u TMUX tmux -L "$socket" kill-session -t "=${name}" || info "session を消せませんでした: ${name}"
+  done <<<"$sessions"
+  remaining=$(selftest_project_sessions "$socket" "$project") || return 1
+  [ -z "$remaining" ] && return 0
+  info "使い捨ての Project の session が socket ${socket} に残っています:"
+  info "$remaining"
+  return 1
+}
+
+selftest_remove_scratch() {
+  local scratch="${SELFTEST_SCRATCH:-}"
+  case "$scratch" in
+    "") return 0 ;;
+    /private/tmp/awt-ui-verify/?*) rm -rf -- "$scratch" ;;
+    *)
+      info "想定外の場所なので消しません: ${scratch}"
+      return 1
+      ;;
+  esac
+}
+
 # ハーネス自身が壊れていないことを確かめる最小の導線。Diff を開いて行を1つ選ぶ。
-# 検証用の差分を作るため、リポジトリに untracked のプローブファイルを一時的に置く。
+#
+# Project は実行ごとに作る独立したリポジトリにする。理由は2つある。
+# - socket は全 worktree で共通なので、前の実行が残した Project Root の session があると行の文言が
+#   変わる (#811: `-3` だけが残っていて「表示中 shell 3」になり、「shell 1」が見つからなかった)。
+#   session 名は Project Root の `<repo>/.git` から決まるので、別のパスのリポジトリなら名前が重ならない。
+#   linked worktree を渡しても Project Root はメイン側になる (#231) ので、worktree では足りない。
+# - 検証用の差分を作るプローブを、メイン作業ツリーに書かずに済む。
 selftest() {
-  # Project Root のセッションは常にメイン作業ツリーを指すため、プローブもそこへ置く。
-  # Overview の Agent がいない行は「shell 1」、表示中は「表示中 shell 1」なので部分一致で選ぶ。
-  local main_worktree
-  main_worktree=$(git worktree list --porcelain | awk 'NR == 1 { print $2 }')
-  [ -n "$main_worktree" ] || die "メイン作業ツリーを特定できませんでした"
-  # trap から見えるようにグローバルへ置く。local だと関数を抜けた時点で参照できない。
-  SELFTEST_PROBE="$main_worktree/verify-app-ui-probe.txt"
+  local lane scratch canonical
+  lane=$(basename -- "$PWD")
+  SELFTEST_TMUX_SOCKET="${AWT_UI_TMUX_SOCKET_NAME:-awt-ui-verify}"
   # bash 3.2 は EXIT の trap があると、set -u の未定義の変数の参照で止まっても exit 0 を返す。
   # 最後まで走った印が無ければ非 0 で終わらせる (docs/coding-guidelines.md §7)。
   __awt_finished=0
   __awt_on_exit() {
     local rc=$?
-    rm -f "${SELFTEST_PROBE:-}"
     app_quit
+    selftest_kill_project_sessions || { [ "$rc" -ne 0 ] || rc=1; }
+    selftest_remove_scratch || { [ "$rc" -ne 0 ] || rc=1; }
     [[ $__awt_finished -eq 1 || $rc -ne 0 ]] || rc=1
     exit "$rc"
   }
   trap __awt_on_exit EXIT
-  printf 'probe line one\nprobe line two\nprobe line three\n' >"$SELFTEST_PROBE"
-  app_launch "$main_worktree"
+  mkdir -p "/private/tmp/awt-ui-verify/${lane}"
+  scratch=$(mktemp -d "/private/tmp/awt-ui-verify/${lane}/selftest.XXXXXX")
+  # trap から見えるようにグローバルへ置く。正規化に失敗しても作った場所は消せるよう、先に生の値を置く。
+  SELFTEST_SCRATCH="$scratch"
+  canonical=$(cd -- "$scratch" && pwd -P)
+  SELFTEST_SCRATCH="$canonical"
+  SELFTEST_PROJECT="$SELFTEST_SCRATCH/project"
+  mkdir -- "$SELFTEST_PROJECT"
+  git -C "$SELFTEST_PROJECT" init -q
+  printf 'verify-app-ui selftest\n' >"$SELFTEST_PROJECT/README"
+  git -C "$SELFTEST_PROJECT" add README
+  # 利用者の git 設定 (署名・hook・未設定の user) で commit が止まらないようにする。
+  git -C "$SELFTEST_PROJECT" -c user.name=awt-ui-selftest -c user.email=awt-ui-selftest@invalid \
+    -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q -m "selftest"
+  # 分岐元も origin/HEAD も無いと Diff の base が決まらず、プローブの差分が出ない
+  # (#811 の実測: `base: 未決定`)。base は origin/HEAD で決めさせる。remote は要らず ref だけで足りる。
+  git -C "$SELFTEST_PROJECT" update-ref refs/remotes/origin/main HEAD
+  git -C "$SELFTEST_PROJECT" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+  printf 'probe line one\nprobe line two\nprobe line three\n' >"$SELFTEST_PROJECT/verify-app-ui-probe.txt"
+  # 利用者の値より優先する。lane の Application Support だと前回までに登録した Project を引き継ぐ。
+  AWT_UI_APPLICATION_SUPPORT_DIR="$SELFTEST_SCRATCH/application-support"
+  app_launch "$SELFTEST_PROJECT"
+  # Overview の Agent がいない行は「shell 1」、表示中は「表示中 shell 1」なので部分一致で選ぶ。
   # ボタンの順番に依存しないよう、文言と role で対象を特定する。
   app_click_text "shell 1" --role AXButton
   app_click_text "Viewer" --exact --role AXMenuButton
@@ -312,7 +389,7 @@ command=$1
 shift
 
 repo_root_cd
-require_cmd osascript swift open pkill
+require_cmd osascript swift open pkill git
 
 case "$command" in
   -h | --help) usage ;;
@@ -362,6 +439,7 @@ case "$command" in
     ;;
   quit) app_quit ;;
   selftest)
+    require_cmd tmux
     [ "${1:-}" = "--no-build" ] || "$SCRIPT_DIR/build-app.sh" >/dev/null
     selftest
     ;;

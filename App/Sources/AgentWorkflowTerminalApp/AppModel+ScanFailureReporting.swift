@@ -9,7 +9,7 @@ extension AppModel {
   ///   どちらの場合にも偽になる。ここで言えるのは「観測できなかった」ことと、それを消失として
   ///   扱っていないことだけである。
   func report(
-    scanFailures failures: [GitWorktreeEntryFailure], listingFailure: GitRunnerError?
+    scanFailures failures: [GitWorktreeEntryFailure], listingFailure: GitWorktreeListingFailure?
   ) {
     let summaries = Set(failures.map(Self.summary(of:)))
     var failureSet = Set(summaries.map { "entry: \($0)" })
@@ -22,8 +22,16 @@ extension AppModel {
       return
     }
     var warnings: [String] = []
-    if listingFailure != nil {
+    switch listingFailure {
+    case nil:
+      break
+    case .command:
       warnings.append("worktree の一覧を途中までしか読めませんでした。一覧に出なかった worktree は消えたものとしては扱っていません。")
+    case .omittedRecords:
+      // git は exit 0 のまま record を欠くので「途中まで」ではない (#774)。
+      warnings.append(
+        "git が一部の worktree を一覧に出しませんでした (管理ディレクトリが壊れているか読めません)。"
+          + "一覧に出なかった worktree は消えたものとしては扱っていません。")
     }
     if !summaries.isEmpty {
       warnings.append(

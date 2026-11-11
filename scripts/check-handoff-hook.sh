@@ -8,6 +8,10 @@ source "$SCRIPT_DIR/lib.sh"
 [[ $# -eq 0 ]] || die "引数は指定できません"
 require_cmd tmux python3 git
 
+# 利用者の core.hooksPath / init.templateDir が fixture の作成で hook を動かし、system や global の設定が hook の判定も左右するため。
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+unset GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_TEMPLATE_DIR
+
 HOOK="$SCRIPT_DIR/../plugins/awt-handoff/hooks/session-start.sh"
 CONFIG="$SCRIPT_DIR/../plugins/awt-handoff/hooks/hooks.json"
 STOP="$SCRIPT_DIR/stop-tty-processes.sh"
@@ -92,37 +96,56 @@ socket_path=$(T display-message -p '#{socket_path}')
 T set-environment -g AWT_HOSTCTL "$work_dir/hostctl"
 T set-environment -g AWT_HOSTCTL_SOCKET test-socket
 
-git -c init.defaultBranch=main init -q "$work_dir/project"
-git -C "$work_dir/project" -c user.name='Handoff Hook Test' -c user.email=hook@example.invalid \
-  -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q --allow-empty -m 'test fixture'
+fixture_commit() {
+  git -C "$1" -c user.name='Handoff Hook Test' -c user.email=hook@example.invalid \
+    -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q "${@:2}"
+}
+
+git -c init.defaultBranch=main init -q --template= "$work_dir/project"
+fixture_commit "$work_dir/project" --allow-empty -m 'test fixture'
+git -c init.defaultBranch=main init -q --template= "$work_dir/sub"
+fixture_commit "$work_dir/sub" --allow-empty -m 'submodule fixture'
+git -C "$work_dir/project" -c protocol.file.allow=always submodule --quiet add "$work_dir/sub" sm
+fixture_commit "$work_dir/project" -m 'add submodule'
 git -C "$work_dir/project" worktree add -q -b linked "$work_dir/linked"
-git init -q --bare "$work_dir/bare"
-mkdir -p "$work_dir/project/subdir" "$work_dir/linked/subdir" "$work_dir/outside"
+git -C "$work_dir/linked" -c protocol.file.allow=always submodule --quiet update --init
+git init -q --bare --template= "$work_dir/bare"
+mkdir -p "$work_dir/project/subdir" "$work_dir/linked/subdir" "$work_dir/project/sm/subdir" "$work_dir/outside"
 
 : >"$work_dir/empty"
 printf '%s\n' 'このセッションは Agent Workflow Terminal の Project Root で動いている。実装を指示されたら、作業を始める前に awt-handoff:worktree-handoff Skill を使う。調査や質問には使わない。' >"$work_dir/instruction"
 printf '\377\000not JSON\n' >"$work_dir/broken-input"
 
+# 5番目以降の引数は hook の実行だけに渡す環境変数 (NAME=value)。
 expect_hook() {
   local label="$1" directory="$2" expected="$3" input="${4:-$work_dir/input}"
-  local rc=0
+  local rc=0 offset
+  local hook_env=()
+  [[ $# -le 4 ]] || hook_env=("${@:5}")
   python3 -I - "$directory" >"$work_dir/input" <<'PY'
 import json
 import sys
 
 print(json.dumps({"hook_event_name": "SessionStart", "source": "startup", "cwd": sys.argv[1]}))
 PY
+  : >"$work_dir/offset"
+  # ( ) || rc=$? の中では set -e が効かないので、hook の終了コードを取ってから明示的に返す。
+  # bash 3.2 は set -u の下で空の配列の "${a[@]}" を未定義として止まる。
   (
     cd -- "$directory" || exit 1
     env TMUX="$socket_path,0,0" AWT_HOSTCTL=/missing/hostctl AWT_HOSTCTL_SOCKET=wrong-socket \
-      GIT_CEILING_DIRECTORIES="$work_dir" "$HOOK" <"$input"
-  ) >"$work_dir/stdout" 2>"$work_dir/stderr" || rc=$?
+      GIT_CEILING_DIRECTORIES="$work_dir" ${hook_env[@]+"${hook_env[@]}"} "$HOOK"
+    hook_rc=$?
+    python3 -I -c 'import os; print(os.lseek(0, 0, os.SEEK_CUR))' >"$work_dir/offset" || exit 1
+    exit "$hook_rc"
+  ) <"$input" >"$work_dir/stdout" 2>"$work_dir/stderr" || rc=$?
+  offset=$(cat "$work_dir/offset")
 
   checked=$((checked + 1))
-  if [[ "$rc" -eq 0 && ! -s "$work_dir/stderr" ]] && cmp -s "$expected" "$work_dir/stdout"; then
+  if [[ "$rc" -eq 0 && ! -s "$work_dir/stderr" && "$offset" == 0 ]] && cmp -s "$expected" "$work_dir/stdout"; then
     info "OK: $label"
   else
-    ng "$label: exit ${rc}、stdout または stderr が期待と異なります"
+    ng "$label: exit ${rc}、stdin のオフセット '${offset}'、stdout または stderr が期待と異なります"
     cat "$work_dir/stdout" "$work_dir/stderr"
   fi
 }
@@ -139,6 +162,21 @@ expect_hook 'Project Root のルートでは指示を出力する' "$work_dir/pr
 expect_hook 'Project Root のサブディレクトリでは指示を出力する' "$work_dir/project/subdir" "$work_dir/instruction"
 expect_hook '壊れた stdin でも指示を出力する' "$work_dir/project" "$work_dir/instruction" "$work_dir/broken-input"
 expect_hook 'bare リポジトリの中では出力しない' "$work_dir/bare" "$work_dir/empty"
+expect_hook 'submodule のルートでは出力しない' "$work_dir/project/sm" "$work_dir/empty"
+expect_hook 'submodule のサブディレクトリでは出力しない' "$work_dir/project/sm/subdir" "$work_dir/empty"
+expect_hook 'linked worktree の中の submodule では出力しない' "$work_dir/linked/sm" "$work_dir/empty"
+expect_hook 'GIT_DIR を付けた Project Root では出力しない' "$work_dir/project" "$work_dir/empty" \
+  "$work_dir/input" GIT_DIR="$work_dir/project/.git"
+expect_hook 'GIT_DIR を付けた linked worktree では出力しない' "$work_dir/linked" "$work_dir/empty" \
+  "$work_dir/input" GIT_DIR="$work_dir/project/.git"
+expect_hook 'GIT_DIR を付けた git の外では出力しない' "$work_dir/outside" "$work_dir/empty" \
+  "$work_dir/input" GIT_DIR="$work_dir/project/.git"
+expect_hook '空の GIT_DIR を付けた Project Root では出力しない' "$work_dir/project" "$work_dir/empty" \
+  "$work_dir/input" GIT_DIR=
+expect_hook 'GIT_WORK_TREE を付けた Project Root では出力しない' "$work_dir/project" "$work_dir/empty" \
+  "$work_dir/input" GIT_WORK_TREE="$work_dir/project"
+expect_hook 'GIT_COMMON_DIR を付けた Project Root では出力しない' "$work_dir/project" "$work_dir/empty" \
+  "$work_dir/input" GIT_COMMON_DIR="$work_dir/project/.git"
 
 checked=$((checked + 1))
 if [[ -e "$work_dir/calls" ]]; then

@@ -197,8 +197,8 @@ struct DiffForkPointIntegrationTests {
   }
 
   // 製品の子 git は `HOME` を引き継ぐので、`~/.gitconfig` の `core.warnAmbiguousRefs=false` が効く。
-  // そのとき曖昧な名前は警告されずに `refs/heads/` へ解決され、local branch を分岐元に採ってしまう
-  // (git 2.54.0 で計測)。偽の `HOME` を使うのは、その config を製品と同じ経路で読ませるため。
+  // そのとき曖昧な名前は警告されずに、tag が無ければ `refs/heads/` へ解決され、local branch を
+  // 分岐元に採ってしまう (git 2.54.0 で計測)。偽の `HOME` を使うのは、その config を製品と同じ経路で読ませるため。
   // 対照は `-c` で与え、開発者の `~/.gitconfig` に頼らずに git の振る舞いを確かめる。
   @Test(
     "user config の core.warnAmbiguousRefs=false でも、local と remote に在る同名の分岐元を解決しない",

@@ -90,16 +90,6 @@ jobs:
       # ローカル計測: 空にした .o で `ld: file is empty`)。そのまま main で保存されないと、後の run も
       # 同じ entry を復元して落ち続けるので、キャッシュが当たった回に限り `.build` を消して cold で
       # やり直す。ソースの誤りで落ちる回は、やり直しの分だけ遅くなる。
-      - name: Probe - corrupt restored object file
-        if: ${{ steps.build-cache.outputs.cache-matched-key != '' }}
-        run: |
-          o=$(find .build -path '*TerminalCore.build/AgentAdapter.swift.o' | head -1)
-          [[ -n "$o" ]] || { echo "対象の .o がありません"; exit 1; }
-          touch -r "$o" "$RUNNER_TEMP/o-ref"
-          : > "$o"
-          touch -r "$RUNNER_TEMP/o-ref" "$o"
-          ls -lT "$o"
-
       - name: Build
         id: build
         timeout-minutes: 15

@@ -23,15 +23,45 @@ checked=0
 max_jobs=8
 group_names=()
 group_pids=()
+group_rcs=()
+groups_reported=0
 __awt_finished=0
 
 T() { env -u TMUX tmux -L "$SOCK" "$@"; }
 
 wait_running_groups() {
-  local i
+  local i rc
+  for ((i = ${#group_rcs[@]}; i < ${#group_pids[@]}; i++)); do
+    rc=0
+    wait "${group_pids[i]}" 2>/dev/null || rc=$?
+    group_rcs+=("$rc")
+  done
+}
+
+# 群のログはすべて回収してから起動順に出す。並列の出力が混ざらず、順も実行ごとに変わらない。
+# 通常の NG も die から on_exit に入るので、出したことを覚えておかないと全群のログが2回出る。
+report_groups() {
+  local i name dir rc group_checked group_failures
+  groups_reported=1
   for ((i = 0; i < ${#group_pids[@]}; i++)); do
-    if kill -0 "${group_pids[i]}" 2>/dev/null; then
-      wait "${group_pids[i]}" 2>/dev/null || true
+    name="${group_names[i]}"
+    dir="$work_dir/cases/$name"
+    rc="${group_rcs[i]:-0}"
+    info "== 群 $name =="
+    cat "$dir/log" >&2 || true
+    group_checked=""
+    group_failures=""
+    if [[ -f "$dir/result" ]]; then
+      read -r group_checked group_failures <"$dir/result" || true
+    fi
+    if [[ "$rc" -ne 0 || ! "$group_checked" =~ ^[0-9]+$ || ! "$group_failures" =~ ^[0-9]+$ ]]; then
+      checked=$((checked + 1))
+      ng "$name: 途中で止まりました (exit $rc)"
+      [[ ! -f "$dir/stopped" ]] || cat "$dir/stopped" >&2 || true
+    fi
+    if [[ "$group_checked" =~ ^[0-9]+$ && "$group_failures" =~ ^[0-9]+$ ]]; then
+      checked=$((checked + group_checked))
+      failures=$((failures + group_failures))
     fi
   done
 }
@@ -51,8 +81,12 @@ stop_all_ttys() {
     [[ "${#ttys[@]}" -gt 0 ]] || return 0
     stop_rc=0
     "$STOP" -L "$SOCK" "${ttys[@]}" || stop_rc=$?
-    [[ "$stop_rc" -eq 2 ]] || return "$stop_rc"
+    if [[ "$stop_rc" -ne 2 ]]; then
+      [[ "$stop_rc" -eq 0 ]] || info "後始末: stop-tty-processes.sh が exit $stop_rc で終わりました"
+      return "$stop_rc"
+    fi
   done
+  info "後始末: stop-tty-processes.sh が 4 回とも exit 2 で終わりました"
   return 1
 }
 
@@ -81,7 +115,8 @@ cleanup() {
 # die で途中から抜けたときに、動いている群と rm -rf を競合させないよう、群を待ってから後始末する。
 on_exit() {
   local rc=$?
-  wait_running_groups
+  wait_running_groups || true
+  [[ "$groups_reported" -eq 1 ]] || report_groups || true
   cleanup || rc=1
   [[ "$__awt_finished" -eq 1 || "$rc" -ne 0 ]] || rc=1
   exit "$rc"
@@ -701,6 +736,21 @@ group_purpose_no_mktemp() {
   expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
 }
 
+# bash 3.2 の ERR trap の中の $LINENO は、関数の定義行など失敗した行ではない値を返すので出さない。
+# 呼び出しの連鎖の行番号 (BASH_LINENO) は正しい。
+record_stop() {
+  trap - ERR
+  local status="$1" command="$2" chain="" i
+  # set -E の ERR trap は、外側が失敗を許す $(...) の中でも発火する。止まっていない群に誤報を出さない。
+  [[ "$BASH_SUBSHELL" -eq "$group_subshell" ]] || return 0
+  for ((i = ${#FUNCNAME[@]} - 1; i >= 2; i--)); do
+    chain+="${FUNCNAME[i]} ${BASH_LINENO[i - 1]}行 → "
+  done
+  chain+="${FUNCNAME[1]:-}"
+  printf '止まったコマンド: %s (exit %s)、呼び出し: %s\n' "${command//$'\n'/ }" "$status" "$chain" \
+    >"$AWT_TEST_DIR/stopped" || true
+}
+
 # 背景の群の中で動く。件数は親へ戻らないので、最後に result へ書く。result が無ければ親は途中で
 # 止まった群として数えるので、result は最後の文でだけ書く。
 run_group() {
@@ -709,6 +759,9 @@ run_group() {
   shift
   checked=0
   failures=0
+  group_subshell=$BASH_SUBSHELL
+  set -E
+  trap 'record_stop "$?" "$BASH_COMMAND"' ERR
   "$@"
   printf '%s %s\n' "$checked" "$failures" >"$AWT_TEST_DIR/result"
 }
@@ -855,33 +908,8 @@ start_group purpose-valid-1 group_purpose_valid 1 "$long_purpose"
 start_group purpose-valid-2 group_purpose_valid 2 "$quoted_purpose"
 start_group purpose-no-mktemp group_purpose_no_mktemp
 
-# 群のログはすべて回収してから起動順に出す。並列の出力が混ざらず、順も実行ごとに変わらない。
-group_rcs=()
-for ((group_index = 0; group_index < ${#group_pids[@]}; group_index++)); do
-  group_rc=0
-  wait "${group_pids[group_index]}" || group_rc=$?
-  group_rcs+=("$group_rc")
-done
-
-for ((group_index = 0; group_index < ${#group_pids[@]}; group_index++)); do
-  group_name="${group_names[group_index]}"
-  group_dir="$work_dir/cases/$group_name"
-  group_rc="${group_rcs[group_index]}"
-  cat "$group_dir/log" >&2
-  group_checked=""
-  group_failures=""
-  if [[ -f "$group_dir/result" ]]; then
-    read -r group_checked group_failures <"$group_dir/result" || true
-  fi
-  if [[ "$group_rc" -ne 0 || ! "$group_checked" =~ ^[0-9]+$ || ! "$group_failures" =~ ^[0-9]+$ ]]; then
-    checked=$((checked + 1))
-    ng "$group_name: 途中で止まりました (exit $group_rc)"
-  fi
-  if [[ "$group_checked" =~ ^[0-9]+$ && "$group_failures" =~ ^[0-9]+$ ]]; then
-    checked=$((checked + group_checked))
-    failures=$((failures + group_failures))
-  fi
-done
+wait_running_groups
+report_groups
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"

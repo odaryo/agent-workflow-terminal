@@ -64,6 +64,43 @@ struct TmuxWorktreePaneSourceIntegrationTests {
       #expect(actual.isDisjoint(with: other))
     }
   }
+
+  @Test("server はいるが session が0個のときは空配列を返す")
+  func mapsSessionlessServerToEmpty() async throws {
+    try await IsolatedTmuxServer.withServer(
+      socketName: uniqueSocketName("worktree-pane-source-sessionless")
+    ) { runner in
+      let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/sessionless"))
+      let session = TmuxSessionName(identity: worktree)
+      _ = try await runner.run(arguments: ["new-session", "-d", "-s", session.rawValue])
+      _ = try await runner.run(arguments: ["set-option", "-g", "exit-empty", "off"])
+      // `withServer` が起動時に作る session も消さないと、session は0個にならない。
+      for name in [session.rawValue, "awt-operations"] {
+        _ = try await runner.run(arguments: ["kill-session", "-t", "=\(name)"])
+      }
+
+      // server が終わっていても「server 不在 → 空」で通ってしまうので、生きていることと、
+      // 生の list-panes が no current target で失敗することを先に確かめる。
+      let serverPID = try await runner.run(arguments: ["display-message", "-p", "#{pid}"])
+      try #require(
+        Int32(serverPID.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) != nil)
+      do {
+        _ = try await runner.run(arguments: ["list-panes", "-a", "-F", "#{pane_id}"])
+        Issue.record("session が0個の server で list-panes -a が成功した")
+        return
+      } catch let error as TmuxRunnerError {
+        try #require(
+          error
+            == TmuxRunnerError.commandFailed(
+              exitCode: 1, stdout: "", stderr: "no current target\n"))
+      } catch {
+        Issue.record("list-panes -a が TmuxRunnerError 以外で失敗した: \(error)")
+        return
+      }
+
+      #expect(try await TmuxWorktreePaneSource(runner: runner).panes(of: worktree).isEmpty)
+    }
+  }
 }
 
 private struct PaneMembership {

@@ -141,7 +141,7 @@ elif [[ "$purpose_set" -eq 1 ]]; then
 fi
 stages+=(plain)
 errors=""
-# 条件内の trap からの呼び出しを ShellCheck が追跡しないため、未使用関数の判定だけを除外する。
+# trap の文字列からの呼び出しを ShellCheck が追跡しないため、未使用関数の判定だけを除外する。
 # shellcheck disable=SC2329
 cleanup_signal() {
   [[ -z "$errors" ]] || rm -f "$errors"
@@ -149,7 +149,7 @@ cleanup_signal() {
   kill -"$1" $$
 }
 if [[ "${#stages[@]}" -gt 1 ]]; then
-  # EXIT trap は bash 3.2 の展開エラーを exit 0 に変えるため使わない (§7)。
+  # EXIT trap は bash 3.2 の展開エラーを exit 0 に変えるため使わない (docs/coding-guidelines.md §7)。
   # シグナルの trap は前景の hostctl が終わるまで遅れる。
   trap 'cleanup_signal INT' INT
   trap 'cleanup_signal TERM' TERM

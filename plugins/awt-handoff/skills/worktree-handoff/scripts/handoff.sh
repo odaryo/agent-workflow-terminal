@@ -253,6 +253,8 @@ fi
 # 子プロセスの有無では、rc や常駐が残した子を Agent と取り違える。前景のプロセスグループの変化を見る。
 if ! foreground_before=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ') ||
   [[ ! "$foreground_before" =~ ^[0-9]+$ ]] ||
+  ! shell_group=$(ps -o pgid= -p "$pane_pid" | tr -d ' ') ||
+  [[ ! "$shell_group" =~ ^[0-9]+$ ]] ||
   ! command_before=$(ps -o comm= -p "$pane_pid") || [[ -z "$command_before" ]]; then
   printf 'session=%s pane の前景プロセスを読めません。\n' "$session" >&2
   exit 6
@@ -273,7 +275,10 @@ command_samples=0
 for ((attempt = 0; attempt < 65; attempt++)); do
   sleep 0.2
   foreground_now=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ')
-  if [[ ! "$foreground_now" =~ ^[0-9]+$ || "$foreground_now" == "$foreground_before" ]]; then
+  # zsh は rc の外部コマンドを別のプロセスグループで前景に置くので、送信が rc の待ちの間だと、待ちが終わって
+  # シェルへ戻ることが前景の変化に見える。シェル自身が前景に戻るのは Agent の起動ではない。
+  if [[ ! "$foreground_now" =~ ^[0-9]+$ || "$foreground_now" == "$foreground_before" ||
+    "$foreground_now" == "$shell_group" ]]; then
     foreground_candidate=""
     foreground_samples=0
   else

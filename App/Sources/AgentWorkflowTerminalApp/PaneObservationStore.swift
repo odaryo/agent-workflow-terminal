@@ -169,6 +169,18 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
+  func setPurpose(
+    _ text: String, ofActivePaneIn session: TmuxSessionName
+  ) async -> TmuxPanePurposeWriterError? {
+    guard let purposeWriter else { return nil }
+    do {
+      try await purposeWriter.setPurpose(text, ofActivePaneIn: session)
+      return nil
+    } catch {
+      return error
+    }
+  }
+
   // MARK: - 観測
 
   private func start(_ session: TerminalSessionKey) {

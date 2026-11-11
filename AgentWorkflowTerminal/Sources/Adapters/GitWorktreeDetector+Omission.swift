@@ -21,15 +21,19 @@ extension GitWorktreeDetector {
 
   /// git が一覧に出すはずの管理ディレクトリの数。`nil` は `<common>/worktrees` を readdir
   /// できなかったこと。`worktrees` が無い (ENOENT) のは linked worktree を持たない repository の
-  /// 正常な形なので 0 とする。
+  /// 正常な形なので 0 とする。通常のファイル (ENOTDIR) も 0 とする (git 2.54.0 実測: `worktrees`
+  /// を通常のファイルにしても、git は exit 0 で main だけを出す)。
   ///
-  /// 数えるのは、子ディレクトリのうち次のどちらかに当たるものである。
-  /// - 子ディレクトリそのもの、またはその `gitdir` を `lstat` できない (ENOENT 以外の失敗。
+  /// 数えるのは、子ディレクトリのうち次のどちらかに当たるものである。子が symlink なら、たどった
+  /// 先で判定する (git 2.54.0 実測: git は symlink の管理ディレクトリもたどって一覧に出す。数えないと
+  /// 別の worktree の欠けと打ち消し合う)。たどった先が無い (ENOENT / ENOTDIR) symlink は数えない。
+  /// - 子ディレクトリそのもの、またはその `gitdir` を確かめられない (ENOENT 以外の失敗。
   ///   `worktrees` が 444 だと readdir はできても子は EACCES になる)。中を確かめられない以上、
   ///   一覧に出るはずのものとして数える。
   /// - `gitdir` が `lstat` で存在する (種別は問わない)。git 2.54.0 実測では、`gitdir` が 000・
-  ///   ディレクトリ・空のファイルのどれでも record は出ない。作業ツリーが生きていても欠けるので、
-  ///   一覧の不完全として扱う。
+  ///   ディレクトリ・0 バイトのファイルのどれでも record は出ない。作業ツリーが生きていても欠けるので、
+  ///   一覧の不完全として扱う。改行1つの `gitdir` では、git は管理ディレクトリ自身をパスにした
+  ///   `prunable invalid gitdir file` の record を出すので、数えても釣り合う。
   ///
   /// `gitdir` が無い (ENOENT) 管理ディレクトリと、ディレクトリでない子 (`.DS_Store` 等) は数えない。
   /// git 自身も一覧に出さない。
@@ -46,10 +50,11 @@ extension GitWorktreeDetector {
   ///   `readdir` で名前を読む。
   static func listedAdministrativeDirectoryCount(commonDirectory: WorktreeIdentity) -> Int? {
     let worktrees = commonDirectory.rawValue + "/worktrees"
-    guard let directory = opendir(worktrees) else { return errno == ENOENT ? 0 : nil }
+    guard let directory = opendir(worktrees) else {
+      return errno == ENOENT || errno == ENOTDIR ? 0 : nil
+    }
     defer { closedir(directory) }
     var count = 0
-    var info = stat()
     while true {
       errno = 0
       guard let entry = readdir(directory) else { return errno == 0 ? count : nil }
@@ -57,15 +62,20 @@ extension GitWorktreeDetector {
         String(decoding: bytes.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
       }
       guard name != ".", name != ".." else { continue }
-      let child = worktrees + "/" + name
-      guard lstat(child, &info) == 0 else {
-        if errno != ENOENT { count += 1 }
-        continue
-      }
-      guard info.st_mode & S_IFMT == S_IFDIR else { continue }
-      if lstat(child + "/gitdir", &info) == 0 || errno != ENOENT {
+      if isListedAdministrativeDirectory(worktrees + "/" + name) {
         count += 1
       }
     }
+  }
+
+  /// 判定の規則は `listedAdministrativeDirectoryCount`。
+  private static func isListedAdministrativeDirectory(_ child: String) -> Bool {
+    var info = stat()
+    guard lstat(child, &info) == 0 else { return errno != ENOENT }
+    if info.st_mode & S_IFMT == S_IFLNK {
+      guard stat(child, &info) == 0 else { return errno != ENOENT && errno != ENOTDIR }
+    }
+    guard info.st_mode & S_IFMT == S_IFDIR else { return false }
+    return lstat(child + "/gitdir", &info) == 0 || errno != ENOENT
   }
 }

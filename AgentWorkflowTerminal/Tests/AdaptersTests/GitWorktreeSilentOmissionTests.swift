@@ -132,6 +132,101 @@ struct GitWorktreeSilentOmissionTests {
     }
   }
 
+  /// git 2.54.0 実測: git は `worktrees/<id>` が symlink でも、たどった先の `gitdir` を読んで一覧に出す。
+  @Test("symlink の管理ディレクトリは、たどった先がディレクトリなら数え、一覧を完全とする")
+  func symlinkedAdministrativeDirectoryIsCounted() async throws {
+    try await withCommonDirectory(administrativeDirectories: ["wt1", "wt2", "wt3"]) { common in
+      try moveBehindSymlink(common, name: "wt2")
+
+      let result = try await detector(common, listing: try fixture("admin-symlink")).scan()
+
+      #expect(result.listingFailure == nil)
+      #expect(names(result.detected) == ["main", "wt1", "wt2", "wt3"])
+    }
+  }
+
+  /// symlink を数えないと、symlink の wt2 が一覧に載り、gitdir を読めない wt3 が欠けても、
+  /// 数が釣り合って欠けを見逃す (Issue #774 のレビュー、git 2.54.0 実測)。
+  @Test(
+    "symlink の管理ディレクトリがあっても、別の worktree が欠けたら一覧の失敗を返す",
+    .enabled(if: getuid() != 0))
+  func symlinkedAdministrativeDirectoryDoesNotHideOmission() async throws {
+    try await withCommonDirectory(administrativeDirectories: ["wt1", "wt2", "wt3"]) { common in
+      try moveBehindSymlink(common, name: "wt2")
+      try setPermissions(0o000, common.appending(path: "worktrees/wt3/gitdir"))
+
+      let result = try await detector(
+        common, listing: try fixture("admin-symlink-gitdir-unreadable")
+      ).scan()
+
+      #expect(result.listingFailure == Self.missingRecords)
+      #expect(names(result.detected) == ["main", "wt1", "wt2"])
+    }
+  }
+
+  @Test("たどった先が無い symlink の管理ディレクトリは数えず、一覧を完全とする")
+  func danglingSymlinkIsNotCounted() async throws {
+    try await withCommonDirectory(administrativeDirectories: ["wt1", "wt3"]) { common in
+      try FileManager.default.createSymbolicLink(
+        atPath: common.appending(path: "worktrees/wt2").path,
+        withDestinationPath: common.deletingLastPathComponent().appending(path: "nowhere").path)
+
+      let result = try await detector(
+        common, listing: try fixture("admin-symlink-dangling")
+      ).scan()
+
+      #expect(result.listingFailure == nil)
+      #expect(names(result.detected) == ["main", "wt1", "wt3"])
+    }
+  }
+
+  /// git 2.54.0 実測: たどった先の親が 000 の symlink では wt2 の record が出ず、出力は
+  /// たどった先が無い形と同じ main / wt1 / wt3 だった (その形の fixture を使う)。
+  @Test(
+    "たどった先を権限で確かめられない symlink の管理ディレクトリは数える",
+    .enabled(if: getuid() != 0))
+  func symlinkBehindUnsearchableDirectoryIsCounted() async throws {
+    try await withCommonDirectory(administrativeDirectories: ["wt1", "wt2", "wt3"]) { common in
+      let parent = common.deletingLastPathComponent().appending(path: "locked-parent")
+      try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+      try moveBehindSymlink(common, name: "wt2", into: parent)
+      try setPermissions(0o000, parent)
+
+      let result = try await detector(
+        common, listing: try fixture("admin-symlink-dangling")
+      ).scan()
+
+      #expect(result.listingFailure == Self.missingRecords)
+    }
+  }
+
+  /// git 2.54.0 実測: `worktrees` が通常のファイルでも、git は exit 0 で main だけを出す。
+  @Test("worktrees が通常のファイルなら main だけの一覧を完全とする")
+  func worktreesFileIsComplete() async throws {
+    try await withCommonDirectory(administrativeDirectories: nil) { common in
+      try Data().write(to: common.appending(path: "worktrees"))
+
+      let result = try await detector(common, listing: try fixture("worktrees-file")).scan()
+
+      #expect(result.listingFailure == nil)
+      #expect(names(result.detected) == ["main"])
+    }
+  }
+
+  /// git 2.54.0 実測: 改行1つの gitdir では、git は管理ディレクトリ自身をパスにした
+  /// `prunable invalid gitdir file` の record を出すので、数えても釣り合う。
+  @Test("gitdir が改行1つの管理ディレクトリは prunable の record と釣り合い、一覧を完全とする")
+  func newlineGitdirIsBalancedByPrunableRecord() async throws {
+    try await withCommonDirectory(administrativeDirectories: ["wt1", "wt2", "wt3"]) { common in
+      try Data("\n".utf8).write(to: common.appending(path: "worktrees/wt2/gitdir"))
+
+      let result = try await detector(common, listing: try fixture("gitdir-newline")).scan()
+
+      #expect(result.listingFailure == nil)
+      #expect(names(result.detected) == ["main", "wt1", "wt3"])
+    }
+  }
+
   @Test("worktrees ディレクトリが無い main だけの一覧は完全とする")
   func missingWorktreesDirectoryIsComplete() async throws {
     try await withCommonDirectory(administrativeDirectories: nil) { common in
@@ -196,6 +291,15 @@ private func withCommonDirectory(
   try await body(common)
 }
 
+/// `worktrees/<name>` を `into` (既定は common dir の親) の下へ移し、元の場所に symlink を置く。
+private func moveBehindSymlink(_ common: URL, name: String, into parent: URL? = nil) throws {
+  let original = common.appending(path: "worktrees/\(name)")
+  let moved = (parent ?? common.deletingLastPathComponent()).appending(path: "\(name)-admin")
+  try FileManager.default.moveItem(at: original, to: moved)
+  try FileManager.default.createSymbolicLink(
+    atPath: original.path, withDestinationPath: moved.path)
+}
+
 private func setPermissions(_ mode: Int16, _ url: URL) throws {
   try FileManager.default.setAttributes(
     [.posixPermissions: NSNumber(value: mode)], ofItemAtPath: url.path)
@@ -211,10 +315,11 @@ private func restoreOwnerPermissions(under url: URL) {
     let path = url.appending(path: child)
     var info = stat()
     guard lstat(path.path, &info) == 0 else { continue }
-    if info.st_mode & S_IFMT == S_IFDIR {
-      restoreOwnerPermissions(under: path)
-    } else {
-      _ = chmod(path.path, 0o644)
+    switch info.st_mode & S_IFMT {
+    case S_IFDIR: restoreOwnerPermissions(under: path)
+    // `chmod` は symlink をたどるので、たどった先のディレクトリを 644 にして消せなくしてしまう。
+    case S_IFLNK: continue
+    default: _ = chmod(path.path, 0o644)
     }
   }
 }

@@ -8,10 +8,10 @@ public enum GitWorktreeListingFailure: Error, Sendable, Equatable {
   case omittedRecords(GitWorktreeOmission)
 }
 
-/// git 2.54.0 実測: 管理ディレクトリの `gitdir` を読めない (000・ディレクトリ・空) 場合と、
+/// git 2.54.0 実測: 管理ディレクトリの `gitdir` を読めない (000・ディレクトリ・0 バイト) 場合と、
 /// `<common>/worktrees` を読めない場合 (000・444)、`worktree list --porcelain -z` は exit 0・stderr
-/// 空のまま、その linked worktree の record を出さない (Issue #774)。空の `gitdir` 以外は 2.39.2 でも
-/// 同じだった。
+/// 空のまま、その linked worktree の record を出さない (Issue #774)。git 2.39.2 では 000・
+/// ディレクトリ・`worktrees` の 000 / 444 が同じだった。0 バイトの `gitdir` は 2.39.2 では測っていない。
 public enum GitWorktreeOmission: Sendable, Equatable {
   /// `<common>/worktrees` を readdir できなかった。いくつ欠けたかは分からない。
   case administrativeDirectoriesUnreadable

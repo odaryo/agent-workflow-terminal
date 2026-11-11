@@ -155,7 +155,6 @@ enum SocketIO {
         if waitForStop(stopRead, milliseconds: 100) { return }
         continue
       }
-      m824("accepted fd=\(descriptor)")
       continuation.yield(SocketDescriptor(descriptor))
     }
   }
@@ -384,14 +383,11 @@ private actor SocketConnection {
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) async {
     maximumPauseMilliseconds = 50
-    let fd824 = descriptor?.value ?? -1
-    m824("serve fd=\(fd824)")
     await withTaskCancellationHandler {
       defer { close() }
       do {
         try SocketIO.configure(try checkedDescriptor(.now.advanced(by: .seconds(5))))
         let bytes = try await readLine(deadline: .now.advanced(by: .seconds(5)), limit: 65_536)
-        m824("read fd=\(fd824)")
         let response: HostControlResponse
         if let line = String(bytes: bytes, encoding: .utf8) {
           switch HostControlProtocol.decodeRequest(line) {
@@ -403,12 +399,9 @@ private actor SocketConnection {
         } else {
           response = .failure(code: .invalidRequest, message: "要求のUTF-8形式が不正です")
         }
-        m824("handled fd=\(fd824)")
         try await writeLine(
           HostControlProtocol.encode(response), deadline: .now.advanced(by: .seconds(5)))
-        m824("written fd=\(fd824)")
       } catch {
-        m824("error fd=\(fd824) \(error)")
         return
       }
     } onCancel: {
@@ -429,7 +422,6 @@ private actor SocketConnection {
     }
     let timer = Task {
       do { try await Task.sleep(until: deadline, clock: .continuous) } catch { return }
-      m824("timer fired")
       stream.continuation.yield(
         .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした"))
       stream.continuation.finish()
@@ -524,9 +516,4 @@ private actor SocketConnection {
   }
   // listener と接続は SocketIO の状態を共有するので、行数のためだけに分けない。
   // swiftlint:disable:next file_length
-}
-
-func m824(_ message: String) {
-  let now = Int((Date().timeIntervalSince1970 * 1000).rounded())
-  FileHandle.standardError.write(Data("[824s] t=\(now) \(message)\n".utf8))
 }

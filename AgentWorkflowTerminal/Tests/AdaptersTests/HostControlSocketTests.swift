@@ -554,11 +554,11 @@ extension HostControlSocketTests {
   }
 
   private static func sendRequest(
-    _ bytes: [UInt8], to path: String, expectClosed: Bool = false, caller: String = #function
+    _ bytes: [UInt8], to path: String, expectClosed: Bool = false
   ) throws -> String {
     let descriptor = try makeSocket()
     defer { Darwin.close(descriptor) }
-    var timeout = timeval(tv_sec: 60, tv_usec: 0)
+    var timeout = timeval(tv_sec: 2, tv_usec: 0)
     try #require(
       setsockopt(
         descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout,
@@ -566,15 +566,10 @@ extension HostControlSocketTests {
     try #require(withAddress(path) { Darwin.connect(descriptor, $0, $1) } == 0)
     let sent = bytes.withUnsafeBytes { Darwin.send(descriptor, $0.baseAddress, $0.count, 0) }
     try #require(sent == bytes.count)
-    let start824 = Date()
-    m824("client sent caller=\(caller)")
     var response: [UInt8] = []
     var byte: UInt8 = 0
     while true {
       let received = Darwin.recv(descriptor, &byte, 1, 0)
-      if response.isEmpty {
-        m824("client ttfb_ms=\(Int(Date().timeIntervalSince(start824) * 1000)) caller=\(caller) recv=\(received)")
-      }
       try #require(received == 1, "recv=\(received) errno=\(errno) bytes=\(response.count)")
       if byte == 10 {
         if expectClosed { #expect(Darwin.recv(descriptor, &byte, 1, 0) == 0) }
@@ -587,7 +582,7 @@ extension HostControlSocketTests {
   private static func sendOversizedRequest(to path: String) throws {
     let descriptor = try makeSocket()
     defer { Darwin.close(descriptor) }
-    var timeout = timeval(tv_sec: 60, tv_usec: 0)
+    var timeout = timeval(tv_sec: 2, tv_usec: 0)
     var noSignal: Int32 = 1
     try #require(
       setsockopt(
@@ -621,10 +616,8 @@ extension HostControlSocketTests {
       offset += written
     }
     var byte: UInt8 = 0
-    let start824 = Date()
     let received = Darwin.recv(descriptor, &byte, 1, 0)
     let receiveError = errno
-    m824("client oversized recv_ms=\(Int(Date().timeIntervalSince(start824) * 1000)) recv=\(received) errno=\(receiveError)")
     #expect(received == 0 || (received == -1 && receiveError == ECONNRESET))
   }
   // 回帰テストの追加先が指定されているため、別ファイルへの分割はしない。

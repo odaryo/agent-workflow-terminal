@@ -4,12 +4,15 @@ description: Agent Workflow Terminal の Project Root で実装を指示され�
 allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/handoff.sh *)
 ---
 
-実装の指示を受け、カレントが Project Root（linked worktree ではない）のときだけ使う。
+実装の指示を受け、カレントが Project Root（linked worktree でも submodule の中でもない）のときだけ使う。
 調査や質問への回答には使わない。
 
-1. `git rev-parse --git-dir` と `git rev-parse --git-common-dir` を実行する。
-   それぞれの結果をカレントディレクトリからの絶対パスに直して比較し、同じなら Project Root、
-   違えば linked worktree と判定する。linked worktree ではこの手順を使わない。
+1. `echo "${GIT_DIR+x}${GIT_WORK_TREE+x}${GIT_COMMON_DIR+x}"` が `x` を含む行を出力すれば、カレントから
+   判定できないのでこの手順を使わない。空行なら、`git rev-parse --is-inside-work-tree`・`git rev-parse --git-dir`・
+   `git rev-parse --git-common-dir`・`git rev-parse --show-superproject-working-tree` を実行する。
+   1つ目が `true` で、2つ目と3つ目の結果をカレントディレクトリからの絶対パスに直すと同じで、4つ目の出力が
+   空なら Project Root と判定する。1つ目が `true` でなければ作業ツリーの外、2つ目と3つ目が違えば linked worktree、
+   4つ目の出力が空でなければ submodule の中なので、この手順を使わない。
 2. `${CLAUDE_SKILL_DIR}/scripts/handoff.sh --check` が exit 0 になることを確認する。
    使えないときは、このセッションの中で通常どおり worktree を作って移動して作業する。
 3. `CLAUDE.md` など Project の規則に従って worktree を作る。

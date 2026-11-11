@@ -3154,7 +3154,7 @@ PR_READY
 - [ ] Androidの接続鍵もKeystoreで機器内に生成・保持し、外へ出さない(§20.6)
 - [ ] permissive-only license policyを正式採用 — governance決定待ち
 - [ ] `hostctl worktree open`の`--from-pane`で引き渡し元のpaneを記録し、Overviewで`Completed`／`Idle`のときだけ「引き渡し済み」の印を出す。記録の後に`Completed`／`Idle`を経た`Working`で解除し、記録はアプリの寿命だけ持つ(§3.1、§5.3、§13、§21.4、Issue #828)
-- [ ] `hostctl project check`で、ディレクトリが`worktree open`の受け付ける登録済みProjectかを読み取り専用で確かめる。確かめられないとき(アプリ不在・時間切れ・古い版)はSessionStart hookで知らせない(§3.1、§21.4、Issue #819)
+- [ ] `hostctl project check`で、ディレクトリから解決したProjectが登録済みで利用可能か(`worktree open`と同じ条件。Project Rootとそのサブディレクトリも受け付ける)を読み取り専用で確かめる。確かめられないとき(アプリ不在・時間切れ・古い版)はSessionStart hookで知らせない(§3.1、§21.4、Issue #819)
 - [ ] `hostctl worktree open`の`--purpose`でIssueのタイトルを渡し、アプリはセッションを作る前に検査して、新しく作ったセッションのpaneにだけ書く。作った後の書き込みの失敗は引き渡しを失敗にしない(§3.1、§21.4、Issue #837)
 - [ ] Overviewのworktreeのセッションの見出しに、branchがマージ済みならタイトルの右に`arrow.triangle.merge`と「マージ済み」を出し、判定不能・未マージ・detached HEAD・既定branchのfirst-parentの列の上にある先端(commitの無いbranchとfast-forwardのmerge)では出さない。Closeの選択肢4は先端だけの使い回しを使わず判定し直す。判定不能も同じ先端の組では判定し直さず、重い判定はアプリ全体で1件ずつ回し、先端が変わった印はすぐ外す(§3.4、§5.3、§13、Issue #879)
 - [ ] Agentも起動する新規セッションは、起動コマンドを対話シェルに打ち込み、tmux sessionを新しく作れたときだけ1回実行する。起動コマンドが未設定なら項目を無効にする — ユーザー確認待ち(§3.1、Issue #805)

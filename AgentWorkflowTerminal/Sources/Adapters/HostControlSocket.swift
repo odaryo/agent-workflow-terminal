@@ -32,8 +32,9 @@ public actor HostControlSocketServer {
   }
 
   public func start(
-    // hostctlは30秒で切るので、この期限のfailureは届かない。届くのは待ち行列の先頭でのアプリ側の
-    // 25秒の失敗で、これは接続の解放用。30秒より短くすると、遅れて成功する後ろの要求を失敗にする。
+    // hostctlはworktree openを30秒 (project checkは5秒) で切るので、この期限のfailureは届かない。
+    // 届くのは待ち行列の先頭でのアプリ側の25秒の失敗で、これは接続の解放用。30秒より短くすると、
+    // 遅れて成功する後ろの要求を失敗にする。
     handlerTimeout: Duration = .seconds(35),
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) throws(HostControlSocketError) {

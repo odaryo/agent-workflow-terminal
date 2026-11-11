@@ -417,3 +417,4 @@ extension AgentObservationResult {
     }
   }
 }
+// Issue #851 の計測 run 5 用。次のコミットで戻す。

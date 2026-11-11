@@ -86,6 +86,21 @@ jobs:
           path: AgentWorkflowTerminal/.build
           key: ${{ steps.build-cache.outputs.cache-primary-key }}
 
+      # 計測用の一時的な段 (Issue #851)。Fixtures から消したファイルが増分ビルド後も bundle に残るか。
+      - name: Probe - deleted fixture survives incremental build
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          f=Tests/TerminalCoreTests/Fixtures/AgentState/claude-2.1.259-agent-absent.json
+          name=$(basename "$f")
+          echo "--- before"; find .build -name "$name" -print
+          rm "$f"
+          swift build --build-tests 2>&1 | tail -1
+          echo "--- after delete"; find .build -name "$name" -print
+          git checkout -- "$f"
+          python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" "$f"
+          swift build --build-tests 2>&1 | tail -1
+          echo "--- after restore"; find .build -name "$name" -print
+
       # 経過時間とポーリングの観測回数を測る AdaptersSerialTimingTests は、同一プロセス内で
       # 並行実行されると他テストの負荷を観測してしまうため分けて走らせる。
       #

@@ -39,7 +39,6 @@ private struct WorktreeClosePanel: View {
       HStack(spacing: 8) {
         ProgressView().controlSize(.small)
         Text("検査しています (未commit・未push・マージ済みかを確認しています。マージの判定には数秒かかることがあります)")
-        Spacer()
         Button("取り消し") { session.close() }
       }
     case .inspectionUnavailable(let reason):
@@ -72,7 +71,6 @@ private struct WorktreeClosePanel: View {
         Text(line)
       }
       HStack {
-        Spacer()
         if !result.closedWorktree {
           Button("再検査") { session.inspect() }
         }
@@ -84,7 +82,6 @@ private struct WorktreeClosePanel: View {
   /// `nil` なら実行ボタンを出さない。§3.4 の拒否は確認では済ませないので、押せない形でも出さない。
   private func actions(executable: Bool?) -> some View {
     HStack {
-      Spacer()
       Button("再検査") { session.inspect() }
       Button("キャンセル") { session.close() }
       if let executable {

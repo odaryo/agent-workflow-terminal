@@ -16,7 +16,7 @@ struct DiffUnsentCommentSummaryTests {
     #expect(summary.count(in: current.id) == 2)
     #expect(summary.otherSnapshotCount == 1)
     #expect(summary.otherCommentCount == 1)
-    #expect(summary.latestOtherSnapshot?.id == old.id)
+    #expect(summary.nextOtherSnapshot?.id == old.id)
     #expect(summary.hasOtherUnsentComments)
   }
 
@@ -47,7 +47,7 @@ struct DiffUnsentCommentSummaryTests {
 
     #expect(summary.otherSnapshotCount == 2)
     #expect(summary.otherCommentCount == 5)
-    #expect(summary.latestOtherSnapshot?.id == second.id)
+    #expect(summary.nextOtherSnapshot?.id == second.id)
     #expect(summary.count(in: first.id) == 3)
     #expect(summary.count(in: second.id) == 2)
     #expect(summary.count(in: sentOnly.id) == 0)
@@ -60,8 +60,26 @@ struct DiffUnsentCommentSummaryTests {
     let summary = summary(
       [old, latest], comments: try comments([(old, false), (latest, false)]), current: old)
 
-    #expect(summary.latestOtherSnapshot?.id == latest.id)
+    #expect(summary.nextOtherSnapshot?.id == latest.id)
     #expect(summary.otherCommentCount == 1)
+  }
+
+  @Test("未送信のある snapshot が3つあっても、バナーを辿ると新しい順に最古まで届き最新へ戻る")
+  func cyclesThroughAllUnsentSnapshots() throws {
+    let oldest = snapshot()
+    let middle = snapshot()
+    let newest = snapshot()
+    let comments = try comments([(oldest, false), (middle, false), (newest, false)])
+
+    #expect(
+      summary([oldest, middle, newest], comments: comments, current: newest).nextOtherSnapshot?.id
+        == middle.id)
+    #expect(
+      summary([oldest, middle, newest], comments: comments, current: middle).nextOtherSnapshot?.id
+        == oldest.id)
+    #expect(
+      summary([oldest, middle, newest], comments: comments, current: oldest).nextOtherSnapshot?.id
+        == newest.id)
   }
 
   @Test("別 snapshot に未送信が無ければバナーを出さない", arguments: [false, true])
@@ -73,7 +91,7 @@ struct DiffUnsentCommentSummaryTests {
     let summary = summary([old, current], comments: try comments(entries), current: current)
 
     #expect(!summary.hasOtherUnsentComments)
-    #expect(summary.latestOtherSnapshot == nil)
+    #expect(summary.nextOtherSnapshot == nil)
     #expect(summary.otherCommentCount == 0)
     #expect(summary.otherSnapshotCount == 0)
   }
@@ -83,7 +101,7 @@ struct DiffUnsentCommentSummaryTests {
     let summary = DiffUnsentCommentSummary(
       history: DiffSnapshotHistory(), comments: DiffReviewComments(), currentSnapshotID: nil)
     #expect(!summary.hasOtherUnsentComments)
-    #expect(summary.latestOtherSnapshot == nil)
+    #expect(summary.nextOtherSnapshot == nil)
   }
 
   private func summary(

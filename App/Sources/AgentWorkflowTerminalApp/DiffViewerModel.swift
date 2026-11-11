@@ -9,24 +9,6 @@ import TerminalCore
 /// 持ち続けるので、base branch の記憶 (§9.1.1) と過去 snapshot (§9.3) が失われない。
 @MainActor
 final class DiffViewerModel: ObservableObject {
-  enum Kind: Hashable, CaseIterable {
-    case commit
-    case base
-    case branch
-  }
-
-  struct FileSelection: Hashable {
-    let origin: DiffChangeOrigin
-    let path: String
-  }
-
-  /// コメントを付ける対象として選ばれている行 (§9.2)。単一行も1行の範囲として持つ。
-  struct LineSelection: Equatable {
-    let file: FileSelection
-    let side: DiffLineSide
-    var range: DiffLineRange
-  }
-
   /// 再観測の間隔。agent の編集は `.git/index` を触らないので index の監視では拾えず、
   /// かといって 4 本の git を高頻度で回すわけにもいかないため、明示 Refresh と併用する前提の
   /// 粗いポーリングにしてある (§9.3)。
@@ -82,6 +64,8 @@ final class DiffViewerModel: ObservableObject {
   /// ユーザーが選び直した base branch。セッションごとに覚え、次に開いても再判定しない (§9.1.1)。
   private var userSelectedBaseBranch: GitBranchRef?
   private var didLoadContext = false
+  /// 種別 Picker は読み込み中も操作できて `openSnapshot()` が重なるため、最後の呼び出しだけを通す。
+  private var openGeneration = 0
 
   /// `timeSource` を差し替えられるのは、coalescing の閾値の経過をテストが実時間を待たずに
   /// 動かすため。既定は本番と同じ単調増加クロック。
@@ -98,23 +82,6 @@ final class DiffViewerModel: ObservableObject {
     self.sendCoalescer = DiffCommentSendCoalescer(timeSource: timeSource)
   }
 
-  var currentSnapshot: DiffSnapshot? {
-    guard let currentSnapshotID else { return history.latest }
-    return history.snapshot(currentSnapshotID)
-  }
-
-  var isViewingOldSnapshot: Bool {
-    guard let current = currentSnapshot, let latest = history.latest else { return false }
-    return current.id != latest.id
-  }
-
-  var baseBranchDescription: String {
-    switch baseBranch {
-    case .resolved(let branch, let source): "\(branch.displayLabel) (\(source.decisionLabel))"
-    case .undetermined: "未決定"
-    }
-  }
-
   // MARK: - 行選択とコメント (§9.2)
 
   var currentFileComments: [DiffReviewComment] {
@@ -125,13 +92,6 @@ final class DiffViewerModel: ObservableObject {
   var currentSnapshotComments: [DiffReviewComment] {
     guard let snapshot = currentSnapshot else { return [] }
     return comments.comments(in: snapshot.id)
-  }
-
-  func isSelected(line: Int, side: DiffLineSide) -> Bool {
-    guard let lineSelection, lineSelection.side == side, lineSelection.file == selection else {
-      return false
-    }
-    return lineSelection.range.lineNumbers.contains(line)
   }
 
   func selectLine(_ line: Int, side: DiffLineSide) {
@@ -375,13 +335,26 @@ final class DiffViewerModel: ObservableObject {
 
   // MARK: - 読み込み
 
+  /// 読み込みに失敗・キャンセルされたときは立てず、次に開いたときに読み直す。比較元が未決定でも
+  /// 読み込み自体は成功なので読み直さない。
   func loadContextIfNeeded() async {
     guard !didLoadContext else { return }
-    didLoadContext = true
-    await loadContext()
+    didLoadContext = await loadContext()
   }
 
-  func loadContext() async {
+  /// ペインが現れるたびに呼ぶ。snapshot が既にあれば作り直さない (§9.3: レビュー中の表示と
+  /// コメント位置を勝手に動かさない)。context の読み込みや build が失敗・キャンセルされていれば、
+  /// 次に開いたときにもう一度試す。`isLoading` を見ないのは、古いビューの build が走っていても
+  /// `openSnapshot()` の世代番号で後勝ちにできるため。
+  func prepareForDisplay() async {
+    await loadContextIfNeeded()
+    // `openSnapshot()` も同じ。キャンセル済みの呼び出しが世代を進めると、走っている生きた呼び出しの結果が捨てられる。
+    guard !Task.isCancelled, currentSnapshot == nil, currentRequest() != nil else { return }
+    await openSnapshot()
+  }
+
+  @discardableResult
+  func loadContext() async -> Bool {
     let outcome = await Self.readContext(
       worktreeRoot: worktreeRoot, userSelection: userSelectedBaseBranch)
     switch outcome {
@@ -393,23 +366,46 @@ final class DiffViewerModel: ObservableObject {
       if selectedCommit == nil { selectedCommit = context.commits.first }
       if selectedBranch == nil { selectedBranch = context.baseBranch.branch }
       errorMessage = nil
+      return true
     case .failure(let failure):
       errorMessage = failure.message
+      return false
     }
   }
 
-  func selectBaseBranch(_ branch: GitBranchRef) {
+  func selectKind(_ newKind: Kind) async {
+    guard newKind != kind else { return }
+    kind = newKind
+    await openSnapshotIfPossible()
+  }
+
+  func selectBaseBranch(_ branch: GitBranchRef) async {
     userSelectedBaseBranch = branch
     baseBranch = DiffBaseBranchResolver.resolve(
       userSelection: branch, forkPoint: nil, originHead: nil)
+    await openSnapshotIfPossible()
   }
 
-  func selectBranch(_ branch: GitBranchRef) {
+  func selectBranch(_ branch: GitBranchRef) async {
     selectedBranch = branch
+    await openSnapshotIfPossible()
   }
 
-  func selectCommit(_ commit: GitCommit) {
+  func selectCommit(_ commit: GitCommit) async {
     selectedCommit = commit
+    await openSnapshotIfPossible()
+  }
+
+  private func openSnapshotIfPossible() async {
+    guard currentRequest() != nil else {
+      // 走っている build は選び直す前の種別のものなので、結果を反映させない。
+      openGeneration += 1
+      isLoading = false
+      // context の読み込み失敗の文言は、読み込みに成功するまで消さない。
+      if didLoadContext { errorMessage = nil }
+      return
+    }
+    await openSnapshot()
   }
 
   /// 続きを `--skip` で取らずに件数を増やして読み直すのは、読み込みの間に HEAD が動くと
@@ -427,11 +423,17 @@ final class DiffViewerModel: ObservableObject {
 
   /// Diff を開く / Refresh する。どちらも新しい snapshot を作り、古いものは残す (§9.3)。
   func openSnapshot() async {
-    guard let request = currentRequest() else { return }
+    guard !Task.isCancelled, let request = currentRequest() else { return }
     let context = rangeContext()
+    openGeneration += 1
+    let generation = openGeneration
     isLoading = true
-    defer { isLoading = false }
     let outcome = await Self.build(worktreeRoot: worktreeRoot, request: request)
+    // 古い呼び出しの結果は捨てる。誰も表示していないのでコメントも付いていない。
+    guard generation == openGeneration else { return }
+    isLoading = false
+    // ビューが消えて build がキャンセルされた。失敗として出さず、次に開いたときに作り直す。
+    guard !Task.isCancelled else { return }
     switch outcome {
     case .success(let result):
       history.append(result.snapshot)
@@ -458,9 +460,9 @@ final class DiffViewerModel: ObservableObject {
       opened: opened.observation, current: observation)
   }
 
-  func setReviewState(_ state: DiffReviewState) {
-    guard let id = currentSnapshot?.id else { return }
-    history.setReviewState(state, for: id)
+  func showLatestSnapshot() {
+    guard let latest = history.latest else { return }
+    showSnapshot(latest.id)
   }
 
   func showSnapshot(_ id: DiffSnapshotID) {

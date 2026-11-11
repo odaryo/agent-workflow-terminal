@@ -4,9 +4,11 @@ struct DiffUnsentCommentSummary {
   private let counts: [DiffSnapshotID: Int]
   let otherSnapshotCount: Int
   let otherCommentCount: Int
-  let latestOtherSnapshot: DiffSnapshot?
+  /// バナーのリンクで開く snapshot。表示中より古い側の最新を先に出し、最古の次は最新へ戻る。
+  /// 「他の中で最新」だけだと、未送信のある snapshot が3つ以上のとき最古へ辿れない。
+  let nextOtherSnapshot: DiffSnapshot?
 
-  var hasOtherUnsentComments: Bool { latestOtherSnapshot != nil }
+  var hasOtherUnsentComments: Bool { nextOtherSnapshot != nil }
 
   init(
     history: DiffSnapshotHistory, comments: DiffReviewComments,
@@ -22,7 +24,13 @@ struct DiffUnsentCommentSummary {
     }
     otherSnapshotCount = others.count
     otherCommentCount = others.reduce(0) { $0 + counts[$1.id, default: 0] }
-    latestOtherSnapshot = others.last
+    let currentIndex = history.snapshots.firstIndex { $0.id == currentSnapshotID }
+    let older = currentIndex.map { index in
+      others.filter { other in
+        history.snapshots.firstIndex { $0.id == other.id }.map { $0 < index } ?? false
+      }
+    }
+    nextOtherSnapshot = older?.last ?? others.last
   }
 
   func count(in snapshotID: DiffSnapshotID) -> Int {

@@ -261,7 +261,7 @@ selftest() {
   app_click_text "Viewer" --exact --role AXMenuButton
   swift "$SCRIPT_DIR/ui-ax.swift" "$APP_NAME" press "Diff" --exact --role AXMenuItem
   sleep 2
-  app_click_text "開く" --exact --role AXButton
+  # Diff は開いた時点で自動で表示される (#830)。
   sleep 4
   local geom x y
   geom=$(app_find "probe line two")

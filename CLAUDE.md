@@ -447,9 +447,17 @@ tmux server を起動した開発版のバンドルが対象だった。バン�
   前は `/private/tmp/claude-<uid>/*/*/scratchpad/` の形で代用する。判定を変えたときは
   `scripts/check-orphan-warning.sh` の fixture で確かめる (CI の `Orphan warning - fixtures`)。
 
-**Review findings and the roadmap.** Critical findings block the current Issue, as before. Major / Minor findings are filed as Issues in the legacy `P3 バグ改修` milestone (the parking lot, not the current P3) and do **not** count against the current phase. Promote findings when measured impact blocks a phase's acceptance criteria; data loss and incorrect input routing require evaluation even if everyday use has not reproduced them. The current P3–P5 and their acceptance criteria live in `docs/roadmap.md`. Measured 9/1〜9/6: each trunk Issue spawned ~3.4 derived Issues, none found by using the app; the parking lot prevents these from making a phase unbounded.
+**レビューの指摘の扱い (ユーザー決定 2026-11-12。以前の「Major / Minor はすべて `P3 バグ改修` へ起票する」を置き換えた)。**
+Critical は従来どおり今の Issue を止める。Major / Minor は次の順で扱う。
 
-**Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
+1. **数行で直るものは、同じ PR で直す。** 下の Scope discipline の例外として、レビューの指摘への対処はスコープに含める。直したものは PR 本文に書く。
+2. **起票するのは次のどれかに当たるものだけ。** ユーザーに見える影響が再現したもの (計測の生出力を付ける)、データを失うもの、入力が別の宛先へ送られるもの。起票先は旧 `P3 バグ改修` milestone (現在の P3 ではない) で、現在のフェーズには数えない。フェーズの受け入れ条件を塞ぐと計測で分かったものは、そのフェーズへ昇格する。
+3. **それ以外は、PR 本文の「保留した指摘」に理由とともに残して終わる。** Issue にはしない。同じ指摘が後で出たら、この記録を指して終える。テストの穴・検査の検査・文言の不正確さ・人工的な状態 (chmod 000、ループする symlink など) でしか起きないものは、ここに入る。
+4. **派生は1段で止める。** レビュー由来の Issue (本文が「#N のレビュー」などで始まるもの) を直したときに出た指摘は、2. に当たっても起票しない。同じ PR で直すか、「保留した指摘」に残す。
+
+理由: 9/1〜9/6 の計測では、幹の Issue 1件につき約3.4件が派生し、どれもアプリを使って見つかったものではなかった。2026-11-11〜12 にパーキングロットの33件を並列のレーンで処理すると、その間に #860 以降で75件が起票された。そのうち55件はレビュー由来で、重さは Minor 40件・Major 5件・Critical 0件、種類は半分近く (`test:` 28件・`ci:` 6件) がテストと検査の穴だった。Minor を直したコードをレビューすると Minor の Minor が出るので、全件を起票する規則では処理するほど Issue が増えた。
+
+**Scope discipline** (applies to every role): no changes beyond the spec'd scope — no drive-by refactors or周辺整理. 例外は、上の「レビューの指摘の扱い」の 1. (数行で直るレビューの指摘を同じ PR で直す) だけである。 GREEN (build / test / lint) is a necessary gate, never evidence of quality; only adversarial review with measurement is.
 
 **Session hygiene** (the Director's own session). Measured over 24h of transcripts: cost is ~52% cache read / ~37% cache write / ~11% output, so what the Director spends is set by **context length**, not by how much it writes. The per-request cache write is incremental and healthy — the leak is that a Director session grows monotonically (median 185k, peak 313k, later 447k) because on a 1M window autocompact defaults to about 967k.
 
@@ -475,7 +483,7 @@ tmux server を起動した開発版のバンドルが対象だった。バン�
 | 種類 | 例 | 行き先 |
 | --- | --- | --- |
 | タスクの一覧・状態 | 何が Todo / In Progress か | **Issue + Project #6 のみ。** ファイルに書かない — 二重管理になる |
-| Issue 内の一時記憶 | 計測結果、実装者へ渡した spec、棄却したレビュー仮説 | spec は **Issue コメント**、棄却した仮説とその理由は **PR 本文** |
+| Issue 内の一時記憶 | 計測結果、実装者へ渡した spec、棄却したレビュー仮説、起票しない指摘 | spec は **Issue コメント**、棄却した仮説と「保留した指摘」はその理由とともに **PR 本文** |
 | 横断的な学び | 「実装者の『計測した』は主張であって証拠ではない」 | **`CLAUDE.md` / `.claude/agents/*.md`。** 第二の規約集を別ファイルに育てない |
 | 引き継ぎポインタ | 直前セッションの最終報告、in-flight の worktree / PR、次の着手候補 | **handoff ファイル** (下記) |
 

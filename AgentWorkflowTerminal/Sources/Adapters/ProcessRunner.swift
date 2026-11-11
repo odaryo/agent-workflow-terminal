@@ -36,23 +36,11 @@ public protocol ProcessRunning: Sendable {
     timeout: Duration,
     outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult
-}
 
-extension ProcessRunning {
-  public func run(
-    executableURL: URL,
-    arguments: [String],
-    environment: [String: String],
-    timeout: Duration
-  ) async throws(ProcessRunnerError) -> ProcessRunResult {
-    try await run(
-      executableURL: executableURL,
-      arguments: arguments,
-      environment: environment,
-      timeout: timeout,
-      outputLimit: ProcessRunLimits.defaultOutputBytes
-    )
-  }
+  func runTruncatingAtOutputLimit(
+    executableURL: URL, arguments: [String], environment: [String: String],
+    timeout: Duration, outputLimit: Int
+  ) async throws(ProcessRunnerError) -> ProcessRunOutput
 }
 
 // 実行ホストは Mac に限定する (設計書 §20.1)。
@@ -61,39 +49,21 @@ public struct FoundationProcessRunner: ProcessRunning, Sendable {
   public init() {}
 
   public func run(
-    executableURL: URL,
-    arguments: [String],
-    environment: [String: String],
-    timeout: Duration,
-    outputLimit: Int
+    executableURL: URL, arguments: [String], environment: [String: String],
+    timeout: Duration, outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
-    guard outputLimit >= 0 else {
-      throw .invalidOutputLimit(outputLimit)
+    switch try await execute(
+      ProcessExecution(
+        executableURL: executableURL, arguments: arguments, environment: environment,
+        timeout: timeout, outputLimit: outputLimit), truncatingAtOutputLimit: false)
+    {
+    case .completed(let result): return result
+    case .truncated(_, _, let limit): throw .outputLimitExceeded(limit: limit)
     }
-    let execution = ProcessExecution(
-      executableURL: executableURL,
-      arguments: arguments,
-      environment: environment,
-      timeout: timeout,
-      outputLimit: outputLimit
-    )
-
-    let result = await withTaskCancellationHandler {
-      await execution.run()
-    } onCancel: {
-      Task {
-        await execution.cancel()
-      }
-    }
-    if Task.isCancelled {
-      await execution.cancel()
-      throw .cancelled
-    }
-    return try result.get()
   }
 }
 
-private actor ProcessExecution {
+actor ProcessExecution {
   // SIGTERM の後始末機会と1秒未満の停止上界を両立する暫定値。CLI 別の猶予は未実測。
   private static let terminationGracePeriod = Duration.milliseconds(100)
   // 期限時点で子が終了済みなら、出力の配達が着地する猶予を与えてから .timedOut を確定する。
@@ -139,7 +109,8 @@ private actor ProcessExecution {
     environment: [String: String],
     timeout: Duration,
     outputLimit: Int
-  ) {
+  ) throws(ProcessRunnerError) {
+    guard outputLimit >= 0 else { throw .invalidOutputLimit(outputLimit) }
     self.executableURL = executableURL
     self.arguments = arguments
     self.environment = environment
@@ -148,7 +119,23 @@ private actor ProcessExecution {
     self.outputBudget = OutputBudget(limit: outputLimit)
   }
 
-  func run() async -> Result<ProcessRunResult, ProcessRunnerError> {
+  func runOutput(
+    truncatingAtOutputLimit: Bool
+  ) async -> Result<ProcessRunOutput, ProcessRunnerError> {
+    let result = await run()
+    switch result {
+    case .success(let completed): return .success(.completed(completed))
+    case .failure(.outputLimitExceeded(let limit)) where truncatingAtOutputLimit:
+      // 部分出力も、従来の停止・回収が完了してから返す。エラーの文字列表現には載せない。
+      return .success(
+        .truncated(
+          stdout: String(decoding: stdoutSnapshot.data, as: UTF8.self),
+          stderr: String(decoding: stderrSnapshot.data, as: UTF8.self), limit: limit))
+    case .failure(let error): return .failure(error)
+    }
+  }
+
+  private func run() async -> Result<ProcessRunResult, ProcessRunnerError> {
     guard !Task.isCancelled else {
       return .failure(.cancelled)
     }

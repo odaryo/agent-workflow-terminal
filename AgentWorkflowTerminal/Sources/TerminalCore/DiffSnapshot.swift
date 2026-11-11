@@ -25,15 +25,31 @@ public enum DiffSubject: Sendable, Equatable {
   case branch(name: GitBranchRef, mergeBase: String)
 }
 
+public struct DiffSectionTruncation: Sendable, Equatable {
+  public let outputLimit: Int
+  public let firstOmittedPath: String?
+
+  public init(outputLimit: Int, firstOmittedPath: String?) {
+    self.outputLimit = outputLimit
+    self.firstOmittedPath = firstOmittedPath
+  }
+}
+
 public struct DiffOriginSection: Sendable, Equatable {
   public let origin: DiffChangeOrigin
   public let files: [UnifiedDiffFile]
   /// パーサが落としたレコード数。0 でないことを UI が黙って捨てない (docs/coding-guidelines.md §2.3)。
   public let unparsedRecordCount: Int
 
-  public init(origin: DiffChangeOrigin, files: [UnifiedDiffFile], unparsedRecordCount: Int = 0) {
+  public let truncation: DiffSectionTruncation?
+
+  public init(
+    origin: DiffChangeOrigin, files: [UnifiedDiffFile], unparsedRecordCount: Int = 0,
+    truncation: DiffSectionTruncation? = nil
+  ) {
     self.origin = origin
     self.files = files
+    self.truncation = truncation
     self.unparsedRecordCount = unparsedRecordCount
   }
 }
@@ -187,7 +203,7 @@ public struct DiffSnapshot: Sendable, Equatable, Identifiable {
     self.head = head
   }
 
-  public var isEmpty: Bool { sections.allSatisfy(\.files.isEmpty) }
+  public var isEmpty: Bool { sections.allSatisfy { $0.files.isEmpty && $0.truncation == nil } }
 
   public func section(_ origin: DiffChangeOrigin) -> DiffOriginSection? {
     sections.first { $0.origin == origin }

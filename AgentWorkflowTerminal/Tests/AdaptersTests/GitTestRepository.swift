@@ -50,7 +50,9 @@ struct GitTestRepository {
   /// 検証対象の `GitRunner` に汚れた global config を読ませる。`GitRunner` から `HOME` を落とす
   /// (= config を読ませない) 対処は credential helper や include まで殺すので採れない。偽の
   /// `HOME` に `.gitconfig` を置くのが、実運用の `~/.gitconfig` と同じ経路になる。
-  func runner(globalConfig: String, in worktreeName: String? = nil) throws -> GitRunner {
+  func runner(
+    globalConfig: String, in worktreeName: String? = nil, ignoresHistoryRewrites: Bool = false
+  ) throws -> GitRunner {
     let home = root.appending(path: "home-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
     try globalConfig.write(
@@ -59,6 +61,7 @@ struct GitTestRepository {
       repositoryDirectory: worktreeName.map { root.appending(path: $0) } ?? mainWorktree,
       processRunner: processRunner,
       executableCandidates: [executableURL],
+      ignoresHistoryRewrites: ignoresHistoryRewrites,
       // `GitRunner` は `HOME` と `PATH` しか子へ渡さないので、`GIT_CONFIG_SYSTEM` を足しても
       // 効かない。system config は実 `/etc/gitconfig` のまま = 製品と同じ条件になる。
       parentEnvironment: [

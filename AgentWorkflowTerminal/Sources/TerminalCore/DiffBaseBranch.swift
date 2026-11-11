@@ -65,11 +65,17 @@ public enum DiffForkPoint {
   /// `rev-parse` は一覧に無い綴り (`Main` や、`core.precomposeunicode=false` での NFD) でも loose ref を
   /// 開けて解決し、その名前は `pack-refs` の後には解決できなくなる。`String ==` は NFC と NFD を同じと
   /// みなすので、一覧との照合はバイト列で行う。近い綴りの ref には寄せない。
+  ///
+  /// 同名の remote-tracking ref は比較元が自分自身になるため採らない (§9.1.1、Issue #838)。
+  /// この除外は自分自身の除外と同じ `String ==` (正準等価) でよい。広く弾いても `origin/HEAD` へ
+  /// 進むだけで、比較元とその経路は Diff 上部に出てユーザーが選び直せるため (§9.1.4)、
+  /// 一覧との照合のようなバイト列の一致は求めない。
   public static func branch(
     recordedStartPoint: String,
     resolvedFullName: String,
     currentBranch: GitBranchRef,
-    listedBranches: [GitBranchRef]
+    listedBranches: [GitBranchRef],
+    remoteNames: [String]
   ) -> GitBranchRef? {
     let candidates = [
       recordedStartPoint, "refs/heads/" + recordedStartPoint, "refs/remotes/" + recordedStartPoint,
@@ -81,6 +87,11 @@ public enum DiffForkPoint {
       }),
       let branch = GitBranchRef(fullName: listed), branch != currentBranch
     else { return nil }
+    if case .remote(let name) = branch,
+      remoteNames.contains(where: { name == $0 + "/" + currentBranch.shortName })
+    {
+      return nil
+    }
     return branch
   }
 }

@@ -93,7 +93,7 @@ struct DiffForkPointTests {
     #expect(
       DiffForkPoint.branch(
         recordedStartPoint: recorded, resolvedFullName: resolved,
-        currentBranch: .local("feature"), listedBranches: Self.listed)
+        currentBranch: .local("feature"), listedBranches: Self.listed, remoteNames: ["origin"])
         == expected)
   }
 
@@ -118,7 +118,7 @@ struct DiffForkPointTests {
     #expect(
       DiffForkPoint.branch(
         recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: current,
-        listedBranches: Self.listed)
+        listedBranches: Self.listed, remoteNames: ["origin"])
         == nil)
   }
 
@@ -128,7 +128,8 @@ struct DiffForkPointTests {
       DiffForkPoint.branch(
         recordedStartPoint: "refs/remotes/origin/feature",
         resolvedFullName: "refs/remotes/origin/feature",
-        currentBranch: .local("origin/feature"), listedBranches: Self.listed)
+        currentBranch: .local("origin/feature"), listedBranches: Self.listed,
+        remoteNames: ["origin"])
         == .remote("origin/feature"))
   }
 
@@ -147,7 +148,7 @@ struct DiffForkPointTests {
     #expect(
       DiffForkPoint.branch(
         recordedStartPoint: recorded, resolvedFullName: resolved,
-        currentBranch: .local("feature"), listedBranches: listed)
+        currentBranch: .local("feature"), listedBranches: listed, remoteNames: ["origin"])
         == nil)
   }
 
@@ -159,7 +160,7 @@ struct DiffForkPointTests {
       DiffForkPoint.branch(
         recordedStartPoint: name, resolvedFullName: "refs/heads/" + name,
         currentBranch: .local("feature"),
-        listedBranches: [.local("\u{304C}"), .local("\u{304B}\u{3099}")]))
+        listedBranches: [.local("\u{304C}"), .local("\u{304B}\u{3099}")], remoteNames: ["origin"]))
     #expect(Array(adopted.fullName.utf8) == Array(("refs/heads/" + name).utf8))
   }
 
@@ -169,7 +170,8 @@ struct DiffForkPointTests {
   func adoptsListedSpellingOverDecomposedResolution() {
     let adopted = DiffForkPoint.branch(
       recordedStartPoint: "\u{304C}", resolvedFullName: "refs/heads/\u{304B}\u{3099}",
-      currentBranch: .local("feature"), listedBranches: [.local("\u{304C}")])
+      currentBranch: .local("feature"), listedBranches: [.local("\u{304C}")],
+      remoteNames: ["origin"])
     #expect(adopted == .local("\u{304C}"))
     #expect(adopted.map { Array($0.fullName.utf8) } == Array("refs/heads/\u{304C}".utf8))
   }
@@ -184,7 +186,44 @@ struct DiffForkPointTests {
     #expect(
       DiffForkPoint.branch(
         recordedStartPoint: resolved, resolvedFullName: resolved,
-        currentBranch: .local("feature"), listedBranches: [listed])
+        currentBranch: .local("feature"), listedBranches: [listed], remoteNames: ["origin"])
         == nil)
+  }
+
+  @Test(
+    "今の branch と同名の remote-tracking ref は分岐元にしない",
+    arguments: [
+      ("refs/remotes/origin/feature", "origin/feature", "feature", ["origin"]),
+      ("origin/feature", "origin/feature", "feature", ["origin"]),
+      ("upstream/feature", "upstream/feature", "feature", ["origin", "upstream"]),
+      ("up/x/b/feat", "up/x/b/feat", "b/feat", ["up/x"]),
+      ("refs/remotes/origin/\u{304B}\u{3099}", "origin/\u{304B}\u{3099}", "\u{304C}", ["origin"]),
+    ])
+  func rejectsSameNamedRemoteTrackingBranch(
+    recorded: String, name: String, current: String, remotes: [String]
+  ) {
+    let branch = GitBranchRef.remote(name)
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: recorded, resolvedFullName: branch.fullName,
+        currentBranch: .local(current), listedBranches: [branch], remoteNames: remotes)
+        == nil)
+  }
+
+  @Test(
+    "同名の remote-tracking ref 以外は分岐元にする",
+    arguments: [
+      (GitBranchRef.remote("origin/team/feature"), ["origin"]),
+      (.local("origin/feature"), ["origin"]),
+      (.remote("foo/feature"), ["origin"]),
+      (.remote("origin/feature"), []),
+      (.remote("origin/main"), ["origin"]),
+    ])
+  func adoptsOtherBranches(branch: GitBranchRef, remotes: [String]) {
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: branch.shortName, resolvedFullName: branch.fullName,
+        currentBranch: .local("feature"), listedBranches: [branch], remoteNames: remotes)
+        == branch)
   }
 }

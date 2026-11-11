@@ -225,6 +225,138 @@ struct DiffForkPointIntegrationTests {
     }
   }
 
+  @Test(
+    "今の branch と同名の remote-tracking ref は分岐元にしない", .timeLimit(.minutes(1)),
+    arguments: [
+      (
+        "origin", "remote-only", ["switch", "-q", "remote-only"],
+        "refs/remotes/origin/remote-only"
+      ),
+      ("origin", "topic", ["switch", "-q", "-c", "topic", "origin/topic"], "origin/topic"),
+      ("origin", "t3", ["checkout", "-q", "--track", "origin/t3"], "origin/t3"),
+      (
+        "upstream", "feature", ["switch", "-q", "-c", "feature", "upstream/feature"],
+        "upstream/feature"
+      ),
+      ("up/x", "b/feat", ["switch", "-q", "b/feat"], "refs/remotes/up/x/b/feat"),
+    ])
+  func ignoresSameNameRemoteTrackingStartPoint(
+    remote: String, branch: String, command: [String], startPoint: String
+  ) async throws {
+    try await withGitRepository { repository in
+      try await repository.git([
+        "remote", "add", remote, repository.root.appending(path: "remote.git").path,
+      ])
+      try await repository.git(["update-ref", "refs/remotes/" + remote + "/" + branch, "HEAD"])
+      try await repository.git(command)
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from " + startPoint, of: "refs/heads/" + branch)
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
+    }
+  }
+
+  @Test(
+    "linked worktree でも今の branch と同名の remote-tracking ref は分岐元にしない",
+    .timeLimit(.minutes(1)))
+  func ignoresSameNameRemoteTrackingStartPointInLinkedWorktree() async throws {
+    try await withGitRepository { repository in
+      try await repository.git([
+        "remote", "add", "origin", repository.root.appending(path: "remote.git").path,
+      ])
+      try await repository.git(["update-ref", "refs/remotes/origin/t4", "HEAD"])
+      let worktree = repository.root.appending(path: "wt")
+      try await repository.git(["worktree", "add", "-q", worktree.path, "t4"])
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from refs/remotes/origin/t4", of: "refs/heads/t4")
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: worktree, processRunner: FoundationProcessRunner())
+      #expect(await builder.resolveBaseBranch(userSelection: nil) == .undetermined)
+    }
+  }
+
+  @Test(
+    "今の branch と同名の remote-tracking ref を採らず origin/HEAD へ進む",
+    .timeLimit(.minutes(1)))
+  func fallsBackToOriginHeadForSameNameRemoteTrackingStartPoint() async throws {
+    try await withGitRepository { repository in
+      try await repository.git([
+        "remote", "add", "origin", repository.root.appending(path: "remote.git").path,
+      ])
+      try await repository.git(["update-ref", "refs/remotes/origin/remote-only", "HEAD"])
+      try await repository.git(["update-ref", "refs/remotes/origin/main", "HEAD"])
+      try await repository.git([
+        "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main",
+      ])
+      try await repository.git(["switch", "-q", "remote-only"])
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from refs/remotes/origin/remote-only", of: "refs/heads/remote-only")
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(
+        await builder.resolveBaseBranch(userSelection: nil)
+          == .resolved(branch: .remote("origin/main"), source: .originHead))
+    }
+  }
+
+  @Test("末尾だけが今の branch と一致する remote-tracking ref は分岐元にする", .timeLimit(.minutes(1)))
+  func resolvesRemoteTrackingStartPointWithMatchingSuffix() async throws {
+    try await withGitRepository { repository in
+      try await repository.git([
+        "remote", "add", "origin", repository.root.appending(path: "remote.git").path,
+      ])
+      try await repository.git(["update-ref", "refs/remotes/origin/team/feature", "HEAD"])
+      try await repository.git(["switch", "-q", "-c", "feature", "origin/team/feature"])
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from origin/team/feature", of: "refs/heads/feature")
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(
+        await builder.resolveBaseBranch(userSelection: nil)
+          == .resolved(branch: .remote("origin/team/feature"), source: .forkPoint))
+    }
+  }
+
+  @Test("remote 名で始まる local branch は分岐元にする", .timeLimit(.minutes(1)))
+  func resolvesLocalStartPointWithRemoteName() async throws {
+    try await withGitRepository { repository in
+      try await repository.git([
+        "remote", "add", "origin", repository.root.appending(path: "remote.git").path,
+      ])
+      try await repository.git(["branch", "origin/feature", "main"])
+      try await repository.git(["switch", "-q", "-c", "feature", "refs/heads/origin/feature"])
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from refs/heads/origin/feature", of: "refs/heads/feature")
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(
+        await builder.resolveBaseBranch(userSelection: nil)
+          == .resolved(branch: .local("origin/feature"), source: .forkPoint))
+    }
+  }
+
+  @Test("git remote に無い名前の下の remote-tracking ref は分岐元にする", .timeLimit(.minutes(1)))
+  func resolvesRemoteTrackingStartPointWithoutConfiguredRemote() async throws {
+    try await withGitRepository { repository in
+      try await repository.git(["update-ref", "refs/remotes/foo/feature", "HEAD"])
+      try await repository.git(["switch", "-q", "-c", "feature", "refs/remotes/foo/feature"])
+      try await repository.requireOldestReflogSubject(
+        "branch: Created from refs/remotes/foo/feature", of: "refs/heads/feature")
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
+      #expect(
+        await builder.resolveBaseBranch(userSelection: nil)
+          == .resolved(branch: .remote("foo/feature"), source: .forkPoint))
+    }
+  }
+
   @Test("`git worktree add -b` で作った worktree の分岐元を使う", .timeLimit(.minutes(1)))
   func resolvesForkPointInLinkedWorktree() async throws {
     try await withGitRepository { repository in

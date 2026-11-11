@@ -91,7 +91,9 @@ struct UntrackedContentIdentity: Sendable {
         case S_IFLNK:
           identity.append(try Self.linkTarget(at: absolutePath))
         case S_IFDIR:
-          if count < maximumEntryCount {
+          // 上限の位置より後ろへ積んだ項目は訪れない。訪れた数で判定すると、幅優先では
+          // 上限内のディレクトリをすべて readdir してしまう (3,000 × 300 件で 0.12 s → 0.75 s)。
+          if pending.count < maximumEntryCount {
             let children = try Self.names(at: absolutePath)
             pending.append(contentsOf: children.map { relativePath + [47] + $0 })
           }

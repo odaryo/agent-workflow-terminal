@@ -14,8 +14,11 @@ extension AppModel {
     let summaries = Set(failures.map(Self.summary(of:)))
     var failureSet = Set(summaries.map { "entry: \($0)" })
     // 原文を鍵にしない。stdout に各 worktree の HEAD が入り、commit のたびに閉じたバナーが戻る。
-    if listingFailure != nil {
-      failureSet.insert("listing")
+    // 種類ごとに鍵を分ける。同じ鍵だと種類が変わっても文言が差し替わらない。
+    switch listingFailure {
+    case nil: break
+    case .command: failureSet.insert("listing:command")
+    case .omittedRecords: failureSet.insert("listing:omitted")
     }
     guard !failureSet.isEmpty else {
       updateScanFailureWarning(nil, failures: failureSet)

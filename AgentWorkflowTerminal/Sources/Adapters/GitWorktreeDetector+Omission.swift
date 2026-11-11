@@ -22,11 +22,13 @@ extension GitWorktreeDetector {
   /// git が一覧に出すはずの管理ディレクトリの数。`nil` は `<common>/worktrees` を readdir
   /// できなかったこと。`worktrees` が無い (ENOENT) のは linked worktree を持たない repository の
   /// 正常な形なので 0 とする。通常のファイル (ENOTDIR) も 0 とする (git 2.54.0 実測: `worktrees`
-  /// を通常のファイルにしても、git は exit 0 で main だけを出す)。
+  /// を通常のファイルにしても、git は exit 0 で main だけを出す)。自分を指してループする (ELOOP)
+  /// `worktrees` も、git は main だけを出すので 0 とする。
   ///
   /// 数えるのは、子ディレクトリのうち次のどちらかに当たるものである。子が symlink なら、たどった
   /// 先で判定する (git 2.54.0 実測: git は symlink の管理ディレクトリもたどって一覧に出す。数えないと
-  /// 別の worktree の欠けと打ち消し合う)。たどった先が無い (ENOENT / ENOTDIR) symlink は数えない。
+  /// 別の worktree の欠けと打ち消し合う)。たどった先が無い (ENOENT / ENOTDIR) か、ループする (ELOOP)
+  /// symlink は数えない。git もそれを一覧に出さない (#774 のレビューの実測)。
   /// - 子ディレクトリそのもの、またはその `gitdir` を確かめられない (ENOENT 以外の失敗。
   ///   `worktrees` が 444 だと readdir はできても子は EACCES になる)。中を確かめられない以上、
   ///   一覧に出るはずのものとして数える。
@@ -51,7 +53,7 @@ extension GitWorktreeDetector {
   static func listedAdministrativeDirectoryCount(commonDirectory: WorktreeIdentity) -> Int? {
     let worktrees = commonDirectory.rawValue + "/worktrees"
     guard let directory = opendir(worktrees) else {
-      return errno == ENOENT || errno == ENOTDIR ? 0 : nil
+      return errno == ENOENT || errno == ENOTDIR || errno == ELOOP ? 0 : nil
     }
     defer { closedir(directory) }
     var count = 0
@@ -73,7 +75,9 @@ extension GitWorktreeDetector {
     var info = stat()
     guard lstat(child, &info) == 0 else { return errno != ENOENT }
     if info.st_mode & S_IFMT == S_IFLNK {
-      guard stat(child, &info) == 0 else { return errno != ENOENT && errno != ENOTDIR }
+      guard stat(child, &info) == 0 else {
+        return errno != ENOENT && errno != ENOTDIR && errno != ELOOP
+      }
     }
     guard info.st_mode & S_IFMT == S_IFDIR else { return false }
     return lstat(child + "/gitdir", &info) == 0 || errno != ENOENT

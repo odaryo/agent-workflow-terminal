@@ -5,7 +5,7 @@ import Testing
 @testable import Adapters
 
 // reflog の記録と symbolic ref の解決は git の版で変わりうるため、判定前に前提を確かめる
-// (git 2.54.0 で計測、CI の 2.56.0 は未計測)。
+// (git 2.54.0 と 2.56.0 で計測)。
 @Suite("§9.1.1 実 git での symbolic ref の分岐元")
 struct DiffForkPointSymbolicRefIntegrationTests {
   @Test("symbolic ref の別名から作った branch では分岐元を使わない", .timeLimit(.minutes(1)))
@@ -22,8 +22,8 @@ struct DiffForkPointSymbolicRefIntegrationTests {
     }
   }
 
-  // origin/HEAD を分岐元から弾くのは解決先との照合ではなく、`GitBranchRef` が /HEAD を
-  // 除くため候補が一覧に入らないことである。同じ branch に着くので source まで検証する。
+  // `origin/HEAD` は、`rev-parse` との照合と `GitBranchRef` の `/HEAD` の除外が、それぞれ単独で
+  // 分岐元から弾く。弾いても `origin/HEAD` の段で同じ branch に着くので、source まで見る。
   @Test(
     "origin/HEAD から作った branch では分岐元を使わず origin/HEAD へ進む",
     .timeLimit(.minutes(1)))

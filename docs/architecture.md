@@ -4,7 +4,7 @@
 >
 > 作成日: 2026-08-31
 >
-> 最終更新: 2026-11-11(Overviewのマージ済みの印の判定で、一度マージ済みと判定したbranch先端の答えを既定branchが進んでも使い回すことと、GitHubにアクセスせずローカルのrefだけを読むことを§3.4に確定し、印の形と判定の細部を現在の推奨として§3.4、§5.3、§13に書き足した(Issue #879)。同日、worktreeへ引き渡すときにIssueの概要(タイトル)を渡し、アプリが新しく作ったセッションのpaneの`@awt_purpose`に書くと確定し、§12.7の「目的はアプリだけが書く手入力」を改めた。渡し方(`hostctl worktree open`の`--purpose`)、検査、失敗時の扱いは現在の推奨として§3.1、§21.4に書き足した(Issue #837)。同日、ユーザーの要望で、Diffを開いたら表示中のsnapshotが無ければすぐに作って表示し、種類や比較先を選び直したときも作り直すと§9.3に書き足した。同日、ユーザーの決定で、§9.3の履歴メニューと§9.4のReview状態(`Reviewing`／`Reviewed`)を廃止し、§9.4を削除して付録Aに足した。過去のsnapshotは未送信コメントのバナーから開き、最新へ戻る操作で戻ることを現在の推奨とした(Issue #830)。同日、Diffの比較元の既定を、upstreamから分岐元(branchのreflogの最古の`branch: Created from <ref>`)へ変えると§9.1.1に確定した(Issue #829)。同日、Project RootのセッションのAgentが`hostctl worktree open`でworktreeのセッションへ作業を渡した後、Overviewのそのpaneの行を「引き渡し済み」の印で示すと、§3.1、§5.3、§13、§21.4に現在の推奨として書き足した(Issue #828)。同日、OverviewのProjectの見出しを、開閉の印だけでなく行のどこを押しても開閉するようにすると、§13に現在の推奨として書き足した(Issue #826)。同日、OverviewのProjectの見出しの開閉の印を常に出し、worktreeのセッションの表示中の印を見出しではなく見出しの下の最初の行に付けると、§13に現在の推奨として書き足した(Issue #822)。同日、実装に合わせて、Skill PluginがProject RootのセッションでSkillを使うよう促すSessionStart hookを持つことを§3.1に書き足した(Issue #817)。以下はそれ以前の履歴。2026-11-10: Overviewの見出しの右クリックの新規セッションを、シェルだけを立ち上げる通常の項目と、Projectの起動コマンドでAgentも起動する項目の2つにした。「人の操作で開くセッションではAgentを起動しない」を改めた(§3.1、§13、Issue #805)。以下はそれ以前の履歴。モバイルクライアントの検討を作り直し、作業PCより先にiPadを優先して作る順序、OSごとのネイティブ実装、SSHでの接続、CodeとDiffの提供、無料の署名を確定した(§20.1、§20.4〜§20.8)。以下はそれ以前の履歴。セッション移動をProjectをまたいで行うようにした(§5.4)。セッション移動の既定のショートカットを⌘↑／⌘↓に変更した(§5.4)。⌘Spaceの切り替えと表示先を確定した(§5.4)。Gate 3の記録に写っていない画面の信号の採用条件を確定した(§12.5)。実装に合わせて§3.4、§3.5、§12.5、§12.7、§13、§21.4の記述を補った。Closeのbranchを決められないstashの扱いを確定した(§3.4)。ツールバーのProjectメニューの廃止、⌘を伴わない割り当ての禁止、Codexの更新の確認のPermission化、導入順序を確定した(§5.4、§12.8、§20.8)。以下はそれ以前の履歴。Agentが公開したbranch名の表示と、Agentが作業中のworktreeを対象とする決定を取り下げた(§5.3)。以下はそれ以前の履歴。Project RootのAgentは実装の指示を受けたらworktreeを作り、`hostctl worktree open`で作らせたworktreeのセッションへ作業を渡して自分は終えると確定した(§3.1)。Agentへの手順はClaude CodeのSkill Pluginで知らせ、Agentの起動コマンドはProjectごとにアプリで設定して`hostctl`の応答で返す。アプリはAgentを起動しない。以下はそれ以前の履歴。Agentがステータスラインから作業ディレクトリとbranchを公開し、Overviewのセッションの行にbranch名を出すと確定した。Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする。Project Rootという見出しは出さない。以下はそれ以前の履歴。#672: タブ列をなくし、呼称をセッションに統一した。Overviewは既定で表示するメインwindowの左サイドバーだけとし、切り替えと見出しの右クリック操作を集約する。Project内は開いた順に固定し、要対応は印と件数で示す。branch名の表示をやめてAgentの作業ディレクトリ名を出すことにし、全セッションの作業概要の右クリック一覧を廃止した。以下はそれ以前の履歴。Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
+> 最終更新: 2026-11-11(ユーザーの決定で、次を確定した。Diffの分岐元は、今のbranchと同名のremote-tracking ref(すべてのremote)を採らず、作成後の`branch: Reset to <ref>`を作成時の記録より優先する。同名の別の名前空間のrefを採りうる場合と`rebase --onto`は限界として残す(§9.1.1、Issue #838・#841・#900)。SessionStart hookは、アプリに登録されたProjectかを`hostctl`の読み取り専用の問い合わせで確かめてから知らせる(§3.1、Issue #819)。iOS／iPadOSのSSHはCitadelを使わずSwiftNIO SSHを直接使い、iPadのアプリは`iOS/`に置く(§20.6、Issue #806)。iPadの日本語の入力欄の送る時点、出し方、Esc・Ctrl・矢印の扱いを決めた(§20.6、Issue #807)。同日、Overviewのマージ済みの印の判定で、一度マージ済みと判定したbranch先端の答えを既定branchが進んでも使い回すことと、GitHubにアクセスせずローカルのrefだけを読むことを§3.4に確定し、印の形と判定の細部を現在の推奨として§3.4、§5.3、§13に書き足した(Issue #879)。同日、worktreeへ引き渡すときにIssueの概要(タイトル)を渡し、アプリが新しく作ったセッションのpaneの`@awt_purpose`に書くと確定し、§12.7の「目的はアプリだけが書く手入力」を改めた。渡し方(`hostctl worktree open`の`--purpose`)、検査、失敗時の扱いは現在の推奨として§3.1、§21.4に書き足した(Issue #837)。同日、ユーザーの要望で、Diffを開いたら表示中のsnapshotが無ければすぐに作って表示し、種類や比較先を選び直したときも作り直すと§9.3に書き足した。同日、ユーザーの決定で、§9.3の履歴メニューと§9.4のReview状態(`Reviewing`／`Reviewed`)を廃止し、§9.4を削除して付録Aに足した。過去のsnapshotは未送信コメントのバナーから開き、最新へ戻る操作で戻ることを現在の推奨とした(Issue #830)。同日、Diffの比較元の既定を、upstreamから分岐元(branchのreflogの最古の`branch: Created from <ref>`)へ変えると§9.1.1に確定した(Issue #829)。同日、Project RootのセッションのAgentが`hostctl worktree open`でworktreeのセッションへ作業を渡した後、Overviewのそのpaneの行を「引き渡し済み」の印で示すと、§3.1、§5.3、§13、§21.4に現在の推奨として書き足した(Issue #828)。同日、OverviewのProjectの見出しを、開閉の印だけでなく行のどこを押しても開閉するようにすると、§13に現在の推奨として書き足した(Issue #826)。同日、OverviewのProjectの見出しの開閉の印を常に出し、worktreeのセッションの表示中の印を見出しではなく見出しの下の最初の行に付けると、§13に現在の推奨として書き足した(Issue #822)。同日、実装に合わせて、Skill PluginがProject RootのセッションでSkillを使うよう促すSessionStart hookを持つことを§3.1に書き足した(Issue #817)。以下はそれ以前の履歴。2026-11-10: Overviewの見出しの右クリックの新規セッションを、シェルだけを立ち上げる通常の項目と、Projectの起動コマンドでAgentも起動する項目の2つにした。「人の操作で開くセッションではAgentを起動しない」を改めた(§3.1、§13、Issue #805)。以下はそれ以前の履歴。モバイルクライアントの検討を作り直し、作業PCより先にiPadを優先して作る順序、OSごとのネイティブ実装、SSHでの接続、CodeとDiffの提供、無料の署名を確定した(§20.1、§20.4〜§20.8)。以下はそれ以前の履歴。セッション移動をProjectをまたいで行うようにした(§5.4)。セッション移動の既定のショートカットを⌘↑／⌘↓に変更した(§5.4)。⌘Spaceの切り替えと表示先を確定した(§5.4)。Gate 3の記録に写っていない画面の信号の採用条件を確定した(§12.5)。実装に合わせて§3.4、§3.5、§12.5、§12.7、§13、§21.4の記述を補った。Closeのbranchを決められないstashの扱いを確定した(§3.4)。ツールバーのProjectメニューの廃止、⌘を伴わない割り当ての禁止、Codexの更新の確認のPermission化、導入順序を確定した(§5.4、§12.8、§20.8)。以下はそれ以前の履歴。Agentが公開したbranch名の表示と、Agentが作業中のworktreeを対象とする決定を取り下げた(§5.3)。以下はそれ以前の履歴。Project RootのAgentは実装の指示を受けたらworktreeを作り、`hostctl worktree open`で作らせたworktreeのセッションへ作業を渡して自分は終えると確定した(§3.1)。Agentへの手順はClaude CodeのSkill Pluginで知らせ、Agentの起動コマンドはProjectごとにアプリで設定して`hostctl`の応答で返す。アプリはAgentを起動しない。以下はそれ以前の履歴。Agentがステータスラインから作業ディレクトリとbranchを公開し、Overviewのセッションの行にbranch名を出すと確定した。Code／Diff／EvidenceとDiffコメントはAgentが作業中のworktreeを対象とする。Project Rootという見出しは出さない。以下はそれ以前の履歴。#672: タブ列をなくし、呼称をセッションに統一した。Overviewは既定で表示するメインwindowの左サイドバーだけとし、切り替えと見出しの右クリック操作を集約する。Project内は開いた順に固定し、要対応は印と件数で示す。branch名の表示をやめてAgentの作業ディレクトリ名を出すことにし、全セッションの作業概要の右クリック一覧を廃止した。以下はそれ以前の履歴。Task Tabの名前を、そのタブで今作業しているbranch名にすると§5.3に確定した。同じ日の「worktree名で固定する」を置き換え、同名のタブの`_1`／`_2`と、長い名前の省略を定めた。同日、Claude Codeのタブ操作を確定した。Claude CodeはこのアプリのMCPまたはAPIでタブを作れるが、新規タブはユーザーが命令したときだけ開く(§3.1)。新規出現したworktreeは自動でActiveにせずInactiveから始め、Active化は人が選ぶ(§3.2・§3.3)。`+ New Task`で開いたタブは、Agentがworktreeを作ってディレクトリを移してもsessionは移動せず、Project Rootのタブのまま残す(§3.1。§25の未確定事項を解消)。同日、キーボードショートカットの既定と変更を§5.4に確定した。Project移動を⌘⌥↑／⌘⌥↓、タブ移動を⌘⌥←／⌘⌥→、Overview・Code・Diff・Evidenceの開閉を⌘⇧O・⌘⇧C・⌘⇧D・⌘⇧Eとし、割り当てを設定画面で変えられるようにし、⌘Spaceでどのアプリからでもこのアプリを前面に出す。§6.1にViewerを開閉するショートカットの動きを、§13に⌘⇧Oでウィンドウ表示のOverviewも閉じることを確定した。同日、正式プロダクト名をAgent Workflow Terminalに確定し、名前のWorkflowの意味を§0に、Part IIの呼び方をAgent Skillsに揃えた。同日、リモート利用の構成を作り直した(§20)。HostをメインPC(Mac Studio)のこのアプリ、Clientを作業PC(MacBook Pro)とiPhone・iPad・Androidとし、Tailscale上のSSHまたはMoshで接続すること、ClientでProjectとタブまで再現すること、Clientでセッション一覧・Diffの確認・Diffへのコメントができることを確定した。Androidが加わったため、CloudKitによる通知中継と接続先の同期、Apple IDでのpairing、「通知を先、遠隔操作を後」の導入順序とモバイル初版の利用条件を取り消した。2026-11-06: 実装に合わせて次を書き足した。§3.4: Closeの安全確認は`refs/replace/`と`info/grafts`を無視して読む。§9.3: 別のsnapshotに残る未送信コメントの通知。§12.3: 長時間`Unknown`の通知の既定を§11.2と揃えた。2026-11-05: §3.4に、lockされたworktreeとsubmoduleを含むworktreeではCloseの3と4を拒否し、1と2だけを選べると確定した。2026-11-04: §12.7の連携変数と目的の書き込み、目的欄の既定の表示に使うtitleで、見えない文字(default-ignorableと空白)だけの値を未設定と同じに扱うと書き足した。§12.7に、目的が未入力のpaneでtitleを既定の表示にする規則を、titleが状態表示になるCodexのpaneにもそのまま当てはめ、Adapterで見分けて隠さないと確定した。2026-11-03: §4.3のtmux実行ファイルのパスの上書きを、設定画面の入力欄とUserDefaultsで与え、次の起動から反映し、使えない上書きでは既定の探索場所へ落ちないと確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§9.1.3の`--ignore-submodules=untracked`を`git status`にも明示すること、それが`git status`の既定ではなく`git diff`に揃える選択であること、Close時の確認とFile Browserは`none`のままであることを書き足した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。§3.3のResume時の設定修復に、`window-size`の未設定の判定方法(tmux 3.8で計測)と、修復の対象をcurrent windowにすることを確定した。§4.4に、アプリ側の`scrollback-limit`の製品既定をコードから与え、このアプリ用の設定ファイルで上書きできると確定した。Overviewの目的が未入力のpaneでは、tmuxのpaneのtitleを目的欄の既定の表示にする(書き込みはしない)と§12.7と§13に確定した。OverviewのProjectの見出しを開閉でき、閉じたProjectのNeeds Attentionは見出しに件数で示し、開閉の状態を再起動後も引き継ぐと§13に確定した。同日、実装に合わせて3つの例外を確定した。§5.4にタスクタブを切り替える⌃Tab／⌃⇧Tabを、§3.3のResume時の設定修復に`detach-on-destroy`を無条件に入れ直すことを、§16.1の「削除して解除」に保存データを読めなかったときはアプリ内データを残すことを書き足した。2026-11-02: §12.2と§12.6の`Ready for Review`の先出しの許容値を、最小変化行数2を入れた今の製品の採点(443中4.7%、recall 0.953)に直すと確定した。Overviewの表示形態を、独立したウィンドウとメインwindowの左サイドバーから選べるようにし、選んだ形態を再起動後も引き継ぐと§13に確定した。画面の変化の履歴をAgentのプロセスごとに持つことを§12.4.2に確定した。開発中のUI確認の起動だけは専用socketのtmux serverを使う例外を§4.1に確定した。§11.2のローカル通知に、別のタブへ移ったpaneの状態の引き継ぎと、基準の時点のまとめの例外を書き足した。`Inactive`メニューで選んだActive化と、自動でActiveになった新しいworktreeでは、確認なしにsessionを作ると確定した。起動時の復元でsessionが消えていたタブは選んでも黙って作らず、再接続の操作を出すと確定した。停止中に消えたworktreeは起動後のスキャンでも見つからなければ消失として落とすことと、§19.2の候補の表示をMainの選択で満たすことを確定した。タブの右クリックの作業概要一覧の、1つのタブにAgent paneが複数あるときの表し方の推奨を足した。Macのローカル通知の基準・抑止をタブ単位に読み替えた。2026-11-01: Viewer Drawerの表示方法を並べて表示だけにし、Code／Diffの中身の並びを左右か上下から選べるようにした。1つのworktreeとProject Rootに複数のタブを開けるようにし、タブごとに独立したtmux sessionを持たせた。同日に決めた`+ New Task`のwindow追加はこれで置き換えた。タブの右クリックから全タブの作業概要を一覧する。2026-10-09〜10-31の実装に伴う決定 — Overview window、Diffの比較元・範囲の明示、Code Viewerの履歴・blame、Macのローカル通知、Projectの登録解除時のsession・データ削除、Drawerの1ペイン化、`+ New Task`の入口 — を反映)
 >
 > 以前の更新: 2026-10-08(未確定事項の一括決定。Diffの表示先をDrawerへ一本化、Closeの拒否条件と`-D`、Resume時の設定修復、pane概要の連携形式・優先順位・寿命、通知の重複抑止などを反映。同日の追加決定で、Overviewの形態と概要の入力箇所、状態表示とショートカットの原則、判断待ち検出の偏り、通知中継のCloudKit化とpairing、iOSの配布経路、libghosttyの版数固定、対応OSと保存先path、質問fallbackの受け取り方、モバイルの接続鍵・接続先の同期・VPNの例を反映)
 >
@@ -195,7 +195,7 @@ Agent(または`git worktree add`)が作ったworktreeは、検出されただ�
 
 - 入口は`hostctl worktree open --directory <worktree>`とする(§21.4)。Host上のAgentのための操作で、Clientの操作には含めない(§20.3)。アプリは`claude`などのAgentの種類を知らない。
 - Agentの起動と作業の受け渡しはAgent側が行う。`hostctl worktree open`で作ったセッションでは、アプリはAgentを起動しない。アプリがAgentを起動するのは、上の「新しいセッションの開き方」でAgentも起動する項目を人が選んだときだけである(2026-11-10)。
-- Agentへの手順はClaude CodeのSkill Pluginで知らせる(§32の5のとおり、手順はAgent側に置く)。Skill PluginはSessionStart hookを持ち、窓口が使えるProject Rootのセッションにだけ、実装を指示されたらSkillを使うよう短く知らせる(Issue #817)。Skill PluginのないAgentや、アプリが起動していないときは、従来どおり自分のセッションの中でworktreeを作って移動してよい(§32の1)。そのときの表示とViewerの対象は、そのセッションのディレクトリのままとする(§5.3)。
+- Agentへの手順はClaude CodeのSkill Pluginで知らせる(§32の5のとおり、手順はAgent側に置く)。Skill PluginはSessionStart hookを持ち、窓口が使えるProject Rootのセッションにだけ、実装を指示されたらSkillを使うよう短く知らせる(Issue #817)。知らせるのは、そのディレクトリがアプリに登録されたProjectのときだけとする — 確定(2026-11-11、Issue #819)。`hostctl`に登録を確かめる読み取り専用の問い合わせを足し、hookの事前確認で使う。アプリが管理するsessionに印を付ける案と、`TMUX`が無ければ出さない案は採らない(後者は既定serverのpaneからの起動を防げない)。Issue #819の実装までは、hookは窓口の変数と`hostctl`が実行できることしか見ないので、登録されていないrepoのルートでも知らせ、そこで実装を頼むとworktreeを作った後に止まる。Skill PluginのないAgentや、アプリが起動していないときは、従来どおり自分のセッションの中でworktreeを作って移動してよい(§32の1)。そのときの表示とViewerの対象は、そのセッションのディレクトリのままとする(§5.3)。
 - 引き渡し済みの印 — 現在の推奨(2026-11-11、Issue #828)。Skill Pluginは`hostctl worktree open`に呼び出し元のpane(`$TMUX_PANE`)を`--from-pane`で渡す。アプリはセッションを新しく作れた(`created: true`の応答を返した)ときだけ、そのpaneを「引き渡し済み」として記録し、Overviewのそのpaneの行に専用の印を出す(§5.3、§13)。既存のセッションを返したとき(指示は送られない)は記録しない。§12.7のpaneのユーザー変数は使わない。記録はアプリの寿命だけ持ち、再起動で消える。同じpaneのAgentが次の指示で再び`Working`になったら記録を消す(§13)。渡し先のセッション名や、そこへ移る操作は出さない。
 - **引き渡し先のセッションの目的 — 確定(2026-11-11、Issue #837)。** 引き渡すときにIssueの概要(Issueのタイトル)を渡し、アプリが新しく作ったセッションのpaneの`@awt_purpose`に書く(§12.7)。引き渡されたセッションでは`@awt_purpose`が空なので、目的欄にはClaude Codeが最初の指示(「Issue #828を読んで実装し、PRを出す」など)から作ったtitleが出て、何をするセッションかが分からなかった。`--prompt`にIssueのタイトルを含めてClaude Codeのtitleに任せる案は、titleをClaude Codeが作るので概要が入る保証が無く、採らなかった。
   - 渡し方 — 現在の推奨(2026-11-11、Issue #837)。Skill Pluginは`hostctl worktree open`の`--purpose`(§21.4)にIssueのタイトルを渡す。Issue番号や`#N`は入れない(どのIssueかはworktree名の見出しで分かる)。Issueが無い作業では、作業の概要を1行で渡す。アプリが書くのはセッションを新しく作ったとき(`created: true`)だけで、既存のセッションの目的は上書きしない。値が§12.7の目的の検査に通らなければ、セッションを作る前に拒否する。作った後に書けなかったときは、引き渡しを失敗にしない。
@@ -1001,7 +1001,7 @@ Base Diffのbase branchは次の順で決める — 確定(2026-11-11、Issue #8
 決めた結果はセッションごとに記憶し、次にDiffを開いたときは再判定しない。
 
 1. ユーザーが選び直した値。ユーザーはいつでも明示的にbase branchを選び直せる
-2. 分岐元: そのworktreeのbranchのreflogの最古の項目`branch: Created from <ref>`の`<ref>`
+2. 分岐元: そのworktreeのbranchのreflogの最古の項目`branch: Created from <ref>`の`<ref>`。作成後に起点を付け替えた記録`branch: Reset to <ref>`があれば、そちらを優先する(下記)
 3. `origin/HEAD`が指す既定branch
 4. どれも解決できなければユーザーが選ぶ。判定不能をmainへ丸めない
 
@@ -1015,6 +1015,26 @@ Base Diffのbase branchは次の順で決める — 確定(2026-11-11、Issue #8
 branchに解決されるので、一致を確かめずに使うと別のbranchを比較元にしてしまう(git 2.54.0で計測)。
 最古の項目が作成の項目でない場合(reflogの一部が失効した場合)、reflogが無い場合、今は解決できない場合、
 detached HEADの場合も分岐元は無いものとする。
+
+**今のbranchと同名のremote-tracking refは分岐元にしない — 確定(2026-11-11、Issue #838)。** リモートにしか無い
+branchを`git switch <name>`や`git switch -c <name> origin/<name>`で取ってくると、分岐元として自分と同名の
+`origin/<name>`が記録される(git 2.54.0で計測)。これを採ると`@{upstream}`と同じく比較元が自分自身になるので、
+分岐元が無いものとして`origin/HEAD`へ進む。対象は`origin`に限らず、`git remote`が返すすべてのremoteとする。
+記録の書き方は`refs/remotes/origin/<name>`と`origin/<name>`の両方があるので、書き方では見分けない。解決した
+完全名からremote名を除いた残りが、今のbranchの短い名前と等しいかで判定する。
+
+**作成後の起点の付け替えを優先する — 確定(2026-11-11、Issue #841)。** `git checkout -B <branch> <ref>`と
+`git branch -f <branch> <ref>`は、reflogに`branch: Reset to <ref>`を残す。reflogを新しい順に見て、上の条件
+(解決した完全名の一致、localかremoteのbranch、自分自身でも同名のremote-tracking refでもない)を満たす最初の
+`Reset to`の`<ref>`を分岐元とする。満たすものが無ければ、最古の`Created from`で判定する。
+
+次の2つは限界として残す — 確定(2026-11-11)。どちらも、比較元とそれを決めた経路がDiffの上部に出ており(§9.1.4)、
+ユーザーが選び直せる。
+
+- `git rebase --onto`での載せ替えは反映しない。reflogにcommit IDしか残らず、載せ替え先のbranch名が分からないためである(Issue #841)。
+- remote-tracking refと同名のlocal branch(例: `origin/main`という名前のlocal branch)があり、記録した時点の側のrefが
+  消えると、もう一方の名前空間の同名のrefを分岐元に採る。reflogには短い名前しか残らず、記録した時点の名前空間を
+  判別できないためである。gitが曖昧と警告する命名でだけ起きるので、塞がない(Issue #900。git 2.54.0で計測)。
 
 #### 9.1.2 Diff rangeの定義
 
@@ -2199,10 +2219,15 @@ Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのCl
 
 **iOS／iPadOSの端末部品 — 確定(2026-11-10、Gate 2のiPadの計測による)。** SwiftTermを使う。iPadの実機(iPadOS 27.0.1、SwiftTerm 1.99.3)で、表示幅・true color・Agent TUIの表示、Esc・Ctrl・矢印、タッチ・トラックパッド、貼り付けは手を入れずに通った(計測は`Spikes/gate2-ipad/README.md`、Issue #789)。そのままでは足りない次の2つは、アプリ側で手当てする。
 
-- **日本語の変換中の文字**: SwiftTermはmarked textを保持するが描かず、派生クラスからも上書きできない。SwiftTermには手を入れず、アプリに端末とは別の入力欄を設け、変換はそこで行い、確定した文字だけを端末へ送る。送る時点と欄の出し方は未確定とする(§25)。
+- **日本語の変換中の文字**: SwiftTermはmarked textを保持するが描かず、派生クラスからも上書きできない。SwiftTermには手を入れず、アプリに端末とは別の入力欄を設け、変換はそこで行い、確定した文字だけを端末へ送る。入力欄の動きは次のとおり — 確定(2026-11-11、Issue #807)。
+  - 送る時点: 変換を確定するたびに、その文字を端末へ送る(改行は付けない)。入力欄が空のときのReturnは、端末へEnterを送る。
+  - 欄の出し方: 補助キーバーのボタンと外付けキーボードのショートカットで開閉する。閉じている間は、端末が直接キーを受ける。
+  - 欄が開いている間のEsc・Ctrl・矢印: 変換中はIMEが使い、変換していないときは端末へ送る。
 - **外付けキーボードのOptionの組み合わせ**: Option+矢印が届かず、Option+Shift+文字のShiftが落ちる。アプリ側で、macOSのアプリと同じバイト列を送るよう直す。⌘の組み合わせは端末へ送らず、アプリのショートカットに使う。
 
 手当てが成り立たない場合の次の候補は、libghosttyをiOSでも使う案と、`libghostty-vt`と自前の描画である(§24)。
+
+**iOS／iPadOSのSSHライブラリと置き場所 — 確定(2026-11-11、Issue #806)。** SSHはCitadelを使わず、SwiftNIO SSH(`apple/swift-nio-ssh`)を直接使う。Citadel 0.12.1はSSHの中核に個人のフォーク`Wellz26/swift-nio-ssh`を使い、pty-reqとexecを組み合わせる公開APIも無いためである。iPadのアプリはリポジトリ直下の`iOS/`に置く。XcodeGenの`project.yml`を追跡し、生成した`.xcodeproj`は追跡しない。lintとformatの対象にし、CIでは既存のジョブの段としてiOSのビルドを足す。
 
 **配布 — 確定(2026-11-10。直接インストールとv1の配布対象は2026-10-08の確定を維持)。** iOS／iPadOSアプリは、XcodeからDevelopment署名で実機へ直接インストールし、TestFlight／App Storeでの配布とApp Store審査はv1の対象外とする。当面はApple Developer Programに加入せず、無料のPersonal Teamで署名する。Personal Teamのprofileは7日で切れ、Push通知の機能も使えないとされる(どちらも二次情報で、Gate 2で確かめる)。切れたらMacから入れ直す。加入するかは、Push通知(§20.8)に着手するときに改めて決める。
 
@@ -2223,7 +2248,7 @@ Evidence、Ask Agent(Consultation)をClientで提供するかと、作業PCのCl
 | iOS／iPadOSのUI | SwiftUI | `TerminalCore`の型を使える |
 | AndroidのUI | Kotlin | Android着手時に部品と合わせて確かめる |
 | iOS／iPadOSの端末部品 | SwiftTerm(**確定**、上記) | MIT。marked textは保持するが描画しない(1.99.3。Gate 2で確認)ので、日本語は別の入力欄で受ける |
-| iOS／iPadOSのSSH | Citadel。不足ならSwiftNIO SSH | CitadelはMIT、SwiftNIO SSHはApache-2.0。Gate 2のiPadでは公開鍵認証・host keyの確認・PTY・window-changeが動いた。ただしCitadel 0.12.1はSSHの中核に個人のフォーク`Wellz26/swift-nio-ssh`を使い、pty-reqとexecを組み合わせる公開APIが無い。本採用の前に決める(§25) |
+| iOS／iPadOSのSSH | SwiftNIO SSH(**確定**、上記) | Apache-2.0。Gate 2のiPadで公開鍵認証・host keyの確認・PTY・window-changeが動いたのはCitadel 0.12.1(MIT)経由で、直接使う形は計測していない。Citadelは、SSHの中核に個人のフォーク`Wellz26/swift-nio-ssh`を使い、pty-reqとexecを組み合わせる公開APIが無いので採らない |
 | Androidの端末部品とSSH | connectbot/termlib と cbssh | どちらもApache-2.0。termlibは採用例が少なくIMEの記載が無いので、Android着手時に再評価する |
 | CodeとDiffの表示 | `hostctl`のJSONを各OSのネイティブ画面で表示する | HostにHTTPを開かず、認証をSSHに一本化する。`DiffViewerModel`などの一部はiPadへ流用できる(Gitの取得部分は置き換える) |
 | 再接続 | 前面に戻ったら自動で再接続し、同じsessionへattachし直す | sessionはtmuxが保つ。モバイルOSはバックグラウンドのアプリの通信を止める |
@@ -2523,7 +2548,7 @@ SQLite + GRDBが正式採用になるまでの間、§3.2.1のworktree Active/In
 | [libghostty-vt](https://github.com/ghostty-org/ghostty/blob/main/LICENSE) | MIT(Ghostty本体と同一repository) | SwiftTermが不成立のときの候補。VTパーサのみで描画層を含まない |
 | [SwiftTerm](https://github.com/migueldeicaza/SwiftTerm/blob/main/LICENSE) | MIT | iOS／iPadOSのrenderer(確定、2026-11-10、§20.6)。Gate 2は1.99.3で計測した。固定versionで依存し、上げるときはlicenseを再確認する |
 | [tmux](https://github.com/tmux/tmux) | ISC | source組込みではなく外部CLIとして利用 |
-| [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | iOS／iPadOSのSSHの候補(§20.6)。CitadelはMIT(2026-11-10確認) |
+| [SwiftNIO SSH](https://github.com/apple/swift-nio-ssh) | Apache-2.0 | iOS／iPadOSのSSH(確定、2026-11-11、§20.6) |
 | [GRDB.swift](https://github.com/groue/GRDB.swift) | MIT | SQLite access候補 |
 | [ripgrep](https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#how-is-ripgrep-licensed) | MIT または Unlicense | 外部CLI候補。プロジェクトではMIT条件を採用する案 |
 | [highlight.js](https://github.com/highlightjs/highlight.js/blob/main/LICENSE) | BSD-3-Clause | macOSのSyntax highlightingで採用(確定、§21)。11.11.1を`App/Resources/highlight-js/`にLICENSEごと同梱する |
@@ -2692,8 +2717,6 @@ Gate 1は通過済みであり、macOS版のTerminal renderer候補を再評価�
 - 1つのmacOSアプリのプロセスがHostとClientを兼ねるか(作業PCが自分のProjectのHostにもなるか)(§20.5)
 - モバイルへのPush通知の経路(§11.2。2026-11-08にCloudKitの確定を取り消した)
 - Tailscale SSHを鍵の代わりに使えるか(§20.6)
-- iOS／iPadOSのSSHライブラリ: Citadelをそのまま使うか(個人のフォーク`Wellz26/swift-nio-ssh`への依存)、SwiftNIO SSHを直接使うか(§20.6)
-- iPadの日本語の入力欄で、確定した文字を送る時点と、欄の出し方(現在の案: 確定ごとに送り、空欄のReturnはEnterを送る。補助キーバーのボタンとショートカットで開閉する。§20.6)
 - Androidの対応OSの下限と配布経路(§20.6)
 
 ### Storage
@@ -2986,6 +3009,8 @@ PR_READY
 - [x] Diffを開いたらボタン操作を待たずにsnapshotを作って表示し、種類や比較先を選び直したときも作り直す(2026-11-11、§9.3)
 - [x] Diff snapshotにReview状態(`Reviewing`／`Reviewed`)を持たせず、過去のsnapshotを選ぶ履歴メニューも置かない(2026-11-11、§9.3)
 - [x] Base branchはユーザーが選び直した値→分岐元(branchのreflogの最古の`branch: Created from <ref>`)→`origin/HEAD`の既定branch→ユーザー選択の順で決め、結果をセッションごとに記憶する。`@{upstream}`は使わない(2026-11-11)
+- [x] Diffの分岐元は、今のbranchと同名のremote-tracking ref(すべてのremote)を採らない。作成後の`branch: Reset to <ref>`を作成時の記録より優先する。`rebase --onto`と、同名の別の名前空間のrefを採りうる場合は限界として残す(2026-11-11、§9.1.1、Issue #838・#841・#900)
+- [x] SessionStart hookは、アプリに登録されたProjectかを`hostctl`の読み取り専用の問い合わせで確かめてから知らせる(2026-11-11、§3.1、Issue #819)
 - [x] Base／Branch Diffのrangeはmerge-base起点 (base branchの進行分をレビュー範囲へ混ぜない)
 - [x] Base／Branch Diffはworking tree・staged・untrackedを含め、出所を5種(競合(unmerged)を含む)で区別表示する (ignoredは含めない)。競合(unmerged)は一覧とDiffに表示するがコメント送信の対象外
 - [x] Diffコメントは単体／batchでAgentへ送信
@@ -3103,12 +3128,14 @@ PR_READY
 - [x] モバイルの接続はTailscale上のSSH(Androidを含む)。Moshは運用してSSHの接続性が悪ければ検討する(2026-11-10、§20.6)
 - [x] 当面はApple Developer Programに加入せず、無料のPersonal Teamで署名する(2026-11-10、§20.6)
 - [x] iOS／iPadOSの端末部品はSwiftTerm。日本語は別の入力欄で変換して確定した文字だけを端末へ送り、Optionの組み合わせはアプリ側で直す(2026-11-10、§20.6、Gate 2のiPad)
+- [x] iPadの日本語の入力欄は、確定ごとに文字を送り、空欄のReturnはEnterを送る。補助キーバーのボタンとショートカットで開閉する。欄が開いている間のEsc・Ctrl・矢印は、変換中はIME、それ以外は端末へ送る(2026-11-11、§20.6、Issue #807)
+- [x] iOS／iPadOSのSSHはCitadelを使わず、SwiftNIO SSHを直接使う。iPadのアプリは`iOS/`にXcodeGenの`project.yml`で置く(2026-11-11、§20.6、Issue #806)
 - [x] macOSのSyntax highlightingはHighlighterSwiftをやめ、同梱のhighlight.jsをJavaScriptCoreで直接呼ぶ(2026-11-09、§21、Issue #751)
 
 # 付録B. 現在の推奨構成チェックリスト
 
 - [ ] Swift 6／SwiftUIを正式採用 — PoC待ち
-- [ ] iOS／iPadOSはSwiftUI + Citadel(SSH)で作る — Citadelのフォーク依存の判断待ち(§20.6、§25)
+- [ ] iOS／iPadOSはSwiftUIで作る(SSHはSwiftNIO SSHに確定。§20.6)
 - [ ] AndroidはKotlin + termlib + cbsshで作る — Android着手時に再評価(§20.6)
 - [ ] モバイルのCodeとDiffは`hostctl`のJSONを各OSのネイティブ画面で表示する(§20.6)
 - [ ] `window-size smallest`を維持し、モバイルは裏へ回ったらdetachする — Gate 2待ち(§20.7)

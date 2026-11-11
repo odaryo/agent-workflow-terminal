@@ -276,7 +276,8 @@ for ((attempt = 0; attempt < 65; attempt++)); do
   sleep 0.2
   foreground_now=$(ps -o tpgid= -p "$pane_pid" | tr -d ' ')
   # zsh は rc の外部コマンドを別のプロセスグループで前景に置くので、送信が rc の待ちの間だと、待ちが終わって
-  # シェルへ戻ることが前景の変化に見える。シェル自身が前景に戻るのは Agent の起動ではない。
+  # シェルへ戻ることが前景の変化に見える。pane の PID のシェルが前景に戻るのは Agent の起動ではない。
+  # 除くのはそのシェルの pgid だけで、rc から exec せずに起動した子のシェルへ戻る変化は除けない。
   if [[ ! "$foreground_now" =~ ^[0-9]+$ || "$foreground_now" == "$foreground_before" ||
     "$foreground_now" == "$shell_group" ]]; then
     foreground_candidate=""

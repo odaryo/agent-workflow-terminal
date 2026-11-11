@@ -210,12 +210,16 @@ public actor MergedWorktreeMarkRefresher {
 
     let destination = await probe.defaultBranchTip(projectRootBranch: request.projectRootBranch)
     guard !Task.isCancelled else { return }
+    // 周の外へ持ち出さない。鍵に既定 branch の先端を含めずに済むのは、周の中ではそれが1つだからである。
+    var statusesJudgedThisCycle: [CommitObjectID: BranchMergeStatus] = [:]
     for target in request.targets {
       guard let tip = tips[target.identity],
         marks.needsJudgement(target.identity, tip: tip, destination: destination)
       else { continue }
       let status: BranchMergeStatus
-      if let destination {
+      if let shared = statusesJudgedThisCycle[tip] {
+        status = shared
+      } else if let destination {
         let probe = probe
         guard
           let judged = await queue.run({
@@ -223,6 +227,7 @@ public actor MergedWorktreeMarkRefresher {
           }),
           !Task.isCancelled
         else { return }
+        statusesJudgedThisCycle[tip] = judged
         status = judged
       } else {
         status = .unknown

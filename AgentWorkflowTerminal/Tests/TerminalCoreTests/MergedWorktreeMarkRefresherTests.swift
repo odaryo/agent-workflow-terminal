@@ -264,6 +264,66 @@ struct MergedWorktreeMarkRefresherTests {
     #expect(await probe.judgements.count == 1)
   }
 
+  @Test(
+    "同じ先端の未マージ等の判定は1周に1回だけ行い、両 worktree に記録し、既定先端が動けば判定し直す",
+    arguments: [BranchMergeStatus.unmerged, .unknown, .notApplicable])
+  func judgesSharedNonMergedTipOncePerDestination(verdict: BranchMergeStatus) async throws {
+    let tip = try MarkFixture.oid("1")
+    let firstDestination = try MarkFixture.oid("d")
+    let movedDestination = try MarkFixture.oid("e")
+    let first = try MarkFixture.worktree("first", branch: "first")
+    let second = try MarkFixture.worktree("second", branch: "second")
+    let targets = [first, second]
+    let probe = FakeBranchMergeProbe(
+      tips: ["first": tip, "second": tip], defaultTip: firstDestination)
+    await probe.setVerdict(verdict, for: tip)
+    let changes = MarkChangeRecorder()
+    defer { changes.finish() }
+    let refresher = MergedWorktreeMarkRefresher(
+      probe: probe, queue: BranchMergeJudgementQueue(), onChange: changes.onChange)
+
+    try #require(await requestCycle(refresher, targets: targets, probe: probe))
+    try #require(await settle(refresher, targets: targets, probe: probe))
+    #expect(await probe.judgements.count == 1)
+
+    try #require(await requestCycle(refresher, targets: targets, probe: probe))
+    try #require(await settle(refresher, targets: targets, probe: probe))
+    #expect(await probe.judgements.count == 1)
+
+    let countBeforeMove = await probe.judgements.count
+    await probe.setDefaultTip(movedDestination)
+    try #require(await requestCycle(refresher, targets: targets, probe: probe))
+    try #require(await settle(refresher, targets: targets, probe: probe))
+
+    #expect(await probe.judgements.count - countBeforeMove == 1)
+    #expect(await probe.judgements.last?.destination == movedDestination)
+  }
+
+  @Test(
+    "同じ先端が ancestor でも first-parent の列の上または読めない場合は両判定を1回だけ行い、印を出さない",
+    arguments: [true, nil] as [Bool?])
+  func judgesSharedFirstParentTipOnce(answer: Bool?) async throws {
+    let tip = try MarkFixture.oid("1")
+    let first = try MarkFixture.worktree("first", branch: "first")
+    let second = try MarkFixture.worktree("second", branch: "second")
+    let targets = [first, second]
+    let probe = FakeBranchMergeProbe(
+      tips: ["first": tip, "second": tip], defaultTip: try MarkFixture.oid("d"))
+    await probe.markMerged(tip)
+    await probe.setFirstParentAnswer(answer, for: tip)
+    let changes = MarkChangeRecorder()
+    defer { changes.finish() }
+    let refresher = MergedWorktreeMarkRefresher(
+      probe: probe, queue: BranchMergeJudgementQueue(), onChange: changes.onChange)
+
+    try #require(await requestCycle(refresher, targets: targets, probe: probe))
+    try #require(await settle(refresher, targets: targets, probe: probe))
+
+    #expect(await probe.judgements.count == 1)
+    #expect(await probe.firstParentQueries.count == 1)
+    #expect(await changes.log.values.allSatisfy(\.isEmpty))
+  }
+
   @Test("2つの refresher が queue を共有すると、判定は同時に2つ走らない")
   func sharedQueueSerializesJudgementsAcrossRefreshers() async throws {
     let gauge = JudgementConcurrencyGauge()

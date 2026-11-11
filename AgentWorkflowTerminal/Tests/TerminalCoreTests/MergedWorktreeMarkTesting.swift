@@ -45,6 +45,10 @@ actor FakeBranchMergeProbe: BranchMergeProbing {
   private var verdicts: [CommitObjectID: BranchMergeStatus] = [:]
   private var heldTips: Set<CommitObjectID> = []
   private var heldJudgements: [CommitObjectID: [CheckedContinuation<Void, Never>]] = [:]
+  /// 登録の無い先端は `false` (first-parent の列の上に無い)。
+  private var firstParentAnswers: [CommitObjectID: Bool?] = [:]
+  private var heldFirstParentTips: Set<CommitObjectID> = []
+  private var heldFirstParentQueries: [CommitObjectID: [CheckedContinuation<Void, Never>]] = [:]
   private let gauge: JudgementConcurrencyGauge?
   private let judgementDuration: Duration?
 
@@ -52,6 +56,7 @@ actor FakeBranchMergeProbe: BranchMergeProbing {
   private(set) var defaultBranchTipQueries: [String?] = []
   private(set) var judgements: [Judgement] = []
   private(set) var finishedJudgements = 0
+  private(set) var firstParentQueries: [Judgement] = []
 
   init(
     tips: [String: CommitObjectID], defaultTip: CommitObjectID?,
@@ -92,6 +97,21 @@ actor FakeBranchMergeProbe: BranchMergeProbing {
     }
   }
 
+  func setFirstParentAnswer(_ answer: Bool?, for tip: CommitObjectID) {
+    firstParentAnswers[tip] = .some(answer)
+  }
+
+  func holdFirstParent(_ tip: CommitObjectID) {
+    heldFirstParentTips.insert(tip)
+  }
+
+  func releaseFirstParent(_ tip: CommitObjectID) {
+    heldFirstParentTips.remove(tip)
+    for waiter in heldFirstParentQueries.removeValue(forKey: tip) ?? [] {
+      waiter.resume()
+    }
+  }
+
   func judgementCount(of tip: CommitObjectID) -> Int {
     judgements.count { $0.tip == tip }
   }
@@ -118,6 +138,15 @@ actor FakeBranchMergeProbe: BranchMergeProbing {
     await gauge?.leave()
     finishedJudgements += 1
     return verdicts[tip] ?? .unmerged
+  }
+
+  func isOnFirstParentChain(tip: CommitObjectID, destination: CommitObjectID) async -> Bool? {
+    firstParentQueries.append(.init(tip: tip, destination: destination))
+    if heldFirstParentTips.contains(tip) {
+      await withCheckedContinuation { heldFirstParentQueries[tip, default: []].append($0) }
+    }
+    guard let answer = firstParentAnswers[tip] else { return false }
+    return answer
   }
 }
 

@@ -31,7 +31,9 @@ struct GitBranchMergeJudge: Sendable {
       return .init(
         resolution: .originHead(branch: branch), revision: output, failures: [])
     } catch GitRunnerError.commandFailed(let exitCode, _, _) where exitCode == 1 {
-      // --quiet の exit 1 は symbolic ref が無いという正常なフォールバック条件。
+      // --quiet の exit 1 は、origin/HEAD が無いときに加え、symbolic でない普通の ref のときにも
+      // 返る (`--quiet` なしではどちらも rc=128。git 2.54.0 で計測)。どちらも Project Root の
+      // branch へ落ちる。
       guard let projectRootBranch else {
         return .init(
           resolution: .unresolved(reason: .originHeadMissing), revision: nil, failures: [])

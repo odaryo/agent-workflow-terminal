@@ -106,8 +106,10 @@ struct MergedWorktreeMarksTests {
     #expect(marks.markedWorktrees == [second])
   }
 
-  @Test("tips に現れなくなったマージ済みの先端は忘れ、再び現れたら判定を求める")
-  func forgetsMergedTipsThatNoLongerAppear() throws {
+  /// 先端を一度読めなかった・到達不能や Inactive で targets から一時的に外れただけで忘れると、
+  /// 判定し直しになり、squash commit が走査上限より古ければ `.unmerged` に落ちる。
+  @Test("tips に現れなくなったマージ済みの先端も覚えていて、再び現れたら判定を求めずに印が出る")
+  func remembersMergedTipsThatNoLongerAppear() throws {
     let topic = try MarkFixture.identity("topic")
     let other = try MarkFixture.identity("other")
     let tip = try MarkFixture.oid("1")
@@ -121,8 +123,33 @@ struct MergedWorktreeMarksTests {
     marks.observeTips([other: try MarkFixture.oid("2")])
     marks.observeTips([topic: tip])
 
-    #expect(marks.markedWorktrees.isEmpty)
-    #expect(marks.needsJudgement(topic, tip: tip, destination: destination))
+    #expect(marks.markedWorktrees == [topic])
+    #expect(!marks.needsJudgement(topic, tip: tip, destination: destination))
+  }
+
+  /// 捨てる時点 (`record` か `observeTips` か) は固定しないので、refresher と同じく記録の前に
+  /// 毎回 `observeTips` を呼ぶ。
+  @Test("マージ済みの先端は 1024 件まで覚え、超えたら古いものから忘れる")
+  func forgetsOldestMergedTipBeyondCapacity() throws {
+    let topic = try MarkFixture.identity("topic")
+    let destination = try MarkFixture.oid("d")
+    let tips = try (0...1024).map { try Self.sequentialOID($0) }
+    var marks = MergedWorktreeMarks()
+
+    for tip in tips.prefix(1024) {
+      marks.observeTips([topic: tip])
+      marks.record(.merged(.ancestor, tip: tip), for: topic, tip: tip, destination: destination)
+    }
+    #expect(!marks.needsJudgement(topic, tip: tips[0], destination: destination))
+
+    marks.observeTips([topic: tips[1024]])
+    marks.record(
+      .merged(.ancestor, tip: tips[1024]), for: topic, tip: tips[1024], destination: destination)
+    marks.observeTips([topic: tips[1024]])
+
+    #expect(marks.needsJudgement(topic, tip: tips[0], destination: destination))
+    #expect(!marks.needsJudgement(topic, tip: tips[1], destination: destination))
+    #expect(!marks.needsJudgement(topic, tip: tips[1024], destination: destination))
   }
 
   @Test("tips に現れなかった worktree の判定済みの組も忘れる")
@@ -140,5 +167,10 @@ struct MergedWorktreeMarksTests {
     marks.observeTips([topic: tip])
 
     #expect(marks.needsJudgement(topic, tip: tip, destination: destination))
+  }
+
+  private static func sequentialOID(_ number: Int) throws -> CommitObjectID {
+    let hex = String(number, radix: 16)
+    return try #require(CommitObjectID(String(repeating: "0", count: 40 - hex.count) + hex))
   }
 }

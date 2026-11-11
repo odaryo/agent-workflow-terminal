@@ -46,6 +46,91 @@ struct GitBranchMergeProbeIntegrationTests {
       #expect(try await repository.probedMergeStatus("topic") == .unmerged)
     }
   }
+
+  /// 印を出すのは `--no-ff` と squash の2つだけ (git 2.54.0 で計測)。nil の答えでも印は出ないので、
+  /// 印の有無だけでなく `isOnFirstParentChain` の生の答えも比べる。
+  @Test(
+    "first-parent の列の上にある先端を拾い、印を出すのは --no-ff と squash だけ",
+    arguments: FirstParentScenario.allCases)
+  func judgesFirstParentChainPerScenario(scenario: FirstParentScenario) async throws {
+    try await withGitRepository { repository in
+      try await scenario.arrange(in: repository)
+
+      let tip = try await repository.branchTip("topic")
+      let (status, onFirstParentChain) = try await repository.probedMarkInputs("topic")
+
+      #expect(status == .merged(scenario.expectedEvidence, tip: tip))
+      #expect(onFirstParentChain == scenario.expectedOnFirstParentChain)
+      let marked =
+        switch status {
+        case .merged(.squash, _): true
+        case .merged(.ancestor, _): onFirstParentChain == false
+        default: false
+        }
+      #expect(marked == scenario.expectedMark)
+    }
+  }
+}
+
+/// branch は `topic`。`Advanced` の付く場合は、最後に既定 branch を1つ進め、先端と既定 branch の
+/// 先端が同じという近道を通らずに rev-list の経路を通す。
+enum FirstParentScenario: String, CaseIterable, CustomTestStringConvertible, Sendable {
+  case fresh
+  case freshAdvanced
+  case ffsync
+  case noff
+  case ffmerge
+  case ffmergeAdvanced
+  case squash
+  case nolog
+
+  var testDescription: String { rawValue }
+
+  var expectedEvidence: BranchMergeEvidence {
+    self == .squash ? .squash : .ancestor
+  }
+
+  var expectedOnFirstParentChain: Bool {
+    switch self {
+    case .noff, .squash: false
+    case .fresh, .freshAdvanced, .ffsync, .ffmerge, .ffmergeAdvanced, .nolog: true
+    }
+  }
+
+  var expectedMark: Bool { self == .noff || self == .squash }
+
+  func arrange(in repository: GitTestRepository) async throws {
+    switch self {
+    case .fresh:
+      try await repository.git(["branch", "topic"])
+    case .freshAdvanced:
+      try await repository.git(["branch", "topic"])
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+    case .ffsync:
+      try await repository.addProbeBranchWorktree("topic", commits: [])
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+      try await repository.git(["merge", "-q", "--ff-only", "main"], in: "topic")
+      try await repository.commit(file: "m2.txt", contents: "m2", in: nil)
+    case .noff:
+      try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
+      try await repository.git(["merge", "-q", "--no-ff", "-m", "merge topic", "topic"])
+    case .ffmerge, .ffmergeAdvanced:
+      try await repository.addProbeBranchWorktree("topic", commits: [["a.txt": "a1"]])
+      try await repository.git(["merge", "-q", "--ff-only", "topic"])
+      if self == .ffmergeAdvanced {
+        try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+      }
+    case .squash:
+      try await repository.addProbeBranchWorktree(
+        "topic", commits: [["a.txt": "a1"], ["b.txt": "b1"]])
+      try await repository.git(["merge", "-q", "--squash", "topic"])
+      try await repository.git(["commit", "-q", "-m", "squash topic"])
+    case .nolog:
+      try await repository.commit(file: "m1.txt", contents: "m1", in: nil)
+      try await repository.git(
+        ["-c", "core.logAllRefUpdates=false", "branch", "topic", "main~1"])
+    }
+  }
 }
 
 extension GitTestRepository {
@@ -73,5 +158,19 @@ extension GitTestRepository {
     let destination = try #require(await probe.defaultBranchTip(projectRootBranch: "main"))
     #expect(destination == (try await branchTip("main")))
     return await probe.mergeStatus(tip: tip, destination: destination)
+  }
+
+  fileprivate func probedMarkInputs(
+    _ branch: String
+  ) async throws -> (status: BranchMergeStatus, onFirstParentChain: Bool?) {
+    let probe = GitBranchMergeProbe(
+      runner: try runner(globalConfig: ""), mergeCache: GitBranchMergeCache())
+    let tip = try #require(await probe.branchTip(branch))
+    let destination = try #require(await probe.defaultBranchTip(projectRootBranch: "main"))
+    #expect(destination == (try await branchTip("main")))
+    return (
+      await probe.mergeStatus(tip: tip, destination: destination),
+      await probe.isOnFirstParentChain(tip: tip, destination: destination)
+    )
   }
 }

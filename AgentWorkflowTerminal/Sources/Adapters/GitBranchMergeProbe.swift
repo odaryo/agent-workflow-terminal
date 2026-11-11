@@ -44,6 +44,35 @@ public struct GitBranchMergeProbe: BranchMergeProbing {
     await judge.judge(tip: tip, destination: destination).status
   }
 
+  public func isOnFirstParentChain(
+    tip: CommitObjectID, destination: CommitObjectID
+  ) async -> Bool? {
+    guard tip != destination else { return true }
+    guard let tipRevision = GitRevision(tip.rawValue),
+      let destinationRevision = GitRevision(destination.rawValue)
+    else { return nil }
+    let output: String
+    do {
+      output = try await judge.runner.run(
+        .firstParentChain(from: destinationRevision, excluding: tipRevision)
+      ).stdout
+    } catch {
+      return nil
+    }
+    return Self.isFirstParent(tip, ofLastLineIn: output)
+  }
+
+  /// 出力が空 (destination が tip の祖先) と親の無い行 (tip が destination の祖先でない) は、
+  /// ancestor でマージ済みと判定した後にしか問わないので起きないはずの形であり、`false` ではなく
+  /// 判定できなかった (`nil`) として扱う。
+  static func isFirstParent(_ tip: CommitObjectID, ofLastLineIn output: String) -> Bool? {
+    guard let line = output.split(separator: "\n").last else { return nil }
+    let fields = line.split(separator: " ", omittingEmptySubsequences: false)
+      .map { CommitObjectID(String($0)) }
+    guard fields.count >= 2, fields.allSatisfy({ $0 != nil }) else { return nil }
+    return fields[1] == tip
+  }
+
   private func resolve(_ revision: GitRevision) async -> CommitObjectID? {
     switch await judge.resolveCommit(revision) {
     case .resolved(let tip): tip

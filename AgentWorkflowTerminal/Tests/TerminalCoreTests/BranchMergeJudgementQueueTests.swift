@@ -62,6 +62,53 @@ struct BranchMergeJudgementQueueTests {
     #expect(await later.value == 3)
     #expect(await trace.began == ["first", "later"])
   }
+
+  /// 上のテストは取り消しの戻りを門を開けた後に読むので、取り消しを順番が来るまで持ち越す実装でも
+  /// 通る。ここでは門を閉じたまま戻りを待つ。戻り値は別の Task で箱に入れて読み、壊れた実装でも
+  /// テストをハングさせない。
+  @Test("先頭が門で止まっている間に取り消された待ちの Task は、門が開く前に nil を返す")
+  func cancelledWaiterReturnsWhileTheHeadIsStillRunning() async throws {
+    let queue = BranchMergeJudgementQueue()
+    let gate = QueueTestGate()
+    let trace = QueueTestTrace()
+    let outcome = QueueTestOutcome()
+
+    let first = Task {
+      await queue.run {
+        await trace.begin("first")
+        await gate.wait()
+        await trace.end()
+        return 1
+      }
+    }
+    try #require(await waitUntil { await trace.began == ["first"] })
+    let waiting = Task {
+      await outcome.record(await queue.run { await trace.runBriefly("cancelled", returning: 2) })
+    }
+    // 列に入る前に取り消すと、順番待ちに入らずに返る経路を測ってしまう。列は外から見えないので、
+    // 入ったことは時間で作る。
+    try await Task.sleep(for: .milliseconds(100))
+    waiting.cancel()
+    let returnedWhileHeadRuns = await waitUntil { await outcome.hasReturned }
+    let valueWhileHeadRuns = await outcome.value
+
+    await gate.open()
+
+    #expect(returnedWhileHeadRuns)
+    #expect(valueWhileHeadRuns == nil)
+    #expect(await first.value == 1)
+    #expect(await trace.began == ["first"])
+  }
+}
+
+private actor QueueTestOutcome {
+  private(set) var hasReturned = false
+  private(set) var value: Int?
+
+  func record(_ value: Int?) {
+    hasReturned = true
+    self.value = value
+  }
 }
 
 private actor QueueTestGate {

@@ -8,6 +8,8 @@ public protocol BranchMergeProbing: Sendable {
   func defaultBranchTip(projectRootBranch: String?) async -> CommitObjectID?
   /// 2つの OID についての判定 (ancestor + squash。設計書 §3.4)。
   func mergeStatus(tip: CommitObjectID, destination: CommitObjectID) async -> BranchMergeStatus
+  /// tip が destination の first-parent の列の上にあるか。読めなければ `nil`。
+  func isOnFirstParentChain(tip: CommitObjectID, destination: CommitObjectID) async -> Bool?
 }
 
 /// 重い判定をアプリ全体で1件ずつ、来た順に回す。未マージの branch の判定は squash 走査が上限に
@@ -82,8 +84,15 @@ public struct MergedWorktreeMarks: Sendable, Equatable {
     let destination: CommitObjectID?
   }
 
+  /// マージ済みの先端は、今見えている先端に絞らずに覚える (一度読めなかった・到達不能や Inactive で
+  /// 一時的に外れただけで忘れると判定し直しになり、squash commit が走査上限より古ければ未マージに
+  /// 落ちる)。そのぶん件数は上限で抑える。
+  static let mergedTipCapacity = 1024
+
   private var tips: [WorktreeIdentity: CommitObjectID] = [:]
   private var mergedTips: Set<CommitObjectID> = []
+  /// 古い順。記録し直した先端は末尾へ移す。
+  private var mergedTipOrder: [CommitObjectID] = []
   private var judgedPairs: [WorktreeIdentity: JudgedPair] = [:]
 
   public init() {}
@@ -94,10 +103,9 @@ public struct MergedWorktreeMarks: Sendable, Equatable {
   }
 
   /// 1周の始めに、読めた先端で現在の状態を置き換える。`tips` に無い worktree (消えた・detached・
-  /// 先端を読めなかった) は忘れる。マージ済みの先端の記憶も、`tips` に現れる先端だけに絞る。
+  /// 先端を読めなかった) は忘れる。マージ済みの先端の記憶は残す。
   public mutating func observeTips(_ tips: [WorktreeIdentity: CommitObjectID]) {
     self.tips = tips
-    mergedTips.formIntersection(tips.values)
     judgedPairs = judgedPairs.filter { tips[$0.key] != nil }
   }
 
@@ -118,9 +126,20 @@ public struct MergedWorktreeMarks: Sendable, Equatable {
   ) {
     switch status {
     case .merged:
-      mergedTips.insert(tip)
+      rememberMergedTip(tip)
     case .unmerged, .unknown, .notApplicable:
       judgedPairs[identity] = JudgedPair(tip: tip, destination: destination)
+    }
+  }
+
+  private mutating func rememberMergedTip(_ tip: CommitObjectID) {
+    if mergedTips.insert(tip).inserted {
+      mergedTipOrder.append(tip)
+    } else if let index = mergedTipOrder.firstIndex(of: tip) {
+      mergedTipOrder.append(mergedTipOrder.remove(at: index))
+    }
+    while mergedTipOrder.count > Self.mergedTipCapacity {
+      mergedTips.remove(mergedTipOrder.removeFirst())
     }
   }
 }
@@ -199,7 +218,7 @@ public actor MergedWorktreeMarkRefresher {
         let probe = probe
         guard
           let judged = await queue.run({
-            await probe.mergeStatus(tip: tip, destination: destination)
+            await Self.markStatus(probe: probe, tip: tip, destination: destination)
           }),
           !Task.isCancelled
         else { return }
@@ -209,6 +228,23 @@ public actor MergedWorktreeMarkRefresher {
       }
       marks.record(status, for: target.identity, tip: tip, destination: destination)
       notifyIfChanged()
+    }
+  }
+
+  /// first-parent の問い合わせは重い判定と同じ1件として列に並べる (別に並べると、その間に別の
+  /// Project の重い判定が割り込む)。先端が既定 branch の first-parent の列の上にあれば、取り込まれた
+  /// 自分の commit が無い (作っただけ・commit なしで追従しただけ) とみなして印を出さない (設計書
+  /// §3.4)。squash の根拠には掛けない —— squash の検出は branch の合成差分が空でないことを既に
+  /// 求めている。`GitBranchMergeCache` には `mergeStatus` の答えだけが入り、Close の答えは変わらない。
+  private static func markStatus(
+    probe: any BranchMergeProbing, tip: CommitObjectID, destination: CommitObjectID
+  ) async -> BranchMergeStatus {
+    let status = await probe.mergeStatus(tip: tip, destination: destination)
+    guard case .merged(.ancestor, _) = status else { return status }
+    switch await probe.isOnFirstParentChain(tip: tip, destination: destination) {
+    case true?: return .unmerged
+    case nil: return .unknown
+    case false?: return status
     }
   }
 

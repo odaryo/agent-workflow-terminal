@@ -2,13 +2,9 @@ import CryptoKit
 import Foundation
 import TerminalCore
 
-/// 過去版の本文に、現在のファイル (`FileContentReader`) と同じ §7.2 の判定を当てる。
-///
-/// `ProcessRunner` は stdout を非失敗デコード済みの `String` でしか返さないため、不正 UTF-8 の
-/// バイトは U+FFFD に置き換わっていて、そのままでは「不正 UTF-8 はバイナリ」の判定も、先頭
-/// 8 KiB の位置での NUL 判定もできない。そこで復号結果を UTF-8 に戻したバイト列から blob の
-/// OID を計算し、git が返した OID と一致したときだけ「元のバイト列そのもの」として扱う。
-/// 一致しなければ置換が起きた = 元は不正 UTF-8 を含んでいたので、バイナリと判定する。
+/// `ProcessRunner` の stdout では不正 UTF-8 が U+FFFD に置換済みで、元のバイト位置は失われる。
+/// OID が一致した場合だけ元のバイト列として扱い、不一致では NUL の元の位置を範囲で判定する。
+/// 先頭 8 KiB 内か決められない場合は binary に留める (設計書 §7.3)。
 enum GitBlobContent {
   /// `byteCount` は `ls-tree` が返した blob の実サイズ。OID が一致しなかった場合、stdout の
   /// バイト数は置換で変わっているので、こちらを使う。
@@ -21,7 +17,9 @@ enum GitBlobContent {
   ) -> FileContentReadResult {
     let data = Data(stdout.utf8)
     guard data.count == byteCount, blobID(of: data, matching: objectID) == objectID else {
-      return result(.binary(byteCount: byteCount), text: nil, thresholds: thresholds)
+      return classifyReplaced(
+        stdout: stdout, data: data, byteCount: byteCount, thresholds: thresholds,
+        confirmation: confirmation)
     }
     let sampleCount = min(byteCount, BinaryFileDetection.sampleByteCount)
     if let sample = BinaryFileSample(
@@ -50,6 +48,38 @@ enum GitBlobContent {
     return FileContentReadResult(
       observation: observation, decision: decision,
       text: decision == .display || confirmation == .confirmed ? text : nil)
+  }
+
+  private static func classifyReplaced(
+    stdout: String,
+    data: Data,
+    byteCount: Int,
+    thresholds: FileViewThresholds,
+    confirmation: FileOpenConfirmation
+  ) -> FileContentReadResult {
+    if isBinaryAfterReplacement(data) {
+      return result(.binary(byteCount: byteCount), text: nil, thresholds: thresholds)
+    }
+    if byteCount > thresholds.maximumByteCount, confirmation == .notConfirmed {
+      return result(.text(byteCount: byteCount, lineCount: nil), text: nil, thresholds: thresholds)
+    }
+    return result(
+      .undecodable(byteCount: byteCount, lineCount: FileContentReader.lineCount(of: data)),
+      text: confirmation == .confirmed
+        ? FileContentText(content: stdout, truncatedAtByteCount: nil) : nil,
+      thresholds: thresholds)
+  }
+
+  private static func isBinaryAfterReplacement(_ data: Data) -> Bool {
+    guard data.range(of: Data([0xEF, 0xBF, 0xBD])) != nil else { return true }
+    guard let nulPosition = data.firstIndex(of: 0) else { return false }
+    if nulPosition < BinaryFileDetection.sampleByteCount { return true }
+    // 正しい U+FFFD と置換された U+FFFD は区別できず、元の NUL 位置を一点には戻せない (§7.3)。
+    let replacementCount = String(decoding: data[..<nulPosition], as: UTF8.self)
+      .unicodeScalars.reduce(into: 0) { count, scalar in
+        if scalar.value == 0xFFFD { count += 1 }
+      }
+    return nulPosition - 2 * replacementCount < BinaryFileDetection.sampleByteCount
   }
 
   /// hash 算法は OID の桁数で選ぶ (SHA-1 は 40 桁、SHA-256 は 64 桁)。

@@ -344,7 +344,7 @@ public struct DiffSnapshotBuilder: Sendable {
         UntrackedFileDiff.fileWithoutContent(path: path, reason: .binary(byteCount: byteCount)),
         false
       )
-    case .text(let byteCount, _):
+    case .text(let byteCount, _), .undecodable(let byteCount, _):
       guard let text = result.text, text.truncatedAtByteCount == nil else {
         return (
           UntrackedFileDiff.fileWithoutContent(path: path, reason: .tooLarge(byteCount: byteCount)),

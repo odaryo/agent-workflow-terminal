@@ -23,9 +23,9 @@ struct FileContentReaderTests {
   }
 
   @Test(
-    "NUL と不正 UTF-8 はバイナリとして本文を返さない",
+    "先頭の NUL はバイナリとして本文を返さない",
     arguments: [
-      Data([65, 0, 66]), Data([0xC3, 0x28]),
+      Data([65, 0, 66]), Data([65, 0, 0xFF]),
     ])
   func detectsBinaryFiles(_ data: Data) throws {
     try withContentFile(data) { url in
@@ -33,6 +33,87 @@ struct FileContentReaderTests {
       #expect(result.observation == .binary(byteCount: data.count))
       #expect(result.text == nil)
       #expect(result.decision.confirmationReasons != nil)
+    }
+  }
+
+  @Test(
+    "NUL のない不正 UTF-8 は確認後に置換復号した本文を返す",
+    arguments: [
+      Data([0xC3, 0x28]),
+      Data(Array(repeating: UInt8(65), count: 107) + [0xE9, 0x0A, 0xE9]),
+    ], [FileOpenConfirmation.notConfirmed, .confirmed])
+  func readsUndecodableContent(_ bytes: Data, confirmation: FileOpenConfirmation) throws {
+    try withContentFile(bytes) { url in
+      let result = try FileContentReader().read(url: url, confirmation: confirmation)
+      let lineCount = bytes.contains(0x0A) ? 2 : 1
+      #expect(result.observation == .undecodable(byteCount: bytes.count, lineCount: lineCount))
+      #expect(result.decision.confirmationReasons?.elements == [.undecodable])
+      if confirmation == .confirmed {
+        let text = try #require(result.text)
+        #expect(text.content == String(decoding: bytes, as: UTF8.self))
+        #expect(text.content.contains("\u{FFFD}"))
+        #expect(text.truncatedAtByteCount == nil)
+      } else {
+        #expect(result.text == nil)
+      }
+    }
+  }
+
+  @Test("先頭 9000 バイトより後ろの不正 UTF-8 も復号できない観測にする")
+  func detectsInvalidUTF8BeyondSample() throws {
+    let bytes =
+      Data(repeating: 65, count: 9_000) + Data([0xFF, 0xFE]) + Data(repeating: 65, count: 10)
+    try withContentFile(bytes) { url in
+      let result = try FileContentReader().read(url: url)
+      #expect(result.observation == .undecodable(byteCount: 9_012, lineCount: 1))
+      #expect(result.decision.confirmationReasons?.elements == [.undecodable])
+      #expect(result.text == nil)
+    }
+  }
+
+  @Test("サイズ超過の不正 UTF-8 は確認後に復号できない観測と本文を返す")
+  func readsLargeUndecodableContentAfterConfirmation() throws {
+    let bytes = Data(Array(repeating: UInt8(65), count: 107) + [0xE9, 0x0A, 0xE9])
+    try withContentFile(bytes) { url in
+      let thresholds = FileViewThresholds(maximumByteCount: 100, maximumLineCount: 50_000)
+      let pending = try FileContentReader().read(url: url, thresholds: thresholds)
+      #expect(pending.observation == .text(byteCount: 110, lineCount: nil))
+      #expect(pending.text == nil)
+      #expect(
+        pending.decision.confirmationReasons?.elements == [.byteCount(actual: 110, maximum: 100)])
+
+      let confirmed = try FileContentReader().read(
+        url: url, thresholds: thresholds, confirmation: .confirmed)
+      #expect(confirmed.observation == .undecodable(byteCount: 110, lineCount: 2))
+      #expect(
+        confirmed.decision.confirmationReasons?.elements
+          == [.undecodable, .byteCount(actual: 110, maximum: 100)])
+      let text = try #require(confirmed.text)
+      #expect(text.content == String(decoding: bytes, as: UTF8.self))
+      #expect(text.truncatedAtByteCount == nil)
+    }
+  }
+
+  @Test(
+    "打ち切った不正 UTF-8 は不完全な末尾だけ落とし、不正バイトは置換して残す",
+    arguments: [
+      ([UInt8(0xFF), 65, 0xE3, 0x81, 0x82], 2, "\u{FFFD}A"),
+      ([UInt8(65), 65, 65, 0xFF, 65], 4, "AAA\u{FFFD}"),
+    ])
+  func truncatesUndecodableContent(
+    bytes: [UInt8], expectedByteCount: Int, expectedContent: String
+  ) throws {
+    try withContentFile(Data(bytes)) { url in
+      let result = try FileContentReader().read(
+        url: url,
+        thresholds: FileViewThresholds(
+          maximumByteCount: 1, maximumLineCount: 50_000, absoluteMaximumByteCount: 4),
+        confirmation: .confirmed)
+      #expect(result.observation == .undecodable(byteCount: bytes.count, lineCount: nil))
+      let text = try #require(result.text)
+      #expect(text.content == expectedContent)
+      #expect(text.truncatedAtByteCount == expectedByteCount)
+      #expect(text.content.hasSuffix("\u{FFFD}") == (expectedByteCount == 4))
     }
   }
 

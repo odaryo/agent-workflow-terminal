@@ -71,6 +71,22 @@ struct FileViewingTests {
       ])
   }
 
+  @Test(
+    "復号できない観測はサイズと行数の理由より先に確認を求める",
+    arguments: [
+      (10, 1, [FileOpenConfirmationReason.undecodable]),
+      (101, 1, [.undecodable, .byteCount(actual: 101, maximum: 100)]),
+      (10, 11, [.undecodable, .lineCount(actual: 11, maximum: 10)]),
+    ])
+  func confirmsUndecodableContent(
+    byteCount: Int, lineCount: Int, expectedReasons: [FileOpenConfirmationReason]
+  ) {
+    let decision = FileOpenDecision.decide(
+      observation: .undecodable(byteCount: byteCount, lineCount: lineCount),
+      thresholds: FileViewThresholds(maximumByteCount: 100, maximumLineCount: 10))
+    #expect(decision.confirmationReasons?.elements == expectedReasons)
+  }
+
   @Test("閾値ちょうどはそのまま表示する")
   func allowsValuesAtThresholds() {
     let decision = FileOpenDecision.decide(

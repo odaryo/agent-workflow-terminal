@@ -65,7 +65,7 @@ public struct FileContentReader: Sendable {
     self.openRegularFile = openRegularFile
   }
 
-  /// 不正な UTF-8 をバイナリと見なす判定は、実際に読んだ範囲にしか及ばない。警告閾値を超えていて
+  /// UTF-8 の妥当性の判定は、実際に読んだ範囲にしか及ばない。警告閾値を超えていて
   /// `confirmation` が `.notConfirmed` の場合は本文を読まないため、そのファイルがテキストか
   /// どうかは先頭 8 KiB の NUL 判定までしか分かっていない。
   public func read(
@@ -174,17 +174,18 @@ public struct FileContentReader: Sendable {
       throw FileContentReaderError.fileChanged(
         expected: limit, actual: Self.byteCount(of: handle, atLeast: limit + excess.count))
     }
-    // 設計書に文字コード推測の要求が無いため、不正 UTF-8 は別 encoding ではなく binary とする。
-    guard let decoded = Self.decodeUTF8(data, droppingIncompleteTail: isTruncated) else {
-      return result(observation: .binary(byteCount: byteCount), text: nil, thresholds: thresholds)
-    }
+    let decodingData = isTruncated ? Self.droppingIncompleteUTF8Tail(data) : data
+    let decoded = String(data: decodingData, encoding: .utf8)
     // 打ち切った場合の行数は数えていない。0 や部分値に丸めない (§12.3)。
     let lineCount = isTruncated ? nil : Self.lineCount(of: data)
-    let observation = FileViewObservation.text(byteCount: byteCount, lineCount: lineCount)
+    let observation: FileViewObservation =
+      decoded == nil
+      ? .undecodable(byteCount: byteCount, lineCount: lineCount)
+      : .text(byteCount: byteCount, lineCount: lineCount)
     let decision = FileOpenDecision.decide(observation: observation, thresholds: thresholds)
     let text = FileContentText(
-      content: decoded.text,
-      truncatedAtByteCount: isTruncated ? decoded.byteCount : nil)
+      content: decoded ?? String(decoding: decodingData, as: UTF8.self),
+      truncatedAtByteCount: isTruncated ? decodingData.count : nil)
     return FileContentReadResult(
       observation: observation,
       decision: decision,
@@ -213,18 +214,38 @@ public struct FileContentReader: Sendable {
     return max(Int(info.st_size), lowerBound)
   }
 
-  /// 絶対上限は文字境界を無視して切るため、末尾に不完全な UTF-8 列が残り得る。これを不正 UTF-8 =
-  /// バイナリと見なすと、打ち切りだけを理由に本文を失う。UTF-8 の1文字は最長 4 バイト。
   static func decodeUTF8(
     _ data: Data, droppingIncompleteTail: Bool
   ) -> (text: String, byteCount: Int)? {
-    if let text = String(data: data, encoding: .utf8) { return (text, data.count) }
-    guard droppingIncompleteTail else { return nil }
-    for dropped in 1...3 where dropped <= data.count {
-      let candidate = data.dropLast(dropped)
-      if let text = String(data: candidate, encoding: .utf8) { return (text, candidate.count) }
+    let candidate = droppingIncompleteTail ? droppingIncompleteUTF8Tail(data) : data
+    guard let text = String(data: candidate, encoding: .utf8) else { return nil }
+    return (text, candidate.count)
+  }
+
+  // 打ち切りで欠けた列だけを落とす。不正な末尾まで落とすと、置換して残すべきバイトを失う (§7.2)。
+  private static func droppingIncompleteUTF8Tail(_ data: Data) -> Data {
+    let tail = Array(data.suffix(3))
+    guard let start = tail.lastIndex(where: { $0 & 0xC0 != 0x80 }) else { return data }
+    let lead = tail[start]
+    let length: Int
+    switch lead {
+    case 0xC2...0xDF: length = 2
+    case 0xE0...0xEF: length = 3
+    case 0xF0...0xF4: length = 4
+    default: return data
     }
-    return nil
+    let suffix = tail[start...]
+    guard suffix.count < length else { return data }
+    if suffix.count > 1 {
+      let second = tail[start + 1]
+      switch lead {
+      case 0xE0 where second < 0xA0, 0xED where second > 0x9F,
+        0xF0 where second < 0x90, 0xF4 where second > 0x8F:
+        return data
+      default: break
+      }
+    }
+    return Data(data.dropLast(suffix.count))
   }
 
   static func lineCount(of data: Data) -> Int {

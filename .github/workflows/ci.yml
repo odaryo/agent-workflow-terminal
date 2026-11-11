@@ -57,6 +57,9 @@ jobs:
           swift --version
           echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
+      - name: Set source mtimes from content
+        run: python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" .
+
       - name: Restore build cache
         id: build-cache
         uses: actions/cache/restore@v4

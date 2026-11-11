@@ -152,7 +152,8 @@ extension GitTestRepository {
   /// 先端は製品とは別の経路 (`branchTip`: `log --format=%H`) で読んだ値と突き合わせる。
   fileprivate func probedMergeStatus(_ branch: String) async throws -> BranchMergeStatus {
     let probe = GitBranchMergeProbe(
-      runner: try runner(globalConfig: ""), mergeCache: GitBranchMergeCache())
+      runner: try runner(globalConfig: "", ignoresHistoryRewrites: true),
+      mergeCache: GitBranchMergeCache())
     let tip = try #require(await probe.branchTip(branch))
     #expect(tip == (try await branchTip(branch)))
     let destination = try #require(await probe.defaultBranchTip(projectRootBranch: "main"))
@@ -164,7 +165,8 @@ extension GitTestRepository {
     _ branch: String
   ) async throws -> (status: BranchMergeStatus, onFirstParentChain: Bool?) {
     let probe = GitBranchMergeProbe(
-      runner: try runner(globalConfig: ""), mergeCache: GitBranchMergeCache())
+      runner: try runner(globalConfig: "", ignoresHistoryRewrites: true),
+      mergeCache: GitBranchMergeCache())
     let tip = try #require(await probe.branchTip(branch))
     let destination = try #require(await probe.defaultBranchTip(projectRootBranch: "main"))
     #expect(destination == (try await branchTip("main")))

@@ -252,6 +252,14 @@ if [[ "$AWT_TEST_MODE" == argument-error ]]; then
   printf '%s\n' 'invalid arguments' >&2
   exit 2
 fi
+if [[ "$AWT_TEST_MODE" == wait-release ]]; then
+  touch "$AWT_TEST_DIR/hostctl-started"
+  for ((attempt = 0; attempt < 100; attempt++)); do
+    [[ ! -e "$AWT_TEST_DIR/hostctl-release" ]] || break
+    sleep 0.1
+  done
+  exit 2
+fi
 printf 'sent\n' >>"$AWT_TEST_DIR/sends"
 printf '%s\0%s\0%s\0%s\0' "$from_pane_set" "$from_pane" "$purpose_set" "$purpose" >"$AWT_TEST_DIR/last-send"
 if [[ "$AWT_TEST_MODE" == unavailable ]]; then
@@ -925,6 +933,77 @@ group_purpose_no_mktemp() {
   expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
 }
 
+group_tempfile_signal() {
+  local signal="$1" want="$2" label="$1 で一時ファイルを消して終了する"
+  local handoff_pid attempt temp_file temp_count=0 ready=1 rc=0
+  mkdir "$AWT_TEST_DIR/tmp"
+  pane_env=(TMUX_PANE=%22 TMPDIR="$AWT_TEST_DIR/tmp")
+  AWT_TEST_MODE=wait-release
+  # job control 無しの & は SIGINT を無視して起動するので、exec の前に既定へ戻す。
+  python3 -I -c 'import os,signal,sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' \
+    env "${pane_env[@]}" TMUX="$socket_path,0,0" AWT_HOSTCTL=/missing/hostctl AWT_HOSTCTL_SOCKET=wrong-socket \
+    "$HANDOFF" --directory "$AWT_TEST_DIR" --prompt tempfile-signal \
+    >"$AWT_TEST_DIR/stdout" 2>"$AWT_TEST_DIR/stderr" &
+  handoff_pid=$!
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    [[ ! -e "$AWT_TEST_DIR/hostctl-started" ]] || break
+    kill -0 "$handoff_pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  checked=$((checked + 1))
+  if [[ -e "$AWT_TEST_DIR/hostctl-started" ]]; then
+    info "OK: $label (hostctl の開始を確認した)"
+  else
+    ng "$label: hostctl が上限内に開始しませんでした"
+    ready=0
+  fi
+  for temp_file in "$AWT_TEST_DIR/tmp"/awt-handoff.*; do
+    [[ ! -e "$temp_file" ]] || temp_count=$((temp_count + 1))
+  done
+  checked=$((checked + 1))
+  if [[ "$temp_count" -eq 1 ]]; then
+    info "OK: $label (シグナル前の awt-handoff.* は1つ)"
+  else
+    ng "$label: シグナル前の awt-handoff.* は $temp_count 個です (期待: 1)"
+    ready=0
+  fi
+  if [[ "$ready" -eq 1 ]]; then
+    if ! kill -"$signal" "$handoff_pid"; then
+      checked=$((checked + 1))
+      ng "$label: シグナルを送れませんでした"
+      ready=0
+    fi
+  fi
+  # 前景の hostctl が終わるまで trap は遅れるので、失敗時も release してから回収する。
+  touch "$AWT_TEST_DIR/hostctl-release"
+  wait "$handoff_pid" || rc=$?
+  [[ "$ready" -eq 1 ]] || return 0
+
+  checked=$((checked + 1))
+  if [[ "$rc" -eq "$want" ]]; then
+    info "OK (exit $rc): $label"
+  else
+    ng "$label: exit $rc (期待: $want)"
+  fi
+  temp_count=0
+  for temp_file in "$AWT_TEST_DIR/tmp"/awt-handoff.*; do
+    [[ ! -e "$temp_file" ]] || temp_count=$((temp_count + 1))
+  done
+  checked=$((checked + 1))
+  if [[ "$temp_count" -eq 0 ]]; then
+    info "OK: $label (awt-handoff.* は残っていない)"
+  else
+    ng "$label: awt-handoff.* が $temp_count 個残っています"
+  fi
+  expect_hostctl_calls "$label" %22
+  checked=$((checked + 1))
+  if [[ ! -e "$AWT_TEST_DIR/sends" ]]; then
+    info "OK: $label (送信していない)"
+  else
+    ng "$label: 送信されています"
+  fi
+}
+
 # bash 3.2 の ERR trap の中の $LINENO は、関数の定義行など失敗した行ではない値を返すので出さない。
 # 呼び出しの連鎖の行番号 (BASH_LINENO) は正しい。
 record_stop() {
@@ -1100,6 +1179,9 @@ done
 start_group purpose-valid-1 group_purpose_valid 1 "$long_purpose"
 start_group purpose-valid-2 group_purpose_valid 2 "$quoted_purpose"
 start_group purpose-no-mktemp group_purpose_no_mktemp
+start_group tempfile-int group_tempfile_signal INT 130
+start_group tempfile-term group_tempfile_signal TERM 143
+start_group tempfile-hup group_tempfile_signal HUP 129
 
 wait_running_groups
 report_groups

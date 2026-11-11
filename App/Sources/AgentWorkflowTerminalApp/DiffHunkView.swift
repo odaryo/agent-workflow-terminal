@@ -147,6 +147,10 @@ private struct DiffLineRow: View {
         }
       }
       .contextMenu {
+        Button("この行をコピー") {
+          NSPasteboard.general.clearContents()
+          NSPasteboard.general.setString(line.text, forType: .string)
+        }
         Button("選択を解除") { model.clearLineSelection() }
       }
   }
@@ -161,7 +165,7 @@ private struct DiffLineRow: View {
       // コメントを付ける行を選べなくなる** (実測: 同じビルドでこの修飾子を外すだけで、
       // 同じ座標への HID クリックが `選択中: … new 41` へ変わった。行番号の桁を狙っても
       // 付いている間は無反応で、テキストの上だけの現象ではない)。§9.2 の行選択を優先し、
-      // マウスでの本文コピーは落としている。
+      // 本文コピーは行の右クリックの「この行をコピー」と、コメント欄の「選択した行をコピー」で行う。
       Text(line.kind.sign + line.text + (line.isMissingTrailingNewline ? " (改行なし)" : ""))
         .font(.system(.caption, design: .monospaced))
         .fixedSize(horizontal: true, vertical: false)

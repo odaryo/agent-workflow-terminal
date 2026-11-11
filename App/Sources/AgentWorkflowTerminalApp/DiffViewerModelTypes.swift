@@ -33,6 +33,15 @@ extension DiffViewerModel {
     return lineSelection.range.lineNumbers.contains(line)
   }
 
+  var selectedLinesText: String? {
+    guard let lineSelection else { return nil }
+    return currentSnapshot?.commentAnchor(
+      origin: lineSelection.file.origin,
+      path: lineSelection.file.path,
+      side: lineSelection.side,
+      lines: lineSelection.range)?.anchoredText
+  }
+
   var currentSnapshot: DiffSnapshot? {
     guard let currentSnapshotID else { return history.latest }
     return history.snapshot(currentSnapshotID)

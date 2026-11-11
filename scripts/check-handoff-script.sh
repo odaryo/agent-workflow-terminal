@@ -277,7 +277,8 @@ if [[ "$AWT_TEST_MODE" == argument-error ]]; then
   printf '%s\n' 'invalid arguments' >&2
   exit 2
 fi
-if [[ "$AWT_TEST_MODE" == wait-release ]]; then
+if [[ "$AWT_TEST_MODE" == wait-release ||
+  ( "$AWT_TEST_MODE" == wait-release-no-prompt && "$from_pane_set" -eq 1 ) ]]; then
   touch "$AWT_TEST_DIR/hostctl-started"
   for ((attempt = 0; attempt < 100; attempt++)); do
     [[ ! -e "$AWT_TEST_DIR/hostctl-release" ]] || break
@@ -305,7 +306,7 @@ case "$AWT_TEST_MODE" in
     done
     [[ -e "$AWT_TEST_DIR/screen-stop.ready" ]] || exit 1
     ;;
-  no-prompt)
+  no-prompt | wait-release-no-prompt)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 /bin/sleep 600
     ;;
   prompt-command)
@@ -1065,62 +1066,160 @@ group_purpose_no_mktemp() {
   expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
 }
 
-group_tempfile_signal() {
-  local signal="$1" want="$2" label="$1 で一時ファイルを消して終了する"
-  local handoff_pid attempt temp_file temp_count=0 ready=1 rc=0
-  mkdir "$AWT_TEST_DIR/tmp"
-  pane_env=(TMUX_PANE=%22 TMPDIR="$AWT_TEST_DIR/tmp")
-  AWT_TEST_MODE=wait-release
-  # job control 無しの & は SIGINT を無視して起動するので、exec の前に既定へ戻す。
-  python3 -I -c 'import os,signal,sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' \
+# bash の wait はシグナル死と exit 128+n に同じ値を返すので、python の親の returncode (シグナル死なら負) で見分ける。
+# job control 無しの & は SIGINT を無視して起動するので、Popen の前に既定へ戻す。env は exec するので、Popen の pid が
+# handoff の bash 本体の pid になる。読む側が書きかけを読まないよう、pid と returncode は一時名から os.replace する。
+start_handoff() {
+  rm -f "$AWT_TEST_DIR/handoff-pid" "$AWT_TEST_DIR/handoff-rc"
+  python3 -I -c '
+import os
+import signal
+import subprocess
+import sys
+
+
+def publish(path, value):
+    temp = path + ".tmp"
+    with open(temp, "w") as file:
+        file.write(f"{value}\n")
+    os.replace(temp, path)
+
+
+signal.signal(signal.SIGINT, signal.SIG_DFL)
+child = subprocess.Popen(sys.argv[3:])
+publish(sys.argv[1], child.pid)
+publish(sys.argv[2], child.wait())
+' "$AWT_TEST_DIR/handoff-pid" "$AWT_TEST_DIR/handoff-rc" \
     env "${pane_env[@]}" TMUX="$socket_path,0,0" AWT_HOSTCTL=/missing/hostctl AWT_HOSTCTL_SOCKET=wrong-socket \
-    "$HANDOFF" --directory "$AWT_TEST_DIR" --prompt tempfile-signal \
-    >"$AWT_TEST_DIR/stdout" 2>"$AWT_TEST_DIR/stderr" &
-  handoff_pid=$!
+    "$HANDOFF" "$@" >"$AWT_TEST_DIR/stdout" 2>"$AWT_TEST_DIR/stderr" &
+  handoff_parent=$!
+}
+
+wait_for_file() {
+  local path="$1" attempts="$2" attempt
+  for ((attempt = 0; attempt < attempts; attempt++)); do
+    [[ ! -s "$path" ]] || return 0
+    sleep 0.1
+  done
+  [[ ! -s "$path" ]] || return 0
+  return 1
+}
+
+read_handoff_pid() {
+  wait_for_file "$AWT_TEST_DIR/handoff-pid" 50 || return 1
+  handoff_pid=$(cat "$AWT_TEST_DIR/handoff-pid") || handoff_pid=""
+  [[ ! "$handoff_pid" =~ ^[0-9]+$ ]] || return 0
+  handoff_pid=""
+  return 1
+}
+
+# 親が returncode を書いた後は、pid が再利用されうるので kill -0 に頼らない。
+handoff_alive() {
+  [[ -n "$handoff_pid" && ! -e "$AWT_TEST_DIR/handoff-rc" ]] || return 1
+  kill -0 "$handoff_pid" 2>/dev/null || return 1
+  return 0
+}
+
+# 上限内に returncode が書かれなければ handoff を、それでも書かれなければ親を止めて回収し、1 を返す。
+# 親を wait で回収するので、止めずに待つと上限の無い待ちになる。
+reap_handoff() {
+  local attempts="$1"
+  if wait_for_file "$AWT_TEST_DIR/handoff-rc" "$attempts"; then
+    wait "$handoff_parent" 2>/dev/null || true
+    return 0
+  fi
+  [[ -z "$handoff_pid" ]] || kill -KILL "$handoff_pid" 2>/dev/null || true
+  wait_for_file "$AWT_TEST_DIR/handoff-rc" 20 || kill -KILL "$handoff_parent" 2>/dev/null || true
+  wait "$handoff_parent" 2>/dev/null || true
+  return 1
+}
+
+expect_handoff_pid() {
+  local label="$1"
+  checked=$((checked + 1))
+  if read_handoff_pid; then
+    info "OK: $label (handoff の pid を読めた)"
+    return 0
+  fi
+  ng "$label: handoff の pid を上限内に読めませんでした"
+  return 1
+}
+
+# wait-release の偽 hostctl は、どの段でも hostctl-release を待つ間 hostctl-started を作っている。
+expect_hostctl_started() {
+  local label="$1" attempt
   for ((attempt = 0; attempt < 50; attempt++)); do
-    [[ ! -e "$AWT_TEST_DIR/hostctl-started" ]] || break
-    kill -0 "$handoff_pid" 2>/dev/null || break
+    [[ ! -e "$AWT_TEST_DIR/hostctl-started" && ! -e "$AWT_TEST_DIR/handoff-rc" ]] || break
     sleep 0.1
   done
   checked=$((checked + 1))
   if [[ -e "$AWT_TEST_DIR/hostctl-started" ]]; then
     info "OK: $label (hostctl の開始を確認した)"
-  else
-    ng "$label: hostctl が上限内に開始しませんでした"
-    ready=0
+    return 0
   fi
+  ng "$label: hostctl が上限内に開始しませんでした"
+  return 1
+}
+
+# 呼び出し側の local の temp_count に数を、temp_path に最後に見つけたパスを入れる。
+count_handoff_temp_files() {
+  local temp_file
+  temp_count=0
+  temp_path=""
   for temp_file in "$AWT_TEST_DIR/tmp"/awt-handoff.*; do
-    [[ ! -e "$temp_file" ]] || temp_count=$((temp_count + 1))
+    if [[ -e "$temp_file" ]]; then
+      temp_count=$((temp_count + 1))
+      temp_path="$temp_file"
+    fi
   done
-  checked=$((checked + 1))
-  if [[ "$temp_count" -eq 1 ]]; then
-    info "OK: $label (シグナル前の awt-handoff.* は1つ)"
-  else
-    ng "$label: シグナル前の awt-handoff.* は $temp_count 個です (期待: 1)"
-    ready=0
+}
+
+# want は親が書く returncode で、シグナル死なら -<シグナル番号> になる。
+group_tempfile_signal() {
+  local signal="$1" want="$2" label="$1 で一時ファイルを消して、同じシグナルで終了する"
+  local handoff_parent="" handoff_pid="" temp_path="" temp_count=0 ready=1 rc
+  mkdir "$AWT_TEST_DIR/tmp"
+  pane_env=(TMUX_PANE=%22 TMPDIR="$AWT_TEST_DIR/tmp")
+  AWT_TEST_MODE=wait-release
+  start_handoff --directory "$AWT_TEST_DIR" --prompt tempfile-signal
+  expect_handoff_pid "$label" || ready=0
+  if [[ "$ready" -eq 1 ]]; then
+    expect_hostctl_started "$label" || ready=0
   fi
   if [[ "$ready" -eq 1 ]]; then
-    if ! kill -"$signal" "$handoff_pid"; then
-      checked=$((checked + 1))
-      ng "$label: シグナルを送れませんでした"
+    count_handoff_temp_files
+    checked=$((checked + 1))
+    if [[ "$temp_count" -eq 1 ]]; then
+      info "OK: $label (シグナル前の awt-handoff.* は1つ)"
+    else
+      ng "$label: シグナル前の awt-handoff.* は $temp_count 個です (期待: 1)"
       ready=0
     fi
   fi
+  if [[ "$ready" -eq 1 ]] && ! kill -"$signal" "$handoff_pid"; then
+    checked=$((checked + 1))
+    ng "$label: シグナルを送れませんでした"
+    ready=0
+  fi
   # 前景の hostctl が終わるまで trap は遅れるので、失敗時も release してから回収する。
   touch "$AWT_TEST_DIR/hostctl-release"
-  wait "$handoff_pid" || rc=$?
+  checked=$((checked + 1))
+  if reap_handoff 100; then
+    info "OK: $label (handoff は上限内に終わった)"
+  else
+    ng "$label: handoff が上限内に終わりませんでした"
+    ready=0
+  fi
   [[ "$ready" -eq 1 ]] || return 0
 
+  rc=$(cat "$AWT_TEST_DIR/handoff-rc")
   checked=$((checked + 1))
-  if [[ "$rc" -eq "$want" ]]; then
-    info "OK (exit $rc): $label"
+  if [[ "$rc" == "$want" ]]; then
+    info "OK (returncode $rc): $label"
   else
-    ng "$label: exit $rc (期待: $want)"
+    ng "$label: returncode $rc (期待: ${want}。負の値はシグナル死)"
   fi
-  temp_count=0
-  for temp_file in "$AWT_TEST_DIR/tmp"/awt-handoff.*; do
-    [[ ! -e "$temp_file" ]] || temp_count=$((temp_count + 1))
-  done
+  count_handoff_temp_files
   checked=$((checked + 1))
   if [[ "$temp_count" -eq 0 ]]; then
     info "OK: $label (awt-handoff.* は残っていない)"
@@ -1128,12 +1227,95 @@ group_tempfile_signal() {
     ng "$label: awt-handoff.* が $temp_count 個残っています"
   fi
   expect_hostctl_calls "$label" %22
-  checked=$((checked + 1))
-  if [[ ! -e "$AWT_TEST_DIR/sends" ]]; then
-    info "OK: $label (送信していない)"
-  else
-    ng "$label: 送信されています"
+}
+
+# rm の後に trap を既定へ戻したかは、終了コードでは見分けられない。戻した bash の TERM / HUP は既定の動作で死に、
+# 戻さなくても handler が同じシグナルで死に直す。INT は前景の子を待つ間は受け流されるので、終了コードが時機で変わる。
+# そこで handler の rm を観測する。handoff が自分で消した一時ファイルを置き直してからシグナルを送り、残っていれば
+# handler は走っていない。
+group_tempfile_trap_reset() {
+  local signal="$1" label="rm の後の $1 では一時ファイルの handler を走らせない"
+  local handoff_parent="" handoff_pid="" temp_path="" temp_count=0 attempt calls=0 ready=1
+  mkdir "$AWT_TEST_DIR/tmp"
+  pane_env=(TMUX_PANE=%22 TMPDIR="$AWT_TEST_DIR/tmp")
+  AWT_TEST_MODE=wait-release-no-prompt
+  AWT_TEST_SESSION=$(basename -- "$AWT_TEST_DIR")
+  start_handoff --directory "$AWT_TEST_DIR" --prompt tempfile-reset
+  expect_handoff_pid "$label" || ready=0
+  if [[ "$ready" -eq 1 ]]; then
+    expect_hostctl_started "$label" || ready=0
   fi
+  if [[ "$ready" -eq 1 ]]; then
+    count_handoff_temp_files
+    checked=$((checked + 1))
+    if [[ "$temp_count" -eq 1 ]]; then
+      info "OK: $label (--from-pane の段の awt-handoff.* は1つ)"
+    else
+      ng "$label: --from-pane の段の awt-handoff.* は $temp_count 個です (期待: 1)"
+      ready=0
+    fi
+  fi
+  touch "$AWT_TEST_DIR/hostctl-release"
+  if [[ "$ready" -eq 1 ]]; then
+    for ((attempt = 0; attempt < 100; attempt++)); do
+      calls=0
+      [[ ! -f "$AWT_TEST_DIR/calls" ]] || calls=$(wc -l <"$AWT_TEST_DIR/calls" | tr -d ' ')
+      [[ -e "$temp_path" || "$calls" -ne 2 ]] || break
+      [[ ! -e "$AWT_TEST_DIR/handoff-rc" ]] || break
+      sleep 0.1
+    done
+    checked=$((checked + 1))
+    if [[ ! -e "$temp_path" && "$calls" -eq 2 ]]; then
+      info "OK: $label (handoff が一時ファイルを消し、hostctl を2回呼んだ)"
+    else
+      ng "$label: 上限内に一時ファイルが消えて hostctl が2回呼ばれる状態になりませんでした (呼び出し $calls 回)"
+      ready=0
+    fi
+  fi
+  if [[ "$ready" -eq 1 ]]; then
+    # rm と trap の戻しの間に撃つと、正しい版でも handler が走る。
+    sleep 0.5
+    checked=$((checked + 1))
+    # プロンプト待ちに入っていなければ、シグナルを送っても handler の有無を観測できない。
+    if handoff_alive; then
+      info "OK: $label (handoff はプロンプト待ちで生きている)"
+    else
+      ng "$label: handoff がプロンプト待ちの前に終わっています"
+      ready=0
+    fi
+  fi
+  if [[ "$ready" -eq 1 ]]; then
+    : >"$temp_path"
+    if ! kill -"$signal" "$handoff_pid"; then
+      checked=$((checked + 1))
+      ng "$label: シグナルを送れませんでした"
+      ready=0
+    fi
+  fi
+  if [[ "$ready" -eq 1 ]]; then
+    # handler は前景の子 (sleep 0.2 や tmux / ps) が終わるまで遅れる。INT の正しい版は受け流してプロンプト待ちを
+    # 続けるので、上限に達しても NG にしない。
+    wait_for_file "$AWT_TEST_DIR/handoff-rc" 50 || true
+    checked=$((checked + 1))
+    if [[ -e "$temp_path" ]]; then
+      info "OK: $label (置き直したファイルが残った)"
+    else
+      ng "$label: 置き直したファイルが消えました (trap が既定へ戻っていません)"
+    fi
+  fi
+  # プロンプト待ち (最大 15 秒) を待たない。
+  if handoff_alive; then
+    kill -TERM "$handoff_pid" 2>/dev/null || true
+  fi
+  checked=$((checked + 1))
+  if reap_handoff 50; then
+    info "OK: $label (handoff は上限内に終わった)"
+  else
+    ng "$label: handoff が上限内に終わりませんでした"
+    ready=0
+  fi
+  [[ "$ready" -eq 1 ]] || return 0
+  expect_hostctl_calls "$label" %22 ''
 }
 
 # bash 3.2 の ERR trap の中の $LINENO は、関数の定義行など失敗した行ではない値を返すので出さない。
@@ -1302,6 +1484,9 @@ start_group literal-command group_literal_command
 start_group gone group_gone
 start_group changing-screen group_changing_screen
 start_group no-prompt group_no_prompt
+start_group tempfile-reset-int group_tempfile_trap_reset INT
+start_group tempfile-reset-term group_tempfile_trap_reset TERM
+start_group tempfile-reset-hup group_tempfile_trap_reset HUP
 start_group success group_success
 start_group exec-agent group_exec_agent
 start_group from-pane-valid group_from_pane %22 'TMUX_PANE を --from-pane で渡す' %22
@@ -1330,9 +1515,9 @@ done
 start_group purpose-valid-1 group_purpose_valid 1 "$long_purpose"
 start_group purpose-valid-2 group_purpose_valid 2 "$quoted_purpose"
 start_group purpose-no-mktemp group_purpose_no_mktemp
-start_group tempfile-int group_tempfile_signal INT 130
-start_group tempfile-term group_tempfile_signal TERM 143
-start_group tempfile-hup group_tempfile_signal HUP 129
+start_group tempfile-int group_tempfile_signal INT -2
+start_group tempfile-term group_tempfile_signal TERM -15
+start_group tempfile-hup group_tempfile_signal HUP -1
 
 wait_running_groups
 report_groups

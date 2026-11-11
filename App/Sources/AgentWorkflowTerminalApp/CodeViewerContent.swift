@@ -186,6 +186,9 @@ enum FileViewText {
     case .text(let byteCount, let lineCount):
       // 行数を数えていない場合がある。0 行と書かない (§12.3)。
       lineCount.map { "\(byteCount) バイト / \($0) 行" } ?? "\(byteCount) バイト"
+    case .undecodable(let byteCount, let lineCount):
+      "UTF-8 で復号できない / "
+        + (lineCount.map { "\(byteCount) バイト / \($0) 行" } ?? "\(byteCount) バイト")
     }
   }
 
@@ -193,6 +196,8 @@ enum FileViewText {
     switch reason {
     case .binary(let byteCount):
       "バイナリです (\(byteCount) バイト)"
+    case .undecodable:
+      "UTF-8 で復号できません。不正なバイトは U+FFFD (�) に置き換えて表示します"
     case .byteCount(let actual, let maximum):
       "サイズが閾値を超えています (\(actual) バイト > \(maximum) バイト)"
     case .lineCount(let actual, let maximum):

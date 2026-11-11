@@ -46,6 +46,26 @@ struct DiffSnapshotBuilderIntegrationTests {
     }
   }
 
+  @Test("untracked の latin1 は置換済みの本文で全行追加になる", .timeLimit(.minutes(1)))
+  func synthesizesUndecodableUntrackedFile() async throws {
+    try await withGitRepository { repository in
+      let root = repository.mainWorktree
+      let bytes = Data(Array("caf".utf8) + [0xE9, 0x0A] + Array("fin".utf8) + [0xE9, 0x0A])
+      try bytes.write(to: root.appending(path: "latin1.txt"))
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: root, processRunner: FoundationProcessRunner())
+      let result = try await builder.build(
+        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date())
+      let file = try #require(result.snapshot.file(origin: .untracked, path: "latin1.txt"))
+      let lines = file.hunks.flatMap(\.lines)
+      let expected = String(decoding: bytes, as: UTF8.self)
+        .split(separator: "\n", omittingEmptySubsequences: false).dropLast().map(String.init)
+      #expect(lines.count == 2)
+      #expect(lines.allSatisfy { $0.kind == .added })
+      #expect(lines.map(\.text) == expected)
+    }
+  }
+
   @Test("同じファイルが2つの出所に出ても hunk をマージしない", .timeLimit(.minutes(1)))
   func keepsSameFileInBothOrigins() async throws {
     try await withGitRepository { repository in

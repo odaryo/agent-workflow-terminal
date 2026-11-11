@@ -6,8 +6,8 @@ public enum TmuxWorktreePaneSourceError: Error, Sendable, Equatable {
 }
 
 /// 全 worktree の pane 一覧を `list-panes -a` 1回にまとめ、その結果を読み取りの失敗も含めて
-/// 短い TTL の間だけ共有する (Issue #239 R3、失敗の共有は #781)。worktree ごとに `-t <session>` で撃つと、外部プロセス起動が worktree 数に
-/// 線形に増える。
+/// 短い TTL の間だけ共有する (Issue #239 R3、失敗の共有は #781)。worktree ごとに
+/// `-t <session>` で撃つと、外部プロセス起動が worktree 数に線形に増える。
 ///
 /// - Important: TTL は呼び出し側の pane 一覧の再取得周期の**半分以下**を渡す。周期に近い値だと
 ///   位相のずれた worktree の poll が畳めないまま、pane 集合の鮮度だけが落ちる。
@@ -85,8 +85,8 @@ actor TmuxAllSessionPaneListCache {
   private func complete(_ outcome: ReadOutcome, capturedAt: ContinuousClock.Instant) {
     inFlight = nil
     // 失敗も成功と同じ TTL の間共有する。捨てると、失敗が続く間 session ごとの poll がそれぞれ
-    // `list-panes` を起動する。再試行は TTL ぶん遅れるだけで、TTL は pane 一覧周期の半分以下
-    // なので、feed が数える「連続2回の失敗」は別々の読み取りのままである。
+    // `list-panes` を起動する。再試行は TTL ぶん遅れるだけで、TTL は pane 一覧周期より短い
+    // ので、feed が数える「連続2回の失敗」は別々の読み取りのままである。
     latest = CachedListing(
       result: outcome.result, capturedAt: capturedAt, listedAt: outcome.listedAt)
   }
@@ -113,7 +113,7 @@ actor TmuxAllSessionPaneListCache {
       if error.isServerAbsent { return .success([]) }
       // server は生きているが session が0個 (`exit-empty off` で起きる) だと、`-a` を付けても
       // tmux は既定の target を解決しようとして解決できず、exit 1 と `no current target\n` を
-      // 返す (tmux 3.8 実測。同じ server で `display-message` は成功する。Issue #781)。
+      // 返す (tmux 3.4 と 3.8 で実測。同じ server で `display-message` は成功する。Issue #781)。
       // exit code と stderr の完全一致の両方で絞るのは、それ以外の失敗まで空へ畳むと pane 一覧が
       // 黙って消えるため。`isServerAbsent` に足さないのは、server は生きており、同じ述語を使う
       // 注入や画面読み取りの経路まで不在扱いにしないため。

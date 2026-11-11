@@ -77,7 +77,7 @@ struct TmuxWorktreePaneSourceTests {
   }
 
   /// `exit-empty off` の server で session が0個のとき、`list-panes -a` はこの形で失敗する
-  /// (tmux 3.8 実測、#781)。server は生きているので `isServerAbsent` とは別の分岐になる。
+  /// (tmux 3.4 と 3.8 で実測、#781)。server は生きているので `isServerAbsent` とは別の分岐になる。
   @Test("server はいるが session が無い (no current target) は空配列にする")
   func mapsNoCurrentTargetToEmpty() async throws {
     let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/missing"))

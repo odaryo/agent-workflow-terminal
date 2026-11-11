@@ -1,5 +1,5 @@
 {
   "name": "awt-handoff",
   "description": "Agent Workflow Terminal で worktree の新しいセッションの Agent へ作業を渡す",
-  "version": "0.3.0"
+  "version": "0.4.0"
 }

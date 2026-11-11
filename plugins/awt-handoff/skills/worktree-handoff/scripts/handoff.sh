@@ -2,7 +2,7 @@
 set -u
 
 usage_error() {
-  printf '%s\n' '使い方: handoff.sh --check | --directory <worktree> --prompt <700 バイトまでの1行の指示>' >&2
+  printf '%s\n' '使い方: handoff.sh --check | --directory <worktree> --prompt <700 バイトまでの1行の指示> [--purpose <1024 バイトまでの1行の目的>]' >&2
   exit 2
 }
 
@@ -15,6 +15,8 @@ done
 
 directory=""
 prompt=""
+purpose=""
+purpose_set=0
 check=0
 if [[ $# -eq 1 && "$1" == --check ]]; then
   check=1
@@ -33,6 +35,12 @@ else
         [[ $# -ge 2 && "$prompt_set" -eq 0 ]] || usage_error
         prompt="$2"
         prompt_set=1
+        shift 2
+        ;;
+      --purpose)
+        [[ $# -ge 2 && "$purpose_set" -eq 0 ]] || usage_error
+        purpose="$2"
+        purpose_set=1
         shift 2
         ;;
       *) usage_error ;;
@@ -66,6 +74,42 @@ if reason is not None:
 '
   rc=$?
   [[ "$rc" -eq 0 ]] || exit "$rc"
+  if [[ "$purpose_set" -eq 1 ]]; then
+    # 上限・Cc/Zl/Zp・末尾の ; はアプリがセッションを作る前に行う検査 (§12.7、§21.4) に揃える。ここで弾かないと、
+    # アプリが invalid_request を返し、exit 2 ではなく exit 1 で引き渡しが止まる。
+    printf '%s' "$purpose" | python3 -I -c '
+import sys
+import unicodedata
+
+data = sys.stdin.buffer.read()
+reason = None
+if not data.strip():
+    reason = "空です"
+elif len(data) > 1024:
+    reason = "1024 バイトを超えています"
+else:
+    try:
+        text = data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        reason = "不正な UTF-8 です"
+    if reason is None:
+        if any(byte < 0x20 or byte == 0x7f for byte in data):
+            reason = "制御文字を含んでいます"
+        elif any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in text):
+            reason = "1行に収まらない文字を含んでいます"
+        elif b"\\" in data:
+            reason = "backslash を含んでいます"
+        elif data.startswith(b"-"):
+            reason = "- で始まっています"
+        elif data.endswith(b";"):
+            reason = "; で終わっています"
+if reason is not None:
+    print(f"目的が不正です: {reason}。", file=sys.stderr)
+    sys.exit(2)
+'
+    rc=$?
+    [[ "$rc" -eq 0 ]] || exit "$rc"
+  fi
 fi
 
 resolve_environment() {
@@ -85,20 +129,45 @@ if [[ -z "$hostctl" || ! -f "$hostctl" || ! -x "$hostctl" || -z "$socket" ]]; th
 fi
 [[ "$check" -eq 0 ]] || exit 0
 
-open_plain=1
-if [[ "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]] && errors=$(mktemp "${TMPDIR:-/tmp}/awt-handoff.XXXXXX" 2>/dev/null); then
-  response=$("$hostctl" worktree open --directory "$directory" --socket "$socket" --from-pane "$TMUX_PANE" 2>"$errors")
-  rc=$?
-  # --from-pane を知らない古い hostctl は、要求を送る前に exit 2 で拒否する。exit 2 なら呼び直しても二重には開かない。
-  if [[ "$rc" -ne 2 ]]; then
-    cat "$errors" >&2
-    open_plain=0
-  fi
-  rm -f "$errors"
+from_pane=""
+[[ ! "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]] || from_pane="$TMUX_PANE"
+# --purpose を知る hostctl は --from-pane も知るので、外すのは --purpose が先。
+stages=()
+[[ -z "$from_pane" || "$purpose_set" -eq 0 ]] || stages+=(from-pane+purpose)
+if [[ -n "$from_pane" ]]; then
+  stages+=(from-pane)
+elif [[ "$purpose_set" -eq 1 ]]; then
+  stages+=(purpose)
 fi
-if [[ "$open_plain" -eq 1 ]]; then
-  response=$("$hostctl" worktree open --directory "$directory" --socket "$socket")
-  rc=$?
+stages+=(plain)
+errors=""
+if [[ "${#stages[@]}" -gt 1 ]]; then
+  # 一時ファイルを作れなければ stderr を取らずに呼ぶ。古い hostctl の拒否が見えるだけで、目的は落とさない。
+  errors=$(mktemp "${TMPDIR:-/tmp}/awt-handoff.XXXXXX" 2>/dev/null) || errors=""
+fi
+for ((stage = 0; stage < ${#stages[@]}; stage++)); do
+  arguments=(worktree open --directory "$directory" --socket "$socket")
+  case "${stages[stage]}" in
+    from-pane*) arguments+=(--from-pane "$from_pane") ;;
+  esac
+  case "${stages[stage]}" in
+    *purpose) arguments+=(--purpose "$purpose") ;;
+  esac
+  last=0
+  [[ $((stage + 1)) -lt "${#stages[@]}" ]] || last=1
+  if [[ "$last" -eq 0 && -n "$errors" ]]; then
+    response=$("$hostctl" "${arguments[@]}" 2>"$errors")
+    rc=$?
+  else
+    response=$("$hostctl" "${arguments[@]}")
+    rc=$?
+  fi
+  # 知らない引数を受けた古い hostctl は、要求を送る前に exit 2 で拒否する。exit 2 なら呼び直しても二重には開かない。
+  [[ "$last" -eq 0 && "$rc" -eq 2 ]] || break
+done
+if [[ -n "$errors" ]]; then
+  [[ "$last" -eq 1 || "$rc" -eq 2 ]] || cat "$errors" >&2
+  rm -f "$errors"
 fi
 if [[ "$rc" -ne 0 ]]; then
   [[ -z "$response" ]] || printf '%s\n' "$response" >&2

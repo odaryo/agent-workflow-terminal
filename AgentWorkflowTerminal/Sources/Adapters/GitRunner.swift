@@ -166,6 +166,19 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/"])
   }
 
+  /// 最後の行は、destination から first-parent を辿って tip の祖先に当たる直前の commit とその親。
+  /// destination が tip の祖先なら出力は空。tip の祖先に当たらないまま root まで辿ると親の無い行で
+  /// 終わるが、これは tip が destination の祖先でないことを意味しない (無関係な履歴の merge や
+  /// commit 日時のずれでも起きる)。逆に、分岐した未マージの tip でも root の行で終わるとは限らない
+  /// (git 2.54.0 で計測、Issue #879 のレビュー)。
+  static func firstParentChain(
+    from destination: GitRevision, excluding tip: GitRevision
+  ) -> Self {
+    Self(arguments: [
+      "rev-list", "--first-parent", "--parents", destination.rawValue, "^" + tip.rawValue,
+    ])
+  }
+
   public static func isAncestor(_ ancestor: GitRevision, of descendant: GitRevision) -> Self {
     Self(arguments: ["merge-base", "--is-ancestor", ancestor.rawValue, descendant.rawValue])
   }

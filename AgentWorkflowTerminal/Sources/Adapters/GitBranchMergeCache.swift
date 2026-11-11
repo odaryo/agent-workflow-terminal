@@ -1,7 +1,8 @@
 import TerminalCore
 
-/// `GitCloseSafetyInspector` の merge 判定を、branch 先端と既定 branch 先端の OID の組で再利用する
-/// (Issue #366)。
+/// `GitBranchMergeJudge` の merge 判定を、branch 先端と既定 branch 先端の OID の組で再利用する
+/// (Issue #366)。Close の安全確認 (`GitCloseSafetyInspector`) と Overview のマージ済みの印
+/// (`GitBranchMergeProbe`、Issue #879) が同じ cache を読み書きする。
 ///
 /// 未マージの branch では squash 走査が上限まで回り切り、git 2.50.1 の実測で上限 300 に張り付く
 /// 走査は 1 回 4.9〜5.1 秒かかった (隔離した一時 repository、1 commit で 2 ファイルを変更)。
@@ -24,8 +25,9 @@ public actor GitBranchMergeCache {
     let squashScanCommitLimit: Int
   }
 
-  /// 鍵は既定 branch が動くたびに増えるので、古いものから捨てる。1件は OID 2つ分の小さな値で、
-  /// 上限は「同じ起動の中で開き直す worktree の数」を十分に上回ればよい。
+  /// 鍵は既定 branch が動くたびに増える (印の経路は、動くたびに未マージの worktree の数だけ足す)
+  /// ので、古いものから捨てる。押し出されて失うのは再利用による時間の節約だけで、判定の答えは
+  /// 変わらない。
   static let capacity = 256
 
   private var entries: [Key: BranchMergeStatus] = [:]

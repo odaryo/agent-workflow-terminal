@@ -55,7 +55,7 @@ extension ProcessRunning {
   }
 }
 
-// Foundation.Process は macOS でのみ利用でき、実行ホストも Mac に限定する (設計書 §20.1)。
+// 実行ホストは Mac に限定する (設計書 §20.1)。
 #if os(macOS)
 public struct FoundationProcessRunner: ProcessRunning, Sendable {
   public init() {}
@@ -106,7 +106,6 @@ private actor ProcessExecution {
   }
 
   private struct ProcessResources {
-    let process: Process
     let stdout: OutputPipe
     let stderr: OutputPipe
   }
@@ -118,8 +117,9 @@ private actor ProcessExecution {
   private let outputLimit: Int
   private let outputBudget: OutputBudget
 
-  private var process: Process?
-  private var processWasLaunched = false
+  private var processIdentifier: pid_t?
+  private var childWasReaped = false
+  private var exitSource: (any DispatchSourceProcess)?
   private var stdoutReader: AsyncPipeReader?
   private var stderrReader: AsyncPipeReader?
   private var terminationStatus: Int32?
@@ -162,16 +162,16 @@ private actor ProcessExecution {
     install(resources)
 
     do {
-      try resources.process.run()
+      processIdentifier = try spawnChild(resources)
     } catch {
       closeParentWriteHandles(resources)
       let result = Result<ProcessRunResult, ProcessRunnerError>.failure(
-        .launchFailed(executableURL: executableURL, message: String(describing: error)))
+        error)
       complete(result)
       stopReading()
       return result
     }
-    processWasLaunched = true
+    observeChildExit()
     closeParentWriteHandles(resources)
     startTimeout()
     if Task.isCancelled {
@@ -202,21 +202,46 @@ private actor ProcessExecution {
       throw error
     }
 
-    let process = Process()
-    process.executableURL = executableURL
-    process.arguments = arguments
-    process.environment = environment
-    process.standardInput = FileHandle.nullDevice
-    process.standardOutput = stdout.writeHandle
-    process.standardError = stderr.writeHandle
-    process.terminationHandler = { [weak self] process in
+    return ProcessResources(stdout: stdout, stderr: stderr)
+  }
+
+  private func spawnChild(_ resources: ProcessResources) throws(ProcessRunnerError) -> pid_t {
+    try ChildSpawn.launch(
+      executableURL: executableURL, arguments: arguments, environment: environment,
+      stdout: resources.stdout.writeHandle.fileDescriptor,
+      stderr: resources.stderr.writeHandle.fileDescriptor)
+  }
+
+  private func observeChildExit() {
+    guard let processIdentifier else { return }
+    let source = DispatchSource.makeProcessSource(
+      identifier: processIdentifier, eventMask: .exit,
+      queue: DispatchQueue(label: "awt.process.exit"))
+    source.setEventHandler { [weak self] in
       guard let self else { return }
-      let status = process.terminationStatus
       Task {
-        await self.processDidTerminate(status: status)
+        await self.childExited()
       }
     }
-    return ProcessResources(process: process, stdout: stdout, stderr: stderr)
+    exitSource = source
+    source.activate()
+  }
+
+  private func childExited() async {
+    guard processIdentifier != nil else { return }
+    refreshTerminationStatusIfNeeded()
+    // .exit が回収可能になる直前に届く例が /usr/bin/true の3000回中2回あったため、
+    // 一度きりの通知に頼らず、actor を塞がずに回収を待つ (Issue #875)。
+    while !childWasReaped {
+      do {
+        try await Task.sleep(for: .milliseconds(1))
+      } catch {
+        return
+      }
+      refreshTerminationStatusIfNeeded()
+    }
+    guard let terminationStatus else { return }
+    processDidTerminate(status: terminationStatus)
   }
 
   private func makeOutputPipe(label: String) throws(ProcessRunnerError) -> OutputPipe {
@@ -226,6 +251,14 @@ private actor ProcessExecution {
         executableURL: executableURL,
         message: "pipe: \(String(cString: Darwin.strerror(errno)))"
       )
+    }
+    for descriptor in descriptors {
+      guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) != -1 else {
+        let errorCode = errno
+        descriptors.forEach { _ = Darwin.close($0) }
+        throw .launchFailed(
+          executableURL: executableURL, message: String(cString: strerror(errorCode)))
+      }
     }
     return OutputPipe(
       reader: AsyncPipeReader(
@@ -243,7 +276,6 @@ private actor ProcessExecution {
   }
 
   private func install(_ resources: ProcessResources) {
-    process = resources.process
     stdoutReader = resources.stdout.reader
     stderrReader = resources.stderr.reader
   }
@@ -381,22 +413,14 @@ private actor ProcessExecution {
 
   private func stopDirectProcessIfNeeded() {
     guard let terminalError else { return }
-    guard let process else {
-      complete(.failure(terminalError))
-      return
-    }
-    guard processWasLaunched else {
-      complete(.failure(terminalError))
-      return
-    }
-    guard process.isRunning else {
-      refreshTerminationStatusIfNeeded()
+    refreshTerminationStatusIfNeeded()
+    guard let processIdentifier, !childWasReaped else {
       complete(.failure(terminalError))
       return
     }
 
-    // Foundation.Process が終了・回収できるのは直接起動した PID だけで、孫は残り得る。
-    process.terminate()
+    // 孫を巻き込まないよう、process group ではなく直接の子だけを停止する。
+    _ = Darwin.kill(processIdentifier, SIGTERM)
     guard escalationTask == nil else { return }
     escalationTask = Task {
       do {
@@ -405,20 +429,42 @@ private actor ProcessExecution {
         return
       }
       guard !Task.isCancelled else { return }
-      escalateTerminationIfNeeded()
+      await escalateTerminationIfNeeded()
     }
   }
 
-  private func escalateTerminationIfNeeded() {
-    guard finalResult == nil, terminalError != nil, let process, process.isRunning else { return }
-    _ = Darwin.kill(process.processIdentifier, SIGKILL)
+  private func escalateTerminationIfNeeded() async {
+    guard finalResult == nil, terminalError != nil else { return }
+    refreshTerminationStatusIfNeeded()
+    guard let processIdentifier, !childWasReaped else {
+      await childExited()
+      return
+    }
+    _ = Darwin.kill(processIdentifier, SIGKILL)
   }
 
   private func refreshTerminationStatusIfNeeded() {
-    guard terminationStatus == nil, processWasLaunched, let process, !process.isRunning else {
+    guard let processIdentifier, !childWasReaped else { return }
+    // 回収と kill を同じ actor に閉じ、回収後に再利用された PID への送信を防ぐ。
+    var status: Int32 = 0
+    var result: pid_t
+    repeat {
+      result = waitpid(processIdentifier, &status, WNOHANG)
+    } while result == -1 && errno == EINTR
+    if result == processIdentifier {
+      // Darwin の <sys/wait.h> の WIFEXITED / WEXITSTATUS / WTERMSIG の定義に従う。
+      let signal = status & 0x7f
+      guard signal != 0x7f else { return }
+      terminationStatus = signal == 0 ? (status >> 8) & 0xff : signal
+    } else if result == -1 && errno == ECHILD {
+      // 他所で回収された子の不明な終了を成功と取り違えない。
+      terminationStatus = -1
+    } else {
       return
     }
-    terminationStatus = process.terminationStatus
+    childWasReaped = true
+    exitSource?.cancel()
+    exitSource = nil
   }
 
   private func waitForResult() async -> Result<ProcessRunResult, ProcessRunnerError> {
@@ -437,6 +483,8 @@ private actor ProcessExecution {
   private func complete(_ result: Result<ProcessRunResult, ProcessRunnerError>) {
     guard finalResult == nil else { return }
     finalResult = result
+    exitSource?.cancel()
+    exitSource = nil
     timeoutTask?.cancel()
     timeoutTask = nil
     endOfFileGraceTask?.cancel()

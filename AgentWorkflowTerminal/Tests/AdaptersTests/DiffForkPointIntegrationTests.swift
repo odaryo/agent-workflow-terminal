@@ -121,8 +121,8 @@ struct DiffForkPointIntegrationTests {
   }
 
   // Swift の `String ==` は正準等価で比べ、NFC と NFD を同じとみなすので、前提はすべて UTF-8 の
-  // バイト列で確かめる。`Process` は argv を NFD へ分解して渡す (実測: `"\u{304C}"` が
-  // `e3 81 8b e3 82 99` で届いた) ので、NFC の branch は git 側の precompose で作る。
+  // バイト列で確かめる。NFC の ref を作るときだけ precompose を有効にし、NFD の start-point と
+  // 一覧の綴りが異なる前提を git の設定で固定する。
   @Test("正規化だけが違う綴りから作った branch では分岐元を使わない", .timeLimit(.minutes(1)))
   func ignoresNormalizationVariantStartPoint() async throws {
     let composed = "\u{304C}"
@@ -153,17 +153,13 @@ struct DiffForkPointIntegrationTests {
     }
   }
 
-  // 既定の設定 (`core.precomposeunicode=true`) では、記録と一覧は NFC になる。一方で `Process` が
-  // argv を NFD へ分解し、`rev-parse` は argv を NFC へ戻さないので、NFD の完全名を返す (git 2.54.0
-  // で計測)。採るのは一覧に在る NFC の綴りで、`String ==` では NFD を採っても通るのでバイト列で見る。
-  // `pack-refs` の後は検査しない。NFD の `rev-parse` が解決できなくなるのは argv の分解のせいで、
-  // 分岐元の採否とは別の Issue (#875) で扱う。
+  // `String ==` では NFD の完全名を採っても通るため、loose ref と packed ref の両方で
+  // 分岐元の完全名を UTF-8 バイト列で確かめる。
   @Test(
-    "既定の設定でかな名の branch から作った branch では、一覧に在る NFC の綴りを分岐元にする",
+    "既定の設定でかな名の branch から作った branch では、pack-refs の前後とも NFC の分岐元を使う",
     .timeLimit(.minutes(1)))
   func resolvesPrecomposedStartPoint() async throws {
     let composed = "\u{304C}"
-    let decomposed = "\u{304B}\u{3099}"
     try await withGitRepository { repository in
       let precompose = try await repository.gitExitCode([
         "config", "--get", "core.precomposeunicode",
@@ -185,7 +181,7 @@ struct DiffForkPointIntegrationTests {
         "rev-parse", "--verify", "--quiet", "--symbolic-full-name", composed,
       ])
       try #require(resolved.exitCode == 0)
-      try #require(Array(resolved.stdout.utf8) == Array(("refs/heads/" + decomposed + "\n").utf8))
+      try #require(Array(resolved.stdout.utf8) == Array(("refs/heads/" + composed + "\n").utf8))
 
       let builder = try DiffSnapshotBuilder(
         worktreeRoot: repository.mainWorktree, processRunner: FoundationProcessRunner())
@@ -193,6 +189,48 @@ struct DiffForkPointIntegrationTests {
       #expect(base == .resolved(branch: .local(composed), source: .forkPoint))
       #expect(
         base.branch.map { Array($0.fullName.utf8) } == Array(("refs/heads/" + composed).utf8))
+
+      try await repository.git(["pack-refs", "--all"])
+      let packedRefs = try Data(
+        contentsOf: repository.mainWorktree.appending(path: ".git/packed-refs"))
+      let packedLines = packedRefs.split(separator: UInt8(ascii: "\n"))
+      let localRef = Array((" refs/heads/" + composed).utf8)
+      try #require(
+        packedLines.contains { $0.suffix(localRef.count).elementsEqual(localRef) })
+      try #require(
+        !FileManager.default.fileExists(
+          atPath: repository.mainWorktree.appending(path: ".git/refs/heads/" + composed).path))
+
+      let packedBase = await builder.resolveBaseBranch(userSelection: nil)
+      #expect(packedBase == .resolved(branch: .local(composed), source: .forkPoint))
+      #expect(
+        packedBase.branch.map { Array($0.fullName.utf8) }
+          == Array(("refs/heads/" + composed).utf8))
+    }
+  }
+
+  @Test("clone 直後のかな名の remote branch から作った branch では NFC の分岐元を使う", .timeLimit(.minutes(1)))
+  func resolvesPrecomposedRemoteStartPointAfterClone() async throws {
+    let composed = "\u{304C}"
+    try await withGitRepository { repository in
+      try await repository.git(["branch", composed])
+      let clone = repository.root.appending(path: "clone")
+      try await repository.git(["clone", "-q", repository.mainWorktree.path, clone.path])
+      try await repository.git(["switch", "-q", "-c", "x", "origin/" + composed], in: "clone")
+
+      let packedRefs = try Data(contentsOf: clone.appending(path: ".git/packed-refs"))
+      let packedLines = packedRefs.split(separator: UInt8(ascii: "\n"))
+      let remoteRef = Array((" refs/remotes/origin/" + composed).utf8)
+      try #require(
+        packedLines.contains { $0.suffix(remoteRef.count).elementsEqual(remoteRef) })
+
+      let builder = try DiffSnapshotBuilder(
+        worktreeRoot: clone, processRunner: FoundationProcessRunner())
+      let base = await builder.resolveBaseBranch(userSelection: nil)
+      #expect(base == .resolved(branch: .remote("origin/" + composed), source: .forkPoint))
+      #expect(
+        base.branch.map { Array($0.fullName.utf8) }
+          == Array(("refs/remotes/origin/" + composed).utf8))
     }
   }
 

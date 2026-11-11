@@ -3,7 +3,7 @@
 Gate 1 で検証した libghostty 統合を製品コードとして実装する独立 SwiftPM package です。
 135MB の `GhosttyKit.xcframework` と、その生成に必要な Metal Toolchain を通常のソースビルドから
 分離しています。CI は事前ビルド済み xcframework を Release アセットから取得して `App/` を
-コンパイルしますが、xcframework 自体は CI でビルドしません。
+ビルドし、テストも実行しますが、xcframework 自体は CI でビルドしません。
 
 ## ビルド
 

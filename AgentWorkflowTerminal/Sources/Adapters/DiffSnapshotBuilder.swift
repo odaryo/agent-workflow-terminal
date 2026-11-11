@@ -256,7 +256,8 @@ public struct DiffSnapshotBuilder: Sendable {
       subject: subject(mergeBase),
       sections: sections,
       observation: DiffSnapshotObservation(
-        headObject: statusResult.status.branch?.oid, files: observations(of: sections)),
+        headObject: statusResult.status.branch?.oid,
+        files: observations(of: sections, untrackedIdentities: untracked.identities)),
       head: Self.head(of: statusResult.status),
       patchFailures: failures,
       statusFailures: statusResult.failures,
@@ -311,24 +312,34 @@ public struct DiffSnapshotBuilder: Sendable {
     value.isEmpty || value.allSatisfy { $0 == "0" } ? nil : value
   }
 
+  private struct UntrackedFiles {
+    var files: [UnifiedDiffFile] = []
+    var unreadablePaths: [String] = []
+    var identities: [String: String] = [:]
+  }
+
   private func synthesizeUntracked(
     _ status: GitStatus
-  ) -> (files: [UnifiedDiffFile], unreadablePaths: [String]) {
-    var files: [UnifiedDiffFile] = []
-    var unreadable: [String] = []
+  ) -> UntrackedFiles {
+    var result = UntrackedFiles()
+    let contentIdentity = UntrackedContentIdentity()
     for entry in status.entries {
       guard case .untracked(let path) = entry else { continue }
       guard !path.hasSuffix("/") else {
         // `-uall` でも、内部に .git を持つディレクトリは畳まれたまま出る。
-        files.append(UntrackedFileDiff.fileWithoutContent(path: path, reason: .notReadable))
-        unreadable.append(path)
+        result.files.append(UntrackedFileDiff.fileWithoutContent(path: path, reason: .notReadable))
+        result.unreadablePaths.append(path)
+        result.identities[path] = contentIdentity.identity(worktreeRoot: worktreeRoot, path: path)
         continue
       }
       let read = readUntracked(path: path)
-      files.append(read.file)
-      if !read.isSynthesized { unreadable.append(path) }
+      result.files.append(read.file)
+      if !read.isSynthesized {
+        result.unreadablePaths.append(path)
+        result.identities[path] = contentIdentity.identity(worktreeRoot: worktreeRoot, path: path)
+      }
     }
-    return (files, unreadable)
+    return result
   }
 
   /// 全行追加へ合成できたかどうかを、そのまま呼び出し側へ返す。読めなかったものを
@@ -355,13 +366,19 @@ public struct DiffSnapshotBuilder: Sendable {
     }
   }
 
-  private func observations(of sections: [DiffOriginSection]) -> [DiffFileObservation] {
+  private func observations(
+    of sections: [DiffOriginSection], untrackedIdentities: [String: String] = [:]
+  ) -> [DiffFileObservation] {
     sections.flatMap { section in
       section.files.map { file in
-        DiffFileObservation(
+        var text = UnifiedDiffCanonicalText.text(of: file)
+        if section.origin == .untracked, let identity = untrackedIdentities[file.path] {
+          text += "\u{1F}" + identity
+        }
+        return DiffFileObservation(
           origin: section.origin,
           path: file.path,
-          fingerprint: Self.fingerprint(UnifiedDiffCanonicalText.text(of: file)))
+          fingerprint: Self.fingerprint(text))
       }
     }
   }

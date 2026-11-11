@@ -325,44 +325,6 @@ struct DiffSnapshotBuilderIntegrationTests {
     }
   }
 
-  /// 死角を塞ぐのは別 Issue (M4)。ここでは「今は何を検知できないか」を実 git で固定する。
-  @Test("畳まれた untracked ディレクトリの中の変更は検知できない", .timeLimit(.minutes(1)))
-  func doesNotDetectChangesInsideFoldedUntrackedDirectory() async throws {
-    try await withGitRepository { repository in
-      let root = repository.mainWorktree
-      // 内部に .git を持つディレクトリは `-uall` でも1件に畳まれる (git 2.50.1 で実測)。
-      let nested = root.appending(path: "nested")
-      try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
-      try await repository.git(["init", "-q", "-b", "main", nested.path])
-      try write("x\n", to: nested, "a.txt")
-      try write("plain\n", to: root, "plain.txt")
-
-      let builder = try DiffSnapshotBuilder(
-        worktreeRoot: root, processRunner: FoundationProcessRunner())
-      let opened = try await builder.build(
-        .base(branch: .local("main")), id: DiffSnapshotID(rawValue: UUID()), now: Date()
-      ).snapshot
-      #expect(
-        opened.file(origin: .untracked, path: "nested/")?.content
-          == .unreadable(.notReadable))
-
-      try write("y\n", to: nested, "b.txt")
-      try write("z\n", to: nested, "c.txt")
-      let afterNested = DiffSnapshotChangeDetection.compare(
-        opened: opened.observation,
-        current: try await builder.observe(.base(branch: .local("main"))))
-      #expect(afterNested.fileChanges.isEmpty)
-
-      // 読めている untracked ファイルの変更は検知できる。
-      try write("plain changed\n", to: root, "plain.txt")
-      let afterPlain = DiffSnapshotChangeDetection.compare(
-        opened: opened.observation,
-        current: try await builder.observe(.base(branch: .local("main"))))
-      #expect(
-        afterPlain.fileChanges == [.modified(origin: .untracked, path: "plain.txt")])
-    }
-  }
-
   /// Issue #242: 競合中のパスは `git diff` / `git diff --cached` のどちらにも patch 形式では
   /// 現れないため、status の `u` レコードからしか一覧を作れない。
   @Test("競合中のファイルは unmerged 区分に出て、解析失敗にならない", .timeLimit(.minutes(1)))

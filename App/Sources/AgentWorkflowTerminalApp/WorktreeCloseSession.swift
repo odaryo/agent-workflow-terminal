@@ -22,10 +22,15 @@ final class WorktreeClosing: ObservableObject {
   private let tmuxRunner: TmuxRunner?
   private let processRunner: any ProcessRunning
   /// Close を開き直すたびに squash 走査を払わないため、確認をまたいで持つ (Issue #366)。
-  private let mergeCache = GitBranchMergeCache()
+  /// Overview の印の probe と共有すると、どちらで判定した答えももう一方が使える。
+  private let mergeCache: GitBranchMergeCache
 
-  init(tmuxRunner: TmuxRunner?, processRunner: any ProcessRunning = FoundationProcessRunner()) {
+  init(
+    tmuxRunner: TmuxRunner?, mergeCache: GitBranchMergeCache,
+    processRunner: any ProcessRunning = FoundationProcessRunner()
+  ) {
     self.tmuxRunner = tmuxRunner
+    self.mergeCache = mergeCache
     self.processRunner = processRunner
   }
 

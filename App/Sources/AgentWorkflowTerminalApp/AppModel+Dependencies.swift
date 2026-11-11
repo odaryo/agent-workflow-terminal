@@ -22,6 +22,9 @@ struct AppDependencies: Sendable {
   /// `nil` の起動では Project の一覧と worktree の状態を保存できない。
   let applicationSupportDirectory: URL?
   let applicationSupportWarning: String?
+  /// 重い判定を全 Project で1件ずつ回すため、起動ごとに1つを共有する。初期値付きの `let` なので
+  /// memberwise init の引数に出ない。
+  let mergeJudgementQueue = BranchMergeJudgementQueue()
 
   static func make() -> Self {
     let launchProject = resolveLaunchProject()

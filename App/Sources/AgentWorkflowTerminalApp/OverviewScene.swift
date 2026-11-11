@@ -190,24 +190,37 @@ private struct OverviewProjectSection: View {
   }
 
   @ViewBuilder
+  private func sessionHeading(
+    _ worktree: OverviewWorktree, title: String, isDisplayed: Bool
+  ) -> some View {
+    let isMerged = model.mergedWorktrees.contains(worktree.session.identity)
+    Button {
+      reveal(worktree.session, nil)
+    } label: {
+      HStack {
+        Text(title)
+        if isMerged {
+          Label("マージ済み", systemImage: "arrow.triangle.merge")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+      }
+      .font(.subheadline.weight(.semibold))
+      .foregroundStyle(isDisplayed ? .primary : .secondary)
+    }
+    .buttonStyle(.plain)
+    .help("このセッションを表示")
+    .accessibilityLabel(isMerged ? "\(title) マージ済み" : title)
+    .contextMenu {
+      sessionHeadingMenu(worktree)
+    }
+  }
+
+  @ViewBuilder
   private func worktreeRows(_ worktree: OverviewWorktree, title: String?) -> some View {
     let isDisplayed = isSelectedProject && model.displayedSession == worktree.session
     if let title {
-      Button {
-        reveal(worktree.session, nil)
-      } label: {
-        HStack {
-          Text(title)
-        }
-        .font(.subheadline.weight(.semibold))
-        .foregroundStyle(isDisplayed ? .primary : .secondary)
-      }
-      .buttonStyle(.plain)
-      .help("このセッションを表示")
-      .accessibilityLabel(title)
-      .contextMenu {
-        sessionHeadingMenu(worktree)
-      }
+      sessionHeading(worktree, title: title, isDisplayed: isDisplayed)
     }
     ForEach(worktree.rows, id: \.rowID) { row in
       let showsDisplayedMark = isDisplayed && row == worktree.rows.first

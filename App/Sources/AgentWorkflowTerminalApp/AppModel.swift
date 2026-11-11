@@ -23,6 +23,8 @@ final class AppModel: ObservableObject {
   @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
     didSet { saveViewerArrangements(replacing: oldValue) }
   }
+  /// 印を出す worktree。`MergedWorktreeMarkRefresher` が通知した順に MainActor で代入する。
+  @Published private(set) var mergedWorktrees: Set<WorktreeIdentity> = []
   @Published private(set) var message: String?
   /// `message` と分ける。あちらはコンテンツ全体を `ContentUnavailableView` へ差し替えるため、
   /// 端末を出したまま伝えるべき失敗 (Active/Inactive の保存など) をあちらへ載せると、
@@ -49,6 +51,8 @@ final class AppModel: ObservableObject {
   let project: RegisteredProject
   private let projectDirectory: URL
   private let applicationSupportDirectory: URL?
+  let mergedMarkRefresher: MergedWorktreeMarkRefresher?
+  var mergedMarkConsumer: Task<Void, Never>?
   private var store: WorktreeInventoryStore?
   /// 保存されたファイルを読めなかった起動では `false`。読めなかったファイルを上書きすると、
   /// ユーザーが手で復旧できる可能性まで消える。`stop()` の後も `false` (登録解除後に書かない)。
@@ -87,7 +91,12 @@ final class AppModel: ObservableObject {
       }
     paneObservations = PaneObservationStore(dependencies: dependencies, notifier: notifier)
     mainPanes = MainPaneCoordinator(runner: dependencies.tmuxRunner)
-    closing = WorktreeClosing(tmuxRunner: dependencies.tmuxRunner)
+    let mergeCache = GitBranchMergeCache()
+    closing = WorktreeClosing(tmuxRunner: dependencies.tmuxRunner, mergeCache: mergeCache)
+    let marks = Self.makeMergedMarkRefresher(
+      projectDirectory: projectDirectory, mergeCache: mergeCache,
+      queue: dependencies.mergeJudgementQueue)
+    mergedMarkRefresher = marks?.refresher
     sessionActivityProbe = dependencies.sessionActivityProbe
     message = dependencies.tmuxError
     // Diff の範囲表示と比較先の候補 (§9.1) が、この Project の一覧を読むための口。
@@ -95,6 +104,11 @@ final class AppModel: ObservableObject {
       DiffWorktreeContext(
         worktreeRoot: root, projectRoot: self?.projectRoot, worktrees: self?.worktrees ?? [])
     }
+    if let marks { startConsumingMergedMarks(marks.changes) }
+  }
+
+  func applyMergedWorktrees(_ marked: Set<WorktreeIdentity>) {
+    mergedWorktrees = marked
   }
 
   var inventory: WorktreeInventory {
@@ -187,6 +201,7 @@ final class AppModel: ObservableObject {
     hostControlRescan.stop()
     canSave = false
     paneObservations.stopAll()
+    stopMergedMarks()
   }
 
   private func scanAndObserve(projectDirectory: URL) async {
@@ -220,6 +235,7 @@ final class AppModel: ObservableObject {
         }
         reportedInitialScanFailure = nil
         report(scanFailures: scan.failures, listingFailure: scan.listingFailure)
+        await requestMergedMarks()
         await observe(with: detector)
         return
       } catch {
@@ -290,12 +306,15 @@ final class AppModel: ObservableObject {
         isListingComplete: scan.listingFailure == nil,
         prunable: scan.prunable
       )
-      guard updated.inventory != inventory else { continue }
-      projectRoot = updated.inventory.projectRoot
-      worktrees = updated.inventory.taskWorktrees
-      // 消えた worktree を選択したままだと描画先が無くなり、端末が空になる (Issue #496)。
-      reconcileSessionSelection()
-      save()
+      if updated.inventory != inventory {
+        projectRoot = updated.inventory.projectRoot
+        worktrees = updated.inventory.taskWorktrees
+        // 消えた worktree を選択したままだと描画先が無くなり、端末が空になる (Issue #496)。
+        reconcileSessionSelection()
+        save()
+      }
+      // 一覧が同じでも branch の先端は進むので、スキャンのたびに頼む。
+      await requestMergedMarks()
     }
   }
 

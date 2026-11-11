@@ -102,30 +102,6 @@ jobs:
           rm -rf .build
           swift build --build-tests
 
-      # 確認用の一時的な段 (Issue #851)。復元した .build の上で、参照されるソースを消すとビルドが落ち、
-      # rename なら通ることを確かめる。
-      - name: Probe - delete and rename sources on restored build
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: |
-          set -x
-          del=Sources/TerminalCore/AgentAdapter.swift
-          rm "$del"
-          if swift build --build-tests > "$RUNNER_TEMP/probe-del.log" 2>&1; then
-            tail -20 "$RUNNER_TEMP/probe-del.log"
-            echo "::error::参照されるソースを消してもビルドが通った (偽 GREEN)"
-            exit 1
-          fi
-          grep -E "error:" "$RUNNER_TEMP/probe-del.log" | head -5
-          git checkout -- "$del"
-          src=$(git ls-files Sources/TerminalCore | grep -v AgentAdapter | head -1)
-          git mv "$src" "${src%.swift}Renamed.swift"
-          swift build --build-tests 2>&1 | grep -E "Compiling|error:|Build complete" | head -20
-          find .build -name "$(basename "${src%.swift}")Renamed.swift.o" -print
-          git mv "${src%.swift}Renamed.swift" "$src"
-          python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" Sources
-          swift build --build-tests 2>&1 | tail -1
-          git status --short
-
       # 保存は main の push だけで、PR は main のキャッシュを復元するだけにする。PR ごとに保存すると
       # リポジトリあたり 10GB の枠を食い潰す (1回の保存は core 82MB・App 152MB・checks 40MB)。
       # キャッシュの段は、失敗しても止まっても CI を落とさない (continue-on-error)。

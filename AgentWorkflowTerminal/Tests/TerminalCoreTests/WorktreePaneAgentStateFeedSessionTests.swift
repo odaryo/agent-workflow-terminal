@@ -1,7 +1,7 @@
 import TerminalCore
 import Testing
 
-/// 偽の adapter・信号源・時計は `WorktreePaneAgentStateFeedTests.swift` のものを使う。
+/// 偽の adapter・信号源・時計は `WorktreePaneFeedTestDoubles.swift` のものを使う。
 @Suite("session (タブ) 単位の pane Agent 状態列 (設計書 §12.2)")
 struct WorktreePaneAgentStateFeedSessionTests {
   @Test("states は渡された session をそのまま pane 一覧の問い合わせに使う (設計書 §12.2)")

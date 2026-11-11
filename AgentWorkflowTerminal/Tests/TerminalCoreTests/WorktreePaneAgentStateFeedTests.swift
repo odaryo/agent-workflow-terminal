@@ -23,6 +23,7 @@ struct WorktreePaneAgentStateFeedTests {
     await context.channel.send(
       observation(.working, adapter: "matched"), to: PaneID(rawValue: "%1"))
     _ = await iterator.next()
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
     #expect(await iterator.next() == [])
     #expect(await context.signals.forgotten == [PaneID(rawValue: "%1")])
@@ -95,8 +96,9 @@ struct WorktreePaneAgentStateFeedTests {
       await context.channel.send(.working, to: testCase.initial.id)
       #expect(await iterator.next()?.first?.adapterID == AgentAdapterID(rawValue: "matched"))
 
+      try #require(await context.clock.waitForSleep(1))
       await context.clock.advance()
-      await context.paneSource.waitForCalls(2)
+      try #require(await context.paneSource.waitForCalls(2))
       await context.channel.waitForReselection(of: testCase.changed.id, cancellations: 1)
       let selectedAdapterID = await context.channel.adapterID(for: testCase.changed.id)
       #expect(selectedAdapterID == testCase.expectedAdapterID)
@@ -118,8 +120,9 @@ struct WorktreePaneAgentStateFeedTests {
     await context.channel.send(.working, to: initial.id)
     _ = await iterator.next()
 
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
-    await context.paneSource.waitForCalls(2)
+    try #require(await context.paneSource.waitForCalls(2))
     for _ in 0..<20 { await Task.yield() }
 
     #expect(await context.signals.livenessCallCount == 2)
@@ -202,8 +205,9 @@ struct WorktreePaneAgentStateFeedTests {
     let value = observation(.working, adapter: "matched")
     await context.channel.send(value, to: unchanged.id)
     await recorder.waitForCount(1)
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
-    await context.paneSource.waitForCalls(2)
+    try #require(await context.paneSource.waitForCalls(2))
     await context.channel.send(value, to: unchanged.id)
     for _ in 0..<20 { await Task.yield() }
     #expect(await recorder.count == 1)
@@ -235,14 +239,16 @@ struct WorktreePaneAgentStateFeedTests {
     await context.channel.send(.working, to: current.id)
     await recorder.waitForCount(1)
 
+    try #require(await context.clock.waitForSleep(1))
     await context.clock.advance()
-    await context.paneSource.waitForCalls(2)
+    try #require(await context.paneSource.waitForCalls(2))
     for _ in 0..<20 { await Task.yield() }
     #expect(await recorder.count == 1)
     #expect(await context.channel.cancellationCount == 0)
 
+    try #require(await context.clock.waitForSleep(2))
     await context.clock.advance()
-    await context.paneSource.waitForCalls(3)
+    try #require(await context.paneSource.waitForCalls(3))
     for _ in 0..<20 { await Task.yield() }
     #expect(await recorder.count == 1)
     #expect(await context.channel.cancellationCount == 0)
@@ -314,145 +320,6 @@ private struct TestContext {
   let clock: FeedTestClock
 }
 
-enum TestError: Error { case failed }
-
-actor ScriptedPaneSource: WorktreePaneSource {
-  private let results: [Result<[PaneSnapshot], TestError>]
-  private var callCount = 0
-
-  init(results: [Result<[PaneSnapshot], TestError>]) { self.results = results }
-
-  func panes(of session: TerminalSessionKey) async throws -> [PaneSnapshot] {
-    let index = min(callCount, results.count - 1)
-    callCount += 1
-    return try results[index].get()
-  }
-
-  func waitForCalls(_ expected: Int) async {
-    while callCount < expected { await Task.yield() }
-  }
-}
-
-actor FeedSignalSource: AgentSignalSource {
-  private let aliveNames: Set<String>
-  private let preferredProcessNames: [Int32: String]
-  private(set) var forgotten: [PaneID] = []
-  private(set) var livenessCallCount = 0
-
-  init(aliveNames: Set<String>, preferredProcessNames: [Int32: String] = [:]) {
-    self.aliveNames = aliveNames
-    self.preferredProcessNames = preferredProcessNames
-  }
-
-  func signals(
-    for pane: PaneSnapshot, minimumChangedLines: Int
-  ) async throws -> AgentSignals {
-    throw TestError.failed
-  }
-
-  func liveness(
-    for pane: PaneSnapshot, matchingProcessNames: Set<String>
-  ) async -> AgentLiveness {
-    livenessCallCount += 1
-    let preferred = preferredProcessNames[pane.processID] ?? pane.currentCommand
-    return aliveNames.contains(preferred) && matchingProcessNames.contains(preferred)
-      ? .alive : .absent
-  }
-
-  func forget(_ pane: PaneSnapshot) async { forgotten.append(pane.id) }
-}
-
-struct FeedAdapter: AgentAdapter {
-  let id: AgentAdapterID
-  let processNames: Set<String>
-  let channel: ObservationChannel
-
-  init(id: String, processNames: Set<String>, channel: ObservationChannel) {
-    self.id = AgentAdapterID(rawValue: id)
-    self.processNames = processNames
-    self.channel = channel
-  }
-
-  func classify(signals: AgentSignals, liveness: AgentLiveness) -> AgentObservationResult {
-    .absent
-  }
-
-  func observations(
-    of pane: PaneSnapshot, from source: any AgentSignalSource,
-    intervals: AgentObservationIntervals
-  ) -> AsyncStream<AgentObservationResult> {
-    channel.stream(for: pane.id, adapterID: id)
-  }
-}
-
-actor ObservationChannel {
-  private struct Subscription {
-    let id: UUID
-    let adapterID: AgentAdapterID
-    let continuation: AsyncStream<AgentObservationResult>.Continuation
-  }
-
-  private var subscriptions: [PaneID: [Subscription]] = [:]
-  private(set) var cancellationCount = 0
-  var subscriberCount: Int { subscriptions.values.reduce(0) { $0 + $1.count } }
-
-  nonisolated func stream(
-    for paneID: PaneID, adapterID: AgentAdapterID
-  ) -> AsyncStream<AgentObservationResult> {
-    let subscriptionID = UUID()
-    return AsyncStream { continuation in
-      Task {
-        await self.register(
-          continuation, for: paneID, adapterID: adapterID, subscriptionID: subscriptionID)
-      }
-      continuation.onTermination = { _ in
-        Task { await self.cancel(paneID, subscriptionID: subscriptionID) }
-      }
-    }
-  }
-
-  func send(_ value: AgentObservationResult, to paneID: PaneID) {
-    subscriptions[paneID]?.last?.continuation.yield(value)
-  }
-
-  func send(_ state: AgentState, to paneID: PaneID) {
-    guard let subscription = subscriptions[paneID]?.last else { return }
-    subscription.continuation.yield(
-      .observation(
-        AgentStateObservation(
-          state: state, adapterID: subscription.adapterID,
-          observedAt: Date(timeIntervalSince1970: 1))))
-  }
-
-  func waitForSubscriber(_ paneID: PaneID) async {
-    while subscriptions[paneID]?.isEmpty != false { await Task.yield() }
-  }
-
-  func waitForSubscribers(_ count: Int) async {
-    while subscriberCount < count { await Task.yield() }
-  }
-
-  func adapterID(for paneID: PaneID) -> AgentAdapterID? { subscriptions[paneID]?.last?.adapterID }
-
-  func waitForCancellations(_ count: Int) async {
-    while cancellationCount < count { await Task.yield() }
-  }
-
-  private func register(
-    _ continuation: AsyncStream<AgentObservationResult>.Continuation, for paneID: PaneID,
-    adapterID: AgentAdapterID, subscriptionID: UUID
-  ) {
-    subscriptions[paneID, default: []].append(
-      Subscription(id: subscriptionID, adapterID: adapterID, continuation: continuation))
-  }
-
-  private func cancel(_ paneID: PaneID, subscriptionID: UUID) {
-    subscriptions[paneID]?.removeAll { $0.id == subscriptionID }
-    if subscriptions[paneID]?.isEmpty == true { subscriptions.removeValue(forKey: paneID) }
-    cancellationCount += 1
-  }
-}
-
 private struct ReselectionCase {
   let initial: PaneSnapshot
   let changed: PaneSnapshot
@@ -468,28 +335,5 @@ private actor FeedOutputRecorder {
 
   func waitForCount(_ expected: Int) async {
     while values.count < expected { await Task.yield() }
-  }
-}
-
-actor FeedTestClock: ContinuousTimeSource {
-  nonisolated let now = ContinuousClock().now
-  private var sleepers: [CheckedContinuation<Void, any Error>] = []
-  private(set) var sleepCount = 0
-
-  func sleep(until deadline: ContinuousClock.Instant) async throws {
-    sleepCount += 1
-    try await withCheckedThrowingContinuation { continuation in sleepers.append(continuation) }
-  }
-
-  func waitForSleep(_ count: Int) async -> Bool {
-    let deadline = ContinuousClock().now.advanced(by: .seconds(10))
-    while sleepCount < count, ContinuousClock().now < deadline { await Task.yield() }
-    return sleepCount >= count
-  }
-
-  func advance() {
-    let current = sleepers
-    sleepers.removeAll()
-    for sleeper in current { sleeper.resume() }
   }
 }

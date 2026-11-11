@@ -5,7 +5,7 @@ import Testing
 
 @testable import AgentWorkflowTerminalApp
 
-/// gate はプロセス全体で共有されるので、並行させると1秒の probe の間に他方が gate を待って落ちる (Issue #544)。
+/// gate はプロセス全体で共有されるので、並行させるとテストが互いの bootstrap の終了を待って遅くなる (Issue #544)。
 @Suite("bootstrap のプロセス内直列化 (Issue #512)", .serialized)
 struct TmuxSessionBootstrapTests {
   @Test("別 Project の create が失敗しても、bootstrap 後の probe から後始末まで入り交じらない")
@@ -40,27 +40,37 @@ struct TmuxSessionBootstrapTests {
       bootstrapCalls == expectedCalls(name: firstName) + expectedCalls(name: secondName))
   }
 
-  @Test("bootstrap 後にキャンセルされても、キャンセルされていない Task で後始末する")
+  @Test(
+    "bootstrap 後にキャンセルされても、キャンセルされていない Task で後始末する",
+    .timeLimit(.minutes(1)))
   func cleansUpAfterCancellation() async throws {
-    let process = BootstrapProcessRunner(initialProbeCount: 1)
+    let process = BootstrapProcessRunner(initialProbeCount: 1, bootstrapProbeWait: .untilCancelled)
     let provisioner = try makeProvisioner(process)
     let identity = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/task"))
     let key = try #require(TerminalSessionKey(identity: identity, index: 1))
-    let task = Task { await provisioner.attachCommand(for: key, workingDirectory: "/") }
+    let task = Task {
+      let result = await provisioner.attachCommand(for: key, workingDirectory: "/")
+      await process.releaseAll()
+      return result
+    }
     defer { task.cancel() }
 
-    for _ in 0..<100_000 {
-      if await process.calls.count == 2 { break }
-      await Task.yield()
-    }
-    try #require(await process.calls.count == 2)
-    task.cancel()
+    // .timeLimit はテストの Task をキャンセルするだけで、キャンセルに反応しない待ちからは抜けない。
+    // プロダクションが退行して probe に届かなくなっても、止まり続けずに expectation の失敗で終える。
+    try await withTaskCancellationHandler {
+      await process.waitForBootstrapProbe()
+      try #require(await process.calls.count == 2)
+      task.cancel()
 
-    #expect(await task.value == .failure(.operation(.tmux(.process(.cancelled)))))
-    #expect(
-      await process.calls.last == [
-        "-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use",
-      ])
+      #expect(await task.value == .failure(.operation(.tmux(.process(.cancelled)))))
+      #expect(
+        await process.calls.last == [
+          "-u", "kill-session", "-t", "=awt-bootstrap-server-do-not-use",
+        ])
+    } onCancel: {
+      task.cancel()
+      Task { await process.releaseAll() }
+    }
   }
 
   private func expectedCalls(name: String) -> [[String]] {
@@ -85,10 +95,34 @@ private actor BootstrapProcessRunner: ProcessRunning {
   private var initialProbe: CheckedContinuation<Void, Never>?
   private var bootstrapProbe: CheckedContinuation<Void, Never>?
   private var bootstrapProbeCount = 0
+  private var bootstrapProbeEntered = false
+  private var isReleased = false
+  private var bootstrapProbeEnterWaiters: [CheckedContinuation<Void, Never>] = []
   private let initialProbeCount: Int
+  private let bootstrapProbeWait: BootstrapProbeWait
 
-  init(initialProbeCount: Int = 2) {
+  /// 実時間で再開する経路は serializesAcrossProvisioners のデッドロック回避だけに残す。
+  enum BootstrapProbeWait {
+    case deadlineOrNextProbe
+    case untilCancelled
+  }
+
+  init(initialProbeCount: Int = 2, bootstrapProbeWait: BootstrapProbeWait = .deadlineOrNextProbe) {
     self.initialProbeCount = initialProbeCount
+    self.bootstrapProbeWait = bootstrapProbeWait
+  }
+
+  func releaseAll() {
+    isReleased = true
+    bootstrapProbeEntered = true
+    bootstrapProbeEnterWaiters.forEach { $0.resume() }
+    bootstrapProbeEnterWaiters = []
+    resumeBootstrapProbe()
+  }
+
+  func waitForBootstrapProbe() async {
+    if bootstrapProbeEntered { return }
+    await withCheckedContinuation { bootstrapProbeEnterWaiters.append($0) }
   }
 
   func run(
@@ -109,12 +143,30 @@ private actor BootstrapProcessRunner: ProcessRunning {
       }
       bootstrapProbeCount += 1
       if bootstrapProbeCount == 1 {
-        // 修正前は後続の probe がこの待ちを解除する。直列化後は期限で進み、デッドロックを避ける。
-        await withCheckedContinuation { continuation in
-          bootstrapProbe = continuation
-          Task {
-            try? await Task.sleep(for: .seconds(1))
-            resumeBootstrapProbe()
+        bootstrapProbeEntered = true
+        bootstrapProbeEnterWaiters.forEach { $0.resume() }
+        bootstrapProbeEnterWaiters = []
+        switch bootstrapProbeWait {
+        case .deadlineOrNextProbe:
+          // 修正前は後続の probe がこの待ちを解除する。直列化後は期限で進み、デッドロックを避ける。
+          await withCheckedContinuation { continuation in
+            bootstrapProbe = continuation
+            Task {
+              try? await Task.sleep(for: .seconds(1))
+              resumeBootstrapProbe()
+            }
+          }
+        case .untilCancelled:
+          await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+              if Task.isCancelled || isReleased {
+                continuation.resume()
+              } else {
+                bootstrapProbe = continuation
+              }
+            }
+          } onCancel: {
+            Task { await self.resumeBootstrapProbe() }
           }
         }
       } else {

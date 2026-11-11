@@ -39,8 +39,11 @@ App/ の UI 配線を実機で確認するためのハーネス。CLAUDE.md「De
                         無視する (前回までに登録した Project を引き継がないため)
   -h, --help            このヘルプを表示
 
-launch の Application Support は /private/tmp/awt-ui-verify/<$PWD の basename>/application-support。
+launch の Application Support は /private/tmp/awt-ui-verify/<$PWD の basename>/as。
 AWT_UI_APPLICATION_SUPPORT_DIR で上書きできる。同じ worktree の再起動でも保存内容を残す。
+アプリはその下の AgentWorkflowTerminal/hostctl.sock で hostctl を待ち受ける。socket のパスは
+103 バイトまでで、既定のままなら basename が 38 バイトまでのときに収まる。超えるときは launch が
+警告し、AWT_UI_APPLICATION_SUPPORT_DIR に短いパスを与える例を出す (起動は続ける)。
 launch の tmux socket 名は awt-ui-verify。AWT_UI_TMUX_SOCKET_NAME で上書きできる。
 launch は最終バンドルを /private/tmp/awt-ui-verify/<$PWD の basename>/ へ写し、bundle id を
 dev.local.agentworkflowterminal.ui-verify.<$PWD の basename> に変えて署名し直してから起動する。
@@ -210,6 +213,21 @@ read_app_window_count() {
   APP_WINDOW_COUNT=0
 }
 
+# sun_path は NUL 込みで 104 バイトなので、socket のパスは 103 バイトまで (HostControlSocket.swift の
+# address)。超えるとアプリは hostctl の窓口を開かず、hostctl worktree open が使えない (#911)。
+# selftest も launch を通り、hostctl を使わないので、止めずに警告だけにする。
+warn_if_hostctl_socket_too_long() {
+  local socket_path="${1%/}/AgentWorkflowTerminal/hostctl.sock" bytes short
+  bytes=$(printf '%s' "$socket_path" | LC_ALL=C wc -c | tr -d ' ')
+  [ "$bytes" -le 103 ] && return 0
+  # 例のパスは basename の cksum で決め、同じ worktree なら毎回同じになるようにする (保存内容を残すため)。
+  short="/private/tmp/awt-ui-verify/as-$(basename -- "$PWD" | cksum | cut -d ' ' -f 1)"
+  info "警告: hostctl の socket のパスが ${bytes} バイトで、上限の 103 バイトを超えます: ${socket_path}"
+  info "  アプリは hostctl の窓口を開けず、hostctl worktree open は使えません。hostctl を使うなら、"
+  info "  短いパスを与えて起動し直してください: AWT_UI_APPLICATION_SUPPORT_DIR=${short} scripts/verify-app-ui.sh launch"
+  info "  (selftest は hostctl を使わず、AWT_UI_APPLICATION_SUPPORT_DIR も無視するので、selftest ではこの警告を無視してよい)"
+}
+
 app_launch() {
   local project="${1:-$PWD}"
   pgrep -x "$APP_NAME" >/dev/null && die "既に ${APP_NAME} が動いています。ユーザーか別の作業のインスタンスかもしれないので、操作せず確認してください"
@@ -219,9 +237,10 @@ app_launch() {
   # 測っているバンドルが自分のビルドであることは、ここで担保する。
   local lane
   lane=$(basename -- "$PWD")
-  local application_support="${AWT_UI_APPLICATION_SUPPORT_DIR:-/private/tmp/awt-ui-verify/${lane}/application-support}"
+  local application_support="${AWT_UI_APPLICATION_SUPPORT_DIR:-/private/tmp/awt-ui-verify/${lane}/as}"
   local tmux_socket_name="${AWT_UI_TMUX_SOCKET_NAME:-awt-ui-verify}"
   mkdir -p "$application_support"
+  warn_if_hostctl_socket_too_long "$application_support"
   # UserDefaults は bundle id の domain に入り、Application Support と違って環境変数で
   # 逸らせない。写しの bundle id を変えて、開発版と別のレーンの設定に書かないようにする (#598)。
   local bundle_id

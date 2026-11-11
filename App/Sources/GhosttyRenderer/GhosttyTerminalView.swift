@@ -408,7 +408,7 @@ private final class GhosttyRuntime {
     // Why not アプリ側の ID だけで防ぐ: libghostty 内部に残った旧世代のメッセージは、
     // アドレス再利用後には新しい surface のポインタで action_cb に届く (Issue #125 の計測2)。
     // free は IO / renderer スレッドを join するため、次の生成前に tick すれば、
-    // hasSurface が false の間に旧世代のメッセージを捨て切れる。
+    // エラーで打ち切られない限り、hasSurface が false の間に旧世代のメッセージを捨て切れる。
     ghostty_app_tick(app)
   }
 
@@ -871,6 +871,7 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
     surfaceConfiguration.context = GHOSTTY_SURFACE_CONTEXT_WINDOW
 
     let command = POSIXShellCommandLine.joined(configuration.command)
+    let creatingID = GhosttySurfaceIdentities.shared.beginCreation()
     command.withCString { commandPointer in
       surfaceConfiguration.command = commandPointer
       if let workingDirectory = configuration.workingDirectory {
@@ -882,13 +883,14 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
         surface = ghostty_surface_new(app, &surfaceConfiguration)
       }
     }
+    GhosttySurfaceIdentities.shared.finishCreation(address: surface.map { UInt(bitPattern: $0) })
 
     guard let surface else {
       NSLog("[app] ghostty_surface_new が失敗しました。画面復帰後に再試行できます")
       send(.creationFailed)
       return
     }
-    surfaceID = GhosttySurfaceIdentities.shared.register(address: UInt(bitPattern: surface))
+    surfaceID = creatingID
 
     updateContentScaleFromWindow()
     updateSurfaceSize()

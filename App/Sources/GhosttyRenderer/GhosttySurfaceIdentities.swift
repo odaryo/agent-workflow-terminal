@@ -12,18 +12,28 @@ final class GhosttySurfaceIdentities: Sendable {
   private struct State {
     var lastID: UInt64 = 0
     var identities: [UInt: GhosttySurfaceID] = [:]
+    var creatingID: GhosttySurfaceID?
   }
 
   private let state = OSAllocatedUnfairLock(initialState: State())
 
   init() {}
 
-  func register(address: UInt) -> GhosttySurfaceID {
+  func beginCreation() -> GhosttySurfaceID {
     state.withLock { state in
       state.lastID += 1
       let surfaceID = GhosttySurfaceID(rawValue: state.lastID)
-      state.identities[address] = surfaceID
+      state.creatingID = surfaceID
       return surfaceID
+    }
+  }
+
+  func finishCreation(address: UInt?) {
+    state.withLock { state in
+      if let address, let surfaceID = state.creatingID {
+        state.identities[address] = surfaceID
+      }
+      state.creatingID = nil
     }
   }
 
@@ -35,6 +45,8 @@ final class GhosttySurfaceIdentities: Sendable {
   }
 
   func id(forAddress address: UInt) -> GhosttySurfaceID? {
-    state.withLock { $0.identities[address] }
+    // Why 未登録なら生成中の ID: 生成は main で同期に1つずつ行い、生存中はすべて登録済みで、
+    // free 後も drain まで登録を残すため、未登録アドレスの action は生成中の surface に限られる。
+    state.withLock { $0.identities[address] ?? $0.creatingID }
   }
 }

@@ -371,9 +371,11 @@ private struct AgentWorkspace {
     ])
     // codex は shell の子 (深さ 1)。`&` で起こして shell を親に残す。codex の終了後も pane を
     // 残すため、`wait` の後は Agent 名でないプロセスに置き換える。
+    // リダイレクトは書く前に空のファイルを作るので、別名へ書いて mv (rename) で置く (#777)。
     let codex = try await runner.run(arguments: [
       "split-window", "-d", "-t", "=\(session):", "-P", "-F", "#{pane_id}",
-      "/bin/sh -c '\(codexPath) 600 & echo $! > \(pidFile.path); wait; exec /bin/sleep 600'",
+      "/bin/sh -c '\(codexPath) 600 & echo $! > \(pidFile.path).tmp"
+        + " && /bin/mv \(pidFile.path).tmp \(pidFile.path); wait; exec /bin/sleep 600'",
     ])
     let claudeFields = claude.stdout.split(separator: " ")
     try await waitUntil { FileManager.default.fileExists(atPath: pidFile.path) }

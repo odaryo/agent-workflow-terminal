@@ -41,8 +41,11 @@ struct UntrackedContentIdentityTests {
       try Data(repeating: 1, count: 9).write(to: file)
       let identity = UntrackedContentIdentity(maximumHashedByteCount: 8)
       let before = identity.identity(worktreeRoot: root, path: "large")
+      let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+      let modificationDate = try #require(attributes[.modificationDate] as? Date)
       try Data(repeating: 2, count: 9).write(to: file)
-      try changeIdentityModificationDate(of: file)
+      try FileManager.default.setAttributes(
+        [.modificationDate: modificationDate], ofItemAtPath: file.path)
       #expect(identity.identity(worktreeRoot: root, path: "large") != before)
     }
   }
@@ -111,8 +114,11 @@ struct UntrackedContentIdentityTests {
       try Data([1, 2]).write(to: file)
       let identity = UntrackedContentIdentity()
       let before = identity.identity(worktreeRoot: root, path: "nested/")
+      let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+      let modificationDate = try #require(attributes[.modificationDate] as? Date)
       try Data([3, 4]).write(to: file)
-      try changeIdentityModificationDate(of: file)
+      try FileManager.default.setAttributes(
+        [.modificationDate: modificationDate], ofItemAtPath: file.path)
       #expect(identity.identity(worktreeRoot: root, path: "nested/") != before)
     }
   }
@@ -179,6 +185,23 @@ struct UntrackedContentIdentityTests {
       try Data([2, 3]).write(to: nested.appending(path: "z"))
       #expect(identity.identity(worktreeRoot: root, path: "nested/") == before)
       try Data([2, 3]).write(to: nested.appending(path: "a"))
+      #expect(identity.identity(worktreeRoot: root, path: "nested/") != before)
+    }
+  }
+
+  @Test("項目上限があっても深い階層より先に浅い階層の同サイズ書き換えを検知する")
+  func detectsShallowRewriteBeforeDeeperEntries() throws {
+    try withIdentityDirectory { root in
+      let directory = root.appending(path: "nested/.a")
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      for name in ["x", "y", "z"] {
+        try Data([1]).write(to: directory.appending(path: name))
+      }
+      let file = root.appending(path: "nested/b")
+      try Data([1]).write(to: file)
+      let identity = UntrackedContentIdentity(maximumEntryCount: 3)
+      let before = identity.identity(worktreeRoot: root, path: "nested/")
+      try Data([2]).write(to: file)
       #expect(identity.identity(worktreeRoot: root, path: "nested/") != before)
     }
   }

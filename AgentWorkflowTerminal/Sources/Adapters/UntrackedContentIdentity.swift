@@ -71,13 +71,14 @@ struct UntrackedContentIdentity: Sendable {
   private func appendDirectory(at root: [UInt8], to identity: inout IdentityDigest) {
     var pending: [[UInt8]]
     do {
-      pending = Array(try Self.names(at: root).reversed())
+      pending = try Self.names(at: root)
     } catch {
       identity.append(Self.failureIdentity(error))
       return
     }
     var count = 0
-    while count < maximumEntryCount, let relativePath = pending.popLast() {
+    while count < maximumEntryCount, count < pending.count {
+      let relativePath = pending[count]
       count += 1
       identity.append(relativePath)
       let absolutePath = root + [47] + relativePath
@@ -92,7 +93,7 @@ struct UntrackedContentIdentity: Sendable {
         case S_IFDIR:
           if count < maximumEntryCount {
             let children = try Self.names(at: absolutePath)
-            pending.append(contentsOf: children.reversed().map { relativePath + [47] + $0 })
+            pending.append(contentsOf: children.map { relativePath + [47] + $0 })
           }
         default: break
         }

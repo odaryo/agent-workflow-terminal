@@ -1145,7 +1145,8 @@ expect_handoff_pid() {
   return 1
 }
 
-# wait-release の偽 hostctl は、どの段でも hostctl-release を待つ間 hostctl-started を作っている。
+# hostctl-release を待つ間、偽 hostctl は hostctl-started を作っている。wait-release ではどの段でも、
+# wait-release-no-prompt では --from-pane の段だけ待つ。
 expect_hostctl_started() {
   local label="$1" attempt
   for ((attempt = 0; attempt < 50; attempt++)); do

@@ -7,13 +7,16 @@ extension AppModel {
     await hostControlRescan.request()
   }
 
-  func openWorktreeForAgent(directory: String) async -> HostControlResponse {
+  func openWorktreeForAgent(directory: String, purpose: String? = nil) async -> HostControlResponse
+  {
     await hostControlOpenQueue.run {
-      await self.findAndOpenWorktreeForAgent(directory: directory)
+      await self.findAndOpenWorktreeForAgent(directory: directory, purpose: purpose)
     }
   }
 
-  private func findAndOpenWorktreeForAgent(directory: String) async -> HostControlResponse {
+  private func findAndOpenWorktreeForAgent(
+    directory: String, purpose: String?
+  ) async -> HostControlResponse {
     for attempt in 0..<3 {
       await rescanNow()
       guard !hostControlRescan.isStopped else {
@@ -22,7 +25,7 @@ extension AppModel {
       guard !Task.isCancelled else {
         return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
       }
-      if let response = await openScannedWorktreeForAgent(directory: directory) {
+      if let response = await openScannedWorktreeForAgent(directory: directory, purpose: purpose) {
         return response
       }
       if attempt < 2 {
@@ -36,7 +39,9 @@ extension AppModel {
     return .failure(code: .notRegistered, message: "登録済みの worktree が見つかりません")
   }
 
-  private func openScannedWorktreeForAgent(directory: String) async -> HostControlResponse? {
+  private func openScannedWorktreeForAgent(
+    directory: String, purpose: String?
+  ) async -> HostControlResponse? {
     let candidates = worktrees.map {
       (identity: $0.identity, worktreePath: $0.detected.worktreePath)
     }
@@ -66,13 +71,15 @@ extension AppModel {
         guard worktree.detected.isReachable else {
           return .failure(code: .unreachable, message: "worktree へ到達できません")
         }
-        return await openHostControlSession(for: worktree)
+        return await openHostControlSession(for: worktree, purpose: purpose)
       }
     }
     return nil
   }
 
-  private func openHostControlSession(for worktree: TaskWorktree) async -> HostControlResponse {
+  private func openHostControlSession(
+    for worktree: TaskWorktree, purpose: String?
+  ) async -> HostControlResponse {
     guard let sessions else {
       return .failure(code: .tmuxFailed, message: "tmux を利用できません")
     }
@@ -106,6 +113,7 @@ extension AppModel {
         return failure
       }
       created = true
+      await writeHandoffPurpose(purpose, to: key)
     }
     guard !Task.isCancelled else {
       return .failure(code: .tmuxFailed, message: "処理が時間内に終わりませんでした")
@@ -120,6 +128,16 @@ extension AppModel {
       HostControlOpenedWorktree(
         session: TmuxSessionName(key: key).rawValue,
         directory: currentWorktree.detected.worktreePath, created: created, agentCommand: nil))
+  }
+
+  /// 目的は表示だけなので、書けなくても引き渡しは失敗にしない。
+  private func writeHandoffPurpose(_ purpose: String?, to key: TerminalSessionKey) async {
+    guard let purpose else { return }
+    if let failure = await paneObservations.setPurpose(
+      purpose, ofActivePaneIn: TmuxSessionName(key: key))
+    {
+      NSLog("[app] 引き渡しの目的を書けません: \(failure)")
+    }
   }
 
   private func createHostControlSession(

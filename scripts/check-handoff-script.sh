@@ -89,28 +89,70 @@ RC
 cat >"$work_dir/hostctl" <<'HOSTCTL'
 #!/usr/bin/env bash
 set -eu
-printf 'called\n' >>"$AWT_TEST_DIR/calls"
+# AWT_TEST_HOSTCTL_KIND: new は --from-pane と --purpose を、from-pane は --from-pane だけを知る。old はどちらも知らない。
+command_ok=0
+if [[ $# -ge 2 && "$1" == worktree && "$2" == open ]]; then
+  command_ok=1
+  shift 2
+fi
+directory=""
+socket=""
 from_pane=""
 from_pane_set=0
-if [[ $# -eq 8 && "$7" == --from-pane ]]; then
-  from_pane="$8"
-  from_pane_set=1
-  set -- "$1" "$2" "$3" "$4" "$5" "$6"
-fi
+purpose=""
+purpose_set=0
+unknown=""
+while [[ "$command_ok" -eq 1 && $# -gt 0 ]]; do
+  option="$1"
+  case "$option" in
+    --directory | --socket) ;;
+    --from-pane) [[ "$AWT_TEST_HOSTCTL_KIND" != old ]] || unknown="${unknown:-$option}" ;;
+    --purpose) [[ "$AWT_TEST_HOSTCTL_KIND" == new ]] || unknown="${unknown:-$option}" ;;
+    *)
+      unknown="${unknown:-$option}"
+      shift
+      continue
+      ;;
+  esac
+  if [[ $# -lt 2 ]]; then
+    unknown="${unknown:-$option}"
+    break
+  fi
+  case "$option" in
+    --directory) directory="$2" ;;
+    --socket) socket="$2" ;;
+    --from-pane)
+      from_pane="$2"
+      from_pane_set=1
+      ;;
+    --purpose)
+      purpose="$2"
+      purpose_set=1
+      ;;
+  esac
+  shift 2
+done
+# calls と from-pane は exit 2 で拒否した呼び出しも含めて全部記録する。sends は exit 2 以外で終わったものだけ。
+printf 'called\n' >>"$AWT_TEST_DIR/calls"
 printf '%s\n' "$from_pane" >>"$AWT_TEST_DIR/from-pane"
-[[ $# -eq 6 && "$1" == worktree && "$2" == open && "$3" == --directory &&
-  "$4" == "$AWT_TEST_DIR" && "$5" == --socket && "$6" == test-socket ]] || exit 2
-if [[ "$from_pane_set" -eq 1 && "${AWT_TEST_OLD_HOSTCTL:-0}" == 1 ]]; then
-  printf '%s\n' '不正な引数です: --from-pane' >&2
+if [[ -n "$unknown" ]]; then
+  printf '不正な引数です: %s\n' "$unknown" >&2
   exit 2
 fi
-if [[ "$AWT_TEST_MODE" == unavailable ]]; then
-  printf '%s\n' '{"ok":false,"version":1,"code":"unavailable","message":"app is not running"}' >&2
-  exit 69
+[[ "$command_ok" -eq 1 && "$directory" == "$AWT_TEST_DIR" && "$socket" == test-socket ]] || exit 2
+if [[ "$purpose_set" -eq 1 && ( -z "$purpose" || "$purpose" == --* ) ]]; then
+  printf '%s\n' '不正な引数です: --purpose' >&2
+  exit 2
 fi
 if [[ "$AWT_TEST_MODE" == argument-error ]]; then
   printf '%s\n' 'invalid arguments' >&2
   exit 2
+fi
+printf 'sent\n' >>"$AWT_TEST_DIR/sends"
+printf '%s\0%s\0%s\0%s\0' "$from_pane_set" "$from_pane" "$purpose_set" "$purpose" >"$AWT_TEST_DIR/last-send"
+if [[ "$AWT_TEST_MODE" == unavailable ]]; then
+  printf '%s\n' '{"ok":false,"version":1,"code":"unavailable","message":"app is not running"}' >&2
+  exit 69
 fi
 created=true
 case "$AWT_TEST_MODE" in
@@ -161,7 +203,7 @@ export AWT_TEST_DIR="$work_dir"
 export AWT_TEST_MODE=success
 export AWT_TEST_SESSION=success
 export AWT_TEST_AGENT="$work_dir/agent"
-export AWT_TEST_OLD_HOSTCTL=0
+export AWT_TEST_HOSTCTL_KIND=new
 
 # この検査自体が tmux pane の中で動くことがあるので、継承した TMUX_PANE を渡さない。
 # bash 3.2 は set -u の下で空の配列の展開を未定義の参照として止まるので、要素を必ず1つ以上にする。
@@ -314,7 +356,7 @@ expect_hostctl_calls() {
 }
 
 reset_hostctl_calls() {
-  rm -f "$work_dir/calls" "$work_dir/from-pane" "$work_dir/argv"
+  rm -f "$work_dir/calls" "$work_dir/from-pane" "$work_dir/sends" "$work_dir/last-send" "$work_dir/argv"
 }
 
 expect_agent_prompt() {
@@ -373,7 +415,7 @@ for invalid_pane in 22 %2a ''; do
 done
 
 reset_hostctl_calls
-AWT_TEST_OLD_HOSTCTL=1
+AWT_TEST_HOSTCTL_KIND=old
 pane_env=(TMUX_PANE=%22)
 AWT_TEST_SESSION=from-pane-old
 sessions+=(from-pane-old)
@@ -387,7 +429,7 @@ AWT_TEST_MODE=existing
 expect_exit 3 '古い hostctl の呼び直しでも既存セッションには送らない' --directory "$work_dir" --prompt from-pane-existing
 expect_hostctl_calls '古い hostctl の呼び直しでも既存セッションには送らない' %22 ''
 expect_no_old_hostctl_error '古い hostctl の呼び直しでも既存セッションには送らない'
-AWT_TEST_OLD_HOSTCTL=0
+AWT_TEST_HOSTCTL_KIND=new
 
 reset_hostctl_calls
 AWT_TEST_MODE=unavailable
@@ -416,6 +458,136 @@ if [[ ! -s "$work_dir/stdout" && "$(cat "$work_dir/stderr")" == 'invalid argumen
 else
   ng '呼び直しの失敗時の出力が期待と異なります'
 fi
+
+# 送信 (exit 2 以外で終わった呼び出し) が1回だけで、その引数の組が期待どおりかを見る。
+expect_send() {
+  local label="$1" sends=-1
+  checked=$((checked + 1))
+  printf '%s\0%s\0%s\0%s\0' "$2" "$3" "$4" "$5" >"$work_dir/want-send"
+  [[ ! -f "$work_dir/sends" ]] || sends=$(wc -l <"$work_dir/sends" | tr -d ' ')
+  if [[ "$sends" -eq 1 ]] && cmp -s "$work_dir/want-send" "$work_dir/last-send"; then
+    info "OK: $label (送信は1回で、引数の組が期待どおり)"
+  else
+    ng "$label: 送信が期待と異なります (送信 $sends 回)"
+    tr '\0' '|' 2>/dev/null <"$work_dir/last-send" || true
+    printf '\n'
+  fi
+}
+
+expect_stderr_contains() {
+  local label="$1" text="$2"
+  checked=$((checked + 1))
+  if rg -q -F -- "$text" "$work_dir/stderr"; then
+    info "OK: $label (stderr に「${text}」がある)"
+  else
+    ng "$label: stderr に「${text}」がありません"
+    cat "$work_dir/stderr"
+  fi
+}
+
+AWT_TEST_MODE=success
+AWT_TEST_AGENT="$work_dir/agent"
+purpose_value='Issue #837 の目的'
+for kind in new from-pane old; do
+  for pane_kind in set unset; do
+    for purpose_kind in set unset; do
+      reset_hostctl_calls
+      AWT_TEST_HOSTCTL_KIND="$kind"
+      AWT_TEST_SESSION="purpose-$kind-pane-$pane_kind-purpose-$purpose_kind"
+      sessions+=("$AWT_TEST_SESSION")
+      label="hostctl=$kind TMUX_PANE=$pane_kind --purpose=$purpose_kind"
+      arguments=(--directory "$work_dir" --prompt purpose-matrix)
+      [[ "$purpose_kind" != set ]] || arguments+=(--purpose "$purpose_value")
+      # 呼び出しごとの --from-pane の値。段は「両方 → --from-pane だけ → 無し」から付けるものが無い段を除いたもの。
+      want_calls=()
+      if [[ "$pane_kind" == set ]]; then
+        pane_env=(TMUX_PANE=%22)
+        [[ "$purpose_kind" != set || "$kind" == new ]] || want_calls+=(%22)
+        if [[ "$kind" == old ]]; then
+          want_calls+=(%22 '')
+        else
+          want_calls+=(%22)
+        fi
+      else
+        pane_env=(-u TMUX_PANE)
+        [[ "$purpose_kind" != set || "$kind" == new ]] || want_calls+=('')
+        want_calls+=('')
+      fi
+      want_pane_set=0
+      want_pane=''
+      if [[ "$pane_kind" == set && "$kind" != old ]]; then
+        want_pane_set=1
+        want_pane=%22
+      fi
+      want_purpose_set=0
+      want_purpose=''
+      if [[ "$purpose_kind" == set && "$kind" == new ]]; then
+        want_purpose_set=1
+        want_purpose="$purpose_value"
+      fi
+      expect_exit 0 "$label" "${arguments[@]}"
+      expect_hostctl_calls "$label" "${want_calls[@]}"
+      expect_send "$label" "$want_pane_set" "$want_pane" "$want_purpose_set" "$want_purpose"
+      expect_agent_prompt "$label" purpose-matrix
+      expect_no_old_hostctl_error "$label"
+    done
+  done
+done
+AWT_TEST_HOSTCTL_KIND=new
+pane_env=(-u TMUX_PANE)
+
+long_purpose=$(python3 -I -c 'print("あ" * 341 + "a", end="")')
+# shellcheck disable=SC2016 # 展開されずにそのまま hostctl へ届くことを検査する
+quoted_purpose='目的 '"'"'single'"'"' "double" $(printf expanded) `printf expanded`'
+purpose_index=0
+for valid_purpose in "$long_purpose" "$quoted_purpose"; do
+  purpose_index=$((purpose_index + 1))
+  reset_hostctl_calls
+  AWT_TEST_SESSION="purpose-valid-$purpose_index"
+  sessions+=("$AWT_TEST_SESSION")
+  expect_exit 0 "目的 $purpose_index はそのまま渡す" --directory "$work_dir" --prompt purpose-valid --purpose "$valid_purpose"
+  expect_send "目的 $purpose_index はそのまま渡す" 0 '' 1 "$valid_purpose"
+done
+checked=$((checked + 1))
+if [[ "$(printf '%s' "$long_purpose" | wc -c | tr -d ' ')" -eq 1024 ]]; then
+  info 'OK: 1件目の目的は 1024 バイトちょうど'
+else
+  ng '1件目の目的が 1024 バイトではありません'
+fi
+
+reset_hostctl_calls
+AWT_TEST_HOSTCTL_KIND=old
+pane_env=(TMUX_PANE=%22 TMPDIR="$work_dir/missing-tmp")
+AWT_TEST_SESSION=purpose-no-mktemp
+sessions+=(purpose-no-mktemp)
+expect_exit 0 'mktemp に失敗しても段を飛ばさずに呼び直す' --directory "$work_dir" --prompt purpose-no-mktemp --purpose "$purpose_value"
+expect_hostctl_calls 'mktemp に失敗しても段を飛ばさずに呼び直す' %22 %22 ''
+expect_send 'mktemp に失敗しても段を飛ばさずに呼び直す' 0 '' 0 ''
+expect_agent_prompt 'mktemp に失敗しても段を飛ばさずに呼び直す' purpose-no-mktemp
+# 一時ファイルに取れていれば出ない文言なので、mktemp が実際に失敗したことの確認になる。
+expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
+AWT_TEST_HOSTCTL_KIND=new
+pane_env=(-u TMUX_PANE)
+
+too_long_purpose=$(python3 -I -c 'print("あ" * 341 + "ab", end="")')
+reset_hostctl_calls
+purpose_index=0
+for invalid_purpose in $'a\nb' $'a\tb' $'a\xc2\x85b' $'a\xe2\x80\xa8b' $'a\xe2\x80\xa9b' 'a\b' '-purpose' '' '   ' \
+  "$too_long_purpose" 'end;' $'a\xffb'; do
+  purpose_index=$((purpose_index + 1))
+  expect_exit 2 "不正な目的 $purpose_index を拒否する" --directory "$work_dir" --prompt purpose-invalid --purpose "$invalid_purpose"
+  expect_no_call "不正な目的 $purpose_index"
+  expect_stderr_contains "不正な目的 $purpose_index" '目的が不正です: '
+done
+pane_env=(TMUX_PANE=%22)
+expect_exit 2 'TMUX_PANE があっても不正な目的を拒否する' --directory "$work_dir" --prompt purpose-invalid --purpose 'end;'
+expect_no_call 'TMUX_PANE があっても不正な目的'
+pane_env=(-u TMUX_PANE)
+
+expect_exit 2 '--purpose の2回目の指定を拒否する' --directory "$work_dir" --prompt purpose-twice --purpose first --purpose second
+expect_no_call '--purpose の2回目の指定'
+expect_exit 2 '--purpose の値が無ければ拒否する' --directory "$work_dir" --prompt purpose-missing --purpose
+expect_no_call '--purpose の値が無い'
 
 pane_env=(-u TMUX_PANE)
 AWT_TEST_MODE=success

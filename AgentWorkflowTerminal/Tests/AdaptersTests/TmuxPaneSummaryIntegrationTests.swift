@@ -213,7 +213,61 @@ struct TmuxPaneSummaryIntegrationTests {
     }
   }
 
+  @Test("セッション指定の目的はそのセッションの pane にだけ書き、名前が前方一致する別 session に書かない")
+  func purposeOfActivePaneInSession() async throws {
+    let worktree = try #require(
+      WorktreeIdentity(rawValue: "/repo/.git/worktrees/summary-session-purpose"))
+    let short = TmuxSessionName(identity: worktree)
+    let long = TmuxSessionName(key: try #require(TerminalSessionKey(identity: worktree, index: 10)))
+    try #require(long.rawValue.hasPrefix(short.rawValue))
+
+    let socketName = uniqueSocketName("pane-summary-session-purpose")
+    try await IsolatedTmuxServer.withServer(socketName: socketName) { runner in
+      let writer = TmuxPanePurposeWriter(runner: runner)
+      let longPane = try await Self.newPane(
+        session: long.rawValue, runner: runner, createSession: true)
+
+      // 短い名前の session が無いとき、`=` の無い target は前方一致で長い名前へ着地する (tmux 3.8 で実測)。
+      do throws(TmuxPanePurposeWriterError) {
+        try await writer.setPurpose("Issue の概要", ofActivePaneIn: short)
+        Issue.record("存在しない session への書き込みが成功した")
+      } catch {
+        guard case .tmux = error else {
+          Issue.record("存在しない session の失敗が .tmux で返らなかった: \(error)")
+          return
+        }
+      }
+      #expect(try #require(try await Self.rawPurposes(runner: runner)[longPane]).isEmpty)
+
+      let shortPane = try await Self.newPane(
+        session: short.rawValue, runner: runner, createSession: true)
+      try await writer.setPurpose("Issue の概要 テスト", ofActivePaneIn: short)
+      let written = try await Self.rawPurposes(runner: runner)
+      #expect(written[shortPane] == "Issue の概要 テスト")
+      #expect(try #require(written[longPane]).isEmpty)
+      #expect(
+        try await Self.readPurpose(worktree, pane: shortPane, runner: runner)
+          == .accepted("Issue の概要 テスト"))
+
+      try await writer.setPurpose("\u{FEFF}", ofActivePaneIn: short)
+      #expect(try #require(try await Self.rawPurposes(runner: runner)[shortPane]).isEmpty)
+    }
+  }
+
   // MARK: - helpers
+
+  /// 解釈器を通さない生の値。session 名によらず全 pane を読む。
+  private static func rawPurposes(runner: TmuxRunner) async throws -> [PaneID: String] {
+    let output = try await runner.run(arguments: [
+      "list-panes", "-a", "-F", "#{pane_id} #{\(TmuxPaneSummaryOption.purpose)}",
+    ])
+    var result: [PaneID: String] = [:]
+    for line in output.stdout.split(separator: "\n", omittingEmptySubsequences: true) {
+      let fields = line.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: false)
+      result[PaneID(rawValue: String(fields[0]))] = fields.count > 1 ? String(fields[1]) : ""
+    }
+    return result
+  }
 
   private struct Interpreted {
     let agent: PaneAgentProcess

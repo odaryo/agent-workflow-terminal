@@ -168,6 +168,81 @@ struct HostControlTests {
     #expect(error.message.contains("fromPane"))
   }
 
+  @Test("目的を持つ要求はpurposeをキー順に入れて往復する")
+  func requestWithPurposeRoundTrip() throws {
+    let request = HostControlRequest.openWorktree(directory: "/path", purpose: "Issue の概要")
+    let line =
+      #"{"command":"worktree.open","directory":"/path","purpose":"Issue の概要","version":1}"#
+    #expect(HostControlProtocol.encode(request) == line)
+    #expect(try HostControlProtocol.decodeRequest(line).get() == request)
+    #expect(
+      try HostControlProtocol.decodeRequest(HostControlProtocol.encode(request)).get() == request)
+  }
+
+  @Test("呼び出し元paneと目的の両方を持つ要求をキー順に入れて往復する")
+  func requestWithFromPaneAndPurposeRoundTrip() throws {
+    let request = HostControlRequest.openWorktree(
+      directory: "/path", fromPane: PaneID(rawValue: "%22"), purpose: "Issue の概要")
+    let line =
+      #"{"command":"worktree.open","directory":"/path","fromPane":"%22","#
+      + #""purpose":"Issue の概要","version":1}"#
+    #expect(HostControlProtocol.encode(request) == line)
+    #expect(try HostControlProtocol.decodeRequest(line).get() == request)
+    #expect(
+      try HostControlProtocol.decodeRequest(HostControlProtocol.encode(request)).get() == request)
+  }
+
+  @Test("目的が無い要求はpurposeのキーを省き、変更前と同じバイト列にする")
+  func requestWithoutPurposeOmitsKey() {
+    let line = #"{"command":"worktree.open","directory":"/path","version":1}"#
+    #expect(
+      HostControlProtocol.encode(.openWorktree(directory: "/path", fromPane: nil, purpose: nil))
+        == line)
+    let withFromPane =
+      #"{"command":"worktree.open","directory":"/path","fromPane":"%22","version":1}"#
+    #expect(
+      HostControlProtocol.encode(
+        .openWorktree(directory: "/path", fromPane: PaneID(rawValue: "%22"), purpose: nil))
+        == withFromPane)
+  }
+
+  @Test("purposeが無い要求とnullの要求は目的なしとして受け付ける")
+  func acceptsMissingOrNullPurpose() throws {
+    let missing = #"{"command":"worktree.open","directory":"/path","version":1}"#
+    let null = #"{"command":"worktree.open","directory":"/path","purpose":null,"version":1}"#
+    #expect(
+      try HostControlProtocol.decodeRequest(missing).get()
+        == .openWorktree(directory: "/path", fromPane: nil, purpose: nil))
+    #expect(
+      try HostControlProtocol.decodeRequest(null).get()
+        == .openWorktree(directory: "/path", fromPane: nil, purpose: nil))
+  }
+
+  // 中身の検査はアプリがセッションを作る前に Adapters の validate で行う。プロトコルは文字列なら通す。
+  @Test(
+    "purposeの文字列は空・改行・末尾の;・-始まりを含めてそのまま往復する",
+    arguments: ["", "1行目\n2行目", "末尾;", "-u", "--x", "\u{2028}", " "])
+  func purposeContentIsNotValidated(purpose: String) throws {
+    let request = HostControlRequest.openWorktree(directory: "/path", purpose: purpose)
+    let line = HostControlProtocol.encode(request)
+    #expect(!line.contains("\n"))
+    #expect(line.contains(#""purpose":"#))
+    #expect(try HostControlProtocol.decodeRequest(line).get() == request)
+  }
+
+  @Test(
+    "purposeが文字列でなければ項目名を示して拒否する",
+    arguments: ["1", "1.5", "true", "false", #"["x"]"#, "[]", #"{"text":"x"}"#, "{}"])
+  func rejectsNonStringPurpose(wireValue: String) {
+    let line =
+      #"{"command":"worktree.open","directory":"/path","purpose":"# + wireValue + #","version":1}"#
+    guard case .failure(let error) = HostControlProtocol.decodeRequest(line) else {
+      Issue.record("文字列でないpurposeを受け付けた: \(line)")
+      return
+    }
+    #expect(error.message == "purposeの形式が不正です")
+  }
+
   @Test("不正JSONのエラーにデコーダの内部表現を出さない", arguments: ["{", "{}"])
   func readableDecodingErrors(line: String) {
     guard case .failure(let requestError) = HostControlProtocol.decodeRequest(line),
@@ -185,7 +260,8 @@ struct HostControlTests {
     let result = HostControlCommandLine.parse(["worktree", "open", "--directory", "/two words/日本語"])
     #expect(
       try result.get()
-        == .openWorktree(directory: "/two words/日本語", socket: nil, fromPane: nil))
+        == .openWorktree(
+          directory: "/two words/日本語", socket: nil, fromPane: nil, purpose: nil))
   }
 
   @Test("socket指定を解釈する")
@@ -194,7 +270,8 @@ struct HostControlTests {
       ["worktree", "open", "--directory", "/path", "--socket", "/private/tmp/host.sock"])
     #expect(
       try result.get()
-        == .openWorktree(directory: "/path", socket: "/private/tmp/host.sock", fromPane: nil))
+        == .openWorktree(
+          directory: "/path", socket: "/private/tmp/host.sock", fromPane: nil, purpose: nil))
   }
 
   @Test(
@@ -210,7 +287,8 @@ struct HostControlTests {
     let socket: String? = arguments.contains("--socket") ? "/s.sock" : nil
     #expect(
       try HostControlCommandLine.parse(arguments).get()
-        == .openWorktree(directory: "/path", socket: socket, fromPane: PaneID(rawValue: "%22")))
+        == .openWorktree(
+          directory: "/path", socket: socket, fromPane: PaneID(rawValue: "%22"), purpose: nil))
   }
 
   @Test(
@@ -233,6 +311,77 @@ struct HostControlTests {
   func rejectsInvalidFromPaneArguments(arguments: [String]) {
     guard case .failure = HostControlCommandLine.parse(arguments) else {
       Issue.record("不正な呼び出し元paneの指定を受け付けた: \(arguments)")
+      return
+    }
+  }
+
+  @Test(
+    "目的の指定を他の引数の前後どちらに置いても解釈する",
+    arguments: [
+      ["worktree", "open", "--purpose", "Issue の概要", "--directory", "/path"],
+      ["worktree", "open", "--directory", "/path", "--purpose", "Issue の概要"],
+      [
+        "worktree", "open", "--purpose", "Issue の概要", "--from-pane", "%22", "--directory",
+        "/path",
+      ],
+      [
+        "worktree", "open", "--directory", "/path", "--from-pane", "%22", "--purpose",
+        "Issue の概要",
+      ],
+      [
+        "worktree", "open", "--from-pane", "%22", "--socket", "/s.sock", "--purpose",
+        "Issue の概要", "--directory", "/path",
+      ],
+    ]
+  )
+  func parsesPurpose(arguments: [String]) throws {
+    let socket: String? = arguments.contains("--socket") ? "/s.sock" : nil
+    let fromPane: PaneID? = arguments.contains("--from-pane") ? PaneID(rawValue: "%22") : nil
+    #expect(
+      try HostControlCommandLine.parse(arguments).get()
+        == .openWorktree(
+          directory: "/path", socket: socket, fromPane: fromPane, purpose: "Issue の概要"))
+  }
+
+  // handoff.sh は exit 2 を「--purpose を知らない古い hostctl」と読んで目的なしで呼び直すので、
+  // 中身を理由に拒否すると目的なしでセッションが開く。
+  @Test(
+    "目的の値の中身は検査しない",
+    arguments: ["-u", "-x foo", "1行目\n2行目", "末尾;", ";", "a\u{2028}b", " ", "\u{FEFF}"])
+  func purposeArgumentContentIsNotValidated(value: String) throws {
+    #expect(
+      try HostControlCommandLine.parse(
+        ["worktree", "open", "--directory", "/path", "--purpose", value]
+      ).get()
+        == .openWorktree(directory: "/path", socket: nil, fromPane: nil, purpose: value))
+  }
+
+  @Test("目的の2回目の指定は他の引数の重複と同じ誤りにする")
+  func rejectsDuplicatePurposeAsInvalidArgument() {
+    let arguments = [
+      "worktree", "open", "--purpose", "a", "--directory", "/path", "--purpose", "b",
+    ]
+    guard case .failure(let error) = HostControlCommandLine.parse(arguments) else {
+      Issue.record("目的の2回目の指定を受け付けた")
+      return
+    }
+    #expect(error.message == "不正な引数です: --purpose")
+  }
+
+  @Test(
+    "目的の重複、値の欠落、空、--始まりを拒否する",
+    arguments: [
+      ["worktree", "open", "--directory", "/path", "--purpose", "a", "--purpose", "a"],
+      ["worktree", "open", "--directory", "/path", "--purpose", "a", "--purpose", "b"],
+      ["worktree", "open", "--directory", "/path", "--purpose"],
+      ["worktree", "open", "--purpose", "--directory", "/path"],
+      ["worktree", "open", "--directory", "/path", "--purpose", ""],
+      ["worktree", "open", "--directory", "/path", "--purpose", "--x"],
+    ]
+  )
+  func rejectsInvalidPurposeArguments(arguments: [String]) {
+    guard case .failure = HostControlCommandLine.parse(arguments) else {
+      Issue.record("不正な目的の指定を受け付けた: \(arguments)")
       return
     }
   }

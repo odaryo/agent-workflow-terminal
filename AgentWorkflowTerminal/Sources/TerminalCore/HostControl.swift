@@ -1,7 +1,7 @@
 import Foundation
 
 public enum HostControlRequest: Sendable, Equatable {
-  case openWorktree(directory: String, fromPane: PaneID? = nil)
+  case openWorktree(directory: String, fromPane: PaneID? = nil, purpose: String? = nil)
 }
 
 public struct HostControlOpenedWorktree: Sendable, Equatable {
@@ -36,12 +36,13 @@ public enum HostControlProtocol {
 
   public static func encode(_ request: HostControlRequest) -> String {
     switch request {
-    case .openWorktree(let directory, let fromPane):
+    case .openWorktree(let directory, let fromPane, let purpose):
       var object: [String: Any] = [
         "command": "worktree.open", "directory": directory, "version": version,
       ]
       // 省くのは、古いhostctlが送る要求と同じバイト列に保つため。
       if let fromPane { object["fromPane"] = fromPane.rawValue }
+      if let purpose { object["purpose"] = purpose }
       return encodeObject(object)
     }
   }
@@ -62,13 +63,23 @@ public enum HostControlProtocol {
       } catch {
         return .failure(invalidFromPane)
       }
-      return .success(.openWorktree(directory: wire.directory, fromPane: fromPane))
+      // 中身 (長さ・改行・末尾の`;`) は検査しない。上限はAdaptersにあり、アプリがセッションを
+      // 作る前に検査する。
+      let purpose: String?
+      do {
+        purpose = try JSONDecoder().decode(PurposeWire.self, from: Data(line.utf8)).purpose
+      } catch {
+        return .failure(invalidPurpose)
+      }
+      return .success(
+        .openWorktree(directory: wire.directory, fromPane: fromPane, purpose: purpose))
     } catch {
       return .failure(HostControlProtocolError(message: "要求のJSON形式が不正です"))
     }
   }
 
   static let invalidFromPane = HostControlProtocolError(message: "fromPaneの形式が不正です")
+  static let invalidPurpose = HostControlProtocolError(message: "purposeの形式が不正です")
 
   /// tmux の `#{pane_id}` の形 (`%` と ASCII の10進数字) だけを受け付ける。要求の `fromPane` と
   /// `--from-pane` で共有する。
@@ -141,6 +152,10 @@ public enum HostControlProtocol {
     }
   }
 
+  private struct PurposeWire: Decodable {
+    let purpose: String?
+  }
+
   private struct ResponseWire: Decodable {
     let response: HostControlResponse
 
@@ -180,7 +195,7 @@ public struct HostControlProtocolError: Error, Sendable, Equatable {
 }
 
 public enum HostControlCommand: Sendable, Equatable {
-  case openWorktree(directory: String, socket: String?, fromPane: PaneID?)
+  case openWorktree(directory: String, socket: String?, fromPane: PaneID?, purpose: String?)
 }
 
 public enum HostControlCommandLine {
@@ -191,9 +206,7 @@ public enum HostControlCommandLine {
     guard arguments.starts(with: ["worktree", "open"]) else {
       return .failure(HostControlProtocolError(message: "worktree openを指定してください"))
     }
-    var directory: String?
-    var socket: String?
-    var fromPane: PaneID?
+    var options = Options()
     var index = 2
     while index < arguments.count {
       let option = arguments[index]
@@ -204,22 +217,41 @@ public enum HostControlCommandLine {
       guard !value.isEmpty, !value.hasPrefix("--") else {
         return .failure(HostControlProtocolError(message: "不正な引数の値です: \(option)"))
       }
+      if let error = options.assign(option, value) { return .failure(error) }
+      index += 2
+    }
+    guard let directory = options.directory else {
+      return .failure(HostControlProtocolError(message: "--directoryが必要です"))
+    }
+    return .success(
+      .openWorktree(
+        directory: directory, socket: options.socket, fromPane: options.fromPane,
+        purpose: options.purpose))
+  }
+
+  private struct Options {
+    var directory: String?
+    var socket: String?
+    var fromPane: PaneID?
+    var purpose: String?
+
+    /// 2回目の指定と未知の引数は同じ「不正な引数です」にする。
+    mutating func assign(_ option: String, _ value: String) -> HostControlProtocolError? {
       switch option {
       case "--directory" where directory == nil: directory = value
       case "--socket" where socket == nil: socket = value
       case "--from-pane" where fromPane == nil:
         guard let pane = HostControlProtocol.callerPane(value) else {
-          return .failure(HostControlProtocolError(message: "不正な引数の値です: \(option)"))
+          return HostControlProtocolError(message: "不正な引数の値です: \(option)")
         }
         fromPane = pane
+      // handoff.sh は exit 2 を「--purpose を知らない古い hostctl」と読んで目的なしで呼び直すので、
+      // 中身を理由に拒否しない。中身はアプリがセッションを作る前に検査する。
+      case "--purpose" where purpose == nil: purpose = value
       default:
-        return .failure(HostControlProtocolError(message: "不正な引数です: \(option)"))
+        return HostControlProtocolError(message: "不正な引数です: \(option)")
       }
-      index += 2
+      return nil
     }
-    guard let directory else {
-      return .failure(HostControlProtocolError(message: "--directoryが必要です"))
-    }
-    return .success(.openWorktree(directory: directory, socket: socket, fromPane: fromPane))
   }
 }

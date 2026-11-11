@@ -254,7 +254,9 @@ jobs:
 
       - name: Handoff script - checks
         if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
-        timeout-minutes: 5
+        # 220 件 (#837) で検査に 4 分 36 秒、続く後始末に session 1 つあたり約 1 秒かかり、
+        # 5 分では後始末の途中で打ち切られて隔離 server が残った (2026-11-11 の CI 実測)。
+        timeout-minutes: 10
         run: scripts/check-handoff-script.sh
 
       - name: Handoff hook - checks

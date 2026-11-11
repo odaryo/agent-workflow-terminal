@@ -116,7 +116,7 @@ extension DiffBaseBranchSource {
   /// §9.1.1 のどの経路で base branch が決まったか。
   var decisionLabel: String {
     switch self {
-    case .upstream: "upstream で決定"
+    case .forkPoint: "分岐元で決定"
     case .originHead: "origin/HEAD で決定"
     case .userSelection: "ユーザーが選択"
     }

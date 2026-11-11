@@ -19,10 +19,10 @@ struct DiffRangeSummaryTests {
     let summary = DiffRangeSummary(
       snapshot: snapshot,
       context: DiffSnapshotRangeContext(
-        worktreeName: "feat/x", baseSource: .upstream, commit: nil))
+        worktreeName: "feat/x", baseSource: .forkPoint, commit: nil))
 
     #expect(summary.target == "feat/x — branch feat/x @ fedcba9")
-    #expect(summary.comparison == "base remotes/origin/main (upstream で決定)")
+    #expect(summary.comparison == "base remotes/origin/main (分岐元で決定)")
     #expect(summary.origin == "merge-base 0123456 起点")
     #expect(
       summary.contents
@@ -32,7 +32,7 @@ struct DiffRangeSummaryTests {
   @Test(
     "base を決めた経路を区別する",
     arguments: [
-      (DiffBaseBranchSource.upstream, "base main (upstream で決定)"),
+      (DiffBaseBranchSource.forkPoint, "base main (分岐元で決定)"),
       (.originHead, "base main (origin/HEAD で決定)"),
       (.userSelection, "base main (ユーザーが選択)"),
     ])

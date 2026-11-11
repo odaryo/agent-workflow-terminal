@@ -8,27 +8,36 @@ struct DiffBaseBranchTests {
   func prefersUserSelection() {
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: .local("release/1.0"), upstream: .remote("origin/feature"),
+        userSelection: .local("release/1.0"), forkPoint: .remote("origin/develop"),
         originHead: .remote("origin/main"))
         == .resolved(branch: .local("release/1.0"), source: .userSelection))
   }
 
-  @Test("選択が無ければ upstream、次に origin/HEAD を使う")
+  @Test("選択が無ければ分岐元、次に origin/HEAD を使う")
   func fallsBackInOrder() {
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: nil, upstream: .remote("origin/feature"), originHead: .remote("origin/main"))
-        == .resolved(branch: .remote("origin/feature"), source: .upstream))
+        userSelection: nil, forkPoint: .remote("origin/develop"),
+        originHead: .remote("origin/main"))
+        == .resolved(branch: .remote("origin/develop"), source: .forkPoint))
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: nil, upstream: nil, originHead: .remote("origin/main"))
+        userSelection: nil, forkPoint: nil, originHead: .remote("origin/main"))
         == .resolved(branch: .remote("origin/main"), source: .originHead))
   }
 
-  @Test("どちらも解決できなければ未決定にする (main へ丸めない)")
+  @Test("分岐元は local branch でも origin/HEAD より優先する")
+  func prefersLocalForkPointOverOriginHead() {
+    #expect(
+      DiffBaseBranchResolver.resolve(
+        userSelection: nil, forkPoint: .local("main"), originHead: .remote("origin/main"))
+        == .resolved(branch: .local("main"), source: .forkPoint))
+  }
+
+  @Test("どれも解決できなければ未決定にする (main へ丸めない)")
   func doesNotFallBackToMain() {
     #expect(
-      DiffBaseBranchResolver.resolve(userSelection: nil, upstream: nil, originHead: nil)
+      DiffBaseBranchResolver.resolve(userSelection: nil, forkPoint: nil, originHead: nil)
         == .undetermined)
   }
 
@@ -38,19 +47,80 @@ struct DiffBaseBranchTests {
   func treatsBlankAsAbsent(blank: String) {
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: .local(blank), upstream: .remote(blank), originHead: .remote(blank))
+        userSelection: .local(blank), forkPoint: .local(blank), originHead: .remote(blank))
         == .undetermined)
     #expect(
       DiffBaseBranchResolver.resolve(
-        userSelection: .local(blank), upstream: .remote(blank), originHead: .remote("origin/x"))
+        userSelection: .local(blank), forkPoint: .remote(blank), originHead: .remote("origin/x"))
         == .resolved(branch: .remote("origin/x"), source: .originHead))
+    #expect(
+      DiffBaseBranchResolver.resolve(
+        userSelection: .local(blank), forkPoint: .local("main"), originHead: .remote(blank))
+        == .resolved(branch: .local("main"), source: .forkPoint))
   }
 
   @Test("解決済みの branch 名だけを取り出せる")
   func exposesBranchName() {
     #expect(
-      DiffBaseBranch.resolved(branch: .remote("origin/main"), source: .upstream).branch
+      DiffBaseBranch.resolved(branch: .remote("origin/main"), source: .forkPoint).branch
         == .remote("origin/main"))
     #expect(DiffBaseBranch.undetermined.branch == nil)
+  }
+}
+
+/// `recordedStartPoint` は reflog の `branch: Created from <ref>` の `<ref>`、`resolvedFullName` は
+/// それを今の repository で `rev-parse --verify --quiet --symbolic-full-name` した stdout (trim 済み)。
+/// 値は git 2.54.0 の隔離 repository での実測 (Issue #829)。
+@Suite("§9.1.1 分岐元の採否")
+struct DiffForkPointTests {
+  @Test(
+    "記録どおりの名前で branch に解決できれば分岐元にする",
+    arguments: [
+      ("origin/main", "refs/remotes/origin/main", GitBranchRef.remote("origin/main")),
+      ("refs/remotes/origin/main", "refs/remotes/origin/main", .remote("origin/main")),
+      ("refs/heads/main", "refs/heads/main", .local("main")),
+      ("main", "refs/heads/main", .local("main")),
+      ("日本語", "refs/heads/日本語", .local("日本語")),
+    ])
+  func adoptsMatchingBranch(recorded: String, resolved: String, expected: GitBranchRef) {
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: recorded, resolvedFullName: resolved,
+        currentBranch: .local("feature"))
+        == expected)
+  }
+
+  // `HEAD` / `@` / `@{-1}` は記録時ではなく今の文脈で解決されるので、記録と名前が一致しない。
+  @Test(
+    "記録と名前が一致しない解決・branch でない解決・自分自身は分岐元にしない",
+    arguments: [
+      ("HEAD", "refs/heads/main", GitBranchRef.local("feature")),
+      ("@", "refs/heads/main", .local("feature")),
+      ("@{-1}", "refs/heads/b8", .local("feature")),
+      ("origin/HEAD", "refs/remotes/origin/main", .local("feature")),
+      ("v1", "refs/tags/v1", .local("feature")),
+      ("refs/tags/v1", "refs/tags/v1", .local("feature")),
+      ("main~0", "", .local("feature")),
+      ("main^{commit}", "", .local("feature")),
+      ("0123456789abcdef0123456789abcdef01234567", "", .local("feature")),
+      ("feat", "refs/heads/feat", .local("feat")),
+      ("HEAD", "refs/heads/feature", .local("feature")),
+      ("@", "refs/heads/feature", .local("feature")),
+    ])
+  func rejects(recorded: String, resolved: String, current: GitBranchRef) {
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: current)
+        == nil)
+  }
+
+  @Test("同じ短縮名でも local と remote は別の branch として扱う")
+  func distinguishesNamespaceFromCurrentBranch() {
+    #expect(
+      DiffForkPoint.branch(
+        recordedStartPoint: "refs/remotes/origin/feature",
+        resolvedFullName: "refs/remotes/origin/feature",
+        currentBranch: .local("origin/feature"))
+        == .remote("origin/feature"))
   }
 }

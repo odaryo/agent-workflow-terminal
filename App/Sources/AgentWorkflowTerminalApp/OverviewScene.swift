@@ -126,12 +126,12 @@ private struct OverviewProjectSection: View {
             }
           }
         }
+        .font(.subheadline.weight(.bold))
+        .foregroundStyle(.secondary)
         .contentShape(.rect)
       }
       .buttonStyle(.plain)
       .help(disclosureLabel)
-      .font(.subheadline.weight(.bold))
-      .foregroundStyle(.secondary)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         showsAttentionCount

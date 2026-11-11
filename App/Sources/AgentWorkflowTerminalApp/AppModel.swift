@@ -287,7 +287,8 @@ final class AppModel: ObservableObject {
         detected: scan.detected,
         previous: inventory,
         unobserved: scan.failures.map(\.worktreePath),
-        isListingComplete: scan.listingFailure == nil
+        isListingComplete: scan.listingFailure == nil,
+        prunable: scan.prunable
       )
       guard updated.inventory != inventory else { continue }
       projectRoot = updated.inventory.projectRoot

@@ -26,7 +26,9 @@ struct GitWorktreePartialListingTests {
     #expect(result.detected.map(\.branch) == ["main", "wt1"])
     #expect(result.detected.map(\.isProjectRoot) == [true, false])
     #expect(result.failures.isEmpty)
-    #expect(result.listingFailure == .commandFailed(exitCode: 128, stdout: output, stderr: stderr))
+    #expect(
+      result.listingFailure
+        == .command(.commandFailed(exitCode: 128, stdout: output, stderr: stderr)))
   }
 
   @Test(
@@ -124,12 +126,98 @@ struct GitWorktreePartialListingTests {
     #expect(await runner.invocations.count == 1)
   }
 
+  // MARK: - prunable (Issue #774)
+
+  /// git 2.54.0 実測: 作業ツリーを消した wt1 は `prunable` 付きの完結 record として出て、
+  /// 続く wt2 の `locked` を読めずに exit 128 で途切れる。
+  @Test("部分一覧でも git が prunable と明示した worktree の安定 ID を返す")
+  func reportsPrunableIdentityInPartialListing() async throws {
+    let output = try fixture(
+      named: "git-2.54.0-worktree-list-porcelain-z-prunable-then-locked-unreadable.txt")
+    let runner = PartialListingProcessStub(listings: [
+      .success(.init(exitCode: 128, stdout: output, stderr: "fatal: failed to read\n"))
+    ])
+
+    let result = try await detector(runner, findAdministrativeDirectory: Self.adminDirectory).scan()
+
+    #expect(result.listingFailure != nil)
+    #expect(
+      result.detected.map { URL(fileURLWithPath: $0.worktreePath).lastPathComponent } == ["main"])
+    #expect(result.prunable == [try identity("/repo/.git/worktrees/wt1")])
+  }
+
+  @Test("完全な一覧でも git が prunable と明示した worktree の安定 ID を返す")
+  func reportsPrunableIdentityInCompleteListing() async throws {
+    let output = try fixture(named: "git-2.54.0-worktree-list-porcelain-z-prunable.txt")
+    let runner = PartialListingProcessStub(listings: [
+      .success(.init(exitCode: 0, stdout: output, stderr: ""))
+    ])
+
+    let result = try await detector(runner, findAdministrativeDirectory: Self.adminDirectory).scan()
+
+    #expect(result.listingFailure == nil)
+    #expect(
+      result.detected.map { URL(fileURLWithPath: $0.worktreePath).lastPathComponent } == [
+        "main", "wt1", "wt3",
+      ])
+    #expect(result.prunable == [try identity("/repo/.git/worktrees/wt2")])
+  }
+
+  // MARK: - bare (Issue #774)
+
+  /// git 2.54.0 実測: bare の entry だけが完結し、最初の linked worktree の record は途切れる。
+  @Test("bare で最初の linked worktree が途切れたら、bare の entry を数えずに一覧の失敗を throw する")
+  func throwsWhenOnlyBareRecordCompleted() async throws {
+    let output = try fixture(
+      named: "git-2.54.0-worktree-list-porcelain-z-bare-locked-unreadable.txt")
+    let stderr = "fatal: failed to read 'worktrees/wt1/locked': Permission denied\n"
+    let runner = PartialListingProcessStub(listings: [
+      .success(.init(exitCode: 128, stdout: output, stderr: stderr))
+    ])
+    let subject = try detector(runner)
+
+    await #expect(
+      throws: GitWorktreeScanError.list(
+        .commandFailed(exitCode: 128, stdout: output, stderr: stderr))
+    ) {
+      try await subject.scan()
+    }
+  }
+
+  @Test("exit 0 の bare だけの一覧は throw せず、検出0件の完全な一覧とする")
+  func bareOnlyCompleteListingDoesNotThrow() async throws {
+    let output = try fixture(named: "git-2.50.1-worktree-list-porcelain-z-bare.txt")
+    let runner = PartialListingProcessStub(listings: [
+      .success(.init(exitCode: 0, stdout: output, stderr: ""))
+    ])
+
+    let result = try await detector(runner).scan()
+
+    #expect(result.listingFailure == nil)
+    #expect(result.detected.isEmpty)
+    #expect(result.failures.isEmpty)
+  }
+
   private func fixture(_ failure: String) throws -> String {
+    try fixture(named: "git-2.50.1-worktree-list-porcelain-z-locked-\(failure).txt")
+  }
+
+  private func fixture(named name: String) throws -> String {
     let url = try #require(
-      Bundle.module.url(
-        forResource: "git-2.50.1-worktree-list-porcelain-z-locked-\(failure).txt",
-        withExtension: nil, subdirectory: "Fixtures"))
+      Bundle.module.url(forResource: name, withExtension: nil, subdirectory: "Fixtures"))
     return String(decoding: try Data(contentsOf: url), as: UTF8.self)
+  }
+
+  private func identity(_ rawValue: String) throws -> WorktreeIdentity {
+    try #require(WorktreeIdentity(rawValue: rawValue))
+  }
+
+  /// 作業ツリー名をそのまま管理ディレクトリ名とみなす。サニタイズの無い名前だけを使う。
+  @Sendable private static func adminDirectory(
+    _ path: String, _ common: WorktreeIdentity
+  ) -> WorktreeIdentity? {
+    WorktreeIdentity(
+      rawValue: "\(common.rawValue)/worktrees/\(URL(fileURLWithPath: path).lastPathComponent)")
   }
 
   private func reason(_ failure: String) -> String {
@@ -140,14 +228,19 @@ struct GitWorktreePartialListingTests {
     }
   }
 
-  private func detector(_ processRunner: PartialListingProcessStub) throws -> GitWorktreeDetector {
+  private func detector(
+    _ processRunner: PartialListingProcessStub,
+    findAdministrativeDirectory:
+      @escaping @Sendable (String, WorktreeIdentity) -> WorktreeIdentity? =
+      { _, _ in nil }
+  ) throws -> GitWorktreeDetector {
     GitWorktreeDetector(
       projectRunner: try gitRunner(URL(fileURLWithPath: "/repo"), processRunner),
       makeRunner: { directory throws(GitRunnerError) in
         try gitRunner(directory, processRunner)
       },
       isWorktreeReachable: { _ in true },
-      findAdministrativeDirectory: { _, _ in nil }
+      findAdministrativeDirectory: findAdministrativeDirectory
     )
   }
 }

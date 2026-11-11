@@ -185,6 +185,13 @@ public struct WorktreeScanResult: Sendable, Hashable {
 ///   `detected` にも載っているパスは検出できているので `unobserved` 側を無視する。
 ///   `previous` のどれとも一致しないパスは保持しようが無いので何もしない (UI への通知は
 ///   呼び出し側の責務)。
+/// - Important: `prunable` は git が `prunable` と明示した安定 ID で、`isListingComplete` が
+///   `false` でも、今回検出されなかったものは消失にする (設計書 §3.2.1「作業ツリーのディレクトリが
+///   存在せずgitが`prunable`とするworktreeは消失」)。今回検出されたものは、入れないだけの到達不能
+///   (Issue #496) として検出した値で保持する。
+/// - Important: 不完全な一覧で未検出の Task を保持するとき、今回検出した worktree と作業ツリーの
+///   パスが同じものは保持せず消失にする。一覧が壊れている間に消して同じパスへ作り直した worktree は
+///   別の安定 ID で現れ、保持すると同じパスの Task が2つ並ぶ (Issue #774)。
 /// - Note: git の検出順は開いた順を表さないため、観測失敗として保持したものも前回の位置を
 ///   維持する (設計書 §13)。前回状態が無い場合と新規の worktree 同士だけは検出順を使う。
 /// - Important: `previous` の `nil` は「前回状態が無い」= 初回スキャンを表し、空の
@@ -208,7 +215,8 @@ public func reconcileDetectedWorktrees(
   detected: [DetectedWorktree],
   previous: WorktreeInventory?,
   unobserved: [String] = [],
-  isListingComplete: Bool = true
+  isListingComplete: Bool = true,
+  prunable: [WorktreeIdentity] = []
 ) -> WorktreeScanResult {
   var projectRoot: DetectedWorktree?
   var taskWorktrees: [TaskWorktree] = []
@@ -235,7 +243,8 @@ public func reconcileDetectedWorktrees(
   var disappeared: [WorktreeIdentity] = []
   var unobservedIdentities: [WorktreeIdentity] = []
   if let previous {
-    let unobservedPaths = Set(unobserved).subtracting(detected.map(\.worktreePath))
+    let detectedPaths = Set(detected.map(\.worktreePath))
+    let unobservedPaths = Set(unobserved).subtracting(detectedPaths)
 
     if let retainedRoot = retainedProjectRoot(
       previous: previous, detectedProjectRoot: projectRoot, seen: seen,
@@ -245,20 +254,15 @@ public func reconcileDetectedWorktrees(
       unobservedIdentities.append(retainedRoot.identity)
     }
 
-    for task in previous.taskWorktrees
-    where !seen.contains(task.identity)
-      && (!isListingComplete || unobservedPaths.contains(task.detected.worktreePath))
-    {
-      seen.insert(task.identity)
-      // 不完全な一覧で未検出の worktree を observationFailed にすると、一過性の一覧取得失敗で
-      // 表示中の session の選択が外れるため、個別の観測失敗とは区別して前回の状態を残す。
-      taskWorktrees.append(
-        TaskWorktree(
-          detected: unobservedPaths.contains(task.detected.worktreePath)
-            ? task.detected.observing(.observationFailed) : task.detected,
-          activation: task.activation))
-      unobservedIdentities.append(task.identity)
+    let prunableIdentities = Set(prunable)
+    let retainedTasks = retainedTaskWorktrees(
+      previous: previous, seen: seen, unobservedPaths: unobservedPaths
+    ) { task in
+      !isListingComplete && !prunableIdentities.contains(task.identity)
+        && !detectedPaths.contains(task.detected.worktreePath)
     }
+    taskWorktrees.append(contentsOf: retainedTasks)
+    unobservedIdentities.append(contentsOf: retainedTasks.map(\.identity))
 
     var retained = Set(taskWorktrees.map(\.identity))
     if let projectRoot {
@@ -282,6 +286,33 @@ public func reconcileDetectedWorktrees(
     disappeared: disappeared,
     unobserved: unobservedIdentities
   )
+}
+
+/// 今回検出されなかった前回の Task のうち、保持するもの。条件は `reconcileDetectedWorktrees` の doc。
+private func retainedTaskWorktrees(
+  previous: WorktreeInventory,
+  seen: Set<WorktreeIdentity>,
+  unobservedPaths: Set<String>,
+  retainsUnlisted: (TaskWorktree) -> Bool
+) -> [TaskWorktree] {
+  var seen = seen
+  var retained: [TaskWorktree] = []
+  for task in previous.taskWorktrees where !seen.contains(task.identity) {
+    let path = task.detected.worktreePath
+    if unobservedPaths.contains(path) {
+      retained.append(
+        TaskWorktree(
+          detected: task.detected.observing(.observationFailed), activation: task.activation))
+    } else if retainsUnlisted(task) {
+      // 不完全な一覧で未検出の worktree を observationFailed にすると、一過性の一覧取得失敗で
+      // 表示中の session の選択が外れるため、個別の観測失敗とは区別して前回の状態を残す。
+      retained.append(task)
+    } else {
+      continue
+    }
+    seen.insert(task.identity)
+  }
+  return retained
 }
 
 func taskWorktreesInOpenedOrder(

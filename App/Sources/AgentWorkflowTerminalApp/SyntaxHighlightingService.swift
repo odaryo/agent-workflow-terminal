@@ -71,7 +71,9 @@ actor SyntaxHighlightingService {
       message.toString()?.hasPrefix("0 width match regex") == true
     else { return result }
 
-    // front matter 付き Markdown の幅 0 の一致は debugMode では例外になるが、safe mode なら 1 文字送って続けられる。
+    // 幅 0 の一致 (Markdown の front matter や setext 見出しで起きる) は debugMode では例外になるが、
+    // safe mode なら 1 文字送って続けられる。safe でのやり直しでは配列 subLanguage の内側の失敗が
+    // 再び見えなくなるが、Markdown はタグしか xml に渡さないので、両方が起きる形は見つかっていない。
     context.exception = nil
     hljs?.invokeMethod("safeMode", withArguments: [])
     let retriedResult = hljs?.invokeMethod("highlight", withArguments: arguments)

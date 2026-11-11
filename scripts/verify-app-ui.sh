@@ -225,6 +225,7 @@ warn_if_hostctl_socket_too_long() {
   info "警告: hostctl の socket のパスが ${bytes} バイトで、上限の 103 バイトを超えます: ${socket_path}"
   info "  アプリは hostctl の窓口を開けず、hostctl worktree open は使えません。hostctl を使うなら、"
   info "  短いパスを与えて起動し直してください: AWT_UI_APPLICATION_SUPPORT_DIR=${short} scripts/verify-app-ui.sh launch"
+  info "  (selftest は hostctl を使わず、AWT_UI_APPLICATION_SUPPORT_DIR も無視するので、selftest ではこの警告を無視してよい)"
 }
 
 app_launch() {

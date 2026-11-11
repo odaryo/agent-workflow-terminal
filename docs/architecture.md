@@ -482,13 +482,33 @@ refが更新されることに依存する。worktreeはrefを共有するので
   `--no-ff`のmergeとsquash mergeでは出る(git 2.54.0で計測)。**fast-forwardでmergeしたbranchにも印は出ない**
   (commitが既定branchのfirst-parentの列に並ぶため)。これは受け入れる制約とする。squash mergeの根拠には
   この条件を掛けない(squashの検出は、branchの変更内容が空でないことを既に求めている)。この条件が覆うのは、
-  既定branchのfirst-parentの列の上から作ったbranchだけである。列の外のcommit(`--no-ff`でmerge済みの
-  branchの先端など)から作ったcommitの無いbranchや、既定branchが第1親を別の系列とするmerge(foxtrot merge)をfast-forwardで取り込んだ後の
-  branchには印が出る。逆に、shallowなrepositoryでは、`git rev-list --first-parent`の列がshallowの境界で
-  途切れて列の上にあるかを決められないため、マージ済みでも印が出ないことがある(Issue #912)。
-  既定branchから先端までのfirst-parentの列が長い大きなrepositoryでも、同じく印が出ないことがある
-  (Issue #913)。無関係な履歴を`--allow-unrelated-histories`で取り込んだbranchや、commit日時のずれで走査が
-  rootまで行き過ぎたbranchには、印が出る(git 2.54.0で計測、Issue #912)。
+  既定branchのfirst-parentの列の上から作ったbranchだけである。次の2つの形では、commitの無いbranchにも
+  印が出る(Issue #913)。これも受け入れる制約とする。
+  - 列の外のcommitから作ったbranch。`--no-ff`でmerge済みのbranchの先端から作ったbranch(git 2.54.0で計測)や、
+    squash merge済みのbranchの先端から作ったstacked branch(マージ済みのbranchと同じ先端なので同じ答えになる)
+    がこれに当たる。印は作った直後から出る。
+  - 既定branchが、第1親を別の系列とするmerge(foxtrot merge)をfast-forwardで取り込んだ後のbranch。
+    取り込む前は列の上にあって印が出なかったbranchも、取り込んだ後の判定し直しで列から外れて印が出る
+    (git 2.54.0で計測)。
+
+  どちらの印も、先端が動くまで残る(マージ済みの答えは先端で覚えるため)。受け入れる理由は3つある。
+  1つ目に、列の外の形はグラフから見分けられない。判定の入力は2つの先端だけで、答えも先端を鍵に覚える
+  (上記の確定事項)。そのため、マージ済みのbranchと同じ先端を指すbranchは、必ず同じ答えになる。
+  2つ目に、foxtrot mergeは既定branchにmerge commitをfast-forwardで載せる運用でしか起きない。squash merge
+  しか使わない運用では起きない。3つ目に、印を見てCloseの選択肢4で消しても、元のbranchをCloseするときより
+  多くは失われない。`--no-ff`とfoxtrot mergeの形では先端が既定branchの祖先なので、既定branchに無いcommitは
+  消えない。squash merge済みのbranchから作った形で消えるのは、squash mergeで内容が既定branchに入った
+  commitだけである。branchのreflogで「作ってからcommitしていない」を
+  見分ける案は採らない。reflogの無いbranchでは見分けられないうえ、先端で答えを使い回す確定事項を
+  worktreeごとの判定に変えることになるためである。
+
+  逆に、shallowなrepositoryでは、`git rev-list --first-parent`の列がshallowの境界で途切れて列の上に
+  あるかを決められないため、マージ済みでも印が出ないことがある(Issue #912)。この問い合わせの出力が
+  上限(8 MiB、約10万commit)を超えたときも、判定不能として印が出ない(Issue #913)。出力の長さは、
+  既定branchからfirst-parentを辿って先端の祖先に当たるまでのcommit数で決まる。走査がrootまで行き過ぎた
+  場合(下記)はrootまでの数になるので、大きなrepositoryでは、列が短くても上限を超えることがある。
+  無関係な履歴を`--allow-unrelated-histories`で取り込んだbranchや、commit日時のずれで走査がrootまで
+  行き過ぎたbranchには、印が出る(git 2.54.0で計測、Issue #912)。
 - 判定不能も、branch先端と既定branch先端の組が前回と同じ間は判定し直さない。判定不能のworktreeで数秒の
   走査が観測のたびに回り続けるのを避けるためである。取り消しで終わった判定は記録しない。
 - 重い判定はアプリ全体で1件ずつ順に回し、UIを止めない。判定の1周の始めに全worktreeのbranch先端を読み、
@@ -764,7 +784,7 @@ branchが既定branchへマージ済み(§3.4の判定)なら、タイトルの�
 ようにするためである。ancestor判定とsquash mergeの検出で印を分けない。見出しのaccessibility labelは
 「<タイトル> マージ済み」とする。
 
-- 判定不能・未マージ・detached HEAD(branchが無い)では印を出さない。既定branchへ取り込まれた自分のcommitが無いbranch(作っただけのものなど)と、fast-forwardでmergeしたbranchにも出さない(§3.4)。印が無いことは「マージ済みと確かめられて
+- 判定不能・未マージ・detached HEAD(branchが無い)では印を出さない。先端が既定branchのfirst-parentの列の上にあるbranch(作っただけでcommitの無いものなど)と、fast-forwardでmergeしたbranchにも出さない(§3.4)。commitの無いbranchでも、列の外のcommitから作ったものと、foxtrot mergeを取り込んだ後のものには出る(§3.4、受け入れる制約)。印が無いことは「マージ済みと確かめられて
   いない」という意味で、未マージを主張しない。判定不能に専用の印を出さないのは、Closeを開けば検査の結果と
   理由が出る(§3.4)うえ、判定不能は既定branchを特定できないProjectで全worktreeに並びうるためである。
 - 同じworktreeの複数のセッションの見出しには、どれにも同じ印を出す。Project Rootには見出しが無い(上記)ので
@@ -3160,7 +3180,7 @@ PR_READY
 - [ ] `hostctl worktree open`の`--from-pane`で引き渡し元のpaneを記録し、Overviewで`Completed`／`Idle`のときだけ「引き渡し済み」の印を出す。記録の後に`Completed`／`Idle`を経た`Working`で解除し、記録はアプリの寿命だけ持つ(§3.1、§5.3、§13、§21.4、Issue #828)
 - [ ] `hostctl project check`で、ディレクトリから解決したProjectが登録済みで利用可能か(`worktree open`と同じ条件。Project Rootとそのサブディレクトリも受け付ける)を読み取り専用で確かめる。確かめられないとき(アプリ不在・時間切れ・古い版)はSessionStart hookで知らせない(§3.1、§21.4、Issue #819)
 - [ ] `hostctl worktree open`の`--purpose`でIssueのタイトルを渡し、アプリはセッションを作る前に検査して、新しく作ったセッションのpaneにだけ書く。作った後の書き込みの失敗は引き渡しを失敗にしない(§3.1、§21.4、Issue #837)
-- [ ] Overviewのworktreeのセッションの見出しに、branchがマージ済みならタイトルの右に`arrow.triangle.merge`と「マージ済み」を出し、判定不能・未マージ・detached HEAD・既定branchのfirst-parentの列の上にある先端(commitの無いbranchとfast-forwardのmerge)では出さない。Closeの選択肢4は先端だけの使い回しを使わず判定し直す。判定不能も同じ先端の組では判定し直さず、重い判定はアプリ全体で1件ずつ回し、先端が変わった印はすぐ外す(§3.4、§5.3、§13、Issue #879)
+- [ ] Overviewのworktreeのセッションの見出しに、branchがマージ済みならタイトルの右に`arrow.triangle.merge`と「マージ済み」を出し、判定不能・未マージ・detached HEAD・既定branchのfirst-parentの列の上にある先端(列の上から作ったcommitの無いbranchとfast-forwardのmerge)では出さない。列の外のcommitから作ったbranchとfoxtrot mergeの後のbranchには、commitが無くても出る(Issue #913)。Closeの選択肢4は先端だけの使い回しを使わず判定し直す。判定不能も同じ先端の組では判定し直さず、重い判定はアプリ全体で1件ずつ回し、先端が変わった印はすぐ外す(§3.4、§5.3、§13、Issue #879)
 - [ ] Agentも起動する新規セッションは、起動コマンドを対話シェルに打ち込み、tmux sessionを新しく作れたときだけ1回実行する。起動コマンドが未設定なら項目を無効にする — ユーザー確認待ち(§3.1、Issue #805)
 - [ ] 選択中Projectの復元 — ユーザー確認待ち(§16.1)
 - [ ] 同じディレクトリの2つ目以降のsession名の接尾辞を`-<n>`(作る時点の最大値+1、2〜9999)にする — ユーザー確認待ち(§3.5)

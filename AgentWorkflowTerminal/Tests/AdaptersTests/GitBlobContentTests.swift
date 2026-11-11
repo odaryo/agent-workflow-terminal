@@ -53,6 +53,10 @@ struct GitBlobContentTests {
           + Array(repeating: 65, count: 8_192 - 31) + [0], false
       )
     ),
+    (
+      "NUL の後ろの伸びが大きくても置換の数から元の NUL 位置を判定できる",
+      ([0xFF] + Array(repeating: 65, count: 8_191) + [0] + Array(repeating: 0xFF, count: 10), false)
+    ),
     ("サイズ閾値超過", (Array(repeating: 65, count: 100) + [0xFF, 0x0A], false)),
   ]
 

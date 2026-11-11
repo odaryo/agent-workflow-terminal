@@ -65,3 +65,5 @@ step "C no change, new inode (S, 123456789)" 3 "$S" 123456789 3
 step "D same s, ns +1    (S, 123456790)  " 4 "$S" 123456790 4
 step "E same s, same ns  (S, 123456790)  " 5 "$S" 123456790 5
 step "F other s          (S+1, 123456790)" 6 "$((S + 1))" 123456790 6
+step "G s back           (S, 123456790)  " 7 "$S" 123456790 7
+step "H ns -1            (S, 123456789)  " 8 "$S" 123456789 8

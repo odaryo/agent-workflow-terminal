@@ -10,9 +10,12 @@ extension GitWorktreeDetector {
   ///
   /// - Important: EACCES 等は不在の証拠にならないため、ENOENT だけを採る。common dir の
   ///   lstat も失敗した回は、ボリュームの切断等で全 Task を消失にしないため何も返さない。
+  ///   この保護が効くのは common dir と同じボリュームの ID だけである。symlink の管理
+  ///   ディレクトリをたどった先の ID は common dir の外にあり得る (#870 のレビューの実測)。
   ///   symlink 自体の存在を尊重し、リンク先の不在を消失にしないため stat ではなく lstat を使う。
   ///   安定 ID は正規化も連結も readdir との照合もしない。`administrativeDirectory` の doc にある
   ///   `/private` や NFC/NFD の綴り差を消失と誤認すると、Active 指定を失うためである。
+  /// - Note: `omission` と同じく、打ち切る手段の無い同期 FS I/O を行う。
   static func removedAdministrativeDirectories(
     _ identities: [WorktreeIdentity], commonDirectory: WorktreeIdentity
   ) -> [WorktreeIdentity] {

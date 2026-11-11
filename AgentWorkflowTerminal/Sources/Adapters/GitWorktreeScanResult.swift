@@ -36,7 +36,9 @@ public struct GitWorktreeScanResult: Sendable, Equatable {
   /// git が `prunable` を付けた entry の安定 ID (設計書 §3.2.1)。`detected` にも載り得る
   /// (入れないだけの到達不能。Issue #496)。管理ディレクトリを特定できなかった entry は載らない。
   public let prunable: [WorktreeIdentity]
-  /// 前回の安定 ID のうち管理ディレクトリの不在を確認できたもの。完全な一覧の回は常に空。
+  /// `scan(knownIdentities:)` に渡した安定 ID のうち、管理ディレクトリの不在を確認できたもの。
+  /// 渡さなければ常に空になる。`previous` に渡す inventory と同じ時点の Task の ID を渡す。
+  /// 完全な一覧の回は常に空。
   /// 完全な一覧では未検出が既に消失になるため、この確認の FS I/O は行わない。
   /// EACCES 等で確認できなかったものは含めない (`removedAdministrativeDirectories`)。
   public let removed: [WorktreeIdentity]

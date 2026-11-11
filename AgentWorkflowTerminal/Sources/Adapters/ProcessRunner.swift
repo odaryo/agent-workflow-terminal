@@ -230,8 +230,9 @@ private actor ProcessExecution {
   private func childExited() async {
     guard processIdentifier != nil else { return }
     refreshTerminationStatusIfNeeded()
-    // .exit が回収可能になる直前に届く例が /usr/bin/true の3000回中2回あったため、
-    // 一度きりの通知に頼らず、actor を塞がずに回収を待つ (Issue #875)。
+    // .exit は回収可能になる前に届くことがあり、頻度は時機で大きく変わる (/usr/bin/true で、
+    // 即時登録は 3000 回中 2 回、500 µs 後の登録は 1000 回中 615 回)。一度きりの通知に頼らず、
+    // actor を塞がずに回収を待つ (Issue #875)。
     while !childWasReaped {
       do {
         try await Task.sleep(for: .milliseconds(1))

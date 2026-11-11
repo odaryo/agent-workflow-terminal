@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Testing
 
-@Suite("Foundation.Process 実行層")
+@Suite("外部プロセス実行層")
 struct ProcessRunnerTests {
   private let runner = FoundationProcessRunner()
   // 時間を主張しないテストの期限は安全弁であり、CI の負荷で1秒では期限切れになったため (#466)。

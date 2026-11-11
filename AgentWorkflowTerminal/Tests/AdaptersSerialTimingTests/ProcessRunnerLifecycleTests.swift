@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 import Testing
 
-@Suite("Foundation.Process 実行層の停止と上限")
+@Suite("外部プロセス実行層の停止と上限")
 struct ProcessRunnerLifecycleTests {
   private let runner = FoundationProcessRunner()
 

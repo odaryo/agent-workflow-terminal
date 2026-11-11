@@ -30,12 +30,8 @@ actor SyntaxHighlightingService {
 
   func highlight(_ code: String, language: String, isDark: Bool) -> HighlightedCode? {
     guard let context = javascriptContext(), let theme = theme(isDark: isDark) else { return nil }
-    context.exception = nil
-    // main や大きなスタックのスレッドへ移すと、深い入れ子で時間・メモリが急増する。
-    // 協調スレッドのスタック上限で素のテキストへ退避できるよう、JS 呼び出しはこの actor 内に留める。
-    let result = context.objectForKeyedSubscript("hljs")?.invokeMethod(
-      "highlight", withArguments: [code, ["language": language, "ignoreIllegals": true]])
-    // debugMode が効いていない場合も、errorRaised を伴う素のテキストを成功として扱わないため。
+    let result = highlightResult(code, language: language, context: context)
+    // safe mode での再実行は内部の失敗を errorRaised に入れるため、素のテキストを成功として扱わない。
     guard context.exception == nil,
       let errorRaised = result?.objectForKeyedSubscript("errorRaised"),
       errorRaised.isUndefined || errorRaised.isNull,
@@ -61,6 +57,33 @@ actor SyntaxHighlightingService {
     return HighlightedCode(
       text: AttributedString(attributed),
       background: Color(nsColor: nsColor(theme.backgroundColor)))
+  }
+
+  private func highlightResult(_ code: String, language: String, context: JSContext) -> JSValue? {
+    context.exception = nil
+    let hljs = context.objectForKeyedSubscript("hljs")
+    let arguments: [Any] = [code, ["language": language, "ignoreIllegals": true]]
+    // main や大きなスタックのスレッドへ移すと、深い入れ子で時間・メモリが急増する。
+    // 協調スレッドのスタック上限で素のテキストへ退避できるよう、JS 呼び出しはこの actor 内に留める。
+    let result = hljs?.invokeMethod("highlight", withArguments: arguments)
+    guard let exception = context.exception,
+      let message = exception.objectForKeyedSubscript("message"), message.isString,
+      message.toString()?.hasPrefix("0 width match regex") == true
+    else { return result }
+
+    // front matter 付き Markdown の幅 0 の一致は debugMode では例外になるが、safe mode なら 1 文字送って続けられる。
+    context.exception = nil
+    hljs?.invokeMethod("safeMode", withArguments: [])
+    let retriedResult = hljs?.invokeMethod("highlight", withArguments: arguments)
+    let retryHadException = context.exception != nil
+    context.exception = nil
+    hljs?.invokeMethod("debugMode", withArguments: [])
+    guard context.exception == nil else {
+      self.context = nil
+      return nil
+    }
+    guard !retryHadException else { return nil }
+    return retriedResult
   }
 
   private func javascriptContext() -> JSContext? {

@@ -40,6 +40,35 @@ struct SyntaxHighlightingServiceTests {
     #expect(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
   }
 
+  @Test(
+    "幅 0 の一致がある Markdown にもテーマの色を付け、入力を保持する",
+    arguments: [
+      ("---\nname: my_agent\n---\n\nSee foo_bar for details.\n", "name"),
+      ("Configure max_retries\n---\n\nThe max_retries value is read at start.\n", "Configure"),
+    ])
+  func colorsMarkdownWithZeroWidthMatch(code: String, section: String) async throws {
+    let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
+    let result = try #require(await service.highlight(code, language: "markdown", isDark: false))
+    #expect(String(result.text.characters).unicodeScalars.elementsEqual(code.unicodeScalars))
+    let attributed = NSAttributedString(result.text)
+    let sectionRange = try #require(code.range(of: section))
+    let range = NSRange(sectionRange, in: code)
+    let color = try #require(
+      attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor)
+    try expectColor(color, red: 0x64, green: 0x38, blue: 0x20)
+  }
+
+  @Test("幅 0 の一致の後も script 内の失敗は nil を返し、次のハイライトは成功する")
+  func nestedScriptInternalErrorAfterZeroWidthMatch() async throws {
+    let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
+    let markdown = "---\nname: my_agent\n---\n\nSee foo_bar for details.\n"
+    _ = try #require(await service.highlight(markdown, language: "markdown", isDark: false))
+    let failed = await service.highlight(Self.nestedScriptCode(), language: "xml", isDark: false)
+    #expect(failed == nil)
+    let known = await service.highlight("func f() {}", language: "swift", isDark: false)
+    #expect(known != nil)
+  }
+
   @Test("未知の言語で失敗しても次のハイライトは成功する")
   func unknownLanguage() async {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
@@ -67,13 +96,7 @@ struct SyntaxHighlightingServiceTests {
   @Test("HTML の script 内で深い入れ子が失敗したら nil を返し、次のハイライトは成功する")
   func nestedScriptInternalError() async {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
-    // 600 段以下では HighlightJSMarkup の深さの上限 32 によって別の理由で nil になるため、
-    // script の subLanguage 内で RangeError が起きた実測の深さ 4000 を使う (#866)。
-    let depth = 4000
-    let nested =
-      String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)
-    let code = "<div class=\"a\">x</div>\n<script>\nlet a = \(nested);\n</script>\n<p>y</p>\n"
-    let failed = await service.highlight(code, language: "xml", isDark: false)
+    let failed = await service.highlight(Self.nestedScriptCode(), language: "xml", isDark: false)
     #expect(failed == nil)
     let known = await service.highlight("func f() {}", language: "swift", isDark: false)
     #expect(known != nil)
@@ -111,6 +134,15 @@ struct SyntaxHighlightingServiceTests {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
     let result = try #require(await service.highlight(code, language: "swift", isDark: false))
     #expect(String(result.text.characters).unicodeScalars.elementsEqual(code.unicodeScalars))
+  }
+
+  private static func nestedScriptCode() -> String {
+    // 600 段では HighlightJSMarkup の深さの上限 32 によって別の理由で nil になるため、
+    // script の subLanguage 内で RangeError が起きた実測の深さ 4000 を使う (#866)。
+    let depth = 4000
+    let nested =
+      String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)
+    return "<div class=\"a\">x</div>\n<script>\nlet a = \(nested);\n</script>\n<p>y</p>\n"
   }
 
   private func expectColor(_ color: NSColor, red: Int, green: Int, blue: Int) throws {

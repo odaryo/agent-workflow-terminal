@@ -14,27 +14,62 @@ HANDOFF="$SCRIPT_DIR/../plugins/awt-handoff/skills/worktree-handoff/scripts/hand
 STOP="$SCRIPT_DIR/stop-tty-processes.sh"
 SOCK="awt-handoff-$$-$RANDOM"
 work_dir=$(mktemp -d)
-sessions=(anchor)
 failures=0
 checked=0
+# 同時に走らせる群の数。CI の runner は 3 コアで、負荷で揺れやすいのは次の2つである。
+# - changing-screen: 0.05 秒ごとの出力が 0.2 秒止まると、安定と判定されて送信してしまう。
+# - gone-other: 作成から 0.5 秒でプロンプトが出ている前提に頼っている。
+# どちらも誤って NG になる向きに揺れるので、NG が出たらここを下げる (Issue #852)。
+max_jobs=8
+group_names=()
+group_pids=()
 __awt_finished=0
 
 T() { env -u TMUX tmux -L "$SOCK" "$@"; }
 
-cleanup() {
-  local name ttys tty
-  local cleanup_rc=0
-  for name in "${sessions[@]}"; do
-    if ttys=$(T list-panes -t "=$name:" -F '#{pane_tty}' 2>/dev/null); then
-      while IFS= read -r tty; do
-        [[ -n "$tty" ]] || continue
-        "$STOP" -L "$SOCK" "$tty" || cleanup_rc=1
-      done <<<"$ttys"
-      if T has-session -t "=$name" 2>/dev/null; then
-        T kill-session -t "=$name" || cleanup_rc=1
-      fi
+wait_running_groups() {
+  local i
+  for ((i = 0; i < ${#group_pids[@]}; i++)); do
+    if kill -0 "${group_pids[i]}" 2>/dev/null; then
+      wait "${group_pids[i]}" 2>/dev/null || true
     fi
   done
+}
+
+# 一覧を取ってから stop-tty-processes.sh が tty を確かめるまでに pane が閉じると (exec-agent の agent は
+# 30 秒で終わり、exec なので pane ごと閉じる)、何も止めずに exit 2 で終わる。そのときだけ取り直す。
+stop_all_ttys() {
+  local attempt listed tty stop_rc
+  local ttys=()
+  for ((attempt = 0; attempt < 4; attempt++)); do
+    [[ "$attempt" -eq 0 ]] || sleep 0.5
+    listed=$(T list-panes -a -F '#{pane_tty}' 2>/dev/null) || return 0
+    ttys=()
+    while IFS= read -r tty; do
+      [[ -z "$tty" ]] || ttys+=("$tty")
+    done <<<"$listed"
+    [[ "${#ttys[@]}" -gt 0 ]] || return 0
+    stop_rc=0
+    "$STOP" -L "$SOCK" "${ttys[@]}" || stop_rc=$?
+    [[ "$stop_rc" -eq 2 ]] || return "$stop_rc"
+  done
+  return 1
+}
+
+cleanup() {
+  local names name
+  local cleanup_rc=0
+  stop_all_ttys || cleanup_rc=1
+  # 止めた pane が閉じて server ごと終わっていることがある。消せなかったうえに残っている session だけを失敗にする。
+  if names=$(T list-sessions -F '#{session_name}' 2>/dev/null); then
+    while IFS= read -r name; do
+      [[ -n "$name" ]] || continue
+      if ! T kill-session -t "=$name" 2>/dev/null && T has-session -t "=$name" 2>/dev/null; then
+        info "session $name を消せません"
+        cleanup_rc=1
+      fi
+    done <<<"$names"
+  fi
   if ! T list-sessions >/dev/null 2>&1; then
     rm -f "${TMUX_TMPDIR:-/private/tmp}/tmux-$(id -u)/$SOCK"
   fi
@@ -43,8 +78,10 @@ cleanup() {
 }
 
 # bash 3.2 は EXIT trap があると未定義変数で停止しても exit 0 になり得る（規約 §7）。
+# die で途中から抜けたときに、動いている群と rm -rf を競合させないよう、群を待ってから後始末する。
 on_exit() {
   local rc=$?
+  wait_running_groups
   cleanup || rc=1
   [[ "$__awt_finished" -eq 1 || "$rc" -ne 0 ]] || rc=1
   exit "$rc"
@@ -192,6 +229,8 @@ print(json.dumps({"ok": True, "version": 1, "created": sys.argv[1] == "true",
 ' "$created" "$AWT_TEST_SESSION" "$AWT_TEST_AGENT"
 HOSTCTL
 chmod +x "$work_dir/agent" "$work_dir/hostctl"
+mkdir "$work_dir/bin" "$work_dir/cases"
+cp "$work_dir/agent" "$work_dir/bin/claude"
 
 T -f /dev/null new-session -d -s anchor -x 120 -y 24 /bin/sleep 600
 socket_path=$(T display-message -p '#{socket_path}')
@@ -199,11 +238,14 @@ socket_path=$(T display-message -p '#{socket_path}')
 T set-environment -g AWT_HOSTCTL "$work_dir/hostctl"
 T set-environment -g AWT_HOSTCTL_SOCKET test-socket
 
-export AWT_TEST_DIR="$work_dir"
+# 偽 hostctl は --directory が AWT_TEST_DIR と一致することを確かめ、呼び出しの記録も argv もそこへ書く。
+# 並列の群が互いの記録を読まないよう、群ごとに $work_dir/cases/<群名> を持たせる。
+export AWT_TEST_DIR="$work_dir/cases/serial"
 export AWT_TEST_MODE=success
 export AWT_TEST_SESSION=success
 export AWT_TEST_AGENT="$work_dir/agent"
 export AWT_TEST_HOSTCTL_KIND=new
+mkdir "$AWT_TEST_DIR"
 
 # この検査自体が tmux pane の中で動くことがあるので、継承した TMUX_PANE を渡さない。
 # bash 3.2 は set -u の下で空の配列の展開を未定義の参照として止まるので、要素を必ず1つ以上にする。
@@ -222,10 +264,10 @@ expect_exit() {
   local want="$1" label="$2" rc=0
   shift 2
   checked=$((checked + 1))
-  H "$@" >"$work_dir/stdout" 2>"$work_dir/stderr" || rc=$?
+  H "$@" >"$AWT_TEST_DIR/stdout" 2>"$AWT_TEST_DIR/stderr" || rc=$?
   if [[ "$want" == 3 || "$want" == 4 || "$want" == 5 || "$want" == 6 || "$want" == 7 ]]; then
     checked=$((checked + 1))
-    if ! rg -q -F "session=$AWT_TEST_SESSION" "$work_dir/stderr"; then
+    if ! rg -q -F "session=$AWT_TEST_SESSION" "$AWT_TEST_DIR/stderr"; then
       ng "$label: stderr に session= がありません"
     fi
   fi
@@ -233,14 +275,14 @@ expect_exit() {
     info "OK (exit $rc): $label"
   else
     ng "$label: exit $rc (期待: $want)"
-    cat "$work_dir/stdout" "$work_dir/stderr"
+    cat "$AWT_TEST_DIR/stdout" "$AWT_TEST_DIR/stderr"
   fi
 }
 
 expect_no_call() {
   local label="$1"
   checked=$((checked + 1))
-  if [[ -e "$work_dir/calls" ]]; then
+  if [[ -e "$AWT_TEST_DIR/calls" ]]; then
     ng "$label: hostctl が呼ばれました"
   else
     info "OK: $label (hostctl は呼ばれない)"
@@ -250,16 +292,16 @@ expect_no_call() {
 wait_for_argv() {
   local attempt
   for ((attempt = 0; attempt < 50; attempt++)); do
-    [[ -s "$work_dir/argv" ]] && return 0
+    [[ -s "$AWT_TEST_DIR/argv" ]] && return 0
     sleep 0.1
   done
   return 1
 }
 
 expect_unsent() {
-  local name="$1"
+  local name="$1" before="$2"
   checked=$((checked + 1))
-  if [[ ! -e "$work_dir/argv" ]] &&
+  if [[ ! -e "$AWT_TEST_DIR/argv" ]] &&
     [[ "$(T capture-pane -p -t "=$name:")" == "$before" ]]; then
     info "OK: $name には送信していない"
   else
@@ -267,106 +309,44 @@ expect_unsent() {
   fi
 }
 
-expect_exit 0 '環境変数と異なる tmux global の窓口で --check が使える' --check
-expect_no_call '--check'
-
-sessions+=(success)
-# shellcheck disable=SC2016 # 展開されずにそのまま Agent へ届くことを検査する
-prompt="指示 'quoted'"' $HOME `printf expanded` # end'
-expect_exit 0 '特殊文字を含む指示を渡す' --directory "$work_dir" --prompt "$prompt"
-wait_for_argv || true
-checked=$((checked + 1))
-if python3 -I -c '
+expect_argv_prompt() {
+  local want="$1"
+  python3 -I -c '
 import pathlib
 import sys
 assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
-' "$work_dir/argv" "$prompt" &&
-  [[ "$(cat "$work_dir/stdout")" == session=success ]]; then
-  info 'OK: argv は1つで、特殊文字はそのまま届いた'
-else
-  ng 'argv または成功時の stdout が期待と異なります'
-fi
-
-rm -f "$work_dir/argv"
-AWT_TEST_SESSION=exec-agent
-AWT_TEST_AGENT="exec $work_dir/agent"
-sessions+=(exec-agent)
-expect_exit 0 'exec で pane の shell を置き換えて起動する' --directory "$work_dir" --prompt "$prompt"
-checked=$((checked + 1))
-if wait_for_argv && python3 -I -c '
-import pathlib
-import sys
-assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
-' "$work_dir/argv" "$prompt"; then
-  info 'OK: exec でも argv がそのまま届いた'
-else
-  ng 'exec の argv が期待と異なります'
-fi
-AWT_TEST_SESSION=success
-AWT_TEST_AGENT="$work_dir/agent"
-
-rm -f "$work_dir/argv"
-before=$(T capture-pane -p -t '=success:')
-AWT_TEST_MODE=existing
-expect_exit 3 '既存セッションには送らない' --directory "$work_dir" --prompt existing
-checked=$((checked + 1))
-if [[ ! -s "$work_dir/stdout" ]] && rg -q session=success "$work_dir/stderr"; then
-  info 'OK: 既存セッション名を stderr に出した'
-else
-  ng '既存セッション名が stderr にありません'
-fi
-expect_unsent success
-
-AWT_TEST_MODE=unavailable
-expect_exit 69 'hostctl exit 69 を保つ' --directory "$work_dir" --prompt unavailable
-checked=$((checked + 1))
-if [[ ! -s "$work_dir/stdout" ]] && rg -q 'app is not running' "$work_dir/stderr"; then
-  info 'OK: hostctl の失敗応答を stderr に出した'
-else
-  ng 'hostctl の失敗応答が stderr にありません'
-fi
-
-AWT_TEST_MODE=argument-error
-expect_exit 1 'hostctl exit 2 を exit 1 にする' --directory "$work_dir" --prompt arguments
-checked=$((checked + 1))
-if [[ ! -s "$work_dir/stdout" && "$(cat "$work_dir/stderr")" == 'invalid arguments' ]]; then
-  info 'OK: 空の stdout に空行を足さない'
-else
-  ng 'hostctl の失敗時の出力が期待と異なります'
-fi
+' "$AWT_TEST_DIR/argv" "$want"
+}
 
 # 引数は呼び出しごとに偽 hostctl が受け取る --from-pane の値 (無ければ空)。末尾の改行まで比べる。
 expect_hostctl_calls() {
   local label="$1" pane
   shift
-  : >"$work_dir/want-calls"
-  : >"$work_dir/want-from-pane"
+  : >"$AWT_TEST_DIR/want-calls"
+  : >"$AWT_TEST_DIR/want-from-pane"
   for pane in "$@"; do
-    printf 'called\n' >>"$work_dir/want-calls"
-    printf '%s\n' "$pane" >>"$work_dir/want-from-pane"
+    printf 'called\n' >>"$AWT_TEST_DIR/want-calls"
+    printf '%s\n' "$pane" >>"$AWT_TEST_DIR/want-from-pane"
   done
   checked=$((checked + 1))
-  if cmp -s "$work_dir/want-calls" "$work_dir/calls" &&
-    cmp -s "$work_dir/want-from-pane" "$work_dir/from-pane"; then
+  if cmp -s "$AWT_TEST_DIR/want-calls" "$AWT_TEST_DIR/calls" &&
+    cmp -s "$AWT_TEST_DIR/want-from-pane" "$AWT_TEST_DIR/from-pane"; then
     info "OK: $label (hostctl を $# 回呼んだ)"
   else
     ng "$label: hostctl の呼び出しが期待と異なります"
-    cat "$work_dir/calls" "$work_dir/from-pane" 2>/dev/null || true
+    cat "$AWT_TEST_DIR/calls" "$AWT_TEST_DIR/from-pane" 2>/dev/null || true
   fi
 }
 
 reset_hostctl_calls() {
-  rm -f "$work_dir/calls" "$work_dir/from-pane" "$work_dir/sends" "$work_dir/last-send" "$work_dir/argv"
+  rm -f "$AWT_TEST_DIR/calls" "$AWT_TEST_DIR/from-pane" "$AWT_TEST_DIR/sends" "$AWT_TEST_DIR/last-send" \
+    "$AWT_TEST_DIR/argv"
 }
 
 expect_agent_prompt() {
   local label="$1" want="$2"
   checked=$((checked + 1))
-  if wait_for_argv && python3 -I -c '
-import pathlib
-import sys
-assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
-' "$work_dir/argv" "$want"; then
+  if wait_for_argv && expect_argv_prompt "$want"; then
     info "OK: $label (Agent に指示が届いた)"
   else
     ng "$label: Agent に指示が届いていません"
@@ -376,100 +356,24 @@ assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b
 expect_no_old_hostctl_error() {
   local label="$1"
   checked=$((checked + 1))
-  if rg -q -F '不正な引数です' "$work_dir/stderr"; then
+  if rg -q -F '不正な引数です' "$AWT_TEST_DIR/stderr"; then
     ng "$label: 古い hostctl の拒否が stderr に出ています"
   else
     info "OK: $label (古い hostctl の拒否を出さない)"
   fi
 }
 
-AWT_TEST_MODE=success
-AWT_TEST_AGENT="$work_dir/agent"
-
-reset_hostctl_calls
-pane_env=(TMUX_PANE=%22)
-AWT_TEST_SESSION=from-pane-valid
-sessions+=(from-pane-valid)
-expect_exit 0 'TMUX_PANE を --from-pane で渡す' --directory "$work_dir" --prompt from-pane
-expect_hostctl_calls 'TMUX_PANE を --from-pane で渡す' %22
-expect_agent_prompt 'TMUX_PANE を --from-pane で渡す' from-pane
-
-reset_hostctl_calls
-pane_env=(-u TMUX_PANE)
-AWT_TEST_SESSION=from-pane-unset
-sessions+=(from-pane-unset)
-expect_exit 0 'TMUX_PANE が無ければ --from-pane を足さない' --directory "$work_dir" --prompt from-pane
-expect_hostctl_calls 'TMUX_PANE が無ければ --from-pane を足さない' ''
-expect_agent_prompt 'TMUX_PANE が無ければ --from-pane を足さない' from-pane
-
-invalid_index=0
-for invalid_pane in 22 %2a ''; do
-  invalid_index=$((invalid_index + 1))
-  reset_hostctl_calls
-  pane_env=("TMUX_PANE=$invalid_pane")
-  AWT_TEST_SESSION="from-pane-invalid-$invalid_index"
-  sessions+=("$AWT_TEST_SESSION")
-  expect_exit 0 "不正な TMUX_PANE '${invalid_pane}' は渡さない" --directory "$work_dir" --prompt from-pane
-  expect_hostctl_calls "不正な TMUX_PANE '${invalid_pane}' は渡さない" ''
-  expect_agent_prompt "不正な TMUX_PANE '${invalid_pane}' は渡さない" from-pane
-done
-
-reset_hostctl_calls
-AWT_TEST_HOSTCTL_KIND=old
-pane_env=(TMUX_PANE=%22)
-AWT_TEST_SESSION=from-pane-old
-sessions+=(from-pane-old)
-expect_exit 0 '古い hostctl には --from-pane を外して呼び直す' --directory "$work_dir" --prompt from-pane
-expect_hostctl_calls '古い hostctl には --from-pane を外して呼び直す' %22 ''
-expect_agent_prompt '古い hostctl には --from-pane を外して呼び直す' from-pane
-expect_no_old_hostctl_error '古い hostctl には --from-pane を外して呼び直す'
-
-reset_hostctl_calls
-AWT_TEST_MODE=existing
-expect_exit 3 '古い hostctl の呼び直しでも既存セッションには送らない' --directory "$work_dir" --prompt from-pane-existing
-expect_hostctl_calls '古い hostctl の呼び直しでも既存セッションには送らない' %22 ''
-expect_no_old_hostctl_error '古い hostctl の呼び直しでも既存セッションには送らない'
-AWT_TEST_HOSTCTL_KIND=new
-
-reset_hostctl_calls
-AWT_TEST_MODE=unavailable
-expect_exit 69 '--from-pane 付きの呼び出しの exit 69 を保つ' --directory "$work_dir" --prompt from-pane-unavailable
-expect_hostctl_calls '--from-pane 付きの呼び出しの exit 69 を保つ' %22
-checked=$((checked + 1))
-if [[ ! -s "$work_dir/stdout" ]] && rg -q 'app is not running' "$work_dir/stderr"; then
-  info 'OK: --from-pane 付きの呼び出しの失敗応答を stderr に出した'
-else
-  ng '--from-pane 付きの呼び出しの失敗応答が stderr にありません'
-fi
-
-reset_hostctl_calls
-AWT_TEST_MODE=argument-error
-pane_env=(-u TMUX_PANE)
-expect_exit 1 '--from-pane 無しの exit 2 は呼び直さない' --directory "$work_dir" --prompt arguments
-expect_hostctl_calls '--from-pane 無しの exit 2 は呼び直さない' ''
-
-reset_hostctl_calls
-pane_env=(TMUX_PANE=%22)
-expect_exit 1 '呼び直しの exit 2 も exit 1 にする' --directory "$work_dir" --prompt arguments
-expect_hostctl_calls '呼び直しの exit 2 も exit 1 にする' %22 ''
-checked=$((checked + 1))
-if [[ ! -s "$work_dir/stdout" && "$(cat "$work_dir/stderr")" == 'invalid arguments' ]]; then
-  info 'OK: 呼び直しの出力だけを stderr に出した'
-else
-  ng '呼び直しの失敗時の出力が期待と異なります'
-fi
-
 # 送信 (exit 2 以外で終わった呼び出し) が1回だけで、その引数の組が期待どおりかを見る。
 expect_send() {
   local label="$1" sends=-1
   checked=$((checked + 1))
-  printf '%s\0%s\0%s\0%s\0' "$2" "$3" "$4" "$5" >"$work_dir/want-send"
-  [[ ! -f "$work_dir/sends" ]] || sends=$(wc -l <"$work_dir/sends" | tr -d ' ')
-  if [[ "$sends" -eq 1 ]] && cmp -s "$work_dir/want-send" "$work_dir/last-send"; then
+  printf '%s\0%s\0%s\0%s\0' "$2" "$3" "$4" "$5" >"$AWT_TEST_DIR/want-send"
+  [[ ! -f "$AWT_TEST_DIR/sends" ]] || sends=$(wc -l <"$AWT_TEST_DIR/sends" | tr -d ' ')
+  if [[ "$sends" -eq 1 ]] && cmp -s "$AWT_TEST_DIR/want-send" "$AWT_TEST_DIR/last-send"; then
     info "OK: $label (送信は1回で、引数の組が期待どおり)"
   else
     ng "$label: 送信が期待と異なります (送信 $sends 回)"
-    tr '\0' '|' 2>/dev/null <"$work_dir/last-send" || true
+    tr '\0' '|' 2>/dev/null <"$AWT_TEST_DIR/last-send" || true
     printf '\n'
   fi
 }
@@ -477,77 +381,381 @@ expect_send() {
 expect_stderr_contains() {
   local label="$1" text="$2"
   checked=$((checked + 1))
-  if rg -q -F -- "$text" "$work_dir/stderr"; then
+  if rg -q -F -- "$text" "$AWT_TEST_DIR/stderr"; then
     info "OK: $label (stderr に「${text}」がある)"
   else
     ng "$label: stderr に「${text}」がありません"
-    cat "$work_dir/stderr"
+    cat "$AWT_TEST_DIR/stderr"
   fi
 }
 
-AWT_TEST_MODE=success
-AWT_TEST_AGENT="$work_dir/agent"
+# shellcheck disable=SC2016 # 展開されずにそのまま Agent へ届くことを検査する
+prompt="指示 'quoted'"' $HOME `printf expanded` # end'
 purpose_value='Issue #837 の目的'
-for kind in new from-pane old; do
-  for pane_kind in set unset; do
-    for purpose_kind in set unset; do
-      reset_hostctl_calls
-      AWT_TEST_HOSTCTL_KIND="$kind"
-      AWT_TEST_SESSION="purpose-$kind-pane-$pane_kind-purpose-$purpose_kind"
-      sessions+=("$AWT_TEST_SESSION")
-      label="hostctl=$kind TMUX_PANE=$pane_kind --purpose=$purpose_kind"
-      arguments=(--directory "$work_dir" --prompt purpose-matrix)
-      [[ "$purpose_kind" != set ]] || arguments+=(--purpose "$purpose_value")
-      # 呼び出しごとの --from-pane の値。段は「両方 → --from-pane だけ → 無し」から付けるものが無い段を除いたもの。
-      want_calls=()
-      if [[ "$pane_kind" == set ]]; then
-        pane_env=(TMUX_PANE=%22)
-        [[ "$purpose_kind" != set || "$kind" == new ]] || want_calls+=(%22)
-        if [[ "$kind" == old ]]; then
-          want_calls+=(%22 '')
-        else
-          want_calls+=(%22)
-        fi
-      else
-        pane_env=(-u TMUX_PANE)
-        [[ "$purpose_kind" != set || "$kind" == new ]] || want_calls+=('')
-        want_calls+=('')
-      fi
-      want_pane_set=0
-      want_pane=''
-      if [[ "$pane_kind" == set && "$kind" != old ]]; then
-        want_pane_set=1
-        want_pane=%22
-      fi
-      want_purpose_set=0
-      want_purpose=''
-      if [[ "$purpose_kind" == set && "$kind" == new ]]; then
-        want_purpose_set=1
-        want_purpose="$purpose_value"
-      fi
-      expect_exit 0 "$label" "${arguments[@]}"
-      expect_hostctl_calls "$label" "${want_calls[@]}"
-      expect_send "$label" "$want_pane_set" "$want_pane" "$want_purpose_set" "$want_purpose"
-      expect_agent_prompt "$label" purpose-matrix
-      expect_no_old_hostctl_error "$label"
-    done
-  done
-done
-AWT_TEST_HOSTCTL_KIND=new
-pane_env=(-u TMUX_PANE)
-
 long_purpose=$(python3 -I -c 'print("あ" * 341 + "a", end="")')
 # shellcheck disable=SC2016 # 展開されずにそのまま hostctl へ届くことを検査する
 quoted_purpose='目的 '"'"'single'"'"' "double" $(printf expanded) `printf expanded`'
-purpose_index=0
-for valid_purpose in "$long_purpose" "$quoted_purpose"; do
-  purpose_index=$((purpose_index + 1))
+
+group_success() {
+  local before
+  AWT_TEST_SESSION=success
+  expect_exit 0 '特殊文字を含む指示を渡す' --directory "$AWT_TEST_DIR" --prompt "$prompt"
+  wait_for_argv || true
+  checked=$((checked + 1))
+  if expect_argv_prompt "$prompt" &&
+    [[ "$(cat "$AWT_TEST_DIR/stdout")" == session=success ]]; then
+    info 'OK: argv は1つで、特殊文字はそのまま届いた'
+  else
+    ng 'argv または成功時の stdout が期待と異なります'
+  fi
+
+  rm -f "$AWT_TEST_DIR/argv"
+  before=$(T capture-pane -p -t '=success:')
+  AWT_TEST_MODE=existing
+  expect_exit 3 '既存セッションには送らない' --directory "$AWT_TEST_DIR" --prompt existing
+  checked=$((checked + 1))
+  if [[ ! -s "$AWT_TEST_DIR/stdout" ]] && rg -q session=success "$AWT_TEST_DIR/stderr"; then
+    info 'OK: 既存セッション名を stderr に出した'
+  else
+    ng '既存セッション名が stderr にありません'
+  fi
+  expect_unsent success "$before"
+
+  AWT_TEST_MODE=unavailable
+  expect_exit 69 'hostctl exit 69 を保つ' --directory "$AWT_TEST_DIR" --prompt unavailable
+  checked=$((checked + 1))
+  if [[ ! -s "$AWT_TEST_DIR/stdout" ]] && rg -q 'app is not running' "$AWT_TEST_DIR/stderr"; then
+    info 'OK: hostctl の失敗応答を stderr に出した'
+  else
+    ng 'hostctl の失敗応答が stderr にありません'
+  fi
+
+  AWT_TEST_MODE=argument-error
+  expect_exit 1 'hostctl exit 2 を exit 1 にする' --directory "$AWT_TEST_DIR" --prompt arguments
+  checked=$((checked + 1))
+  if [[ ! -s "$AWT_TEST_DIR/stdout" && "$(cat "$AWT_TEST_DIR/stderr")" == 'invalid arguments' ]]; then
+    info 'OK: 空の stdout に空行を足さない'
+  else
+    ng 'hostctl の失敗時の出力が期待と異なります'
+  fi
+}
+
+group_exec_agent() {
+  AWT_TEST_SESSION=exec-agent
+  AWT_TEST_AGENT="exec $work_dir/agent"
+  expect_exit 0 'exec で pane の shell を置き換えて起動する' --directory "$AWT_TEST_DIR" --prompt "$prompt"
+  checked=$((checked + 1))
+  if wait_for_argv && expect_argv_prompt "$prompt"; then
+    info 'OK: exec でも argv がそのまま届いた'
+  else
+    ng 'exec の argv が期待と異なります'
+  fi
+}
+
+# 引数は TMUX_PANE の値。'-' なら TMUX_PANE を外す。
+group_from_pane() {
+  local pane="$1" label="$2"
+  shift 2
+  AWT_TEST_SESSION=$(basename -- "$AWT_TEST_DIR")
+  if [[ "$pane" == - ]]; then
+    pane_env=(-u TMUX_PANE)
+  else
+    pane_env=("TMUX_PANE=$pane")
+  fi
+  expect_exit 0 "$label" --directory "$AWT_TEST_DIR" --prompt from-pane
+  expect_hostctl_calls "$label" "$@"
+  expect_agent_prompt "$label" from-pane
+}
+
+group_from_pane_old() {
+  AWT_TEST_HOSTCTL_KIND=old
+  pane_env=(TMUX_PANE=%22)
+  AWT_TEST_SESSION=from-pane-old
+  expect_exit 0 '古い hostctl には --from-pane を外して呼び直す' --directory "$AWT_TEST_DIR" --prompt from-pane
+  expect_hostctl_calls '古い hostctl には --from-pane を外して呼び直す' %22 ''
+  expect_agent_prompt '古い hostctl には --from-pane を外して呼び直す' from-pane
+  expect_no_old_hostctl_error '古い hostctl には --from-pane を外して呼び直す'
+
   reset_hostctl_calls
-  AWT_TEST_SESSION="purpose-valid-$purpose_index"
-  sessions+=("$AWT_TEST_SESSION")
-  expect_exit 0 "目的 $purpose_index はそのまま渡す" --directory "$work_dir" --prompt purpose-valid --purpose "$valid_purpose"
-  expect_send "目的 $purpose_index はそのまま渡す" 0 '' 1 "$valid_purpose"
+  AWT_TEST_MODE=existing
+  expect_exit 3 '古い hostctl の呼び直しでも既存セッションには送らない' --directory "$AWT_TEST_DIR" --prompt from-pane-existing
+  expect_hostctl_calls '古い hostctl の呼び直しでも既存セッションには送らない' %22 ''
+  expect_no_old_hostctl_error '古い hostctl の呼び直しでも既存セッションには送らない'
+  AWT_TEST_HOSTCTL_KIND=new
+
+  reset_hostctl_calls
+  AWT_TEST_MODE=unavailable
+  expect_exit 69 '--from-pane 付きの呼び出しの exit 69 を保つ' --directory "$AWT_TEST_DIR" --prompt from-pane-unavailable
+  expect_hostctl_calls '--from-pane 付きの呼び出しの exit 69 を保つ' %22
+  checked=$((checked + 1))
+  if [[ ! -s "$AWT_TEST_DIR/stdout" ]] && rg -q 'app is not running' "$AWT_TEST_DIR/stderr"; then
+    info 'OK: --from-pane 付きの呼び出しの失敗応答を stderr に出した'
+  else
+    ng '--from-pane 付きの呼び出しの失敗応答が stderr にありません'
+  fi
+
+  reset_hostctl_calls
+  AWT_TEST_MODE=argument-error
+  pane_env=(-u TMUX_PANE)
+  expect_exit 1 '--from-pane 無しの exit 2 は呼び直さない' --directory "$AWT_TEST_DIR" --prompt arguments
+  expect_hostctl_calls '--from-pane 無しの exit 2 は呼び直さない' ''
+
+  reset_hostctl_calls
+  pane_env=(TMUX_PANE=%22)
+  expect_exit 1 '呼び直しの exit 2 も exit 1 にする' --directory "$AWT_TEST_DIR" --prompt arguments
+  expect_hostctl_calls '呼び直しの exit 2 も exit 1 にする' %22 ''
+  checked=$((checked + 1))
+  if [[ ! -s "$AWT_TEST_DIR/stdout" && "$(cat "$AWT_TEST_DIR/stderr")" == 'invalid arguments' ]]; then
+    info 'OK: 呼び直しの出力だけを stderr に出した'
+  else
+    ng '呼び直しの失敗時の出力が期待と異なります'
+  fi
+}
+
+group_default_agent() {
+  local agent="$1"
+  AWT_TEST_SESSION=$(basename -- "$AWT_TEST_DIR")
+  AWT_TEST_AGENT="$agent"
+  # pane の PATH は tmux の global environment ではなく起動元の PATH から決まるので、pane へ明示的に渡す。
+  # 渡せないと本物の claude が起動する。
+  export AWT_TEST_PANE_PATH="$work_dir/bin:$PATH"
+  expect_exit 0 '空の agentCommand は claude を使う' --directory "$AWT_TEST_DIR" --prompt default-agent
+  checked=$((checked + 1))
+  if wait_for_argv && python3 -I -c '
+import pathlib
+import sys
+assert pathlib.Path(sys.argv[1]).read_bytes() == b"default-agent\0"
+' "$AWT_TEST_DIR/argv"; then
+    info 'OK: 偽の claude へ指示が届いた'
+  else
+    ng '偽の claude へ指示が届いていません'
+  fi
+}
+
+group_prompt_command() {
+  AWT_TEST_SESSION='prompt-command'
+  AWT_TEST_MODE='prompt-command'
+  AWT_TEST_AGENT="$work_dir/no-such-agent"
+  expect_exit 7 'プロンプトの外部コマンドを Agent の起動と取り違えない' --directory "$AWT_TEST_DIR" --prompt no-agent
+}
+
+group_no_agent() {
+  AWT_TEST_SESSION=no-agent
+  AWT_TEST_AGENT=true
+  expect_exit 7 '即座に終わるコマンドは Agent 起動を確認できない' --directory "$AWT_TEST_DIR" --prompt short
+}
+
+group_short_lived_exec() {
+  AWT_TEST_SESSION=short-lived-exec
+  AWT_TEST_AGENT="exec /bin/sh -c 'sleep 1; exit 1'"
+  expect_exit 7 '短命の exec を Agent の起動と取り違えない' --directory "$AWT_TEST_DIR" --prompt short
+  checked=$((checked + 1))
+  if T has-session -t '=short-lived-exec' 2>/dev/null; then
+    ng '短命の exec の session が残っています'
+  else
+    info 'OK: 短命の exec の session は消えた'
+  fi
+}
+
+group_literal_command() {
+  AWT_TEST_SESSION=literal-command
+  AWT_TEST_AGENT=0x41
+  expect_exit 7 '16進数のキー表記を含む agentCommand を文字列として送る' --directory "$AWT_TEST_DIR" --prompt x
+  checked=$((checked + 1))
+  if T capture-pane -p -t '=literal-command:' | rg -q -F "handoff> 0x41 'x'"; then
+    info 'OK: pane に 0x41 が literal で届いた'
+  else
+    ng 'pane に 0x41 が literal で届いていません'
+  fi
+}
+
+group_gone() {
+  local before
+  AWT_TEST_MODE=missing-session
+  AWT_TEST_SESSION=gone
+  T new-session -d -s gone-other -x 120 -y 24 \
+    env PS1='handoff> ' AWT_TEST_ARGV="$AWT_TEST_DIR/argv" /bin/bash --norc --noprofile -i
+  sleep 0.5
+  before=$(T capture-pane -p -t '=gone-other:')
+  expect_exit 5 '存在しない session の接頭辞が一致しても送らない' --directory "$AWT_TEST_DIR" --prompt wrong-session
+  expect_unsent gone-other "$before"
+}
+
+group_changing_screen() {
+  local before cursor attempt
+  cp "$work_dir/changing-screen.rc" "$work_dir/changing-screen.py" "$AWT_TEST_DIR/"
+  AWT_TEST_MODE=changing-screen
+  AWT_TEST_SESSION=changing-screen
+  expect_exit 5 'cursor が正でも画面が変わり続ける pane には送らない' --directory "$AWT_TEST_DIR" --prompt changing-screen
+  checked=$((checked + 1))
+  cursor=$(T display-message -p -t '=changing-screen:' '#{cursor_x}')
+  if [[ "$cursor" =~ ^[0-9]+$ && "$cursor" -gt 0 ]]; then
+    info 'OK: 変化する画面の cursor は0より大きい'
+  else
+    ng '変化する画面の cursor が0より大きくありません'
+  fi
+  touch "$AWT_TEST_DIR/screen-stop"
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    [[ ! -e "$AWT_TEST_DIR/screen-stop.done" ]] || break
+    sleep 0.1
+  done
+  checked=$((checked + 1))
+  if [[ -e "$AWT_TEST_DIR/screen-stop.done" ]]; then
+    info 'OK: 変化する画面の出力が止まった'
+  else
+    ng '変化する画面の出力が止まりません'
+  fi
+  before=$(T capture-pane -p -t '=changing-screen:')
+  expect_unsent changing-screen "$before"
+}
+
+group_no_prompt() {
+  local before
+  AWT_TEST_MODE=no-prompt
+  AWT_TEST_SESSION=no-prompt
+  expect_exit 5 'cursor が動かない pane はタイムアウトする' --directory "$AWT_TEST_DIR" --prompt waiting
+  before=$(T capture-pane -p -t '=no-prompt:')
+  expect_unsent no-prompt "$before"
+}
+
+group_shell() {
+  local shell_name="$1"
+  if ! command -v "$shell_name" >/dev/null 2>&1; then
+    if [[ "${CI:-}" == true ]]; then
+      checked=$((checked + 1))
+      ng "$shell_name がありません"
+    else
+      info "SKIP: $shell_name がありません"
+    fi
+    return 0
+  fi
+  export AWT_TEST_SHELL
+  AWT_TEST_SHELL=$(command -v "$shell_name")
+  AWT_TEST_MODE="$shell_name"
+  AWT_TEST_SESSION="$shell_name"
+  expect_exit 0 "$shell_name の pane へ送信する" --directory "$AWT_TEST_DIR" --prompt "$prompt"
+  checked=$((checked + 1))
+  if wait_for_argv && expect_argv_prompt "$prompt"; then
+    info "OK: $shell_name でも argv がそのまま届いた"
+  else
+    ng "$shell_name の argv が期待と異なります"
+  fi
+}
+
+group_purpose_matrix() {
+  local kind="$1" pane_kind="$2" purpose_kind="$3"
+  local label="hostctl=$kind TMUX_PANE=$pane_kind --purpose=$purpose_kind"
+  local arguments=(--directory "$AWT_TEST_DIR" --prompt purpose-matrix)
+  local want_calls=()
+  local want_pane_set=0 want_pane='' want_purpose_set=0 want_purpose=''
+  AWT_TEST_HOSTCTL_KIND="$kind"
+  AWT_TEST_SESSION="purpose-$kind-pane-$pane_kind-purpose-$purpose_kind"
+  [[ "$purpose_kind" != set ]] || arguments+=(--purpose "$purpose_value")
+  # 呼び出しごとの --from-pane の値。段は「両方 → --from-pane だけ → 無し」から付けるものが無い段を除いたもの。
+  if [[ "$pane_kind" == set ]]; then
+    pane_env=(TMUX_PANE=%22)
+    [[ "$purpose_kind" != set || "$kind" == new ]] || want_calls+=(%22)
+    if [[ "$kind" == old ]]; then
+      want_calls+=(%22 '')
+    else
+      want_calls+=(%22)
+    fi
+  else
+    pane_env=(-u TMUX_PANE)
+    [[ "$purpose_kind" != set || "$kind" == new ]] || want_calls+=('')
+    want_calls+=('')
+  fi
+  if [[ "$pane_kind" == set && "$kind" != old ]]; then
+    want_pane_set=1
+    want_pane=%22
+  fi
+  if [[ "$purpose_kind" == set && "$kind" == new ]]; then
+    want_purpose_set=1
+    want_purpose="$purpose_value"
+  fi
+  expect_exit 0 "$label" "${arguments[@]}"
+  expect_hostctl_calls "$label" "${want_calls[@]}"
+  expect_send "$label" "$want_pane_set" "$want_pane" "$want_purpose_set" "$want_purpose"
+  expect_agent_prompt "$label" purpose-matrix
+  expect_no_old_hostctl_error "$label"
+}
+
+group_purpose_valid() {
+  local index="$1" valid_purpose="$2"
+  AWT_TEST_HOSTCTL_KIND=new
+  pane_env=(-u TMUX_PANE)
+  AWT_TEST_SESSION="purpose-valid-$index"
+  expect_exit 0 "目的 $index はそのまま渡す" --directory "$AWT_TEST_DIR" --prompt purpose-valid --purpose "$valid_purpose"
+  expect_send "目的 $index はそのまま渡す" 0 '' 1 "$valid_purpose"
+}
+
+group_purpose_no_mktemp() {
+  AWT_TEST_HOSTCTL_KIND=old
+  pane_env=(TMUX_PANE=%22 TMPDIR="$work_dir/missing-tmp")
+  AWT_TEST_SESSION=purpose-no-mktemp
+  expect_exit 0 'mktemp に失敗しても段を飛ばさずに呼び直す' --directory "$AWT_TEST_DIR" --prompt purpose-no-mktemp --purpose "$purpose_value"
+  expect_hostctl_calls 'mktemp に失敗しても段を飛ばさずに呼び直す' %22 %22 ''
+  expect_send 'mktemp に失敗しても段を飛ばさずに呼び直す' 0 '' 0 ''
+  expect_agent_prompt 'mktemp に失敗しても段を飛ばさずに呼び直す' purpose-no-mktemp
+  # 一時ファイルに取れていれば出ない文言なので、mktemp が実際に失敗したことの確認になる。
+  expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
+}
+
+# 背景の群の中で動く。件数は親へ戻らないので、最後に result へ書く。result が無ければ親は途中で
+# 止まった群として数えるので、result は最後の文でだけ書く。
+run_group() {
+  trap - EXIT
+  AWT_TEST_DIR="$1"
+  shift
+  checked=0
+  failures=0
+  "$@"
+  printf '%s %s\n' "$checked" "$failures" >"$AWT_TEST_DIR/result"
+}
+
+running_groups() {
+  local i running=0
+  for ((i = 0; i < ${#group_pids[@]}; i++)); do
+    if kill -0 "${group_pids[i]}" 2>/dev/null; then
+      running=$((running + 1))
+    fi
+  done
+  printf '%s' "$running"
+}
+
+# 最古の pid を wait する形にしない。17 秒かかるタイムアウト系が先頭に居座り、空いた枠が埋まらない。
+# bash 3.2 には wait -n が無いので、生きている群を数えて待つ。
+start_group() {
+  local name="$1" dir="$work_dir/cases/$1"
+  shift
+  while [[ "$(running_groups)" -ge "$max_jobs" ]]; do
+    sleep 0.2
+  done
+  mkdir "$dir"
+  run_group "$dir" "$@" >"$dir/log" 2>&1 &
+  group_pids+=("$!")
+  group_names+=("$name")
+}
+
+# 直列の段。tmux の global environment を変える区間を、並列の群と重ねない (重なると群が exit 69 になる)。
+expect_exit 0 '環境変数と異なる tmux global の窓口で --check が使える' --check
+expect_no_call '--check'
+
+expect_exit 2 '改行を拒否する' --directory "$AWT_TEST_DIR" --prompt $'first\nsecond'
+expect_no_call '改行'
+expect_exit 2 'CR を拒否する' --directory "$AWT_TEST_DIR" --prompt $'first\rsecond'
+expect_no_call 'CR'
+expect_exit 2 '空の指示を拒否する' --directory "$AWT_TEST_DIR" --prompt ''
+expect_no_call '空の指示'
+long_prompt=$(python3 -I -c 'print("あ" * 234, end="")')
+expect_exit 2 '700 バイト超を拒否する' --directory "$AWT_TEST_DIR" --prompt "$long_prompt"
+expect_no_call '700 バイト超'
+
+for invalid_prompt in $'foo\\' 'a\\b' $'a\tb' $'a\x03b' $'a\x15b' $'a\x7fb' $'a\xffb' '-option'; do
+  expect_exit 2 '危険な指示を拒否する' --directory "$AWT_TEST_DIR" --prompt "$invalid_prompt"
+  expect_no_call '危険な指示'
 done
+
 checked=$((checked + 1))
 if [[ "$(printf '%s' "$long_purpose" | wc -c | tr -d ' ')" -eq 1024 ]]; then
   info 'OK: 1件目の目的は 1024 バイトちょうど'
@@ -555,64 +763,27 @@ else
   ng '1件目の目的が 1024 バイトではありません'
 fi
 
-reset_hostctl_calls
-AWT_TEST_HOSTCTL_KIND=old
-pane_env=(TMUX_PANE=%22 TMPDIR="$work_dir/missing-tmp")
-AWT_TEST_SESSION=purpose-no-mktemp
-sessions+=(purpose-no-mktemp)
-expect_exit 0 'mktemp に失敗しても段を飛ばさずに呼び直す' --directory "$work_dir" --prompt purpose-no-mktemp --purpose "$purpose_value"
-expect_hostctl_calls 'mktemp に失敗しても段を飛ばさずに呼び直す' %22 %22 ''
-expect_send 'mktemp に失敗しても段を飛ばさずに呼び直す' 0 '' 0 ''
-expect_agent_prompt 'mktemp に失敗しても段を飛ばさずに呼び直す' purpose-no-mktemp
-# 一時ファイルに取れていれば出ない文言なので、mktemp が実際に失敗したことの確認になる。
-expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
-AWT_TEST_HOSTCTL_KIND=new
-pane_env=(-u TMUX_PANE)
-
 too_long_purpose=$(python3 -I -c 'print("あ" * 341 + "ab", end="")')
-reset_hostctl_calls
 purpose_index=0
 for invalid_purpose in $'a\nb' $'a\tb' $'a\xc2\x85b' $'a\xe2\x80\xa8b' $'a\xe2\x80\xa9b' 'a\b' '-purpose' '' '   ' \
   "$too_long_purpose" 'end;' $'a\xffb'; do
   purpose_index=$((purpose_index + 1))
-  expect_exit 2 "不正な目的 $purpose_index を拒否する" --directory "$work_dir" --prompt purpose-invalid --purpose "$invalid_purpose"
+  expect_exit 2 "不正な目的 $purpose_index を拒否する" --directory "$AWT_TEST_DIR" --prompt purpose-invalid --purpose "$invalid_purpose"
   expect_no_call "不正な目的 $purpose_index"
   expect_stderr_contains "不正な目的 $purpose_index" '目的が不正です: '
 done
 pane_env=(TMUX_PANE=%22)
-expect_exit 2 'TMUX_PANE があっても不正な目的を拒否する' --directory "$work_dir" --prompt purpose-invalid --purpose 'end;'
+expect_exit 2 'TMUX_PANE があっても不正な目的を拒否する' --directory "$AWT_TEST_DIR" --prompt purpose-invalid --purpose 'end;'
 expect_no_call 'TMUX_PANE があっても不正な目的'
 pane_env=(-u TMUX_PANE)
 
-expect_exit 2 '--purpose の2回目の指定を拒否する' --directory "$work_dir" --prompt purpose-twice --purpose first --purpose second
+expect_exit 2 '--purpose の2回目の指定を拒否する' --directory "$AWT_TEST_DIR" --prompt purpose-twice --purpose first --purpose second
 expect_no_call '--purpose の2回目の指定'
-expect_exit 2 '--purpose の値が無ければ拒否する' --directory "$work_dir" --prompt purpose-missing --purpose
+expect_exit 2 '--purpose の値が無ければ拒否する' --directory "$AWT_TEST_DIR" --prompt purpose-missing --purpose
 expect_no_call '--purpose の値が無い'
 
-pane_env=(-u TMUX_PANE)
-AWT_TEST_MODE=success
-AWT_TEST_SESSION=success
-AWT_TEST_AGENT="$work_dir/agent"
-rm -f "$work_dir/argv"
-
-rm -f "$work_dir/calls"
-expect_exit 2 '改行を拒否する' --directory "$work_dir" --prompt $'first\nsecond'
-expect_no_call '改行'
-expect_exit 2 'CR を拒否する' --directory "$work_dir" --prompt $'first\rsecond'
-expect_no_call 'CR'
-expect_exit 2 '空の指示を拒否する' --directory "$work_dir" --prompt ''
-expect_no_call '空の指示'
-long_prompt=$(python3 -I -c 'print("あ" * 234, end="")')
-expect_exit 2 '700 バイト超を拒否する' --directory "$work_dir" --prompt "$long_prompt"
-expect_no_call '700 バイト超'
-
-for invalid_prompt in $'foo\\' 'a\\b' $'a\tb' $'a\x03b' $'a\x15b' $'a\x7fb' $'a\xffb' '-option'; do
-  expect_exit 2 '危険な指示を拒否する' --directory "$work_dir" --prompt "$invalid_prompt"
-  expect_no_call '危険な指示'
-done
-
 T set-environment -gu AWT_HOSTCTL
-expect_exit 69 'AWT_HOSTCTL が無い' --directory "$work_dir" --prompt missing
+expect_exit 69 'AWT_HOSTCTL が無い' --directory "$AWT_TEST_DIR" --prompt missing
 expect_exit 69 '--check が使えない' --check
 expect_no_call '窓口が無い'
 checked=$((checked + 1))
@@ -624,164 +795,93 @@ else
 fi
 T set-environment -g AWT_HOSTCTL "$work_dir/hostctl"
 
-AWT_TEST_MODE=success
+# 次の2件は hostctl を呼ぶので、calls が無いことに頼る上の検査より後に置く。
 AWT_TEST_SESSION=long-line
-sessions+=(long-line)
 AWT_TEST_AGENT="$work_dir/agent $(python3 -I -c 'print(" " * 901, end="")')"
-expect_exit 4 'LINE が900 バイト超なら送らない' --directory "$work_dir" --prompt short
+expect_exit 4 'LINE が900 バイト超なら送らない' --directory "$AWT_TEST_DIR" --prompt short
 checked=$((checked + 1))
-if [[ ! -e "$work_dir/argv" ]] &&
+if [[ ! -e "$AWT_TEST_DIR/argv" ]] &&
   [[ "$(T capture-pane -p -t '=long-line:')" != *short* ]]; then
   info 'OK: 長すぎる LINE は送っていない'
 else
   ng '長すぎる LINE が送信されています'
 fi
 
-rm -f "$work_dir/argv"
+rm -f "$AWT_TEST_DIR/argv"
 AWT_TEST_SESSION=control-command
 AWT_TEST_AGENT=$'echo\nunsafe'
-sessions+=(control-command)
-expect_exit 4 'agentCommand の制御文字を拒否する' --directory "$work_dir" --prompt short
+expect_exit 4 'agentCommand の制御文字を拒否する' --directory "$AWT_TEST_DIR" --prompt short
 checked=$((checked + 1))
-if [[ ! -e "$work_dir/argv" ]] &&
+if [[ ! -e "$AWT_TEST_DIR/argv" ]] &&
   [[ "$(T capture-pane -p -t '=control-command:')" != *short* ]]; then
   info 'OK: 制御文字を含む agentCommand は送っていない'
 else
   ng '制御文字を含む agentCommand が送信されています'
 fi
 
-mkdir "$work_dir/bin"
-cp "$work_dir/agent" "$work_dir/bin/claude"
-# pane の PATH は tmux の global environment ではなく起動元の PATH から決まるので、pane へ明示的に渡す。
-# 渡せないと本物の claude が起動する。
-export AWT_TEST_PANE_PATH="$work_dir/bin:$PATH"
-for command_kind in empty whitespace; do
-  AWT_TEST_SESSION="default-$command_kind"
-  AWT_TEST_AGENT=''
-  [[ "$command_kind" != whitespace ]] || AWT_TEST_AGENT='   '
-  sessions+=("$AWT_TEST_SESSION")
-  expect_exit 0 '空の agentCommand は claude を使う' --directory "$work_dir" --prompt default-agent
-  checked=$((checked + 1))
-  if wait_for_argv && python3 -I -c '
-import pathlib
-import sys
-assert pathlib.Path(sys.argv[1]).read_bytes() == b"default-agent\0"
-' "$work_dir/argv"; then
-    info 'OK: 偽の claude へ指示が届いた'
-  else
-    ng '偽の claude へ指示が届いていません'
-  fi
-  rm -f "$work_dir/argv"
-done
-unset AWT_TEST_PANE_PATH
-
-AWT_TEST_SESSION='prompt-command'
-AWT_TEST_MODE='prompt-command'
-AWT_TEST_AGENT="$work_dir/no-such-agent"
-sessions+=("$AWT_TEST_SESSION")
-expect_exit 7 'プロンプトの外部コマンドを Agent の起動と取り違えない' --directory "$work_dir" --prompt no-agent
 AWT_TEST_MODE=success
+AWT_TEST_SESSION=success
+AWT_TEST_AGENT="$work_dir/agent"
 
-AWT_TEST_SESSION=no-agent
-AWT_TEST_AGENT=true
-sessions+=(no-agent)
-expect_exit 7 '即座に終わるコマンドは Agent 起動を確認できない' --directory "$work_dir" --prompt short
+# 並列の段。タイムアウトを待つ群 (13〜15 秒) を先に起動し、その間に成功系を回す。
+start_group prompt-command group_prompt_command
+start_group no-agent group_no_agent
+start_group short-lived-exec group_short_lived_exec
+start_group literal-command group_literal_command
+start_group gone group_gone
+start_group changing-screen group_changing_screen
+start_group no-prompt group_no_prompt
+start_group success group_success
+start_group exec-agent group_exec_agent
+start_group from-pane-valid group_from_pane %22 'TMUX_PANE を --from-pane で渡す' %22
+start_group from-pane-unset group_from_pane - 'TMUX_PANE が無ければ --from-pane を足さない' ''
+start_group from-pane-invalid-1 group_from_pane 22 "不正な TMUX_PANE '22' は渡さない" ''
+start_group from-pane-invalid-2 group_from_pane %2a "不正な TMUX_PANE '%2a' は渡さない" ''
+start_group from-pane-invalid-3 group_from_pane '' "不正な TMUX_PANE '' は渡さない" ''
+start_group from-pane-old group_from_pane_old
+start_group default-empty group_default_agent ''
+start_group default-whitespace group_default_agent '   '
+start_group zsh group_shell zsh
+start_group fish group_shell fish
+for kind in new from-pane old; do
+  for pane_kind in set unset; do
+    for purpose_kind in set unset; do
+      start_group "purpose-$kind-pane-$pane_kind-purpose-$purpose_kind" \
+        group_purpose_matrix "$kind" "$pane_kind" "$purpose_kind"
+    done
+  done
+done
+start_group purpose-valid-1 group_purpose_valid 1 "$long_purpose"
+start_group purpose-valid-2 group_purpose_valid 2 "$quoted_purpose"
+start_group purpose-no-mktemp group_purpose_no_mktemp
 
-AWT_TEST_SESSION=short-lived-exec
-AWT_TEST_AGENT="exec /bin/sh -c 'sleep 1; exit 1'"
-sessions+=(short-lived-exec)
-expect_exit 7 '短命の exec を Agent の起動と取り違えない' --directory "$work_dir" --prompt short
-checked=$((checked + 1))
-if T has-session -t '=short-lived-exec' 2>/dev/null; then
-  ng '短命の exec の session が残っています'
-else
-  info 'OK: 短命の exec の session は消えた（cleanup の対象には残す）'
-fi
-
-AWT_TEST_SESSION=literal-command
-AWT_TEST_AGENT=0x41
-sessions+=(literal-command)
-expect_exit 7 '16進数のキー表記を含む agentCommand を文字列として送る' --directory "$work_dir" --prompt x
-checked=$((checked + 1))
-if T capture-pane -p -t '=literal-command:' | rg -q -F "handoff> 0x41 'x'"; then
-  info 'OK: pane に 0x41 が literal で届いた'
-else
-  ng 'pane に 0x41 が literal で届いていません'
-fi
-
-for shell_name in zsh fish; do
-  if ! command -v "$shell_name" >/dev/null 2>&1; then
-    if [[ "${CI:-}" == true ]]; then
-      checked=$((checked + 1))
-      ng "$shell_name がありません"
-    else
-      info "SKIP: $shell_name がありません"
-    fi
-    continue
-  fi
-  export AWT_TEST_SHELL
-  AWT_TEST_SHELL=$(command -v "$shell_name")
-  AWT_TEST_MODE="$shell_name"
-  AWT_TEST_SESSION="$shell_name"
-  AWT_TEST_AGENT="$work_dir/agent"
-  sessions+=("$shell_name")
-  expect_exit 0 "$shell_name の pane へ送信する" --directory "$work_dir" --prompt "$prompt"
-  checked=$((checked + 1))
-  if wait_for_argv && python3 -I -c '
-import pathlib
-import sys
-assert pathlib.Path(sys.argv[1]).read_bytes() == sys.argv[2].encode("utf-8") + b"\0"
-' "$work_dir/argv" "$prompt"; then
-    info "OK: $shell_name でも argv がそのまま届いた"
-  else
-    ng "$shell_name の argv が期待と異なります"
-  fi
-  rm -f "$work_dir/argv"
+# 群のログはすべて回収してから起動順に出す。並列の出力が混ざらず、順も実行ごとに変わらない。
+group_rcs=()
+for ((group_index = 0; group_index < ${#group_pids[@]}; group_index++)); do
+  group_rc=0
+  wait "${group_pids[group_index]}" || group_rc=$?
+  group_rcs+=("$group_rc")
 done
 
-AWT_TEST_MODE=missing-session
-AWT_TEST_SESSION=gone
-AWT_TEST_AGENT="$work_dir/agent"
-sessions+=(gone-other)
-T new-session -d -s gone-other -x 120 -y 24 \
-  env PS1='handoff> ' AWT_TEST_ARGV="$work_dir/argv" /bin/bash --norc --noprofile -i
-sleep 0.5
-before=$(T capture-pane -p -t '=gone-other:')
-expect_exit 5 '存在しない session の接頭辞が一致しても送らない' --directory "$work_dir" --prompt wrong-session
-expect_unsent gone-other
-
-AWT_TEST_MODE=changing-screen
-AWT_TEST_SESSION=changing-screen
-sessions+=(changing-screen)
-expect_exit 5 'cursor が正でも画面が変わり続ける pane には送らない' --directory "$work_dir" --prompt changing-screen
-checked=$((checked + 1))
-cursor=$(T display-message -p -t '=changing-screen:' '#{cursor_x}')
-if [[ "$cursor" =~ ^[0-9]+$ && "$cursor" -gt 0 ]]; then
-  info 'OK: 変化する画面の cursor は0より大きい'
-else
-  ng '変化する画面の cursor が0より大きくありません'
-fi
-touch "$work_dir/screen-stop"
-for ((attempt = 0; attempt < 50; attempt++)); do
-  [[ ! -e "$work_dir/screen-stop.done" ]] || break
-  sleep 0.1
+for ((group_index = 0; group_index < ${#group_pids[@]}; group_index++)); do
+  group_name="${group_names[group_index]}"
+  group_dir="$work_dir/cases/$group_name"
+  group_rc="${group_rcs[group_index]}"
+  cat "$group_dir/log" >&2
+  group_checked=""
+  group_failures=""
+  if [[ -f "$group_dir/result" ]]; then
+    read -r group_checked group_failures <"$group_dir/result" || true
+  fi
+  if [[ "$group_rc" -ne 0 || ! "$group_checked" =~ ^[0-9]+$ || ! "$group_failures" =~ ^[0-9]+$ ]]; then
+    checked=$((checked + 1))
+    ng "$group_name: 途中で止まりました (exit $group_rc)"
+  fi
+  if [[ "$group_checked" =~ ^[0-9]+$ && "$group_failures" =~ ^[0-9]+$ ]]; then
+    checked=$((checked + group_checked))
+    failures=$((failures + group_failures))
+  fi
 done
-checked=$((checked + 1))
-if [[ -e "$work_dir/screen-stop.done" ]]; then
-  info 'OK: 変化する画面の出力が止まった'
-else
-  ng '変化する画面の出力が止まりません'
-fi
-before=$(T capture-pane -p -t '=changing-screen:')
-expect_unsent changing-screen
-
-AWT_TEST_MODE=no-prompt
-AWT_TEST_SESSION=no-prompt
-AWT_TEST_AGENT="$work_dir/agent"
-sessions+=(no-prompt)
-expect_exit 5 'cursor が動かない pane はタイムアウトする' --directory "$work_dir" --prompt waiting
-before=$(T capture-pane -p -t '=no-prompt:')
-expect_unsent no-prompt
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"

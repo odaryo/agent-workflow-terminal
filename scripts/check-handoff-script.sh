@@ -1070,9 +1070,9 @@ group_tempfile_signal() {
 
 # bash 3.2 の ERR trap の中の $LINENO は、関数の定義行など失敗した行ではない値を返すので出さない。
 # 呼び出しの連鎖の行番号 (BASH_LINENO) は正しい。
-# 実測 bash 3.2.57: パイプラインで止まると BASH_COMMAND は失敗した要素ではなく最後の要素になる。
-# 関数の return で止まると BASH_COMMAND は return の文になり、連鎖は返した関数ではなく呼び出し元で
-# 終わるので、返した関数の名前は trap からは取れない。
+# 実測 bash 3.2.57: 単純コマンドで終わるパイプラインで止まると、BASH_COMMAND は最後の要素になり、
+# 失敗した要素とは限らない。関数の return で止まると BASH_COMMAND は return の文になり、連鎖は返した
+# 関数ではなく、その呼び出し元かそれより上で終わるので、返した関数の名前は trap からは取れない。
 record_stop() {
   trap - ERR
   local status="$1" command="$2" pipestatus="${3:-}" chain="" note="" rightmost="" i
@@ -1097,9 +1097,9 @@ record_stop() {
     note="。パイプラインの最後の要素で、各要素の exit は ${pipestatus}"
   elif [[ "$command" == return || "$command" == "return "* ]]; then
     if [[ -n "${FUNCNAME[1]:-}" ]]; then
-      note="。${FUNCNAME[1]} から呼んだ関数の return で、その関数の名前は出せない"
+      note="。${FUNCNAME[1]} から呼んだ先のどこかの関数の return で、その関数の名前は出せない"
     else
-      note="。関数の return で、その関数の名前は出せない"
+      note="。どこかの関数の return で、その関数の名前は出せない"
     fi
   fi
   printf '止まったコマンド: %s (exit %s%s)、呼び出し: %s\n' "${command//$'\n'/ }" "$status" "$note" "$chain" \

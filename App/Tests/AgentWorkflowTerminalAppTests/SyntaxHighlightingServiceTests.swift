@@ -83,7 +83,7 @@ struct SyntaxHighlightingServiceTests {
   @Test("highlight.js が内部で失敗した入力は nil を返し、次のハイライトは成功する")
   func highlightJSInternalError() async {
     let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
-    // 協調スレッドのスタック (512 KiB) の上では RangeError のしきい値が実測で 600〜700 段なので、4000 段を使う。
+    // 協調スレッドのスタック (512 KiB) の上では RangeError のしきい値が macOS 27 の実測で 600〜700 段なので、4000 段を使う。
     // 大きなスタックでは 4000 段でも JS が成功し、highlight は HighlightJSMarkup の深さの上限 32 で nil になって
     // JS の失敗を確かめないまま通る。そのときは highlightedHTML の #expect が落ちる (#867)。
     let depth = 4000
@@ -141,7 +141,7 @@ struct SyntaxHighlightingServiceTests {
   }
 
   private static func nestedScriptCode() -> String {
-    // 協調スレッドのスタック (512 KiB) の上では RangeError のしきい値が実測で 600〜700 段なので、4000 段を使う。
+    // 協調スレッドのスタック (512 KiB) の上では RangeError のしきい値が macOS 27 の実測で 600〜700 段なので、4000 段を使う。
     // 大きなスタックでは 4000 段でも JS が成功し、highlight は HighlightJSMarkup の深さの上限 32 で nil になって
     // JS の失敗を確かめないまま通る。そのときは highlightedHTML の #expect が落ちる (#867)。
     let depth = 4000

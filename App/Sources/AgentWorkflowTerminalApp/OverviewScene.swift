@@ -127,7 +127,6 @@ private struct OverviewProjectSection: View {
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(disclosureLabel)
         .help(disclosureLabel)
         HStack {
           Text(model.project.displayName)
@@ -136,14 +135,16 @@ private struct OverviewProjectSection: View {
             Text("要対応 \(attentionCount)")
           }
         }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-          showsAttentionCount
-            ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
-            : model.project.displayName
-        )
       }
-      .accessibilityElement(children: .contain)
+      .accessibilityElement(children: .ignore)
+      .accessibilityLabel(
+        showsAttentionCount
+          ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
+          : model.project.displayName
+      )
+      .accessibilityAction(named: disclosureLabel) {
+        isExpanded.wrappedValue.toggle()
+      }
       .contentShape(.rect)
       .contextMenu {
         OverviewProjectMenu(

@@ -44,7 +44,7 @@ case .failure(let error): fail(error.message, code: 2)
 }
 
 switch command {
-case .openWorktree(let directory, let socket, let fromPane):
+case .openWorktree(let directory, let socket, let fromPane, let purpose):
   guard let path = socket ?? ProcessInfo.processInfo.environment["AWT_HOSTCTL_SOCKET"],
     !path.isEmpty
   else {
@@ -52,8 +52,8 @@ case .openWorktree(let directory, let socket, let fromPane):
   }
   do {
     let response = try await HostControlSocketClient.send(
-      .openWorktree(directory: absoluteDirectory(directory), fromPane: fromPane), to: path,
-      timeout: .seconds(30))
+      .openWorktree(directory: absoluteDirectory(directory), fromPane: fromPane, purpose: purpose),
+      to: path, timeout: .seconds(30))
     guard writeLine(HostControlProtocol.encode(response), to: STDOUT_FILENO) else {
       fail("標準出力に書き込めません", code: 74)
     }

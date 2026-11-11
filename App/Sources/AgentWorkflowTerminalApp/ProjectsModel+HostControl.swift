@@ -61,7 +61,7 @@ extension ProjectsModel {
   /// `created == false` は既存セッションで、handoff.sh は指示を送らない。
   private func recordHandoffIfOpened(_ request: HostControlRequest, _ response: HostControlResponse)
   {
-    guard case .openWorktree(_, let fromPane?) = request,
+    guard case .openWorktree(_, let fromPane?, _) = request,
       case .opened(let opened) = response, opened.created
     else { return }
     for slot in slots.values {
@@ -103,10 +103,11 @@ extension ProjectsModel {
 
   private func handleHostControl(_ request: HostControlRequest) async -> HostControlResponse {
     switch request {
-    case .openWorktree(let directory, _):
+    case .openWorktree(let directory, _, let purpose):
       guard directory.hasPrefix("/"), !directory.utf8.contains(0) else {
         return .failure(code: .invalidRequest, message: "directory は空でない絶対パスを指定してください")
       }
+      if let failure = hostControlPurposeFailure(purpose) { return failure }
       let project: RegisteredProject
       do {
         project = try await resolver.resolve(directory: URL(fileURLWithPath: directory))
@@ -125,7 +126,7 @@ extension ProjectsModel {
       }
       return await openWorktreeWithValidatedAgentCommand(
         agentCommand: registeredProject.agentCommand,
-        open: { await model.openWorktreeForAgent(directory: directory) },
+        open: { await model.openWorktreeForAgent(directory: directory, purpose: purpose) },
         isRegistered: { self.registry.project(project.commonDirectory) != nil })
     }
   }
@@ -149,6 +150,25 @@ extension ProjectsModel {
         NSLog("[app] hostctl の tmux 環境変数を設定できません: \(error)")
       }
     }
+  }
+}
+
+/// セッションを作ってから目的だけ弾くと、作ったセッションが残るので、作る前に検査する。
+func hostControlPurposeFailure(_ purpose: String?) -> HostControlResponse? {
+  guard let purpose else { return nil }
+  do {
+    try TmuxPanePurposeWriter.validate(purpose)
+    return nil
+  } catch {
+    let reason =
+      switch error {
+      case .containsLineBreakOrControlCharacter: "改行や制御文字を含んでいます"
+      case .endsWithSemicolon: "末尾が ; です"
+      case .tooLong(let byteCount, let limit): "長すぎます (\(byteCount) / \(limit) バイト)"
+      case .invalidPaneID(let pane): "pane ID が不正です: \(pane.rawValue)"
+      case .tmux(let failure): "tmux への書き込みに失敗しました: \(failure)"
+      }
+    return .failure(code: .invalidRequest, message: "purpose が不正です: \(reason)")
   }
 }
 

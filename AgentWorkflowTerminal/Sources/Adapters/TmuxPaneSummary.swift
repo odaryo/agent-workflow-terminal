@@ -102,8 +102,10 @@ public enum TmuxPanePurposeWriterError: Error, Sendable, Equatable {
   case tmux(TmuxRunnerError)
 }
 
-/// 手入力の目的 (`@awt_purpose`) を書く・消す (§12.7 / §13)。アプリは永続化しない —
-/// pane option なので Agent の再起動を越えて残り、pane が閉じるか server が終わると消える。
+/// 目的 (`@awt_purpose`) を書く・消す (§12.7 / §13)。書く値は Overview での手入力と、
+/// `hostctl worktree open --purpose` で引き渡しの際に受け取った値 (§3.1 / §21.4) の2つ。
+/// アプリは永続化しない — pane option なので Agent の再起動を越えて残り、pane が閉じるか
+/// server が終わると消える。
 public struct TmuxPanePurposeWriter: Sendable {
   private let runner: TmuxRunner
 
@@ -116,10 +118,22 @@ public struct TmuxPanePurposeWriter: Sendable {
     _ text: String, of pane: PaneID
   ) async throws(TmuxPanePurposeWriterError) {
     guard TmuxCapturePane.isWellFormed(pane) else { throw .invalidPaneID(pane) }
+    try Self.validate(text)
     if PaneSummaryFormatViolation.isInvisibleOnly(text) {
       try await clearPurpose(of: pane)
       return
     }
+    // `--` は値が `-` で始まっても option として読ませないため。3.4 / 3.7c とも、無くても
+    // `@awt_purpose -u` の `-u` は値として入った (実測) が、tmux の引数解析に依存しない。
+    try await run([
+      "set-option", "-p", "-t", pane.rawValue, "--", TmuxPaneSummaryOption.purpose, text,
+    ])
+  }
+
+  /// tmux を呼ばずに `setPurpose` と同じ検査をする。見えない scalar だけの値は `setPurpose` が
+  /// 削除として扱うので通す。
+  public static func validate(_ text: String) throws(TmuxPanePurposeWriterError) {
+    if PaneSummaryFormatViolation.isInvisibleOnly(text) { return }
     guard !text.unicodeScalars.contains(where: PaneSummaryFormatViolation.breaksSingleLine) else {
       throw .containsLineBreakOrControlCharacter
     }
@@ -132,11 +146,22 @@ public struct TmuxPanePurposeWriter: Sendable {
     guard byteCount <= TmuxListPanes.summaryValueByteLimit else {
       throw .tooLong(byteCount: byteCount, limit: TmuxListPanes.summaryValueByteLimit)
     }
-    // `--` は値が `-` で始まっても option として読ませないため。3.4 / 3.7c とも、無くても
-    // `@awt_purpose -u` の `-u` は値として入った (実測) が、tmux の引数解析に依存しない。
-    try await run([
-      "set-option", "-p", "-t", pane.rawValue, "--", TmuxPaneSummaryOption.purpose, text,
-    ])
+  }
+
+  /// 新しく作ったセッションの pane ID はアプリから見えない (`TmuxSessionOperations.create` が
+  /// new-window / kill-window を挟む) ので、handoff.sh が Agent を起動するのと同じ `=<session>:`
+  /// で指す。`=` が無いと、その session が無いとき前方一致で別の session (`<session>-10` など) に
+  /// 書く (tmux 3.8 で実測)。
+  public func setPurpose(
+    _ text: String, ofActivePaneIn session: TmuxSessionName
+  ) async throws(TmuxPanePurposeWriterError) {
+    try Self.validate(text)
+    let target = "=\(session.rawValue):"
+    if PaneSummaryFormatViolation.isInvisibleOnly(text) {
+      try await run(["set-option", "-p", "-u", "-t", target, TmuxPaneSummaryOption.purpose])
+      return
+    }
+    try await run(["set-option", "-p", "-t", target, "--", TmuxPaneSummaryOption.purpose, text])
   }
 
   public func clearPurpose(of pane: PaneID) async throws(TmuxPanePurposeWriterError) {

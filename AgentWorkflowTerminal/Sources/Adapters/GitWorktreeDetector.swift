@@ -46,8 +46,9 @@ public enum GitWorktreeScanError: Error, Sendable, Equatable {
 ///   検出できない entry は `failures` に残す。ただし bare、到達不能と確認できない
 ///   `prunable`、common dir が別 Project の entry は対象外として除外する (`isScannable` /
 ///   `describe`)。`prunable` だけでは不在の証拠にならない (Issue #496)。除外自体の代償は Issue #137。
-/// - Important: 到達可能な作業ツリーの安定 ID は初回に git に問い合わせる。`git rev-parse --path-format=absolute` の
-///   出力は symlink 解決とディスク上の大小文字への矯正を経た正規形であり、`WorktreeIdentity` が
+/// - Important: 到達可能な entry は、一致する観測が渡されないか使い回しの条件が外れると、
+///   git に安定 ID を問い合わせる。`git rev-parse --path-format=absolute` の出力は symlink 解決と
+///   ディスク上の大小文字への矯正を経た正規形であり、`WorktreeIdentity` が
 ///   正規化しない設計はこの出力をそのまま渡すことで成立している。作業ツリーのパスと
 ///   `worktrees/<name>` を文字列連結して組み立てると、その前提が消える。git は管理ディレクトリ名を
 ///   サニタイズするので (git 2.50.1 実測: `wt2 with space` → `worktrees/wt2-with-space`)、
@@ -166,6 +167,7 @@ public struct GitWorktreeDetector: Sendable {
     self.entryTimeout = entryTimeout
   }
 
+  /// - Important: `reusableObservations` の限界と Active 化の前の契約は `reusedObservation` (#401)。
   /// - Returns: 対象外として除外した entry はどちらの配列にも載せず、除外したこと自体も
   ///   呼び出し側へ伝えない (`isScannable` / `describe`)。
   public func scan(
@@ -427,11 +429,10 @@ public struct GitWorktreeDetector: Sendable {
   ///   のも同じ理由で不可で、macOS 26.5 実測では NFC の `café` が NFD (`caf` + U+0301) へ
   ///   正規化される一方、git は NFC のまま返す。照合側の `standardizedFileURL` は両辺へ等しく
   ///   効くので残す。
-  /// - Note: `isReachableWorkingTree` と同じく、打ち切る手段の無い同期 FS I/O をここでも行う。
-  ///   `contentsOfDirectory` と `Data(contentsOf:)` はどちらも timeout も cancellation も取らない。
-  ///   到達不能と分かった entry に加え、同じ安定 ID の組では到達可能な entry にも呼ばれる。
-  ///   読む先は Project Root 側であって作業ツリーではないので、応答しないマウント上の作業ツリーで
-  ///   ここが詰まることは無い。
+  /// - Note: `isReachableWorkingTree` と同じく打ち切れない同期 FS I/O を行う (`contentsOfDirectory`
+  ///   と `Data(contentsOf:)` は timeout も cancellation も取らない)。到達不能な entry、同じ安定 ID
+  ///   の組の到達可能な entry、観測を使い回す候補の entry で、スキャンのたびに呼ばれる。読む先は
+  ///   Project Root 側だけなので、応答しないマウント上の作業ツリーでここが詰まることは無い。
   static func administrativeDirectory(
     worktreePath: String,
     commonDirectory: WorktreeIdentity
@@ -496,5 +497,4 @@ public struct GitWorktreeDetector: Sendable {
     }
     return identity
   }
-
 }

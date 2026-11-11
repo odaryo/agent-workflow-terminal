@@ -23,6 +23,23 @@ struct GitWorktreeDetectorReuseTests {
     #expect(calls.paths.contains("finder:\(fixture.linkedPath):\(fixture.commonPath)"))
   }
 
+  @Test("正準等価な観測を再利用しても作業ツリーパスは list の NFC の綴りを保つ")
+  func reusedPathKeepsListSpelling() async throws {
+    let fixture = try ReuseFixture(linkedName: "caf\u{E9}")
+    let stub = fixture.stub()
+    let previous = DetectedWorktree(
+      identity: fixture.identity, worktreePath: "\(fixture.root)/cafe\u{301}", branch: "old",
+      isProjectRoot: false)
+    let detector = try fixture.detector(stub, finder: { _, _ in previous.identity })
+
+    let result = try await detector.scan(reusableObservations: [previous])
+
+    let detected = try #require(result.detected.last)
+    #expect(Array(detected.worktreePath.utf8) == Array(fixture.linkedPath.utf8))
+    #expect(await stub.invocations.allSatisfy { !$0.contains(fixture.linkedPath) })
+    #expect(detected.identity == previous.identity)
+  }
+
   @Test("同じパスの到達不能・Project Root 観測を飛ばして最初の再利用可能な観測を使う")
   func skipsIneligibleObservations() async throws {
     let fixture = try ReuseFixture()
@@ -142,8 +159,13 @@ struct GitWorktreeDetectorReuseTests {
     let previous = DetectedWorktree(
       identity: fixture.commonIdentity, worktreePath: fixture.mainPath, branch: "old",
       isProjectRoot: isProjectRoot)
+    let detector = try fixture.detector(
+      stub,
+      finder: { path, _ in
+        path == fixture.mainPath ? previous.identity : fixture.identity
+      })
 
-    let result = try await fixture.detector(stub).scan(reusableObservations: [previous])
+    let result = try await detector.scan(reusableObservations: [previous])
 
     #expect(await stub.invocations.contains(fixture.mainArguments))
     #expect(result.detected.first?.isProjectRoot == true)
@@ -226,14 +248,15 @@ struct GitWorktreeDetectorReuseTests {
 private struct ReuseFixture: Sendable {
   let root: String
   var mainPath: String { "\(root)/main" }
-  var linkedPath: String { "\(root)/linked" }
+  let linkedPath: String
   var commonPath: String { "\(mainPath)/.git" }
   let commonIdentity: WorktreeIdentity
   let identity: WorktreeIdentity
 
-  init() throws {
+  init(linkedName: String = "linked") throws {
     let directory = "/private/tmp/awt-reuse-\(UUID().uuidString)"
     root = directory
+    linkedPath = "\(directory)/\(linkedName)"
     let common = "\(directory)/main/.git"
     commonIdentity = try #require(WorktreeIdentity(rawValue: common))
     identity = try #require(WorktreeIdentity(rawValue: "\(common)/worktrees/linked"))

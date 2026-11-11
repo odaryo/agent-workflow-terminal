@@ -127,7 +127,14 @@ if [[ -z "$hostctl" || ! -f "$hostctl" || ! -x "$hostctl" || -z "$socket" ]]; th
   printf '%s\n' '引き渡しの窓口が使えません。このセッションの中で続けてください。' >&2
   exit 69
 fi
-[[ "$check" -eq 0 ]] || exit 0
+if [[ "$check" -eq 1 ]]; then
+  if directory=$(pwd -P) &&
+    "$hostctl" project check --directory "$directory" --socket "$socket" >&2; then
+    exit 0
+  fi
+  printf '%s\n' '引き渡しの窓口が使えません: このディレクトリがアプリに登録された Project か確かめられません。このセッションの中で続けてください。' >&2
+  exit 69
+fi
 
 from_pane=""
 [[ ! "${TMUX_PANE:-}" =~ ^%[0-9]+$ ]] || from_pane="$TMUX_PANE"

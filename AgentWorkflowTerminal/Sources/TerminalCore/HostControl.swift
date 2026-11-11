@@ -1,6 +1,7 @@
 import Foundation
 
 public enum HostControlRequest: Sendable, Equatable {
+  case checkProject(directory: String)
   case openWorktree(directory: String, fromPane: PaneID? = nil, purpose: String? = nil)
 }
 
@@ -27,6 +28,7 @@ public enum HostControlFailureCode: String, Sendable, Equatable, CaseIterable {
 }
 
 public enum HostControlResponse: Sendable, Equatable {
+  case projectRegistered
   case opened(HostControlOpenedWorktree)
   case failure(code: HostControlFailureCode, message: String)
 }
@@ -36,6 +38,10 @@ public enum HostControlProtocol {
 
   public static func encode(_ request: HostControlRequest) -> String {
     switch request {
+    case .checkProject(let directory):
+      return encodeObject([
+        "command": "project.check", "directory": directory, "version": version,
+      ])
     case .openWorktree(let directory, let fromPane, let purpose):
       var object: [String: Any] = [
         "command": "worktree.open", "directory": directory, "version": version,
@@ -52,8 +58,13 @@ public enum HostControlProtocol {
   ) -> Result<HostControlRequest, HostControlProtocolError> {
     do {
       let wire = try JSONDecoder().decode(RequestWire.self, from: Data(line.utf8))
-      guard wire.version == version, wire.command == "worktree.open" else {
+      guard wire.version == version,
+        wire.command == "worktree.open" || wire.command == "project.check"
+      else {
         return .failure(HostControlProtocolError(message: "未対応のcommandまたはversionです"))
+      }
+      if wire.command == "project.check" {
+        return .success(.checkProject(directory: wire.directory))
       }
       // fromPaneは別に読む。同じwireで読むと、文字列でない値が総称のJSON形式の誤りになり、
       // どの項目が不正かを示せない。
@@ -93,6 +104,8 @@ public enum HostControlProtocol {
 
   public static func encode(_ response: HostControlResponse) -> String {
     switch response {
+    case .projectRegistered:
+      return encodeObject(["version": version, "ok": true, "registered": true])
     case .opened(let worktree):
       return encodeObject([
         "version": version, "ok": true, "session": worktree.session,
@@ -160,7 +173,7 @@ public enum HostControlProtocol {
     let response: HostControlResponse
 
     private enum CodingKeys: String, CodingKey {
-      case version, ok, session, directory, created, agentCommand, code, message
+      case version, ok, registered, session, directory, created, agentCommand, code, message
     }
 
     init(from decoder: any Decoder) throws {
@@ -169,6 +182,13 @@ public enum HostControlProtocol {
         throw HostControlProtocolError(message: "未対応のversionです")
       }
       if try values.decode(Bool.self, forKey: .ok) {
+        if values.contains(.registered) {
+          guard try values.decode(Bool.self, forKey: .registered) else {
+            throw HostControlProtocolError(message: "応答のJSON形式が不正です")
+          }
+          response = .projectRegistered
+          return
+        }
         response = .opened(
           HostControlOpenedWorktree(
             session: try values.decode(String.self, forKey: .session),
@@ -195,6 +215,7 @@ public struct HostControlProtocolError: Error, Sendable, Equatable {
 }
 
 public enum HostControlCommand: Sendable, Equatable {
+  case checkProject(directory: String, socket: String?)
   case openWorktree(directory: String, socket: String?, fromPane: PaneID?, purpose: String?)
 }
 
@@ -203,13 +224,22 @@ public enum HostControlCommandLine {
   public static func parse(
     _ arguments: [String]
   ) -> Result<HostControlCommand, HostControlProtocolError> {
-    guard arguments.starts(with: ["worktree", "open"]) else {
-      return .failure(HostControlProtocolError(message: "worktree openを指定してください"))
+    let isProjectCheck = arguments.starts(with: ["project", "check"])
+    guard isProjectCheck || arguments.starts(with: ["worktree", "open"]) else {
+      return .failure(
+        HostControlProtocolError(message: "worktree openまたはproject checkを指定してください"))
     }
     var options = Options()
     var index = 2
     while index < arguments.count {
       let option = arguments[index]
+      if isProjectCheck,
+        (option != "--directory" && option != "--socket")
+          || (option == "--directory" && options.directory != nil)
+          || (option == "--socket" && options.socket != nil)
+      {
+        return .failure(HostControlProtocolError(message: "不正な引数です: \(option)"))
+      }
       guard index + 1 < arguments.count else {
         return .failure(HostControlProtocolError(message: "引数の値がありません: \(option)"))
       }
@@ -222,6 +252,9 @@ public enum HostControlCommandLine {
     }
     guard let directory = options.directory else {
       return .failure(HostControlProtocolError(message: "--directoryが必要です"))
+    }
+    if isProjectCheck {
+      return .success(.checkProject(directory: directory, socket: options.socket))
     }
     return .success(
       .openWorktree(

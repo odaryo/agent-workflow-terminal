@@ -658,6 +658,35 @@ extension HostControlSocketTests {
     let received = Darwin.recv(descriptor, &byte, 1, 0)
     return Received(received: received, errno: errno)
   }
+}
+
+extension HostControlSocketTests {
+  @Test("実socketでproject.checkの要求と登録済み・未登録応答を往復する", arguments: [true, false])
+  func roundTripProjectCheck(registered: Bool) async throws {
+    let path = uniquePath()
+    defer {
+      try? FileManager.default.removeItem(atPath: path)
+      try? FileManager.default.removeItem(atPath: path + ".lock")
+    }
+    let expected = HostControlRequest.checkProject(directory: "/project 日本語")
+    let response: HostControlResponse =
+      registered
+      ? .projectRegistered
+      : .failure(code: .notRegistered, message: "登録されていません")
+    let server = HostControlSocketServer(path: path)
+    try await withServer(
+      server,
+      handler: { request in
+        #expect(request == expected)
+        return response
+      },
+      body: {
+        let actual = try await HostControlSocketClient.send(
+          expected, to: path, timeout: .seconds(30))
+        #expect(actual == response)
+      }
+    )
+  }
   // 実socketを通す public API のテストは補助関数を共有するので、行数のためだけに分けない。
   // swiftlint:disable:next file_length
 }

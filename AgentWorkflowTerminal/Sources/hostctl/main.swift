@@ -43,31 +43,41 @@ case .success(let parsed): command = parsed
 case .failure(let error): fail(error.message, code: 2)
 }
 
+let request: HostControlRequest
+let socket: String?
+let timeout: Duration
 switch command {
-case .openWorktree(let directory, let socket, let fromPane, let purpose):
-  guard let path = socket ?? ProcessInfo.processInfo.environment["AWT_HOSTCTL_SOCKET"],
-    !path.isEmpty
-  else {
-    fail("--socketまたはAWT_HOSTCTL_SOCKETを指定してください", code: 2)
+case .openWorktree(let directory, let socketPath, let fromPane, let purpose):
+  request = .openWorktree(
+    directory: absoluteDirectory(directory), fromPane: fromPane, purpose: purpose)
+  socket = socketPath
+  timeout = .seconds(30)
+case .checkProject(let directory, let socketPath):
+  request = .checkProject(directory: absoluteDirectory(directory))
+  socket = socketPath
+  timeout = .seconds(5)
+}
+
+guard let path = socket ?? ProcessInfo.processInfo.environment["AWT_HOSTCTL_SOCKET"],
+  !path.isEmpty
+else {
+  fail("--socketまたはAWT_HOSTCTL_SOCKETを指定してください", code: 2)
+}
+do {
+  let response = try await HostControlSocketClient.send(request, to: path, timeout: timeout)
+  guard writeLine(HostControlProtocol.encode(response), to: STDOUT_FILENO) else {
+    fail("標準出力に書き込めません", code: 74)
   }
-  do {
-    let response = try await HostControlSocketClient.send(
-      .openWorktree(directory: absoluteDirectory(directory), fromPane: fromPane, purpose: purpose),
-      to: path, timeout: .seconds(30))
-    guard writeLine(HostControlProtocol.encode(response), to: STDOUT_FILENO) else {
-      fail("標準出力に書き込めません", code: 74)
-    }
-    switch response {
-    case .opened: exit(0)
-    case .failure: exit(1)
-    }
-  } catch {
-    switch error {
-    case .serverUnavailable: fail("Hostのアプリが起動していません: \(path)", code: 69)
-    case .pathTooLong(let path): fail("socketパスが長すぎます: \(path)", code: 74)
-    case .addressInUse(let path): fail("socketは使用中です: \(path)", code: 74)
-    case .timedOut: fail("Hostとの通信がタイムアウトしました", code: 74)
-    case .io(let message): fail(message, code: 74)
-    }
+  switch (command, response) {
+  case (.openWorktree, .opened), (.checkProject, .projectRegistered): exit(0)
+  default: exit(1)
+  }
+} catch {
+  switch error {
+  case .serverUnavailable: fail("Hostのアプリが起動していません: \(path)", code: 69)
+  case .pathTooLong(let path): fail("socketパスが長すぎます: \(path)", code: 74)
+  case .addressInUse(let path): fail("socketは使用中です: \(path)", code: 74)
+  case .timedOut: fail("Hostとの通信がタイムアウトしました", code: 74)
+  case .io(let message): fail(message, code: 74)
   }
 }

@@ -88,10 +88,37 @@ fi
 
 cat >"$work_dir/hostctl" <<'HOSTCTL'
 #!/usr/bin/env bash
-printf 'called\n' >>"$(dirname -- "$0")/calls"
-exit 1
+exec python3 -I - "$(dirname -- "$0")" "$@" <<'PYTHON'
+import json
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+args = sys.argv[2:]
+with (root / "calls").open("ab") as log:
+    for value in [str(len(args)), *args]:
+        log.write(value.encode() + b"\0")
+if len(args) != 6 or args[:3] != ["project", "check", "--directory"] or args[4:] != ["--socket", "test-socket"]:
+    sys.exit(2)
+mode = (root / "check-mode").read_text().strip()
+if mode == "old":
+    sys.exit(2)
+if mode == "unavailable":
+    sys.exit(69)
+registered = pathlib.Path(args[3]).resolve() in {
+    pathlib.Path(line).resolve() for line in (root / "registered").read_text().splitlines()
+}
+if registered:
+    print(json.dumps({"ok": True, "registered": True, "version": 1}))
+else:
+    print(json.dumps({"code": "not_registered", "message": "not registered", "ok": False, "version": 1}))
+sys.exit(0 if registered else 1)
+PYTHON
 HOSTCTL
 chmod +x "$work_dir/hostctl"
+: >"$work_dir/calls"
+printf '%s\n' registered >"$work_dir/check-mode"
+printf '%s\n' "$work_dir/project" "$work_dir/project/subdir" >"$work_dir/registered"
 
 T -f /dev/null new-session -d -s anchor -x 120 -y 24 /bin/sleep 600
 socket_path=$(T display-message -p '#{socket_path}')
@@ -112,17 +139,21 @@ git -C "$work_dir/project" -c protocol.file.allow=always submodule --quiet add "
 fixture_commit "$work_dir/project" -m 'add submodule'
 git -C "$work_dir/project" worktree add -q -b linked "$work_dir/linked"
 git -C "$work_dir/linked" -c protocol.file.allow=always submodule --quiet update --init
+git -c init.defaultBranch=main init -q --template= "$work_dir/unregistered"
 git init -q --bare --template= "$work_dir/bare"
-mkdir -p "$work_dir/project/subdir" "$work_dir/linked/subdir" "$work_dir/project/sm/subdir" "$work_dir/outside"
+mkdir -p "$work_dir/project/subdir" "$work_dir/linked/subdir" "$work_dir/project/sm/subdir" "$work_dir/outside" "$work_dir/unregistered/subdir"
 
 : >"$work_dir/empty"
 printf '%s\n' 'このセッションは Agent Workflow Terminal の Project Root で動いている。実装を指示されたら、作業を始める前に awt-handoff:worktree-handoff Skill を使う。調査や質問には使わない。' >"$work_dir/instruction"
 printf '\377\000not JSON\n' >"$work_dir/broken-input"
 
+expect_check=0
+
 # 5番目以降の引数は hook の実行だけに渡す環境変数 (NAME=value)。
 expect_hook() {
   local label="$1" directory="$2" expected="$3" input="${4:-$work_dir/input}"
   local rc=0 offset
+  cp "$work_dir/calls" "$work_dir/calls-before"
   local hook_env=()
   [[ $# -le 4 ]] || hook_env=("${@:5}")
   python3 -I - "$directory" >"$work_dir/input" <<'PY'
@@ -151,6 +182,26 @@ PY
     ng "$label: exit ${rc}、stdin のオフセット '${offset}'、stdout または stderr が期待と異なります"
     cat "$work_dir/stdout" "$work_dir/stderr"
   fi
+  checked=$((checked + 1))
+  if python3 -I - "$work_dir" "$directory" "$expect_check" <<'PYTHON'
+import pathlib
+import sys
+
+root = pathlib.Path(sys.argv[1])
+before = (root / "calls-before").read_bytes()
+after = (root / "calls").read_bytes()
+assert after.startswith(before)
+expected = b""
+if sys.argv[3] == "1":
+    args = ["6", "project", "check", "--directory", str(pathlib.Path(sys.argv[2]).resolve()), "--socket", "test-socket"]
+    expected = b"".join(value.encode() + b"\0" for value in args)
+assert after[len(before):] == expected
+PYTHON
+  then
+    info "OK: $label (hostctl の呼び出しが期待どおり)"
+  else
+    ng "$label: hostctl の呼び出しが期待と異なります"
+  fi
 }
 
 expect_hook 'git の外では出力しない' "$work_dir/outside" "$work_dir/empty"
@@ -161,9 +212,18 @@ T set-environment -gu AWT_HOSTCTL
 expect_hook '窓口が使えない Project Root では出力しない' "$work_dir/project" "$work_dir/empty"
 T set-environment -g AWT_HOSTCTL "$work_dir/hostctl"
 
+expect_check=1
 expect_hook 'Project Root のルートでは指示を出力する' "$work_dir/project" "$work_dir/instruction"
 expect_hook 'Project Root のサブディレクトリでは指示を出力する' "$work_dir/project/subdir" "$work_dir/instruction"
 expect_hook '壊れた stdin でも指示を出力する' "$work_dir/project" "$work_dir/instruction" "$work_dir/broken-input"
+expect_hook '登録されていない repo のルートでは出力しない' "$work_dir/unregistered" "$work_dir/empty"
+expect_hook '登録されていない repo のサブディレクトリでは出力しない' "$work_dir/unregistered/subdir" "$work_dir/empty"
+printf '%s\n' old >"$work_dir/check-mode"
+expect_hook 'hostctl が exit 2 (古い hostctl) なら出力しない' "$work_dir/project" "$work_dir/empty"
+printf '%s\n' unavailable >"$work_dir/check-mode"
+expect_hook 'hostctl が exit 69 (アプリ不在) なら出力しない' "$work_dir/project" "$work_dir/empty"
+printf '%s\n' registered >"$work_dir/check-mode"
+expect_check=0
 expect_hook 'bare リポジトリの中では出力しない' "$work_dir/bare" "$work_dir/empty"
 expect_hook 'submodule のルートでは出力しない' "$work_dir/project/sm" "$work_dir/empty"
 expect_hook 'submodule のサブディレクトリでは出力しない' "$work_dir/project/sm/subdir" "$work_dir/empty"
@@ -182,10 +242,24 @@ expect_hook 'GIT_COMMON_DIR を付けた Project Root では出力しない' "$w
   "$work_dir/input" GIT_COMMON_DIR="$work_dir/project/.git"
 
 checked=$((checked + 1))
-if [[ -e "$work_dir/calls" ]]; then
-  ng 'hostctl が呼ばれました'
+if python3 -I - "$work_dir/calls" <<'PYTHON'
+import pathlib
+import sys
+
+fields = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+assert fields.pop() == b""
+assert fields
+while fields:
+    count = int(fields.pop(0))
+    args = fields[:count]
+    del fields[:count]
+    assert count == 6 and args[:3] == [b"project", b"check", b"--directory"]
+    assert args[4:] == [b"--socket", b"test-socket"]
+PYTHON
+then
+  info 'OK: hostctl は登録確認だけで呼ばれ、worktree open は一度も呼ばれない'
 else
-  info 'OK: hostctl は一度も呼ばれない'
+  ng 'hostctl が登録確認以外で呼ばれました'
 fi
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"

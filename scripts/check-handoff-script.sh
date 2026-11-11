@@ -44,7 +44,7 @@ report_groups() {
   local i name dir rc group_checked group_failures
   groups_reported=1
   for ((i = 0; i < ${#group_pids[@]}; i++)); do
-    name="${group_names[i]}"
+    name="${group_names[i]:-}"
     dir="$work_dir/cases/$name"
     rc="${group_rcs[i]:-0}"
     info "== 群 $name =="
@@ -1117,9 +1117,11 @@ start_group() {
     sleep 0.2
   done
   mkdir "$dir"
+  # 名前を pid より先に足す。2つの代入の間にシグナルが来ても、on_exit の report_groups は
+  # group_pids の数だけ回るので、名前の欠けた群を読まない (Issue #881)。
+  group_names+=("$name")
   run_group "$dir" "$@" >"$dir/log" 2>&1 &
   group_pids+=("$!")
-  group_names+=("$name")
 }
 
 # 直列の段。tmux の global environment を変える区間を、並列の群と重ねない (重なると群が exit 69 になる)。

@@ -56,6 +56,7 @@ final class PaneObservationStore: ObservableObject {
   private var stabilizers: [TerminalSessionKey: PaneDisplayStateStabilizer] = [:]
   private var completions = PaneTaskCompletionTracker()
   private var completionEntries: [PaneID: PaneSummaryEntry<AgentStampedValue>] = [:]
+  private var handoffs = PaneHandoffTracker()
   private var summaryDiagnostics: [TerminalSessionKey: PaneSummaryDiagnosticTracker] = [:]
   private var isStopped = false
   private let clock = ContinuousClock()
@@ -127,6 +128,20 @@ final class PaneObservationStore: ObservableObject {
     }
   }
 
+  /// `hostctl worktree open` で作業を渡した pane を記録する (§3.1)。どの session もその pane を
+  /// 観測していなければ記録せず `false` を返す (印を出す行が無い)。
+  func recordHandoff(_ pane: PaneID) -> Bool {
+    for (session, current) in observed {
+      let raw = current.latestPaneStates?.first { $0.id == pane }
+      guard raw != nil || current.details[pane] != nil else { continue }
+      handoffs.record(paneID: pane, processID: current.processIDs[pane])
+      let isHandedOff = handoffs.update(paneID: pane, agentState: raw?.state)
+      observed[session]?.details[pane, default: OverviewPaneDetail()].isHandedOff = isHandedOff
+      return true
+    }
+    return false
+  }
+
   func requestTerminalFocus() {
     terminalFocusRequest &+= 1
   }
@@ -186,6 +201,7 @@ final class PaneObservationStore: ObservableObject {
       for paneID in gone.details.keys {
         completions.forget(paneID: paneID)
         completionEntries[paneID] = nil
+        handoffs.forget(paneID: paneID)
       }
     }
   }
@@ -198,6 +214,8 @@ final class PaneObservationStore: ObservableObject {
       completions.forget(paneID: paneID)
       completionEntries[paneID] = nil
       current.details[paneID]?.isTaskCompleted = false
+      handoffs.forget(paneID: paneID)
+      current.details[paneID]?.isHandedOff = false
     }
     for pane in panes {
       // 解除の判定は生の状態で行う (§12.7)。安定化した状態で遅らせない。
@@ -206,6 +224,8 @@ final class PaneObservationStore: ObservableObject {
         lastTurnEndObservedAt: pane.lastTurnEndObservedAt)
       current.details[pane.id, default: OverviewPaneDetail()].isTaskCompleted =
         display.isCompleted
+      current.details[pane.id, default: OverviewPaneDetail()].isHandedOff =
+        handoffs.update(paneID: pane.id, agentState: pane.state)
     }
     observed[session] = current
     if current.paneStates != nil {
@@ -289,9 +309,11 @@ final class PaneObservationStore: ObservableObject {
       }
       details[summary.paneID]?.isTaskCompleted = display.isCompleted
     }
+    applyHandoffs(to: &details, processIDs: processIDs)
     for paneID in current.details.keys where details[paneID] == nil {
       completions.forget(paneID: paneID)
       completionEntries[paneID] = nil
+      handoffs.forget(paneID: paneID)
     }
     completionEntries.merge(entries) { _, new in new }
     current.details = details
@@ -300,6 +322,18 @@ final class PaneObservationStore: ObservableObject {
       observed[session] = current
     }
     notifier?.completionsObserved(displays, undetermined: undetermined, in: session)
+  }
+
+  /// 解除の判定 (`update`) は生の状態を受ける `receive` だけが行う。ここは記録の有無を写すだけ。
+  private func applyHandoffs(
+    to details: inout [PaneID: OverviewPaneDetail], processIDs: [PaneID: Int32]
+  ) {
+    for (paneID, processID) in processIDs {
+      handoffs.paneProcessObserved(paneID: paneID, processID: processID)
+    }
+    for paneID in details.keys {
+      details[paneID]?.isHandedOff = handoffs.isHandedOff(paneID: paneID)
+    }
   }
 
   private func logNewDiagnostics(for summaries: [PaneSummary], of session: TerminalSessionKey) {

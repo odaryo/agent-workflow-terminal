@@ -220,6 +220,11 @@ struct DiffForkPointIntegrationTests {
       let originMain = try #require(GitRevision("origin/main"))
       let runner = try repository.runner(
         globalConfig: "[core]\n\twarnAmbiguousRefs = false\n")
+      // `HOME` の渡し方が変わって偽の `.gitconfig` が読まれなくなると、本体の `-c` を外しても
+      // このテストは通ってしまう。同じ runner の経路で `false` が効いていることを先に確かめる。
+      let configured = try await runner.run(
+        GitReadCommand(arguments: ["config", "--get", "core.warnAmbiguousRefs"]))
+      try #require(configured.stdout == "false\n")
       let result = try await runner.run(.symbolicFullName(originMain))
       #expect(result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }

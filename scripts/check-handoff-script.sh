@@ -23,15 +23,45 @@ checked=0
 max_jobs=8
 group_names=()
 group_pids=()
+group_rcs=()
+groups_reported=0
 __awt_finished=0
 
 T() { env -u TMUX tmux -L "$SOCK" "$@"; }
 
 wait_running_groups() {
-  local i
+  local i rc
+  for ((i = ${#group_rcs[@]}; i < ${#group_pids[@]}; i++)); do
+    rc=0
+    wait "${group_pids[i]}" 2>/dev/null || rc=$?
+    group_rcs+=("$rc")
+  done
+}
+
+# 群のログはすべて回収してから起動順に出す。並列の出力が混ざらず、順も実行ごとに変わらない。
+# 通常の NG も die から on_exit に入るので、出したことを覚えておかないと全群のログが2回出る。
+report_groups() {
+  local i name dir rc group_checked group_failures
+  groups_reported=1
   for ((i = 0; i < ${#group_pids[@]}; i++)); do
-    if kill -0 "${group_pids[i]}" 2>/dev/null; then
-      wait "${group_pids[i]}" 2>/dev/null || true
+    name="${group_names[i]}"
+    dir="$work_dir/cases/$name"
+    rc="${group_rcs[i]:-0}"
+    info "== 群 $name =="
+    cat "$dir/log" >&2 || true
+    group_checked=""
+    group_failures=""
+    if [[ -f "$dir/result" ]]; then
+      read -r group_checked group_failures <"$dir/result" || true
+    fi
+    if [[ "$rc" -ne 0 || ! "$group_checked" =~ ^[0-9]+$ || ! "$group_failures" =~ ^[0-9]+$ ]]; then
+      checked=$((checked + 1))
+      ng "$name: 途中で止まりました (exit $rc)"
+      [[ ! -f "$dir/stopped" ]] || cat "$dir/stopped" >&2 || true
+    fi
+    if [[ "$group_checked" =~ ^[0-9]+$ && "$group_failures" =~ ^[0-9]+$ ]]; then
+      checked=$((checked + group_checked))
+      failures=$((failures + group_failures))
     fi
   done
 }
@@ -51,8 +81,12 @@ stop_all_ttys() {
     [[ "${#ttys[@]}" -gt 0 ]] || return 0
     stop_rc=0
     "$STOP" -L "$SOCK" "${ttys[@]}" || stop_rc=$?
-    [[ "$stop_rc" -eq 2 ]] || return "$stop_rc"
+    if [[ "$stop_rc" -ne 2 ]]; then
+      [[ "$stop_rc" -eq 0 ]] || info "後始末: stop-tty-processes.sh が exit $stop_rc で終わりました"
+      return "$stop_rc"
+    fi
   done
+  info "後始末: stop-tty-processes.sh が 4 回とも exit 2 で終わりました"
   return 1
 }
 
@@ -81,7 +115,8 @@ cleanup() {
 # die で途中から抜けたときに、動いている群と rm -rf を競合させないよう、群を待ってから後始末する。
 on_exit() {
   local rc=$?
-  wait_running_groups
+  wait_running_groups || true
+  [[ "$groups_reported" -eq 1 ]] || report_groups || true
   cleanup || rc=1
   [[ "$__awt_finished" -eq 1 || "$rc" -ne 0 ]] || rc=1
   exit "$rc"
@@ -122,6 +157,38 @@ cat >"$work_dir/changing-screen.rc" <<'RC'
 PS1='handoff> '
 python3 -I "$AWT_TEST_DIR/changing-screen.py" "$AWT_TEST_DIR/screen-stop" &
 RC
+
+# zsh は rc の外部コマンドを別のプロセスグループで前景に置く (bash の rc と fish の conf.d はシェルと同じ pgid)。
+# 待ちは群が rc-marker を作るまで続き、上限に達したら rc-timeout を作って終わる。送信の時機を負荷に頼らないため。
+cat >"$work_dir/zsh-rc-wait.zshrc" <<'RC'
+PS1='handoff> '
+print -n 'loading> '
+/bin/sh -c '
+i=0
+while [ ! -e "$1" ]; do
+  if [ "$i" -ge 100 ]; then
+    : >"$2"
+    exit 0
+  fi
+  i=$((i + 1))
+  /bin/sleep 0.1
+done
+' sh "$AWT_TEST_DIR/rc-marker" "$AWT_TEST_DIR/rc-timeout"
+RC
+
+# exec しないので、プロンプトでの前景は子の zsh の pgid になり、pane の PID の pgid とは一致しない。
+cat >"$work_dir/bash-child-zsh.rc" <<'RC'
+PS1='handoff> '
+"$AWT_TEST_SHELL" -f -i
+RC
+
+# 引数の数と各引数を NUL 区切りで書くので、空白や改行を含む引数も呼び出しの境界も崩れない。
+cat >"$work_dir/tmux-shim" <<'SHIM'
+#!/bin/bash
+set -eu
+printf '%s\0' "$#" "$@" >>"$AWT_TEST_TMUX_LOG"
+exec "$AWT_TEST_REAL_TMUX" "$@"
+SHIM
 
 cat >"$work_dir/hostctl" <<'HOSTCTL'
 #!/usr/bin/env bash
@@ -216,6 +283,15 @@ case "$AWT_TEST_MODE" in
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
       env AWT_TEST_ARGV="$AWT_TEST_DIR/argv" "$AWT_TEST_SHELL" "$([[ "$AWT_TEST_MODE" == fish ]] && printf -- -N || printf -- -f)" -i
     ;;
+  zsh-rc)
+    tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
+      env ZDOTDIR="$AWT_TEST_DIR" AWT_TEST_DIR="$AWT_TEST_DIR" AWT_TEST_ARGV="$AWT_TEST_DIR/argv" "$AWT_TEST_SHELL" -i
+    ;;
+  bash-child-zsh)
+    tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
+      env AWT_TEST_SHELL="$AWT_TEST_SHELL" AWT_TEST_ARGV="$AWT_TEST_DIR/argv" \
+      /bin/bash --noprofile --rcfile "$AWT_TEST_DIR/bash-child-zsh.rc" -i
+    ;;
   *)
     tmux new-session -d -s "$AWT_TEST_SESSION" -x 120 -y 24 \
       env PATH="${AWT_TEST_PANE_PATH:-$PATH}" PS1='handoff> ' AWT_TEST_ARGV="$AWT_TEST_DIR/argv" /bin/bash --norc --noprofile -i
@@ -228,7 +304,7 @@ print(json.dumps({"ok": True, "version": 1, "created": sys.argv[1] == "true",
                   "session": sys.argv[2], "agentCommand": sys.argv[3]}))
 ' "$created" "$AWT_TEST_SESSION" "$AWT_TEST_AGENT"
 HOSTCTL
-chmod +x "$work_dir/agent" "$work_dir/hostctl"
+chmod +x "$work_dir/agent" "$work_dir/hostctl" "$work_dir/tmux-shim"
 mkdir "$work_dir/bin" "$work_dir/cases"
 cp "$work_dir/agent" "$work_dir/bin/claude"
 
@@ -642,6 +718,154 @@ group_shell() {
   fi
 }
 
+# zsh が無いときの扱いは group_shell に揃える (CI では NG、ローカルでは SKIP)。
+use_test_zsh() {
+  if ! command -v zsh >/dev/null 2>&1; then
+    if [[ "${CI:-}" == true ]]; then
+      checked=$((checked + 1))
+      ng "zsh がありません"
+    else
+      info "SKIP: zsh がありません"
+    fi
+    return 1
+  fi
+  export AWT_TEST_SHELL
+  AWT_TEST_SHELL=$(command -v zsh)
+}
+
+# 送った指示は、rc の待ちの間は tty の echo で画面に出る。それを見てから rc-marker を作るので、待ちが rc-marker で
+# 終わったなら (rc-timeout が無ければ) 送信は待ちの間だった。待ちの後に送信されたなら rc-timeout が先にできる。
+watch_rc_wait() {
+  local text="$1" attempt screen
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    [[ ! -e "$AWT_TEST_DIR/rc-timeout" && ! -e "$AWT_TEST_DIR/watch-stop" ]] || return 0
+    screen=$(T capture-pane -p -J -t "=$AWT_TEST_SESSION:" 2>/dev/null) || screen=""
+    if [[ "$screen" == *"$text"* ]]; then
+      touch "$AWT_TEST_DIR/rc-marker"
+      return 0
+    fi
+    sleep 0.1
+  done
+}
+
+# 引数の agent は missing (存在しないパス) か agent ($work_dir/agent)。
+group_zsh_rc() {
+  local want="$1" agent="$2" label="$3" watcher
+  use_test_zsh || return 0
+  cp "$work_dir/zsh-rc-wait.zshrc" "$AWT_TEST_DIR/.zshrc"
+  AWT_TEST_MODE=zsh-rc
+  AWT_TEST_SESSION=$(basename -- "$AWT_TEST_DIR")
+  if [[ "$agent" == missing ]]; then
+    AWT_TEST_AGENT="$AWT_TEST_DIR/no-such-agent"
+  else
+    AWT_TEST_AGENT="$work_dir/agent"
+  fi
+  # 送る行は「agentCommand '指示'」なので、引用符を含めた形は送信の前の画面に現れない。
+  watch_rc_wait "'$AWT_TEST_SESSION'" &
+  watcher=$!
+  expect_exit "$want" "$label" --directory "$AWT_TEST_DIR" --prompt "$AWT_TEST_SESSION"
+  touch "$AWT_TEST_DIR/watch-stop"
+  wait "$watcher"
+  checked=$((checked + 1))
+  if [[ -e "$AWT_TEST_DIR/rc-marker" && ! -e "$AWT_TEST_DIR/rc-timeout" ]]; then
+    info "OK: $label (送信は rc の待ちの間だった)"
+  else
+    ng "$label: 送信が rc の待ちの間ではありません"
+    T capture-pane -p -J -t "=$AWT_TEST_SESSION:" 2>/dev/null || true
+  fi
+  [[ "$agent" == missing ]] || expect_agent_prompt "$label" "$AWT_TEST_SESSION"
+}
+
+group_bash_child_zsh() {
+  local label='bash の rc から起動した子の対話 zsh の pane へ送信する' pane_pid children
+  use_test_zsh || return 0
+  cp "$work_dir/bash-child-zsh.rc" "$AWT_TEST_DIR/"
+  AWT_TEST_MODE=bash-child-zsh
+  AWT_TEST_SESSION=bash-child-zsh
+  expect_exit 0 "$label" --directory "$AWT_TEST_DIR" --prompt "$prompt"
+  expect_agent_prompt "$label" "$prompt"
+  # pane の PID が bash のままで、その子に zsh がいることを確かめる。exec されると陽性の検査にならない。
+  checked=$((checked + 1))
+  pane_pid=$(T display-message -p -t '=bash-child-zsh:' '#{pane_pid}') || pane_pid=""
+  children=$(ps -A -o ppid=,comm= | awk -v parent="$pane_pid" '$1 == parent { print $2 }') || children=""
+  if [[ "$pane_pid" =~ ^[0-9]+$ && "$(ps -o comm= -p "$pane_pid")" == *bash && "$children" == *zsh* ]]; then
+    info "OK: $label (pane の PID は bash で、子に zsh がいる)"
+  else
+    ng "$label: pane が bash と子の zsh の形になっていません"
+  fi
+}
+
+group_tmux_targets() {
+  local label='tmux の -t はすべて完全一致の =<session>: を使う' real_tmux
+  real_tmux=$(command -v tmux)
+  mkdir "$AWT_TEST_DIR/shim-bin"
+  cp "$work_dir/tmux-shim" "$AWT_TEST_DIR/shim-bin/tmux"
+  AWT_TEST_SESSION=tmux-targets
+  # 偽 hostctl も同じ PATH を継承するので、その new-session も記録に入る。
+  pane_env=(-u TMUX_PANE PATH="$AWT_TEST_DIR/shim-bin:$PATH" AWT_TEST_REAL_TMUX="$real_tmux"
+    AWT_TEST_TMUX_LOG="$AWT_TEST_DIR/tmux-calls")
+  expect_exit 0 "$label" --directory "$AWT_TEST_DIR" --prompt tmux-targets
+  expect_agent_prompt "$label" tmux-targets
+  checked=$((checked + 1))
+  # 特定の行を数えず、-t を持つ呼び出しをすべて見る。handoff.sh が -t 付きの呼び出しを足せば、それも対象になる。
+  if python3 -I -c '
+import pathlib
+import sys
+
+want = sys.argv[2]
+fields = pathlib.Path(sys.argv[1]).read_bytes().split(b"\0")
+if fields[-1] != b"":
+    sys.exit("記録が NUL で終わっていません")
+fields.pop()
+calls = []
+index = 0
+while index < len(fields):
+    count = int(fields[index])
+    calls.append([field.decode("utf-8") for field in fields[index + 1:index + 1 + count]])
+    index += 1 + count
+if index != len(fields):
+    sys.exit("記録の引数の数が合いません")
+problems = []
+kinds = {"display-message #{cursor_x}": 0, "capture-pane": 0, "display-message #{pane_pid}": 0,
+         "send-keys -l": 0, "send-keys Enter": 0}
+for args in calls:
+    options = args[:args.index("--")] if "--" in args else args
+    targeted = False
+    for position, arg in enumerate(options):
+        if arg == "-t":
+            targeted = True
+            if position + 1 >= len(options) or options[position + 1] != want:
+                problems.append(args)
+        elif arg.startswith("-t"):
+            problems.append(args)
+    if not targeted or not args:
+        continue
+    if args[0] == "display-message" and "#{cursor_x}" in args:
+        kinds["display-message #{cursor_x}"] += 1
+    if args[0] == "capture-pane":
+        kinds["capture-pane"] += 1
+    if args[0] == "display-message" and "#{pane_pid}" in args:
+        kinds["display-message #{pane_pid}"] += 1
+    if args[0] == "send-keys" and "-l" in options:
+        kinds["send-keys -l"] += 1
+    if args[0] == "send-keys" and args[-1] == "Enter":
+        kinds["send-keys Enter"] += 1
+for args in problems:
+    print("-t が " + want + " ではありません: " + repr(args), file=sys.stderr)
+for kind, count in kinds.items():
+    if count == 0:
+        print("-t 付きの " + kind + " がありません", file=sys.stderr)
+if problems or 0 in kinds.values():
+    for args in calls:
+        print(repr(args), file=sys.stderr)
+    sys.exit(1)
+' "$AWT_TEST_DIR/tmux-calls" '=tmux-targets:'; then
+    info "OK: $label"
+  else
+    ng "$label: -t の値か呼び出しの種類が期待と異なります"
+  fi
+}
+
 group_purpose_matrix() {
   local kind="$1" pane_kind="$2" purpose_kind="$3"
   local label="hostctl=$kind TMUX_PANE=$pane_kind --purpose=$purpose_kind"
@@ -701,6 +925,21 @@ group_purpose_no_mktemp() {
   expect_stderr_contains 'mktemp に失敗したときは exit 2 の段の stderr をそのまま出す' '不正な引数です: --from-pane'
 }
 
+# bash 3.2 の ERR trap の中の $LINENO は、関数の定義行など失敗した行ではない値を返すので出さない。
+# 呼び出しの連鎖の行番号 (BASH_LINENO) は正しい。
+record_stop() {
+  trap - ERR
+  local status="$1" command="$2" chain="" i
+  # set -E の ERR trap は、外側が失敗を許す $(...) の中でも発火する。止まっていない群に誤報を出さない。
+  [[ "$BASH_SUBSHELL" -eq "$group_subshell" ]] || return 0
+  for ((i = ${#FUNCNAME[@]} - 1; i >= 2; i--)); do
+    chain+="${FUNCNAME[i]} ${BASH_LINENO[i - 1]}行 → "
+  done
+  chain+="${FUNCNAME[1]:-}"
+  printf '止まったコマンド: %s (exit %s)、呼び出し: %s\n' "${command//$'\n'/ }" "$status" "$chain" \
+    >"$AWT_TEST_DIR/stopped" || true
+}
+
 # 背景の群の中で動く。件数は親へ戻らないので、最後に result へ書く。result が無ければ親は途中で
 # 止まった群として数えるので、result は最後の文でだけ書く。
 run_group() {
@@ -709,6 +948,9 @@ run_group() {
   shift
   checked=0
   failures=0
+  group_subshell=$BASH_SUBSHELL
+  set -E
+  trap 'record_stop "$?" "$BASH_COMMAND"' ERR
   "$@"
   printf '%s %s\n' "$checked" "$failures" >"$AWT_TEST_DIR/result"
 }
@@ -824,6 +1066,7 @@ AWT_TEST_SESSION=success
 AWT_TEST_AGENT="$work_dir/agent"
 
 # 並列の段。タイムアウトを待つ群 (13〜15 秒) を先に起動し、その間に成功系を回す。
+start_group zsh-rc-no-agent group_zsh_rc 7 missing 'zsh の rc の待ちの間に送信しても、Agent が居なければ起動とみなさない'
 start_group prompt-command group_prompt_command
 start_group no-agent group_no_agent
 start_group short-lived-exec group_short_lived_exec
@@ -843,6 +1086,9 @@ start_group default-empty group_default_agent ''
 start_group default-whitespace group_default_agent '   '
 start_group zsh group_shell zsh
 start_group fish group_shell fish
+start_group zsh-rc-agent group_zsh_rc 0 agent 'zsh の rc の待ちの間に送信しても、Agent の起動を検出する'
+start_group bash-child-zsh group_bash_child_zsh
+start_group tmux-targets group_tmux_targets
 for kind in new from-pane old; do
   for pane_kind in set unset; do
     for purpose_kind in set unset; do
@@ -855,33 +1101,8 @@ start_group purpose-valid-1 group_purpose_valid 1 "$long_purpose"
 start_group purpose-valid-2 group_purpose_valid 2 "$quoted_purpose"
 start_group purpose-no-mktemp group_purpose_no_mktemp
 
-# 群のログはすべて回収してから起動順に出す。並列の出力が混ざらず、順も実行ごとに変わらない。
-group_rcs=()
-for ((group_index = 0; group_index < ${#group_pids[@]}; group_index++)); do
-  group_rc=0
-  wait "${group_pids[group_index]}" || group_rc=$?
-  group_rcs+=("$group_rc")
-done
-
-for ((group_index = 0; group_index < ${#group_pids[@]}; group_index++)); do
-  group_name="${group_names[group_index]}"
-  group_dir="$work_dir/cases/$group_name"
-  group_rc="${group_rcs[group_index]}"
-  cat "$group_dir/log" >&2
-  group_checked=""
-  group_failures=""
-  if [[ -f "$group_dir/result" ]]; then
-    read -r group_checked group_failures <"$group_dir/result" || true
-  fi
-  if [[ "$group_rc" -ne 0 || ! "$group_checked" =~ ^[0-9]+$ || ! "$group_failures" =~ ^[0-9]+$ ]]; then
-    checked=$((checked + 1))
-    ng "$group_name: 途中で止まりました (exit $group_rc)"
-  fi
-  if [[ "$group_checked" =~ ^[0-9]+$ && "$group_failures" =~ ^[0-9]+$ ]]; then
-    checked=$((checked + group_checked))
-    failures=$((failures + group_failures))
-  fi
-done
+wait_running_groups
+report_groups
 
 [[ "$failures" -eq 0 ]] || die "$checked 件中 $failures 件が期待と異なります"
 info "$checked 件すべて期待どおりです"

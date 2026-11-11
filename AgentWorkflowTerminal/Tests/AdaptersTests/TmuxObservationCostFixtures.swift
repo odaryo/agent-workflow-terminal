@@ -81,6 +81,9 @@ actor ObservationProcessSpy: ProcessRunning {
   /// 非 `nil` の間、`ps` はこの結果を返す (起動は数える)。
   func setProcessTableFailure(_ failure: ProcessRunResult?) { processTableFailure = failure }
 
+  /// 非 `nil` の間、`list-panes` はこの結果を返す (起動は数える)。
+  func setListPanesFailure(_ failure: ProcessRunResult?) { listPanesFailure = failure }
+
   func setVanishingAfterCapture(_ panes: Set<PaneID>) { vanishingAfterCapture = panes }
 
   func setOversized(_ panes: Set<PaneID>) { oversized = panes }

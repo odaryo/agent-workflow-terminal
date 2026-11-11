@@ -76,6 +76,47 @@ struct TmuxWorktreePaneSourceTests {
     }
   }
 
+  /// `exit-empty off` の server で session が0個のとき、`list-panes -a` はこの形で失敗する
+  /// (tmux 3.4 と 3.8 で実測、#781)。server は生きているので `isServerAbsent` とは別の分岐になる。
+  @Test("server はいるが session が無い (no current target) は空配列にする")
+  func mapsNoCurrentTargetToEmpty() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/missing"))
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 1, stdout: "", stderr: "no current target\n"))
+
+    #expect(try await makeSource(spy).panes(of: worktree).isEmpty)
+  }
+
+  @Test("no current target でも exit 1 でなければ失敗を捨てない")
+  func preservesNoCurrentTargetWithOtherExitCode() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/failure"))
+    let failure = TmuxRunnerError.commandFailed(
+      exitCode: 2, stdout: "", stderr: "no current target\n")
+    let spy = WorktreePaneProcessSpy(
+      result: .init(exitCode: 2, stdout: "", stderr: "no current target\n"))
+    let source = try makeSource(spy)
+
+    await #expect(throws: TmuxWorktreePaneSourceError.tmux(failure)) {
+      try await source.panes(of: worktree)
+    }
+  }
+
+  @Test(
+    "stderr が no current target と完全一致しなければ失敗を捨てない",
+    arguments: [
+      "no current target: x\n", "error: no current target\n", "no current target\nother\n",
+    ])
+  func preservesNoCurrentTargetVariants(stderr: String) async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/failure"))
+    let failure = TmuxRunnerError.commandFailed(exitCode: 1, stdout: "", stderr: stderr)
+    let spy = WorktreePaneProcessSpy(result: .init(exitCode: 1, stdout: "", stderr: stderr))
+    let source = try makeSource(spy)
+
+    await #expect(throws: TmuxWorktreePaneSourceError.tmux(failure)) {
+      try await source.panes(of: worktree)
+    }
+  }
+
   @Test("壊れた行があっても成功した pane を返す")
   func preservesPartialParseSuccess() async throws {
     let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/partial"))

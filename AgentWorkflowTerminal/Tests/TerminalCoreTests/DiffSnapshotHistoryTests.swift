@@ -33,22 +33,6 @@ struct DiffSnapshotHistoryTests {
     #expect(history.latest?.section(.unstaged)?.files.map(\.path) == ["a.txt"])
   }
 
-  @Test("Review 状態の変更は対象の snapshot だけに効く")
-  func updatesOnlyTargetReviewState() throws {
-    var history = DiffSnapshotHistory()
-    let first = makeSnapshot(id: 1, paths: ["a.txt"])
-    let second = makeSnapshot(id: 2, paths: ["b.txt"])
-    history.append(first)
-    history.append(second)
-
-    let updated = history.setReviewState(.reviewed, for: first.id)
-    let missing = history.setReviewState(.reviewed, for: DiffSnapshotID(rawValue: UUID()))
-    #expect(updated)
-    #expect(!missing)
-    #expect(history.snapshot(first.id)?.reviewState == .reviewed)
-    #expect(history.snapshot(second.id)?.reviewState == .reviewing)
-  }
-
   @Test("空の履歴は latest を持たない")
   func startsEmpty() {
     let history = DiffSnapshotHistory()

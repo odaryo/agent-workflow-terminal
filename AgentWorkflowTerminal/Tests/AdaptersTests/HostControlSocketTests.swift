@@ -1,9 +1,8 @@
+import Adapters
 import Darwin
 import Foundation
 import TerminalCore
 import Testing
-
-@testable import Adapters
 
 @Suite("hostctl のローカルsocket §21.4")
 struct HostControlSocketTests {
@@ -464,21 +463,6 @@ extension HostControlSocketTests {
       })
   }
 
-  @Test("lockの実ファイルの差し替えと削除をinodeで判別する")
-  func detectsReplacedLock() throws {
-    let path = uniquePath()
-    defer { try? FileManager.default.removeItem(atPath: path + ".lock") }
-    let descriptor = try SocketIO.lock(path)
-    defer { Darwin.close(descriptor) }
-    #expect(try SocketIO.isCurrentLock(descriptor, path: path))
-    try FileManager.default.removeItem(atPath: path + ".lock")
-    #expect(try !SocketIO.isCurrentLock(descriptor, path: path))
-    let replacement = try SocketIO.lock(path)
-    defer { Darwin.close(replacement) }
-    #expect(try !SocketIO.isCurrentLock(descriptor, path: path))
-    #expect(try SocketIO.isCurrentLock(replacement, path: path))
-  }
-
   @Test("basenameが8文字で最終パスが103バイトのsocketをbindできる")
   func bindsAtPathLimit() async throws {
     let directory = "/private/tmp/" + UUID().uuidString + String(repeating: "x", count: 45)
@@ -620,6 +604,6 @@ extension HostControlSocketTests {
     let receiveError = errno
     #expect(received == 0 || (received == -1 && receiveError == ECONNRESET))
   }
-  // 回帰テストの追加先が指定されているため、別ファイルへの分割はしない。
+  // 実socketを通す public API のテストは補助関数を共有するので、行数のためだけに分けない。
   // swiftlint:disable:next file_length
 }

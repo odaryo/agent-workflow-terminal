@@ -32,6 +32,8 @@ public actor HostControlSocketServer {
   }
 
   public func start(
+    // hostctlは30秒で切るので、この期限のfailureは届かない。届くのは待ち行列の先頭でのアプリ側の
+    // 25秒の失敗で、これは接続の解放用。30秒より短くすると、遅れて成功する後ろの要求を失敗にする。
     handlerTimeout: Duration = .seconds(35),
     handler: @escaping @Sendable (HostControlRequest) async -> HostControlResponse
   ) throws(HostControlSocketError) {
@@ -125,6 +127,8 @@ public enum HostControlSocketClient {
 }
 
 enum SocketIO {
+  // pollとacceptの失敗ごとの停止判定を1つのループに置き、fdの所有権をこのスレッドの中で追う。
+  // swiftlint:disable:next cyclomatic_complexity
   fileprivate static func acceptConnections(
     listener: Int32, stopRead: Int32, continuation: AsyncStream<SocketDescriptor>.Continuation
   ) {
@@ -155,6 +159,15 @@ enum SocketIO {
         if waitForStop(stopRead, milliseconds: 100) { return }
         continue
       }
+      // macOSにはaccept4が無く、継承の窓は閉じられない。actorへ渡す前にここで立てて窓を縮める。
+      // libghosttyの子は/usr/bin/loginが閉じるが、閉じるのは子のsoft RLIMIT_NOFILE付近までで、
+      // libghosttyはsoftを起動時の値 (launchdなら256) へ戻すので、それより大きい番号は残る。
+      // passwdを読めずlogin無しの経路と素のposix_spawnは継承する (2026-11-11実測)。
+      // Foundation.Processの子へは渡らない (2026-11-09)。
+      guard fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0 else {
+        Darwin.close(descriptor)
+        continue
+      }
       continuation.yield(SocketDescriptor(descriptor))
     }
   }
@@ -167,7 +180,9 @@ enum SocketIO {
     return event.revents != 0
   }
 
-  static func lock(_ path: String) throws(HostControlSocketError) -> Int32 {
+  static func lock(
+    _ path: String, afterOpen: (Int32) -> Void = { _ in }
+  ) throws(HostControlSocketError) -> Int32 {
     // macOSでは稼働中でもbacklogが満杯ならECONNREFUSEDになるため、接続で生存判定しない。
     let flags = O_CREAT | O_RDWR | O_CLOEXEC | O_EXLOCK | O_NONBLOCK | O_NOFOLLOW
     // 別スレッドが子プロセスを起動している間は、closeしても子が参照を持つのでlockが残る。
@@ -176,6 +191,7 @@ enum SocketIO {
     for attempt in 0...10 {
       let descriptor = Darwin.open(path + ".lock", flags, 0o600)
       if descriptor >= 0 {
+        afterOpen(descriptor)
         do throws(HostControlSocketError) {
           if try isCurrentLock(descriptor, path: path) {
             guard Darwin.fchmod(descriptor, 0o600) == 0 else { throw error() }
@@ -265,8 +281,6 @@ enum SocketIO {
   }
 
   static func configure(_ descriptor: Int32) throws(HostControlSocketError) {
-    // macOSにはaccept4がなく、acceptからfcntlまでの継承の窓はユーザー空間では閉じられない。
-    // Foundation.Processの子にはFD_CLOEXECなし (flags 0) でもNOT_INHERITEDだった (2026-11-09)。libghosttyの子は未計測。
     var noSignal: Int32 = 1
     guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0,
       fcntl(descriptor, F_SETFD, FD_CLOEXEC) == 0,
@@ -291,6 +305,8 @@ enum SocketIO {
   static func bindPrivately(_ descriptor: Int32, path: String) throws(HostControlSocketError) {
     // bind直後のsocketはumask次第で他ユーザーに開くため、0700の中で0600にしてから公開する。
     let parent = path.lastIndex(of: "/").map { String(path[...$0]) } ?? "./"
+    // 一時パスは親+8バイトになり、接頭辞を足すと短いbasenameのsocketがpathTooLongになる。
+    // SIGKILLの残骸は、mkdtempからrmdirまでの間にしか生じない。
     var template = Array((parent + "XXXXXX").utf8CString)
     guard mkdtemp(&template) != nil else { throw error() }
     let directory = String(

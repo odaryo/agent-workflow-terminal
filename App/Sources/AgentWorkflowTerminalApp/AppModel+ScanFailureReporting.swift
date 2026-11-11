@@ -1,6 +1,28 @@
 import Adapters
+import Foundation
+import TerminalCore
 
 extension AppModel {
+  func scan(
+    with detector: GitWorktreeDetector,
+    knownIdentities: [WorktreeIdentity] = []
+  ) async -> Result<GitWorktreeScanResult, GitWorktreeScanError> {
+    do {
+      let scan = try await detector.scan(knownIdentities: knownIdentities)
+      // 失敗した entry は `detected` に載らないため、呼び出し側が `unobserved` として渡す。
+      // 原因の原文はバナーに載せきれないので、ここに残す。
+      for failure in scan.failures {
+        NSLog("[app] worktree の検出に失敗: \(String(describing: failure))")
+      }
+      if let listingFailure = scan.listingFailure {
+        NSLog("[app] worktree の一覧取得に失敗: \(String(describing: listingFailure))")
+      }
+      return .success(scan)
+    } catch {
+      return .failure(error)
+    }
+  }
+
   /// 失敗の集合が変わったときだけバナーを差し替える。集合が同じ間は、ユーザーが閉じた
   /// バナーを 5 秒ごとに復活させない (`reportedScanFailures` を閉じても消さないのはこのため)。
   ///

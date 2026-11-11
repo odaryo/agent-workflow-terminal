@@ -108,16 +108,9 @@ private struct OverviewProjectSection: View {
     let attentionCount = needsAttentionCount(overview)
     let showsAttentionCount = !isExpanded.wrappedValue && attentionCount > 0
     let disclosureLabel = "\(model.project.displayName) を\(isExpanded.wrappedValue ? "閉じる" : "開く")"
+    // Section の header にしない。.sidebar の header は .collapsible(false) を付けても、右クリックの
+    // メニューの後にマウスを載せると標準の開閉マークを出した (実測 2026-11-11、macOS 27)。
     Section {
-      if isExpanded.wrappedValue {
-        ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
-          worktreeRows(projectRoot, title: nil)
-        }
-        ForEach(overview?.tasks ?? [], id: \.session) { task in
-          worktreeRows(task, title: model.sessionTitle(task.session))
-        }
-      }
-    } header: {
       HStack {
         Button {
           isExpanded.wrappedValue.toggle()
@@ -136,12 +129,15 @@ private struct OverviewProjectSection: View {
           }
         }
       }
+      .font(.subheadline.weight(.bold))
+      .foregroundStyle(.secondary)
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         showsAttentionCount
           ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
           : model.project.displayName
       )
+      .accessibilityAddTraits(.isHeader)
       .accessibilityAction(named: disclosureLabel) {
         isExpanded.wrappedValue.toggle()
       }
@@ -152,10 +148,15 @@ private struct OverviewProjectSection: View {
           onSetAgentCommand: onSetAgentCommand,
           requestUnregister: requestUnregister)
       }
+      if isExpanded.wrappedValue {
+        ForEach(overview?.projectRootSessions ?? [], id: \.session) { projectRoot in
+          worktreeRows(projectRoot, title: nil)
+        }
+        ForEach(overview?.tasks ?? [], id: \.session) { task in
+          worktreeRows(task, title: model.sessionTitle(task.session))
+        }
+      }
     }
-    // isExpanded のない Section でも .sidebar では見出しの hover 時に標準の開閉マークが出る
-    // (実測 2026-11-11、macOS 27) ため、明示的に抑止する。
-    .collapsible(false)
   }
 
   private var isExpanded: Binding<Bool> {

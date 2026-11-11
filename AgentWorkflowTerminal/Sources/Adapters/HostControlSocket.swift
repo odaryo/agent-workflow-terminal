@@ -315,7 +315,15 @@ enum SocketIO {
     defer { Darwin.rmdir(directory) }
     let temporaryPath = directory + "/s"
     defer { Darwin.unlink(temporaryPath) }
-    let result = withAddress(try address(temporaryPath)) { Darwin.bind(descriptor, $0, $1) }
+    let temporaryAddress: sockaddr_un
+    do throws(HostControlSocketError) {
+      temporaryAddress = try address(temporaryPath)
+    } catch {
+      // 一時パスは利用者に見えないので、利用者が渡したパスで報告する。
+      if case .pathTooLong = error { throw .pathTooLong(path) }
+      throw error
+    }
+    let result = withAddress(temporaryAddress) { Darwin.bind(descriptor, $0, $1) }
     guard result == 0, Darwin.chmod(temporaryPath, 0o600) == 0,
       Darwin.listen(descriptor, 128) == 0
     else { throw error() }

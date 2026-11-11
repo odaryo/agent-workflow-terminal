@@ -57,6 +57,13 @@ jobs:
           swift --version
           echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
+      # `.build` を main の push で保存し、PR と後の push で復元する (Issue #851)。actions/checkout は
+      # 全ファイルの mtime を checkout した時刻にし、swift-driver は mtime がビルド記録と違うソースを
+      # 変更とみなす。素の復元ではほぼ全部を再コンパイルし、Build は 102s だった (cold は 126s、
+      # run 42967335184)。内容から決まる mtime に揃えると変わったファイルだけになり、変更なしで 5s
+      # (run 42969024871)、TerminalCore の1ファイル変更で 5s (run 42969898424) になった。
+      # key の toolchain は xcodebuild / swift の版の出力のハッシュで、版が変われば復元しない。
+      # 末尾の sha は、保存ごとに新しい key にするため (同じ key は上書きできない)。
       - name: Set source mtimes from content
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_set_mtime_from_blob.py" .
 
@@ -80,9 +87,11 @@ jobs:
         timeout-minutes: 15
         run: swift build --build-tests
 
-      # 計測中は PR でも保存する (Issue #851)。
+      # 保存は main の push だけで、PR は main のキャッシュを復元するだけにする。PR ごとに保存すると
+      # リポジトリあたり 10GB の枠を食い潰す (1回の保存は core 82MB・App 152MB・checks 40MB)。
+      # キャッシュの段は、失敗しても止まっても CI を落とさない (continue-on-error)。
       - name: Save build cache
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ github.event_name == 'push' && !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5
         continue-on-error: true
         uses: actions/cache/save@v4
@@ -207,6 +216,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: scripts/fetch-ghostty.sh
 
+      # キャッシュの方式は build-and-test の注釈のとおり。App は ../AgentWorkflowTerminal に path 依存する。
+      # App/vendor は追跡外だが、fetch-ghostty.sh の tar 展開は Release アセットの中の mtime を保つので、
+      # 同じアセット (ghostty-kit.sha256) なら run 間で同じ mtime になる。
       - name: Set source mtimes from content
         run: python3 scripts/ci_set_mtime_from_blob.py App AgentWorkflowTerminal
 
@@ -232,9 +244,9 @@ jobs:
         working-directory: App
         run: swift test
 
-      # テスト target の成果物も含めるため Test の後に保存する。
+      # 保存の条件は build-and-test と同じ。テスト target の成果物も含めるため Test の後に保存する。
       - name: Save build cache
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        if: ${{ github.event_name == 'push' && !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 5
         continue-on-error: true
         uses: actions/cache/save@v4
@@ -294,7 +306,7 @@ jobs:
           bash --version | head -1
           echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
-      # Session name parity の harness と iOS のビルドが使う。
+      # Session name parity の harness と iOS のビルドが使う。方式は build-and-test の注釈のとおり。
       - name: Set source mtimes from content
         timeout-minutes: 5
         run: python3 scripts/ci_set_mtime_from_blob.py AgentWorkflowTerminal scripts/tests/session-name-parity
@@ -446,8 +458,9 @@ jobs:
             --triple arm64-apple-ios17.0-simulator \
             --sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)"
 
+      # 保存の条件は build-and-test と同じ。
       - name: Save build cache
-        if: ${{ !cancelled() && steps.ios-build.outcome == 'success' }}
+        if: ${{ github.event_name == 'push' && !cancelled() && steps.ios-build.outcome == 'success' }}
         timeout-minutes: 5
         continue-on-error: true
         uses: actions/cache/save@v4

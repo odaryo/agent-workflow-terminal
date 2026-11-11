@@ -102,26 +102,6 @@ jobs:
           rm -rf .build
           swift build --build-tests
 
-      # TEMP Issue #859 の計測 (マージ前に消す)
-      - name: TEMP 859 - probe ns comparison
-        timeout-minutes: 10
-        run: ../scripts/measure_mtime_ns.sh
-
-      # TEMP Issue #859 の計測 (マージ前に消す)。全ソースを別 inode に書き直して mtime を揃え直し、
-      # 再ビルドで何も再コンパイルされないことを見る。
-      - name: TEMP 859 - steady state with nonzero ns
-        timeout-minutes: 10
-        run: |
-          git ls-files -z -- . | while IFS= read -r -d '' f; do
-            if [[ -f "$f" && ! -L "$f" ]]; then cp -p "$f" "$f.tmp859" && mv "$f.tmp859" "$f"; fi
-          done
-          python3 ../scripts/ci_set_mtime_from_blob.py .
-          stat -f '%N %Fm' Package.swift Sources/TerminalCore/AgentAdapter.swift
-          if swift build --build-tests > rebuild.log 2>&1; then status=0; else status=$?; fi
-          cat rebuild.log
-          echo "Compiling lines: $(grep -c '] Compiling' rebuild.log || true)"
-          exit "$status"
-
       # 保存は main の push だけで、PR は main のキャッシュを復元するだけにする。PR ごとに保存すると
       # リポジトリあたり 10GB の枠を食い潰す (1回の保存は core 82MB・App 152MB・checks 40MB)。
       # キャッシュの段は、失敗しても止まっても CI を落とさない (continue-on-error)。

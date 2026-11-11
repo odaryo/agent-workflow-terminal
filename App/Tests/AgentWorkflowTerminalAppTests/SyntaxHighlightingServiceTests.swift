@@ -50,6 +50,20 @@ struct SyntaxHighlightingServiceTests {
     #expect(known != nil)
   }
 
+  @Test("highlight.js が内部で失敗した入力は nil を返し、次のハイライトは成功する")
+  func highlightJSInternalError() async {
+    let service = SyntaxHighlightingService(resourceDirectory: Self.resourceDirectory)
+    // 600 段 (highlight.js が成功した実測の深さ) では HighlightJSMarkup の深さの上限 32 で nil になり、
+    // errorRaised の経路を通らない。4000 段では RangeError を内部で捕まえて errorRaised を立てる (#771 の実測)。
+    let depth = 4000
+    let nested =
+      String(repeating: "`${", count: depth) + "1" + String(repeating: "}`", count: depth)
+    let failed = await service.highlight(nested, language: "javascript", isDark: false)
+    #expect(failed == nil)
+    let known = await service.highlight("func f() {}", language: "swift", isDark: false)
+    #expect(known != nil)
+  }
+
   @Test("存在しないリソースでは繰り返し呼んでも nil を返す")
   func missingResources() async {
     let directory = Self.resourceDirectory.appendingPathComponent(UUID().uuidString)

@@ -93,11 +93,13 @@ public struct DiffSnapshotBuilder: Sendable {
       let recorded = GitBranchReflog.createdFromStartPoint(subjects: subjects),
       let revision = GitRevision(recorded),
       let resolved = (try? await run(.symbolicFullName(revision)))?.trimmed, !resolved.isEmpty,
-      let listed = try? await run(.listRefs())
+      let listed = try? await run(.listRefs()),
+      let remotes = try? await run(.remoteNames())
     else { return nil }
     return DiffForkPoint.branch(
       recordedStartPoint: recorded, resolvedFullName: resolved, currentBranch: head,
-      listedBranches: GitRefNameList.parse(output: listed).all)
+      listedBranches: GitRefNameList.parse(output: listed).all,
+      remoteNames: GitRemoteNames.parse(output: remotes))
   }
 
   public func refNames() async throws(GitRunnerError) -> GitRefNames {

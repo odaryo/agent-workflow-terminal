@@ -41,20 +41,20 @@ struct UnifiedDiffTests {
     #expect(file.hunks.isEmpty)
   }
 
-  /// §9.3 の変更検知は `UnifiedDiffCanonicalText` の値でしか動かない。ここは「今は何を
-  /// 検知できないか」を固定するテストで、死角を塞ぐのは別 Issue (M4)。
+  /// 正規化テキストは内容を区別しない。内容の識別子は Adapters が足す
+  /// (`UntrackedContentIdentityTests`)。
   /// `.notReadable` になるのは、`status` が畳んだ untracked ディレクトリ (内部に `.git` を持つ等)
   /// と、`FileContentReader` が読めなかったファイル。
-  @Test("`.notReadable` は中身もサイズも持たないので、内容が変わっても検知できない")
+  @Test("`.notReadable` の正規化テキストは内容の変化を区別しない")
   func cannotDetectChangesInUnreadableFiles() {
     let before = UntrackedFileDiff.fileWithoutContent(path: "nested/", reason: .notReadable)
     let after = UntrackedFileDiff.fileWithoutContent(path: "nested/", reason: .notReadable)
     #expect(UnifiedDiffCanonicalText.text(of: before) == UnifiedDiffCanonicalText.text(of: after))
   }
 
-  /// untracked の binary は `status` の一覧と `FileContentReader` のサイズしか観測しておらず、
-  /// index の OID を持たない。塞ぐのは別 Issue (#211)。
-  @Test("同じサイズのままの binary 書き換えは検知できない")
+  /// 正規化テキストは同サイズの内容を区別しない。内容の識別子は Adapters が足す
+  /// (`UntrackedContentIdentityTests`)。
+  @Test("同サイズの binary 書き換えは正規化テキストでは区別しない")
   func cannotDetectSameSizeBinaryRewrite() {
     let before = UntrackedFileDiff.fileWithoutContent(path: "b.dat", reason: .binary(byteCount: 32))
     let after = UntrackedFileDiff.fileWithoutContent(path: "b.dat", reason: .binary(byteCount: 32))

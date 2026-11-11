@@ -19,7 +19,7 @@ import os
 struct DiffCommentSendSerializationTests {
 
   /// 1度目が `resolve` で中断している間に、`requestSend` の入口へ届いた2度目。
-  @Test("進行中の送信があるとき requestSend の入口へ届いた要求は捨てられる")
+  @Test("進行中の送信があるとき requestSend の入口へ届いた要求は捨てられる", .timeLimit(.minutes(1)))
   func dropsSecondRequestArrivingWhileSendInProgress() async throws {
     let fixture = try await Fixture.make()
     defer { fixture.cleanUp() }
@@ -28,10 +28,10 @@ struct DiffCommentSendSerializationTests {
     // `resolve` は list-panes → display-message の2回撃つ。後者は pane 一覧のキャッシュを
     // 経由しないので、要求ごとに1つずつ保留できる。
     await runner.hold("display-message")
-    let first = SendTask { await fixture.requestSend() }
+    let first = SendTask(processRunner: runner) { await fixture.requestSend() }
     try await runner.expectHeldCalls(1, of: "display-message")
 
-    let second = SendTask { await fixture.requestSend() }
+    let second = SendTask(processRunner: runner) { await fixture.requestSend() }
     await Fixture.letPendingTasksRun()
 
     await runner.resume("display-message")
@@ -44,17 +44,17 @@ struct DiffCommentSendSerializationTests {
   }
 
   /// 同じことを、`requestSend` を経ない独立の入口 (pane 選択 sheet の確定 = `send`) で測る。
-  @Test("進行中の送信があるとき send の入口 (pane 選択の確定) へ届いた要求は捨てられる")
+  @Test("進行中の送信があるとき send の入口 (pane 選択の確定) へ届いた要求は捨てられる", .timeLimit(.minutes(1)))
   func dropsSecondDirectSendArrivingWhileSendInProgress() async throws {
     let fixture = try await Fixture.make()
     defer { fixture.cleanUp() }
     let runner = fixture.processRunner
 
     await runner.hold("display-message")
-    let first = SendTask { await fixture.requestSend() }
+    let first = SendTask(processRunner: runner) { await fixture.requestSend() }
     try await runner.expectHeldCalls(1, of: "display-message")
 
-    let second = SendTask { await fixture.send() }
+    let second = SendTask(processRunner: runner) { await fixture.send() }
     await Fixture.letPendingTasksRun()
 
     await runner.resume("display-message")
@@ -304,30 +304,51 @@ extension DiffCommentSendSerializationTests {
   }
 }
 
-/// 送信を走らせる `Task` と、その完了の**上限付き**の待ち合わせ。
-///
-/// `await task.value` を直接待たないのは、偽 runner が保留したまま解放されないコマンドを
-/// 撃たれた場合にテストが失敗ではなく**ハング**するため (Swift Testing に per-test の既定
-/// timeout は無い)。上限は実時間ではなく yield 回数で置く。
+/// `.timeLimit` のキャンセルだけでは `task.value` から抜けないため、完了の待ち手を別に持つ。
 @MainActor
 final class SendTask {
   private var isFinished = false
   private var task: Task<Void, Never>?
+  private var waiters: [CheckedContinuation<Void, Never>] = []
+  private let processRunner: GatedTmuxProcessRunner
 
-  init(_ body: @escaping @MainActor () async -> Void) {
+  init(processRunner: GatedTmuxProcessRunner, _ body: @escaping @MainActor () async -> Void) {
+    self.processRunner = processRunner
     task = Task { [self] in
       await body()
       isFinished = true
+      resumeWaiters()
     }
   }
 
   func expectFinished(_ label: String) async throws {
-    for _ in 0..<100_000 {
-      if isFinished { return }
-      await Task.yield()
+    await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        if Task.isCancelled || isFinished {
+          continuation.resume()
+        } else {
+          waiters.append(continuation)
+        }
+      }
+    } onCancel: {
+      Task { await self.cancel() }
     }
-    Issue.record("\(label) が完了しませんでした")
-    throw CancellationError()
+    if Task.isCancelled {
+      await cancel()
+      Issue.record("\(label) が完了しませんでした")
+      throw CancellationError()
+    }
+  }
+
+  private func cancel() async {
+    task?.cancel()
+    await processRunner.releaseAll()
+    resumeWaiters()
+  }
+
+  private func resumeWaiters() {
+    for continuation in waiters { continuation.resume() }
+    waiters = []
   }
 }
 
@@ -358,7 +379,15 @@ actor GatedTmuxProcessRunner: ProcessRunning {
   private var invocations: [[String]] = []
   private var heldCommands: Set<String> = []
   private var held: [String: [CheckedContinuation<Void, Never>]] = [:]
+  private var heldCallWaiters: [HeldCallWaiter] = []
+  private var isReleased = false
   private var failingInjections = 0
+
+  private struct HeldCallWaiter {
+    let command: String
+    let count: Int
+    let continuation: CheckedContinuation<Void, Never>
+  }
 
   init(sessionName: String, pane: PaneID, panePID: Int32, serverPID: Int32) {
     self.sessionName = sessionName
@@ -390,15 +419,36 @@ actor GatedTmuxProcessRunner: ProcessRunning {
     for continuation in pending { continuation.resume() }
   }
 
-  /// 期待した数の呼び出しが保留に入るまで待つ。入らないまま上限に達したら失敗させる
-  /// (テストを無限に待たせない)。
+  func releaseAll() {
+    isReleased = true
+    heldCommands = []
+    let pending = held.values.flatMap { $0 }
+    held = [:]
+    let waiters = heldCallWaiters
+    heldCallWaiters = []
+    for continuation in pending { continuation.resume() }
+    for waiter in waiters { waiter.continuation.resume() }
+  }
+
+  /// `.timeLimit` は continuation を再開しないので、キャンセル時には fake の保留も解く。
   func expectHeldCalls(_ count: Int, of command: String) async throws {
-    for _ in 0..<100_000 {
-      if held[command]?.count == count { return }
-      await Task.yield()
+    await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        if Task.isCancelled || isReleased || held[command]?.count == count {
+          continuation.resume()
+        } else {
+          heldCallWaiters.append(
+            HeldCallWaiter(command: command, count: count, continuation: continuation))
+        }
+      }
+    } onCancel: {
+      Task { await self.releaseAll() }
     }
-    Issue.record("\(command) の保留が \(count) 件に達しませんでした")
-    throw CancellationError()
+    if Task.isCancelled || isReleased {
+      releaseAll()
+      Issue.record("\(command) の保留が \(count) 件に達しませんでした")
+      throw CancellationError()
+    }
   }
 
   func run(
@@ -408,14 +458,21 @@ actor GatedTmuxProcessRunner: ProcessRunning {
     timeout: Duration,
     outputLimit: Int
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
+    guard !Task.isCancelled, !isReleased else { throw .cancelled }
     invocations.append(arguments)
     // global option (`-u`) の後に来る最初の非オプションがサブコマンド。
     let command = arguments.first { !$0.hasPrefix("-") } ?? ""
     if heldCommands.contains(command) {
       await withCheckedContinuation { continuation in
         held[command, default: []].append(continuation)
+        heldCallWaiters.removeAll { waiter in
+          guard held[waiter.command]?.count == waiter.count else { return false }
+          waiter.continuation.resume()
+          return true
+        }
       }
     }
+    guard !Task.isCancelled, !isReleased else { throw .cancelled }
     if command == "load-buffer", failingInjections > 0 {
       failingInjections -= 1
       return ProcessRunResult(

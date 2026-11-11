@@ -35,7 +35,11 @@ actor SyntaxHighlightingService {
     // 協調スレッドのスタック上限で素のテキストへ退避できるよう、JS 呼び出しはこの actor 内に留める。
     let result = context.objectForKeyedSubscript("hljs")?.invokeMethod(
       "highlight", withArguments: [code, ["language": language, "ignoreIllegals": true]])
+    // highlight.js は内部の失敗 (深い入れ子の RangeError など) を例外にせず errorRaised に入れ、
+    // value には色の無い素のテキストを返すので、成功として扱わない (#771)。
     guard context.exception == nil,
+      let errorRaised = result?.objectForKeyedSubscript("errorRaised"),
+      errorRaised.isUndefined || errorRaised.isNull,
       let value = result?.objectForKeyedSubscript("value"), value.isString,
       let html = value.toString(), let runs = HighlightJSMarkup.parse(html)
     else { return nil }

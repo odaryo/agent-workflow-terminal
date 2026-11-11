@@ -60,7 +60,6 @@ public enum SyntaxHighlightLanguage {
     "xml": "xml",
     "yaml": "yaml",
     "yml": "yaml",
-    "zig": "zig",
     "zsh": "bash",
   ]
 

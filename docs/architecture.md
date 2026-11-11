@@ -709,7 +709,7 @@ Gate 1のM4実測(`Spikes/gate1/README.md` §12.4〜§12.5)を根拠とする。
   ないため。
 - 到達不能・観測失敗のセッションは、状態の記号を流用せず`exclamationmark.triangle`と文言で示す(§12.3)。
 
-**引き渡し済みの印 — 現在の推奨(2026-11-11、Issue #828)。** 上の対応表(確定)の例外として、worktreeへ作業を渡し終えたProject Rootのpane(§3.1)は、状態が`Completed`か`Idle`のときだけ、状態の記号の代わりに`arrowshape.turn.up.right.circle`(灰、accessibility label「引き渡し済み」)を出す。レビュー待ちの応答終了と、役目を終えた窓口を見分けるためである。`Question`／`Permission`／`Error`／要対応(種別不明)は隠さず、その状態の記号を出す。`AgentState`の語彙(§12.2)は増やさず、通知(§11.2)も変えない。
+**引き渡し済みの印 — 現在の推奨(2026-11-11、Issue #828)。** 上の対応表(確定)の例外として、`hostctl worktree open`でworktreeへ作業を渡し終えたpane(通常はProject RootのAgentのpane。§3.1)は、状態が`Completed`か`Idle`のときだけ、状態の記号の代わりに`arrowshape.turn.up.right.circle`(灰、accessibility label「引き渡し済み」)を出す。レビュー待ちの応答終了と、役目を終えた窓口を見分けるためである。`Question`／`Permission`／`Error`／要対応(種別不明)は隠さず、その状態の記号を出す。`AgentState`の語彙(§12.2)は増やさず、通知(§11.2)も変えない。
 
 **作業概要の右クリック一覧の廃止 — 現在の推奨(2026-11-08、Issue #672)。** 2026-11-01に確定し、2026-11-02(Issue #438)に細部を推奨した全セッションの作業概要一覧は、Overviewと重複するため廃止する。目的と状態の一覧および切り替えはOverviewで行う。
 

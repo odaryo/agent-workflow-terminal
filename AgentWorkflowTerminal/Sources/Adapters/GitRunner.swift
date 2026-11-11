@@ -161,8 +161,10 @@ public struct GitReadCommand: Sendable, Equatable {
   }
 
   /// 最後の行は、destination から first-parent を辿って tip の祖先に当たる直前の commit とその親。
-  /// tip が destination の祖先でなければ root の行 (親なし) で終わり、destination が tip の祖先なら
-  /// 出力は空 (git 2.54.0 で計測、Issue #879)。
+  /// destination が tip の祖先なら出力は空。tip の祖先に当たらないまま root まで辿ると親の無い行で
+  /// 終わるが、これは tip が destination の祖先でないことを意味しない (無関係な履歴の merge や
+  /// commit 日時のずれでも起きる)。逆に、分岐した未マージの tip でも root の行で終わるとは限らない
+  /// (git 2.54.0 で計測、Issue #879 のレビュー)。
   static func firstParentChain(
     from destination: GitRevision, excluding tip: GitRevision
   ) -> Self {

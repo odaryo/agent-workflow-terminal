@@ -481,7 +481,11 @@ refが更新されることに依存する。worktreeはrefを共有するので
   first-parentの列の上にあるかで見ると、作っただけ・commitなしでの追従・reflogの無いbranchでは出ず、
   `--no-ff`のmergeとsquash mergeでは出る(git 2.54.0で計測)。**fast-forwardでmergeしたbranchにも印は出ない**
   (commitが既定branchのfirst-parentの列に並ぶため)。これは受け入れる制約とする。squash mergeの根拠には
-  この条件を掛けない(squashの検出は、branchの変更内容が空でないことを既に求めている)。
+  この条件を掛けない(squashの検出は、branchの変更内容が空でないことを既に求めている)。この条件が覆うのは、
+  既定branchのfirst-parentの列の上から作ったbranchだけである。列の外のcommit(`--no-ff`でmerge済みの
+  branchの先端など)から作ったcommitの無いbranchや、既定branchが第1親を別の系列とするmerge(foxtrot merge)をfast-forwardで取り込んだ後の
+  branchには印が出る。逆に、無関係な履歴を取り込んだbranchなどでは、マージ済みでも印が出ないことがある
+  (Issue #912、#913)。
 - 判定不能も、branch先端と既定branch先端の組が前回と同じ間は判定し直さない。判定不能のworktreeで数秒の
   走査が観測のたびに回り続けるのを避けるためである。取り消しで終わった判定は記録しない。
 - 重い判定はアプリ全体で1件ずつ順に回し、UIを止めない。判定の1周の始めに全worktreeのbranch先端を読み、

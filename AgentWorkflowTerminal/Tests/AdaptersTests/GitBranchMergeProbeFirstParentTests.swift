@@ -45,8 +45,9 @@ struct GitBranchMergeProbeFirstParentTests {
     #expect(await probe.isOnFirstParentChain(tip: tip, destination: tip) == true)
   }
 
-  /// 出力が空 (既定 branch が先端の祖先) と、最後が親の無い行 (先端が既定 branch の祖先でない) は、
-  /// ancestor でマージ済みと判定した後には起きないはずの形なので、判定できなかったものとして扱う。
+  /// 出力が空 (既定 branch が先端の祖先) と、最後が親の無い行は、印を出さない側へ倒すため判定できな
+  /// かったものとして扱う。親の無い行は ancestor でマージ済みの後でも起き、そのときの正しい答えは
+  /// false である (#912)。ここで固定しているのは今の安全側の扱いであって、正しさではない。
   @Test(
     "git が失敗したとき・行を解釈できないとき・出力が空のとき・最後が親の無い行のときは nil",
     arguments: [

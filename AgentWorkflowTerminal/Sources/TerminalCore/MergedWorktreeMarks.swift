@@ -91,7 +91,8 @@ public struct MergedWorktreeMarks: Sendable, Equatable {
 
   private var tips: [WorktreeIdentity: CommitObjectID] = [:]
   private var mergedTips: Set<CommitObjectID> = []
-  /// 古い順。記録し直した先端は末尾へ移す。
+  /// 古い順 (最初に記録した順)。refresher はマージ済みの先端を判定し直さないので、記録し直しの
+  /// 分岐は refresher からは届かず、押し出しは使った順ではなく記録した順になる。
   private var mergedTipOrder: [CommitObjectID] = []
   private var judgedPairs: [WorktreeIdentity: JudgedPair] = [:]
 

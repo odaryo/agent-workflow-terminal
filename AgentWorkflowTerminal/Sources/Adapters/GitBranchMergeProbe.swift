@@ -62,9 +62,10 @@ public struct GitBranchMergeProbe: BranchMergeProbing {
     return Self.isFirstParent(tip, ofLastLineIn: output)
   }
 
-  /// 出力が空 (destination が tip の祖先) と親の無い行 (tip が destination の祖先でない) は、
-  /// ancestor でマージ済みと判定した後にしか問わないので起きないはずの形であり、`false` ではなく
-  /// 判定できなかった (`nil`) として扱う。
+  /// 出力が空 (destination が tip の祖先) と親の無い行は、`false` ではなく判定できなかった (`nil`)
+  /// として扱い、印を出さない側へ倒す。親の無い行は ancestor でマージ済みの後でも起きる —— 無関係な
+  /// 履歴を `--allow-unrelated-histories` で取り込んだ branch や、commit 日時のずれで走査が root まで
+  /// 行き過ぎた場合で、正しい答えは `false` だった (git 2.54.0 で計測、#879 のレビュー。#912)。
   static func isFirstParent(_ tip: CommitObjectID, ofLastLineIn output: String) -> Bool? {
     guard let line = output.split(separator: "\n").last else { return nil }
     let fields = line.split(separator: " ", omittingEmptySubsequences: false)

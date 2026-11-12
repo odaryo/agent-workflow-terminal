@@ -67,7 +67,7 @@ extension GhosttySurfaceView {
   ) {
     guard let surface else { return }
     _ = ghostty_surface_mouse_button(
-      surface, state, button, Self.modifiers(from: event.modifierFlags)
+      surface, state, button, GhosttyKeyModifiers.ghosttyMods(event.modifierFlags)
     )
   }
 
@@ -76,7 +76,7 @@ extension GhosttySurfaceView {
     let point = convert(event.locationInWindow, from: nil)
     ghostty_surface_mouse_pos(
       surface, point.x, bounds.height - point.y,
-      Self.modifiers(from: event.modifierFlags)
+      GhosttyKeyModifiers.ghosttyMods(event.modifierFlags)
     )
   }
 

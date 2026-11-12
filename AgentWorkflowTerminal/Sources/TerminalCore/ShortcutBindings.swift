@@ -2,7 +2,9 @@ import Foundation
 
 public enum ShortcutAction: String, CaseIterable, Sendable, Hashable, Codable {
   case previousProject, nextProject, previousSession, nextSession
+  case collapseProject, expandProject
   case toggleOverview, toggleCodeViewer, toggleDiffViewer, bringAppToFront
+  case newSessionWithAgent
 }
 
 public enum ShortcutKey: Hashable, Sendable, Codable {
@@ -193,6 +195,10 @@ extension ShortcutAction {
       KeyCombination(key: .upArrow, modifiers: [.command])
     case .nextSession:
       KeyCombination(key: .downArrow, modifiers: [.command])
+    case .collapseProject:
+      KeyCombination(key: .leftArrow, modifiers: [.command])
+    case .expandProject:
+      KeyCombination(key: .rightArrow, modifiers: [.command])
     case .toggleOverview:
       KeyCombination(key: .character("o"), modifiers: [.command, .shift])
     case .toggleCodeViewer:
@@ -201,6 +207,8 @@ extension ShortcutAction {
       KeyCombination(key: .character("d"), modifiers: [.command, .shift])
     case .bringAppToFront:
       KeyCombination(key: .space, modifiers: [.command])
+    case .newSessionWithAgent:
+      KeyCombination(key: .character("n"), modifiers: [.command, .shift])
     }
   }
 }

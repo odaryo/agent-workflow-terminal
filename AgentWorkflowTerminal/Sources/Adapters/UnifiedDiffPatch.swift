@@ -87,14 +87,14 @@ public enum UnifiedDiffPatch {
 
 /// patch の中でレコードの始まりになり得る行。combined diff の本文行は必ず2文字の接頭辞を
 /// 持つので、本文がこれらの語で始まることはない (git 2.50.1 で実測)。
-private enum DiffRecord {
+enum DiffRecord {
   static let gitHeaderPrefix = "diff --git "
   static let unmergedPathPrefix = "* Unmerged path "
   private static let combinedHeaderPrefixes = ["diff --cc ", "diff --combined "]
 
-  static func startsRecord(_ line: String) -> Bool {
+  static func startsRecord(_ line: some StringProtocol) -> Bool {
     line.hasPrefix(gitHeaderPrefix) || line.hasPrefix(unmergedPathPrefix)
-      || combinedHeaderPath(line) != nil
+      || combinedHeaderPrefixes.contains { line.hasPrefix($0) }
   }
 
   static func combinedHeaderPath(_ line: String) -> String? {

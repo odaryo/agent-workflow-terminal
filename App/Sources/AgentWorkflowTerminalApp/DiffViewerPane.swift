@@ -241,7 +241,7 @@ struct DiffViewerPane: View {
       if model.changeSinceOpened?.head == .unknown {
         banner("HEAD を観測できず、変更の有無を判断できません。", icon: "questionmark.circle")
       }
-      ForEach(model.notices, id: \.self) { notice in
+      ForEach(displayedNotices, id: \.self) { notice in
         banner(notice, icon: "exclamationmark.triangle")
       }
       if let block = sendBlock, let pane = mainPane.registeredPane(for: worktree) {
@@ -255,6 +255,19 @@ struct DiffViewerPane: View {
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var displayedNotices: [String] {
+    let latestTruncationNotices =
+      model.history.latest.map {
+        DiffViewerModel.truncationNotices(for: $0)
+      } ?? []
+    let currentTruncationNotices =
+      model.currentSnapshot.map {
+        DiffViewerModel.truncationNotices(for: $0)
+      } ?? []
+    return model.notices.filter { !latestTruncationNotices.contains($0) }
+      + currentTruncationNotices
   }
 
   @ViewBuilder
@@ -339,10 +352,22 @@ private struct DiffFileList: View {
 
   var body: some View {
     List {
-      ForEach(snapshot.sections.filter { !$0.files.isEmpty }, id: \.origin) { section in
-        Section(header: Text("\(section.origin.label) (\(section.files.count))")) {
+      ForEach(
+        snapshot.sections.filter { !$0.files.isEmpty || $0.truncation != nil }, id: \.origin
+      ) { section in
+        Section(header: Text("\(section.origin.label) (\(section.displayedFileCount))")) {
           ForEach(section.files, id: \.path) { file in
             row(origin: section.origin, file: file)
+          }
+          if let truncation = section.truncation {
+            Text(
+              "ここで打ち切り — 以降は表示していません"
+                + (truncation.firstOmittedPath.map { " (次: \($0))" }
+                  ?? " (未表示のファイル名は読めませんでした)")
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .selectionDisabled()
           }
         }
       }

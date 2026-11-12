@@ -29,8 +29,10 @@ struct AgentWorkflowTerminalApp: App {
     .windowToolbarStyle(.unifiedCompact)
     .defaultSize(width: 900, height: 560)
     .commands {
+      ProjectNameMaskCommands(projects: projects)
       ProjectNavigationCommands(projects: projects, shortcuts: projects.shortcuts)
       SessionCyclingCommands(projects: projects, shortcuts: projects.shortcuts)
+      NewAgentSessionCommands(projects: projects, shortcuts: projects.shortcuts)
       ViewerCommands(projects: projects, shortcuts: projects.shortcuts)
       CommandGroup(after: .toolbar) {
         OverviewMenuItem(navigator: projects.navigator, shortcuts: projects.shortcuts)
@@ -68,6 +70,7 @@ private struct HiddenWindowTitle: ViewModifier {
 
 struct ProjectView: View {
   @ObservedObject var model: AppModel
+  let masksProjectName: Bool
   @StateObject var keyboardFocus = TerminalKeyboardFocus()
 
   var body: some View {
@@ -82,7 +85,7 @@ struct ProjectView: View {
         WarningBar(text: scanFailureWarning) { model.dismissScanFailureWarning() }
         Divider()
       }
-      WorktreeClosePanelHost(closing: model.closing)
+      WorktreeClosePanelHost(closing: model.closing, masksProjectName: masksProjectName)
       TerminalSessionClosePanelHost(closing: model.sessionClosing) { model.confirmCloseSession() }
 
       if let message = model.message ?? model.emptyStateMessage {

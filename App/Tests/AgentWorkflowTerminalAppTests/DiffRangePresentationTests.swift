@@ -113,8 +113,35 @@ struct DiffRangeSummaryTests {
     #expect(summary.origin == "親の無い commit (空 tree)")
   }
 
+  @Test("作業ツリーの打ち切った区分は0件でも件数に + を付ける", arguments: [0, 3])
+  func describesTruncatedWorktree(count: Int) {
+    let snapshot = snapshot(
+      subject: .base(branch: .local("main"), mergeBase: mergeBase), head: nil,
+      counts: [.committed: 2, .staged: count], truncatedOrigins: [.staged])
+    let summary = DiffRangeSummary(
+      snapshot: snapshot,
+      context: DiffSnapshotRangeContext(worktreeName: "t", baseSource: nil, commit: nil))
+
+    #expect(
+      summary.contents
+        == "commit済み 2・staged \(count)+・unstaged 0・untracked 0・競合 0 (ignored は含まない)")
+    #expect(snapshot.section(.staged)?.displayedFileCount == "\(count)+")
+  }
+
+  @Test("Commit Diff も打ち切った件数には + を付ける", arguments: [0, 4])
+  func describesTruncatedCommit(count: Int) {
+    let summary = DiffRangeSummary(
+      snapshot: snapshot(
+        subject: .commit(hash: head), head: nil, counts: [.committed: count],
+        truncatedOrigins: [.committed]),
+      context: DiffSnapshotRangeContext(worktreeName: "t", baseSource: nil, commit: nil))
+
+    #expect(summary.contents == "その commit と親の差分 \(count)+ ファイル。未commit 変更は含まない")
+  }
+
   private func snapshot(
-    subject: DiffSubject, head: DiffSnapshotHead?, counts: [DiffChangeOrigin: Int] = [:]
+    subject: DiffSubject, head: DiffSnapshotHead?, counts: [DiffChangeOrigin: Int] = [:],
+    truncatedOrigins: Set<DiffChangeOrigin> = []
   ) -> DiffSnapshot {
     DiffSnapshot(
       id: DiffSnapshotID(rawValue: UUID()),
@@ -127,7 +154,9 @@ struct DiffRangeSummaryTests {
             UnifiedDiffFile(
               oldPath: "\(origin)-\(index)", newPath: "\(origin)-\(index)",
               changeKind: .modified, content: .noContentChange)
-          })
+          },
+          truncation: truncatedOrigins.contains(origin)
+            ? DiffSectionTruncation(outputLimit: 64 * 1024 * 1024, firstOmittedPath: "b.bin") : nil)
       },
       observation: DiffSnapshotObservation(headObject: nil, files: []),
       head: head)

@@ -16,7 +16,11 @@ struct ProjectUnregisterReview: Identifiable {
 
   var id: WorktreeIdentity { project.commonDirectory }
 
-  var title: String { "「\(project.displayName)」の登録を解除" }
+  func title(in registry: ProjectRegistry) -> String {
+    let presentedName =
+      registry.project(project.commonDirectory)?.presentedName ?? project.displayName
+    return "「\(presentedName)」の登録を解除"
+  }
 
   var message: String {
     var lines: [String] = []

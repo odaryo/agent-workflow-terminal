@@ -46,6 +46,7 @@ final class AppModel: ObservableObject {
   let mainPanes: MainPaneCoordinator
   /// Close の確認と実行 (設計書 §3.4)。
   let closing: WorktreeClosing
+  var closeExecutionOverlap = CloseExecutionOverlap()
   let sessionClosing = TerminalSessionClosing()
   let sessionActivityProbe: TmuxSessionActivityProbe?
   let project: RegisteredProject
@@ -294,6 +295,7 @@ final class AppModel: ObservableObject {
       // ID を増減させるのはスキャンだけなので、ID はここで取っても食い違わない。
       let knownIdentities = worktrees.map(\.identity)
       let reusable = reusableObservations(isRequestedScan: !waiters.isEmpty)
+      let mark = closeExecutionOverlap.mark()
       // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
       guard
         case .success(let scan) = await scan(
@@ -303,7 +305,11 @@ final class AppModel: ObservableObject {
         continue
       }
 
-      report(scanFailures: scan.failures, listingFailure: scan.listingFailure)
+      // Close による削除途中の観測失敗を警告へ載せない (Issue #383)。
+      // 一覧の調整は止めず、観測に失敗した worktree の Active 指定を保つ (#243)。
+      if !closeExecutionOverlap.overlapped(since: mark) {
+        report(scanFailures: scan.failures, listingFailure: scan.listingFailure)
+      }
       // 観測に失敗した entry を捨てて `detected` だけを渡すと、その worktree は消失扱いになり、
       // ユーザーの Active 指定が保存から消える (Issue #243)。
       // 一覧が不完全でも消失を確認できた Task は残さない。同名で作り直すと Active を引き継ぐため (#870)。

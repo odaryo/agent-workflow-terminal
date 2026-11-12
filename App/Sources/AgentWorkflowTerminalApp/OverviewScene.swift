@@ -50,14 +50,12 @@ struct OverviewView: View {
           ForEach(projects.availableModels, id: \.project.commonDirectory) { model in
             OverviewProjectSection(
               model: model, store: model.paneObservations, mainPanes: model.mainPanes,
+              presentedName: projects.registry.project(model.project.commonDirectory)?.presentedName
+                ?? model.project.displayName,
               isSelectedProject: projects.registry.selection == model.project.commonDirectory,
               selectProject: { projects.select(model.project.commonDirectory) },
               agentCommand: {
-                guard
-                  case .success(let command) = ProjectAgentCommand.normalized(
-                    projects.registry.project(model.project.commonDirectory)?.agentCommand ?? "")
-                else { return nil }
-                return command
+                projects.agentCommand(for: model.project.commonDirectory)
               },
               onSetAgentCommand: onSetAgentCommand,
               requestUnregister: { await projects.requestUnregister($0) },
@@ -96,6 +94,7 @@ private struct OverviewProjectSection: View {
   @ObservedObject var mainPanes: MainPaneCoordinator
   @AppStorage(OverviewProjectPreferences.collapsedProjectsKey) private var collapsedProjectsJSON =
     "[]"
+  let presentedName: String
   let isSelectedProject: Bool
   let selectProject: () -> Void
   let agentCommand: () -> String?
@@ -107,7 +106,7 @@ private struct OverviewProjectSection: View {
     let overview = makeAgentPaneOverview([input]).first
     let attentionCount = needsAttentionCount(overview)
     let showsAttentionCount = !isExpanded.wrappedValue && attentionCount > 0
-    let disclosureLabel = "\(model.project.displayName) を\(isExpanded.wrappedValue ? "閉じる" : "開く")"
+    let disclosureLabel = "\(presentedName) を\(isExpanded.wrappedValue ? "閉じる" : "開く")"
     // Section の header にしない。.sidebar の header は .collapsible(false) を付けても、右クリックの
     // メニューの後にマウスを載せると標準の開閉マークを出した (実測 2026-11-11、macOS 27)。
     Section {
@@ -119,7 +118,7 @@ private struct OverviewProjectSection: View {
           Image(systemName: isExpanded.wrappedValue ? "chevron.down" : "chevron.right")
             .frame(width: 16, height: 16)
           HStack {
-            Text(model.project.displayName)
+            Text(presentedName)
             Spacer()
             if showsAttentionCount {
               Text("要対応 \(attentionCount)")
@@ -135,8 +134,8 @@ private struct OverviewProjectSection: View {
       .accessibilityElement(children: .ignore)
       .accessibilityLabel(
         showsAttentionCount
-          ? "\(model.project.displayName)、要対応 \(attentionCount) 件"
-          : model.project.displayName
+          ? "\(presentedName)、要対応 \(attentionCount) 件"
+          : presentedName
       )
       .accessibilityAddTraits(.isHeader)
       .accessibilityAction(named: disclosureLabel) {
@@ -165,15 +164,10 @@ private struct OverviewProjectSection: View {
       !OverviewProjectPreferences.collapsedProjects(storedValue: collapsedProjectsJSON)
         .contains(model.project.commonDirectory.rawValue)
     } set: { expanded in
-      var collapsedProjects = OverviewProjectPreferences.collapsedProjects(
-        storedValue: collapsedProjectsJSON)
-      let project = model.project.commonDirectory.rawValue
-      if expanded {
-        collapsedProjects.remove(project)
-      } else {
-        collapsedProjects.insert(project)
-      }
-      if let storedValue = OverviewProjectPreferences.storedValue(for: collapsedProjects) {
+      if let storedValue = OverviewProjectPreferences.storedValue(
+        collapsedProjectsJSON, settingCollapsed: !expanded,
+        for: model.project.commonDirectory.rawValue)
+      {
         collapsedProjectsJSON = storedValue
       }
     }

@@ -12,6 +12,18 @@ enum OverviewProjectPreferences {
     guard let data = try? JSONEncoder().encode(collapsedProjects.sorted()) else { return nil }
     return String(decoding: data, as: UTF8.self)
   }
+
+  static func storedValue(
+    _ storedValue: String, settingCollapsed collapsed: Bool, for project: String
+  ) -> String? {
+    var projects = collapsedProjects(storedValue: storedValue)
+    if collapsed {
+      projects.insert(project)
+    } else {
+      projects.remove(project)
+    }
+    return Self.storedValue(for: projects)
+  }
 }
 
 enum OverviewSidebarPreferences {

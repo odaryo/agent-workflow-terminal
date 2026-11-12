@@ -39,33 +39,111 @@ struct GitBlobContentTests {
     #expect(actual == expected)
   }
 
-  @Test("不正 UTF-8 を含む小さい内容は、現在のファイルと同じくバイナリになる")
-  func invalidUTF8IsBinary() throws {
-    let bytes: [UInt8] = Array("ok ".utf8) + [0xFF, 0xFE] + Array("\n".utf8)
-    let expected = try readThroughFileContentReader(bytes, confirmation: .notConfirmed)
+  private static let invalidCases: [(String, (bytes: [UInt8], isBinary: Bool))] = [
+    ("小さい latin1", (Array("caf".utf8) + [0xE9, 0x0A], false)),
+    ("元の位置 8191 の NUL", ([0xFF] + Array(repeating: 65, count: 8_190) + [0], true)),
+    (
+      "不正バイト10個の後、元の位置 8195 の NUL",
+      (Array(repeating: 0xFF, count: 10) + Array(repeating: 65, count: 8_185) + [0], false)
+    ),
+    (
+      "正しい U+FFFD が10個あっても全体の伸びから元の NUL 位置を判定できる",
+      (
+        Array(String(repeating: "\u{FFFD}", count: 10).utf8) + [0xFF]
+          + Array(repeating: 65, count: 8_192 - 31) + [0], false
+      )
+    ),
+    (
+      "NUL の後ろの伸びが大きくても置換の数から元の NUL 位置を判定できる",
+      ([0xFF] + Array(repeating: 65, count: 8_191) + [0] + Array(repeating: 0xFF, count: 10), false)
+    ),
+    ("サイズ閾値超過", (Array(repeating: 65, count: 100) + [0xFF, 0x0A], false)),
+  ]
 
+  @Test(
+    "不正 UTF-8 は NUL の位置を判定し、現在のファイルと同じ観測・確認・本文を返す",
+    arguments: invalidCases.map(\.0), [FileOpenConfirmation.notConfirmed, .confirmed])
+  func invalidUTF8MatchesFileContentReader(
+    name: String, confirmation: FileOpenConfirmation
+  ) throws {
+    let testCase = try #require(Self.invalidCases.first { $0.0 == name })
+    let bytes = testCase.1.bytes
+    let expected = try readThroughFileContentReader(bytes, confirmation: confirmation)
+    let stdout = String(decoding: bytes, as: UTF8.self)
     let actual = GitBlobContent.classify(
-      stdout: String(decoding: bytes, as: UTF8.self), byteCount: bytes.count,
-      objectID: Self.blobID(of: bytes),
-      thresholds: Self.thresholds, confirmation: .notConfirmed)
+      stdout: stdout, byteCount: bytes.count, objectID: Self.blobID(of: bytes),
+      thresholds: Self.thresholds, confirmation: confirmation)
 
     #expect(actual == expected)
-    #expect(actual.observation == .binary(byteCount: bytes.count))
+    if testCase.1.isBinary {
+      #expect(actual.observation == .binary(byteCount: bytes.count))
+      #expect(actual.text == nil)
+    } else if bytes.count > Self.thresholds.maximumByteCount, confirmation == .notConfirmed {
+      #expect(actual.observation == .text(byteCount: bytes.count, lineCount: nil))
+      #expect(
+        actual.decision.confirmationReasons?.elements
+          == [.byteCount(actual: bytes.count, maximum: Self.thresholds.maximumByteCount)])
+      #expect(actual.text == nil)
+    } else {
+      #expect(actual.observation == .undecodable(byteCount: bytes.count, lineCount: 1))
+      var reasons: [FileOpenConfirmationReason] = [.undecodable]
+      if bytes.count > Self.thresholds.maximumByteCount {
+        reasons.append(.byteCount(actual: bytes.count, maximum: Self.thresholds.maximumByteCount))
+      }
+      #expect(actual.decision.confirmationReasons?.elements == reasons)
+      if confirmation == .confirmed {
+        let text = try #require(actual.text)
+        #expect(text.content == stdout)
+        #expect(text.truncatedAtByteCount == nil)
+      } else {
+        #expect(actual.text == nil)
+      }
+    }
   }
 
-  /// stdout は非失敗デコード済みの String でしか受け取れず、不正バイトの位置と長さは失われる。
-  /// 現在のファイルなら「サイズ超過の確認 → 開くとバイナリ」になる内容を、過去版は確認前から
-  /// バイナリと判定する (この1点だけが現在のファイルと異なる)。
-  @Test("不正 UTF-8 を含む大きい内容は、確認前からバイナリになる")
-  func invalidUTF8LargeIsBinaryBeforeConfirmation() {
-    let bytes = Array(repeating: UInt8(ascii: "a"), count: 100) + [0xFF]
-
-    let actual = GitBlobContent.classify(
+  @Test(
+    "置換文字で NUL の元の位置が決まらない過去版は binary に留める",
+    arguments: [FileOpenConfirmation.notConfirmed, .confirmed])
+  func keepsAmbiguousNULPositionBinary(confirmation: FileOpenConfirmation) throws {
+    let bytes: [UInt8] =
+      [0xEF, 0xBF, 0xBD, 0xE3, 0x81] + Array(repeating: 65, count: 8_192 - 5) + [0, 0xFF]
+    let thresholds = FileViewThresholds(maximumByteCount: 10_000, maximumLineCount: 3)
+    let url = FileManager.default.temporaryDirectory
+      .appending(path: "awt-blob-\(UUID().uuidString)")
+    try Data(bytes).write(to: url)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let current = try FileContentReader().read(
+      url: url, thresholds: thresholds, confirmation: confirmation)
+    let historical = GitBlobContent.classify(
       stdout: String(decoding: bytes, as: UTF8.self), byteCount: bytes.count,
-      objectID: Self.blobID(of: bytes),
-      thresholds: Self.thresholds, confirmation: .notConfirmed)
+      objectID: Self.blobID(of: bytes), thresholds: thresholds, confirmation: confirmation)
 
-    #expect(actual.observation == .binary(byteCount: bytes.count))
+    #expect(current.observation == .undecodable(byteCount: bytes.count, lineCount: 1))
+    #expect(historical.observation == .binary(byteCount: bytes.count))
+    #expect(historical.text == nil)
+  }
+
+  @Test("置換後のバイト数が元より小さい不一致は binary に留める")
+  func keepsShorterReplacementBinary() {
+    let stdout = "\u{FFFD}\n"
+    let byteCount = stdout.utf8.count + 1
+    let actual = GitBlobContent.classify(
+      stdout: stdout, byteCount: byteCount, objectID: Self.blobID(of: Array(stdout.utf8)),
+      thresholds: Self.thresholds, confirmation: .confirmed)
+
+    #expect(actual.observation == .binary(byteCount: byteCount))
+    #expect(actual.text == nil)
+  }
+
+  @Test(
+    "U+FFFD を含まない未知の OID 桁数による不一致は binary に留める",
+    arguments: [FileOpenConfirmation.notConfirmed, .confirmed])
+  func keepsUnexplainedObjectIDMismatchBinary(confirmation: FileOpenConfirmation) {
+    let stdout = "plain\n"
+    let actual = GitBlobContent.classify(
+      stdout: stdout, byteCount: stdout.utf8.count, objectID: String(repeating: "a", count: 41),
+      thresholds: Self.thresholds, confirmation: confirmation)
+    #expect(actual.observation == .binary(byteCount: stdout.utf8.count))
     #expect(actual.text == nil)
   }
 

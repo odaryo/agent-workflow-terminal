@@ -215,8 +215,8 @@ public enum UnifiedDiffCanonicalText {
   /// snapshot 生成時の観測値 (fingerprint) を作るための決定的な直列化。表示には使わない。
   ///
   /// 差分行を持たないファイル (binary・mode 変更のみ) の同一性は `index` の OID が担う。
-  /// untracked で中身を読めなかったファイルだけは OID が無く、サイズしか比べられないため、
-  /// 同じサイズのままの書き換えを検知できない。
+  /// untracked で中身を読めなかったファイルには OID が無く、この正規化テキストはサイズまでしか
+  /// 持たない。内容の識別子は Adapters の `UntrackedContentIdentity` が fingerprint の入力に足す。
   ///
   /// 競合中のファイルも同じ限界を持つ: 前像に入るのは XY と stage 1/2/3 の OID だけなので、
   /// stage を動かさない作業ツリー上の変化 — 競合マーカーの手直しも、ファイルごと削除して

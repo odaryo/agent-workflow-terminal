@@ -18,6 +18,8 @@ extension AppModel {
         currentTarget: { [weak self] in
           self?.worktrees.first { $0.identity == identity }?.detected
         },
+        executionWillBegin: { [weak self] in self?.closeExecutionOverlap.beginExecution() },
+        executionDidFinish: { [weak self] in self?.closeExecutionOverlap.finishExecution() },
         didClose: { [weak self] in self?.finishClose(of: $0) }))
   }
 

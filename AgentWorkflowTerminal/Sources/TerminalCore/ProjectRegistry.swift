@@ -9,11 +9,16 @@ public struct RegisteredProject: Sendable, Hashable {
   /// (`WorktreeIdentity` と同じ理由)。
   public let directory: String
   public var agentCommand: String?
+  public var masksName: Bool
 
-  public init(commonDirectory: WorktreeIdentity, directory: String, agentCommand: String? = nil) {
+  public init(
+    commonDirectory: WorktreeIdentity, directory: String, agentCommand: String? = nil,
+    masksName: Bool = false
+  ) {
     self.commonDirectory = commonDirectory
     self.directory = directory
     self.agentCommand = agentCommand
+    self.masksName = masksName
   }
 }
 
@@ -68,7 +73,18 @@ public struct ProjectRegistry: Sendable, Hashable {
     return true
   }
 
-  /// 追加でも重複でも、その Project を選択する。重複のときは既存の `directory` を保つ。
+  @discardableResult
+  public mutating func setMasksName(
+    _ masksName: Bool, of commonDirectory: WorktreeIdentity
+  ) -> Bool {
+    guard let index = projects.firstIndex(where: { $0.commonDirectory == commonDirectory }) else {
+      return false
+    }
+    projects[index].masksName = masksName
+    return true
+  }
+
+  /// 追加でも重複でも、その Project を選択する。重複のときは既存の Project を設定ごと保ち、渡された値は捨てる。
   @discardableResult
   public mutating func register(_ project: RegisteredProject) -> ProjectRegistration {
     let registration: ProjectRegistration =
@@ -170,17 +186,22 @@ public struct PersistedRegisteredProject: Sendable, Hashable, Codable {
   public let commonDirectory: WorktreeIdentity
   public let directory: String
   public let agentCommand: String?
+  public let masksName: Bool?
 
-  public init(commonDirectory: WorktreeIdentity, directory: String, agentCommand: String? = nil) {
+  public init(
+    commonDirectory: WorktreeIdentity, directory: String, agentCommand: String? = nil,
+    masksName: Bool? = nil
+  ) {
     self.commonDirectory = commonDirectory
     self.directory = directory
     self.agentCommand = agentCommand
+    self.masksName = masksName
   }
 
   public init(_ project: RegisteredProject) {
     self.init(
       commonDirectory: project.commonDirectory, directory: project.directory,
-      agentCommand: project.agentCommand
+      agentCommand: project.agentCommand, masksName: project.masksName ? true : nil
     )
   }
 }
@@ -189,7 +210,7 @@ extension RegisteredProject {
   init(_ persisted: PersistedRegisteredProject) {
     self.init(
       commonDirectory: persisted.commonDirectory, directory: persisted.directory,
-      agentCommand: persisted.agentCommand
+      agentCommand: persisted.agentCommand, masksName: persisted.masksName ?? false
     )
   }
 }

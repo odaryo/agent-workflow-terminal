@@ -51,10 +51,11 @@ public struct BinaryFileSample: Sendable, Hashable {
 public enum FileViewObservation: Sendable, Hashable {
   case binary(byteCount: Int)
   case text(byteCount: Int, lineCount: Int?)
+  case undecodable(byteCount: Int, lineCount: Int?)
 
   fileprivate var byteCount: Int {
     switch self {
-    case .binary(let byteCount), .text(let byteCount, _):
+    case .binary(let byteCount), .text(let byteCount, _), .undecodable(let byteCount, _):
       byteCount
     }
   }
@@ -65,13 +66,16 @@ public enum FileViewObservation: Sendable, Hashable {
   }
 
   fileprivate var lineCount: Int? {
-    if case .text(_, let lineCount) = self { return lineCount }
-    return nil
+    switch self {
+    case .text(_, let lineCount), .undecodable(_, let lineCount): lineCount
+    case .binary: nil
+    }
   }
 }
 
 public enum FileOpenConfirmationReason: Sendable, Hashable {
   case binary(byteCount: Int)
+  case undecodable
   case byteCount(actual: Int, maximum: Int)
   case lineCount(actual: Int, maximum: Int)
 }
@@ -107,6 +111,9 @@ public enum FileOpenDecision: Sendable, Hashable {
     var reasons: [FileOpenConfirmationReason] = []
     if observation.isBinary {
       reasons.append(.binary(byteCount: observation.byteCount))
+    }
+    if case .undecodable = observation {
+      reasons.append(.undecodable)
     }
     if observation.byteCount > thresholds.maximumByteCount {
       reasons.append(

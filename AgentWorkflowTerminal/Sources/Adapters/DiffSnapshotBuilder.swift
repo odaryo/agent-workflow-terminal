@@ -51,17 +51,30 @@ public struct DiffSnapshotBuilder: Sendable {
   private let runner: GitRunner
   private let worktreeRoot: URL
   private let fileReader: FileContentReader
+  private let diffPatchOutputLimit: Int
 
   public init(
     worktreeRoot: URL,
     processRunner: any ProcessRunning,
     executableCandidates: [URL] = GitRunner.defaultExecutableCandidates
   ) throws(GitRunnerError) {
+    try self.init(
+      worktreeRoot: worktreeRoot, processRunner: processRunner,
+      executableCandidates: executableCandidates,
+      diffPatchOutputLimit: GitRunner.diffPatchOutputLimit)
+  }
+
+  init(
+    worktreeRoot: URL,
+    processRunner: any ProcessRunning,
+    executableCandidates: [URL] = GitRunner.defaultExecutableCandidates,
+    diffPatchOutputLimit: Int
+  ) throws(GitRunnerError) {
     runner = try GitRunner(
-      repositoryDirectory: worktreeRoot,
-      processRunner: processRunner,
+      repositoryDirectory: worktreeRoot, processRunner: processRunner,
       executableCandidates: executableCandidates)
     self.worktreeRoot = worktreeRoot
+    self.diffPatchOutputLimit = diffPatchOutputLimit
     fileReader = FileContentReader()
   }
 
@@ -199,21 +212,16 @@ public struct DiffSnapshotBuilder: Sendable {
     case .unsupportedMergeCommit(let parents):
       throw .unsupportedMergeCommit(parents: parents)
     }
-    let patch = try await run(
-      .diffPatch(.range(.twoDot(from: from, to: commit))),
-      outputLimit: GitRunner.diffPatchOutputLimit)
-    let parsed = UnifiedDiffPatch.parse(output: patch)
-    let sections = [
-      DiffOriginSection(
-        origin: .committed, files: parsed.files, unparsedRecordCount: parsed.failures.count)
-    ]
+    let patch = try await patchSection(
+      .range(.twoDot(from: from, to: commit)), origin: .committed)
+    let sections = [patch.section]
     return Collected(
       subject: .commit(hash: hash),
       sections: sections,
       observation: DiffSnapshotObservation(
         headObject: hash, files: observations(of: sections)),
       head: nil,
-      patchFailures: parsed.failures,
+      patchFailures: patch.failures,
       statusFailures: [],
       unreadableUntrackedPaths: [])
   }
@@ -237,12 +245,9 @@ public struct DiffSnapshotBuilder: Sendable {
       (.staged, .index(against: .head)),
       (.unstaged, .unstaged),
     ] {
-      let parsed = UnifiedDiffPatch.parse(
-        output: try await run(.diffPatch(target), outputLimit: GitRunner.diffPatchOutputLimit))
-      failures += parsed.failures
-      sections.append(
-        DiffOriginSection(
-          origin: origin, files: parsed.files, unparsedRecordCount: parsed.failures.count))
+      let patch = try await patchSection(target, origin: origin)
+      failures += patch.failures
+      sections.append(patch.section)
     }
 
     // untracked をファイル単位で得るため `all` を使う。ignored は含めない (§9.1.3)。
@@ -256,7 +261,8 @@ public struct DiffSnapshotBuilder: Sendable {
       subject: subject(mergeBase),
       sections: sections,
       observation: DiffSnapshotObservation(
-        headObject: statusResult.status.branch?.oid, files: observations(of: sections)),
+        headObject: statusResult.status.branch?.oid,
+        files: observations(of: sections, untrackedIdentities: untracked.identities)),
       head: Self.head(of: statusResult.status),
       patchFailures: failures,
       statusFailures: statusResult.failures,
@@ -311,24 +317,34 @@ public struct DiffSnapshotBuilder: Sendable {
     value.isEmpty || value.allSatisfy { $0 == "0" } ? nil : value
   }
 
+  private struct UntrackedFiles {
+    var files: [UnifiedDiffFile] = []
+    var unreadablePaths: [String] = []
+    var identities: [String: String] = [:]
+  }
+
   private func synthesizeUntracked(
     _ status: GitStatus
-  ) -> (files: [UnifiedDiffFile], unreadablePaths: [String]) {
-    var files: [UnifiedDiffFile] = []
-    var unreadable: [String] = []
+  ) -> UntrackedFiles {
+    var result = UntrackedFiles()
+    let contentIdentity = UntrackedContentIdentity()
     for entry in status.entries {
       guard case .untracked(let path) = entry else { continue }
       guard !path.hasSuffix("/") else {
         // `-uall` でも、内部に .git を持つディレクトリは畳まれたまま出る。
-        files.append(UntrackedFileDiff.fileWithoutContent(path: path, reason: .notReadable))
-        unreadable.append(path)
+        result.files.append(UntrackedFileDiff.fileWithoutContent(path: path, reason: .notReadable))
+        result.unreadablePaths.append(path)
+        result.identities[path] = contentIdentity.identity(worktreeRoot: worktreeRoot, path: path)
         continue
       }
       let read = readUntracked(path: path)
-      files.append(read.file)
-      if !read.isSynthesized { unreadable.append(path) }
+      result.files.append(read.file)
+      if !read.isSynthesized {
+        result.unreadablePaths.append(path)
+        result.identities[path] = contentIdentity.identity(worktreeRoot: worktreeRoot, path: path)
+      }
     }
-    return (files, unreadable)
+    return result
   }
 
   /// 全行追加へ合成できたかどうかを、そのまま呼び出し側へ返す。読めなかったものを
@@ -344,7 +360,7 @@ public struct DiffSnapshotBuilder: Sendable {
         UntrackedFileDiff.fileWithoutContent(path: path, reason: .binary(byteCount: byteCount)),
         false
       )
-    case .text(let byteCount, _):
+    case .text(let byteCount, _), .undecodable(let byteCount, _):
       guard let text = result.text, text.truncatedAtByteCount == nil else {
         return (
           UntrackedFileDiff.fileWithoutContent(path: path, reason: .tooLarge(byteCount: byteCount)),
@@ -355,13 +371,19 @@ public struct DiffSnapshotBuilder: Sendable {
     }
   }
 
-  private func observations(of sections: [DiffOriginSection]) -> [DiffFileObservation] {
+  private func observations(
+    of sections: [DiffOriginSection], untrackedIdentities: [String: String] = [:]
+  ) -> [DiffFileObservation] {
     sections.flatMap { section in
       section.files.map { file in
-        DiffFileObservation(
+        var text = UnifiedDiffCanonicalText.text(of: file)
+        if section.origin == .untracked, let identity = untrackedIdentities[file.path] {
+          text += "\u{1F}" + identity
+        }
+        return DiffFileObservation(
           origin: section.origin,
           path: file.path,
-          fingerprint: Self.fingerprint(UnifiedDiffCanonicalText.text(of: file)))
+          fingerprint: Self.fingerprint(text))
       }
     }
   }
@@ -386,6 +408,16 @@ public struct DiffSnapshotBuilder: Sendable {
     } catch {
       throw .git(error)
     }
+  }
+
+  private func patchSection(
+    _ target: GitDiffTarget, origin: DiffChangeOrigin
+  ) async throws(DiffSnapshotBuilderError) -> DiffPatchSection {
+    do {
+      return DiffPatchSection(
+        output: try await runner.runTruncatingAtOutputLimit(
+          .diffPatch(target), outputLimit: diffPatchOutputLimit), origin: origin)
+    } catch { throw .git(error) }
   }
 
   private func revision(_ value: String) throws(DiffSnapshotBuilderError) -> GitRevision {

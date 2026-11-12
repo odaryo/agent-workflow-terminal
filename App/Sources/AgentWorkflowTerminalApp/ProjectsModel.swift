@@ -237,6 +237,15 @@ final class ProjectsModel: ObservableObject {
     return nil
   }
 
+  func setMasksName(_ masksName: Bool, of commonDirectory: WorktreeIdentity) {
+    guard canSave else {
+      warning = "Project の一覧を読み込めていないので保存できません"
+      return
+    }
+    guard registry.setMasksName(masksName, of: commonDirectory) else { return }
+    save()
+  }
+
   /// 一覧から外すだけで、repository・tmux session・アプリ内データには触れない (設計書 §16.1)。
   /// その Project の端末は view ごと破棄され、tmux client が detach する。
   func unregister(_ commonDirectory: WorktreeIdentity) {
@@ -272,6 +281,8 @@ final class ProjectsModel: ObservableObject {
       model.stop()
       await model.pendingSave?.value
     }
+    let presentedName =
+      registry.project(commonDirectory)?.presentedName ?? review.project.displayName
     unregister(commonDirectory)
 
     var problems = await kill(review.sessions)
@@ -283,7 +294,7 @@ final class ProjectsModel: ObservableObject {
 
     if !problems.isEmpty {
       warning =
-        "「\(review.project.displayName)」の登録は解除しましたが、削除しきれていません。"
+        "「\(presentedName)」の登録は解除しましたが、削除しきれていません。"
         + problems.joined(separator: " ")
     }
   }
@@ -465,6 +476,10 @@ func setProjectAgentCommand(
 }
 
 extension RegisteredProject {
+  var presentedName: String {
+    masksName ? ProjectNameMask.masked(displayName) : displayName
+  }
+
   /// 一覧の表示名。bare repository では `repo.git` のように bare ディレクトリ名になる。
   var displayName: String {
     URL(fileURLWithPath: directory).lastPathComponent

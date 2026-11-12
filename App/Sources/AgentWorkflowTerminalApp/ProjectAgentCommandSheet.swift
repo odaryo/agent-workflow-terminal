@@ -19,8 +19,10 @@ struct ProjectAgentCommandSheet: View {
   }
 
   var body: some View {
+    let presentedName =
+      projects.registry.project(project.commonDirectory)?.presentedName ?? project.displayName
     VStack(alignment: .leading, spacing: 16) {
-      Text("「\(project.displayName)」の Agent 起動コマンド")
+      Text("「\(presentedName)」の Agent 起動コマンド")
         .font(.headline)
       Text(
         """

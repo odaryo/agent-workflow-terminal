@@ -29,7 +29,6 @@ struct AgentWorkflowTerminalApp: App {
     .windowToolbarStyle(.unifiedCompact)
     .defaultSize(width: 900, height: 560)
     .commands {
-      ProjectNameMaskCommands(projects: projects)
       ProjectNavigationCommands(projects: projects, shortcuts: projects.shortcuts)
       SessionCyclingCommands(projects: projects, shortcuts: projects.shortcuts)
       NewAgentSessionCommands(projects: projects, shortcuts: projects.shortcuts)

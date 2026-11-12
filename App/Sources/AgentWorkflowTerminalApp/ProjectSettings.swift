@@ -12,6 +12,24 @@ struct ProjectSettingsView: View {
     }
 
     Form {
+      Section {
+        if projects.registry.projects.isEmpty {
+          Text("登録済みの Project はありません。")
+        } else {
+          ForEach(projects.registry.projects, id: \.commonDirectory) { project in
+            Toggle(
+              project.displayName,
+              isOn: Binding(
+                get: { projects.registry.project(project.commonDirectory)?.masksName ?? false },
+                set: { projects.setMasksName($0, of: project.commonDirectory) }))
+          }
+        }
+      } header: {
+        Text("名前を伏せる Project")
+      } footer: {
+        Text("チェックした Project は Overview などで 1 文字目と伏字で表示します。")
+      }
+
       Section("到達できない Project") {
         if unavailableProjects.isEmpty {
           Text("到達できない Project はありません。")

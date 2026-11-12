@@ -5,10 +5,11 @@ import TerminalCore
 /// 切り替えも端末への入力もできなくなる。
 struct WorktreeClosePanelHost: View {
   @ObservedObject var closing: WorktreeClosing
+  let masksProjectName: Bool
 
   var body: some View {
     if let session = closing.session {
-      WorktreeClosePanel(session: session)
+      WorktreeClosePanel(session: session, masksProjectName: masksProjectName)
         .id(ObjectIdentifier(session))
       Divider()
     }
@@ -17,11 +18,16 @@ struct WorktreeClosePanelHost: View {
 
 private struct WorktreeClosePanel: View {
   @ObservedObject var session: WorktreeCloseSession
+  let masksProjectName: Bool
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       Text("Close: \(title)").font(.headline)
-      Text(session.target.worktreePath).font(.caption).foregroundStyle(.secondary)
+      Text(
+        masksProjectName
+          ? URL(fileURLWithPath: session.target.worktreePath).lastPathComponent
+          : session.target.worktreePath
+      ).font(.caption).foregroundStyle(.secondary)
       content
     }
     .padding(10)

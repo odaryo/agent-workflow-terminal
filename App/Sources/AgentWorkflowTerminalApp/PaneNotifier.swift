@@ -121,7 +121,8 @@ final class PaneNotifier {
       let observed = model.paneObservations.observed[event.session]
       let detail = observed?.details[event.paneID]
       let subject = PaneNotificationContent.Subject(
-        projectName: model.project.displayName,
+        projectName: projects?.registry.project(model.project.commonDirectory)?.presentedName
+          ?? model.project.displayName,
         taskName: model.worktreeTitle(of: event.worktree),
         paneName: paneShortName(
           paneID: event.paneID, isMain: model.mainPane(of: event.worktree) == event.paneID,

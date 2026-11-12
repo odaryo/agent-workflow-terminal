@@ -37,7 +37,7 @@ struct ProjectsWindowContent: View {
     }
     .background { MainWindowCapture(navigator: projects.navigator) }
     .confirmationDialog(
-      projects.pendingUnregister?.title ?? "",
+      projects.pendingUnregister?.title(in: projects.registry) ?? "",
       isPresented: Binding(
         get: { projects.pendingUnregister != nil },
         set: { if !$0 { projects.dismissUnregister() } }),
@@ -96,8 +96,12 @@ struct ProjectsWindowContent: View {
       // 切り替えると前の Project の端末は `dismantleNSView` で破棄され、tmux client が detach する
       // (session は残る)。セッションのように opacity で重ねると前の Project の client が attach した
       // まま残り、戻ったときに同じ session へ2つ目の client が attach する。
-      ProjectView(model: model)
-        .id(model.project.commonDirectory)
+      ProjectView(
+        model: model,
+        masksProjectName: projects.registry.project(model.project.commonDirectory)?.masksName
+          ?? false
+      )
+      .id(model.project.commonDirectory)
     } else if projects.registry.projects.isEmpty {
       ContentUnavailableView {
         Label("Project が登録されていません", systemImage: "folder.badge.plus")

@@ -39,6 +39,7 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_CFBundleDisplayName: AWT
         INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Host の SSH に接続して tmux を操作します。
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         SWIFT_VERSION: "6.0"
         SWIFT_STRICT_CONCURRENCY: complete

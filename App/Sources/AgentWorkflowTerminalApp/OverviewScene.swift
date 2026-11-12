@@ -53,11 +53,7 @@ struct OverviewView: View {
               isSelectedProject: projects.registry.selection == model.project.commonDirectory,
               selectProject: { projects.select(model.project.commonDirectory) },
               agentCommand: {
-                guard
-                  case .success(let command) = ProjectAgentCommand.normalized(
-                    projects.registry.project(model.project.commonDirectory)?.agentCommand ?? "")
-                else { return nil }
-                return command
+                projects.agentCommand(for: model.project.commonDirectory)
               },
               onSetAgentCommand: onSetAgentCommand,
               requestUnregister: { await projects.requestUnregister($0) },

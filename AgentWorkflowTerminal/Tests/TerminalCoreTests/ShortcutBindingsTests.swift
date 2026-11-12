@@ -12,6 +12,7 @@ private enum ShortcutFixtures {
     (.toggleCodeViewer, KeyCombination(key: .character("c"), modifiers: [.command, .shift])),
     (.toggleDiffViewer, KeyCombination(key: .character("d"), modifiers: [.command, .shift])),
     (.bringAppToFront, KeyCombination(key: .space, modifiers: [.command])),
+    (.newSessionWithAgent, KeyCombination(key: .character("n"), modifiers: [.command, .shift])),
   ]
   static let custom = KeyCombination(key: .character("k"), modifiers: [.command, .control])
   static let otherCustom = KeyCombination(key: .character("j"), modifiers: [.command, .option])

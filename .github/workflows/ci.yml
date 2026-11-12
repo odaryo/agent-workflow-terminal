@@ -51,13 +51,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # brew install tmux ripgrep は 24s で、起動 約 5s・bottle の取得 約 6s・pour 約 12s だった
-      # (run 43134188790)。起動と取得をビルドの裏へ回す。取得はリンクしないので、単体テストを CLI の
-      # 無い環境で回す前提は崩れない (Issue #1012)。
-      - name: Prefetch tmux and ripgrep
+      # brew install tmux ripgrep は直列だと 23〜24s かかる (run 43134188790 / 43136338586)。ビルドの
+      # 裏で導入してすぐ unlink し、単体テストを CLI の無い環境で回したあとでリンクする (Issue #1012)。
+      - name: Preinstall tmux and ripgrep
         timeout-minutes: 2
         run: |
-          "$GITHUB_WORKSPACE/scripts/ci-brew-prefetch.sh" start tmux ripgrep
+          "$GITHUB_WORKSPACE/scripts/ci-brew-preinstall.sh" start tmux ripgrep
 
       # 版の取得は1回にする (xcodebuild -version は1回 1〜3 秒かかる)。key はファイルのバイト列の
       # ハッシュで、以前の `{ ...; } 2>&1 | shasum` と同じ値になる (変えるとキャッシュが外れる)。
@@ -136,8 +135,10 @@ jobs:
       #
       # 単体テストは tmux / ripgrep を導入する前に走らせる。統合テスト用のフラグ無しで実 CLI に
       # 触れてしまうテストを、CLI の無い環境で落とすため (ジョブを分けていた頃と同じ前提)。
+      # 裏の導入の終わりを待ち、tmux / rg が PATH に無いことを確かめてから回す。
       - name: Test
         run: |
+          "$GITHUB_WORKSPACE/scripts/ci-brew-preinstall.sh" wait tmux rg
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/build-and-test.log" \
             --timeout 600 \
@@ -147,24 +148,21 @@ jobs:
       # 単体テストの失敗と統合テストの結果を別々に得られており、それを失わないため。
       - name: Test (serial, timing sensitive)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        # 経過時間を測るので、裏の brew fetch と重ねない。実際には取得はビルド中に終わっている。
         run: |
-          "$GITHUB_WORKSPACE/scripts/ci-brew-prefetch.sh" wait
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/build-and-test-serial.log" \
             --timeout 300 \
             -- swift test --no-parallel --filter AdaptersSerialTimingTests
 
       # tmux と ripgrep は runner イメージに無い (実測 2026-09-08: macos-15-arm64 の README に
-      # どちらも記載が無い)。tmux / ripgrep の導入は 13〜19 秒 (実測 2026-11-01)。取得は
-      # Prefetch tmux and ripgrep が済ませている。
+      # どちらも記載が無い)。導入は Preinstall tmux and ripgrep が裏で済ませており、ここではリンク
+      # だけをする。裏の導入が落ちていれば、ここで導入し直す。
       - name: Install tmux and ripgrep
         id: install-clis
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 10
         run: |
-          "$GITHUB_WORKSPACE/scripts/ci-brew-prefetch.sh" wait
-          brew install tmux ripgrep
+          "$GITHUB_WORKSPACE/scripts/ci-brew-preinstall.sh" link
 
       # 版数は固定せず runner の既定を使い、ログに残す。サポート下限版数が未決 (Issue #16) の
       # 段階で pin すると、外界のドリフトを検出するというこの段の目的自体が消える。
@@ -229,10 +227,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 方式は build-and-test の Prefetch tmux and ripgrep と同じ。
-      - name: Prefetch tmux, ripgrep and fish
+      # 方式は build-and-test の Preinstall tmux and ripgrep と同じ。
+      - name: Preinstall tmux, ripgrep and fish
         timeout-minutes: 2
-        run: scripts/ci-brew-prefetch.sh start tmux ripgrep fish
+        run: scripts/ci-brew-preinstall.sh start tmux ripgrep fish
 
       # 版の取得は1回にする (xcodebuild -version は1回 1〜3 秒かかる)。key はファイルのバイト列の
       # ハッシュで、以前の `{ ...; } 2>&1 | shasum` と同じ値になる (変えるとキャッシュが外れる)。
@@ -284,7 +282,9 @@ jobs:
       # 読み込み経路だけは window も GHOSTTY_RESOURCES_DIR も無しに検証できる (Issue #236)。
       - name: Test
         working-directory: App
-        run: swift test
+        run: |
+          ../scripts/ci-brew-preinstall.sh wait tmux rg fish
+          swift test
 
       # 保存の条件は build-and-test と同じ。
       - name: Save build cache
@@ -300,14 +300,13 @@ jobs:
       # 220 件で後始末込み 36〜43 秒 (並列にする前は 5 分 4 秒)。
       # tmux・ripgrep・fish の導入は、合わせて 16〜21 秒 (#852 の CI 実測)。Swift のビルドを待たないので、
       # 全体の長さを決める build-and-test から、短いこのジョブへ移した (#719)。単体テストを CLI の
-      # 無い環境で走らせるため、導入は App の Test の後にする。
+      # 無い環境で走らせるため、導入は裏で済ませて unlink しておき、リンクは App の Test の後にする
+      # (Issue #1012)。
       - name: Install tmux, ripgrep and fish
         id: install-clis
         if: ${{ !cancelled() }}
         timeout-minutes: 10
-        run: |
-          scripts/ci-brew-prefetch.sh wait
-          brew install tmux ripgrep fish
+        run: scripts/ci-brew-preinstall.sh link
 
       # 計測用の pane の後始末 (scripts/stop-tty-processes.sh、Issue #540) が、tty の持ち主を確かめずに
       # 止めないことを、隔離 server を立てて検査する。tmux が要るので、tmux を入れるジョブに置く。

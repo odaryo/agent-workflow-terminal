@@ -3,6 +3,8 @@ options:
   deploymentTarget:
     iOS: "17.0"
 packages:
+  AgentWorkflowTerminal:
+    path: ../AgentWorkflowTerminal
   SwiftTerm:
     url: https://github.com/migueldeicaza/SwiftTerm.git
     exactVersion: 1.99.3
@@ -19,6 +21,8 @@ targets:
     sources:
       - Sources
     dependencies:
+      - package: AgentWorkflowTerminal
+        product: RemoteClient
       - package: SwiftTerm
         product: SwiftTerm
       - package: swift-nio-ssh

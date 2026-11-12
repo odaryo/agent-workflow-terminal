@@ -1,8 +1,7 @@
 # iPad アプリ
 
 `AgentWorkflowTerminalMobile` は iOS 17.0 以降の iPad 向け SwiftUI アプリです。
-この段では「接続先は未設定です」と表示する画面だけを持ち、SwiftTerm・NIOSSH・NIOPosix の
-import を通じて依存をビルドできることを確認します。
+SwiftTerm の端末を使い、SSH 経由で Host の tmux session に接続します。
 
 - `project.yml`: XcodeGen の定義。SwiftTerm 1.99.3、swift-nio-ssh 0.15.1、swift-nio 2.105.0 を固定。
 - `Sources/`: アプリのソース。
@@ -10,8 +9,8 @@ import を通じて依存をビルドできることを確認します。
 
 ## 前提
 
-- Swift 6.2 以降を含む Xcode。CI の iPad アプリの段では Xcode 26.3 を使います。
-  SwiftTerm 1.99.3 の tools version が 6.2 のため、Xcode 16.4 では依存を解決できません。
+- Xcode 26.6 (Swift 6.3.3) 以降。CI も Xcode 26.6 を使います。
+  SwiftTerm 1.99.3 は tools version 6.2 を要求しますが、Xcode 26.3 ではコンパイルできません。
 - XcodeGen 2.46.0。PATH に置くか、以下の取得スクリプトで取得して `XCODEGEN` に指定します。
 - 実機へのインストールには Apple ID と無料の Personal Team、USB 接続した iPad が必要です。
   Simulator 向けビルドには署名は不要です。
@@ -23,7 +22,7 @@ import を通じて依存をビルドできることを確認します。
 
 ```sh
 # 必要な場合、使用する Xcode を選択する
-export DEVELOPER_DIR=/Applications/Xcode_26.3.app
+export DEVELOPER_DIR=/Applications/Xcode_26.6.app
 
 # PATH に XcodeGen が無ければ、固定した sha256 を検証して取得する
 export XCODEGEN="$(scripts/fetch-xcodegen.sh "$TMPDIR/awt-xcodegen")"
@@ -84,5 +83,31 @@ Bundle ID は **`dev.odaryo.agentworkflowterminal.ios`** のまま使ってく�
 ## CI
 
 既存の `checks` ジョブ内の `Build (iPad app)` 段で XcodeGen を sha256 検証付きで取得し、
-Simulator 向けにビルドします。この段だけ `DEVELOPER_DIR=/Applications/Xcode_26.3.app` を設定し、
-ほかの段は runner の既定の Xcode 16.4 を使います。ビルド時間は PR の CI で確認します。
+macos-26 の Xcode 26.6 (Swift 6.3.3) で Simulator 向けにビルドします。
+ビルド時間は PR の CI で確認します。
+
+## Host 側の準備
+
+1. Host の Mac の **システム設定 > 一般 > 共有 > リモートログイン** を有効にし、
+   接続に使うユーザーのログインを許可します。
+2. Host と iPad の両方を同じ Tailscale ネットワークにつなぎます。
+3. iPad の AWT の「設定」を開き、「公開鍵をコピー」を押します。
+   Host の接続ユーザーの `~/.ssh/authorized_keys` に、その公開鍵を1行追加します。
+   `.ssh` ディレクトリは所有者だけがアクセスできるようにし、`authorized_keys` は所有者だけが
+   読み書きできるようにします（それぞれ権限 700、600）。秘密鍵は iPad の Keychain に保存されます。
+4. Host で `which tmux` を実行し、表示された絶対パスを確認します。
+   アプリの設定に Tailscale の host、SSH の port（通常 22）、Host の user、tmuxPath を入力し保存します。
+5. 初回接続では host・port・host key の指紋を表示します。
+   Host で `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` を実行し、指紋が一致することを
+   確認して「承認」を押します。承認済みの指紋と異なる host key では接続を拒否します。
+   正当な鍵の更新を確認できた場合は、設定から古い承認を削除して接続し直します。
+
+## 使い方
+
+- 一覧の「更新」で session の名前と接続中の client 数を取得します。
+  session を選ぶと attach し、端末で操作できます。
+- 「一覧へ戻る」で detach します。Host の tmux session はそのまま残ります。
+- アプリをバックグラウンドへ回すと接続を切り、前面へ戻ると同じ名前の session に繋ぎ直します。
+- 回線が切れて「接続が切れました」と表示されたら「再接続」を押します。
+  認証に失敗した場合は公開鍵の登録を確認し、session が見つからない場合は一覧を更新します。
+- 日本語の専用入力欄、Option の組み合わせ、⌘ の組み合わせの端末への送信は対象外です。

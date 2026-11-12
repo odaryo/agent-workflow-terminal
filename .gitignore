@@ -6,6 +6,8 @@ App/.DS_Store
 
 ## User settings
 xcuserdata/
+iOS/*.xcodeproj/
+iOS/DerivedData/
 
 ## Obj-C/Swift specific
 *.hmap

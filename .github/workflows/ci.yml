@@ -342,9 +342,13 @@ jobs:
   # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 1〜17 秒
   # (ビルドのキャッシュが当たった回、run 42971839848) で、brew で導入しうる段は 10 分、それ以外は
   # 5 分、iOS のビルドは 15 分とする。
+  # このジョブだけ macos-26 で動かす。iPad アプリが依存する SwiftTerm 1.99.3 は tools version 6.2 を
+  # 要求し、macos-15 で選べる最新の Xcode 26.3 (Swift 6.2.4) ではそのソースをコンパイルできなかった
+  # (PowerlineRenderer.swift:386、run 43206688015)。macos-26 の既定は Xcode 26.6 (ユーザー決定
+  # 2026-11-12、#806)。ほかの2つのジョブは macos-15 のままなので、Xcode と Swift の版はジョブで違う。
   checks:
     name: Static checks & iOS build
-    runs-on: macos-15
+    runs-on: macos-26
     # SwiftLint / shellcheck が runner イメージから外れると brew で導入するため (数分)、
     # 段の合計 (実測 2 分前後) より大きく取る。
     timeout-minutes: 30
@@ -393,7 +397,8 @@ jobs:
             AgentWorkflowTerminal/Package.swift \
             App/Sources \
             App/Tests \
-            App/Package.swift
+            App/Package.swift \
+            iOS/Sources
 
       # SwiftLint はランナーイメージに同梱されていればそれを使い、
       # 同梱が外れた場合だけ brew で導入する (数分かかる)。
@@ -537,6 +542,14 @@ jobs:
           echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
           rm -rf .build
           build_ios
+
+      # XcodeGen は runner イメージに無いので、リリースの zip を sha256 で固定して取る。
+      - name: Build (iPad app)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          XCODEGEN="$(scripts/fetch-xcodegen.sh "$RUNNER_TEMP/xcodegen")"
+          XCODEGEN="$XCODEGEN" scripts/build-ios.sh
 
       # 保存の条件は build-and-test と同じ。
       - name: Save build cache

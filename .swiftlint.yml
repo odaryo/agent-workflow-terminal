@@ -10,6 +10,7 @@ included:
   - App/Sources
   - App/Tests
   - App/Package.swift
+  - iOS/Sources
 
 excluded:
   # スパイクは使い捨てコードであり、規約の対象外 (docs/coding-guidelines.md)。

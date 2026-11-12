@@ -89,11 +89,16 @@
 
 ```text
 TerminalCore  ←  Adapters  ←  (将来) App / Host Core
+RemoteClient  ←  iOS/ の iPad アプリ
 ```
 
 - `TerminalCore`: ドメインモデル。**UI・外部プロセス・ネットワークに依存しない。**
   Foundation の値型 (`Date`、`URL` 等) までは許可する。
 - `Adapters`: 外部世界との境界の実装。`TerminalCore` にのみ依存する。
+- `RemoteClient`: モバイルクライアント (`iOS/`) のうち、UI とネットワークに依存しないロジック
+  (SSH の鍵と host key の表記、TOFU の判定、tmux の呼び出し文字列と出力の解析、attach の状態遷移)。
+  Foundation と CryptoKit だけを使い、今はどのターゲットにも依存しない。SSH の接続そのもの
+  (SwiftNIO SSH) と端末 (SwiftTerm) は `iOS/` の側に置く (#806)。
 - 依存は**一方向**。`TerminalCore` から `Adapters` を参照しない。
 - platform 依存の実装は同じターゲット内で `#if os(macOS)` により表現する。iOS 実装が載る
   設計書 §24 Gate 2 までは、platform を理由にターゲットを分割しない。
@@ -217,6 +222,10 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
   (git のメッセージ・日付書式) をパーサへ流さない。
 - tmux 3.4 は `LC_ALL=C` だけでは非 ASCII を `_` へ置換または削除するため、global option `-u` を
   サブコマンドより前へ併用する。`LC_ALL=C` と `-u` の併用で UTF-8 を保持できることを実測済み。
+- iPad アプリが SSH の exec で Host の tmux を呼ぶ経路 (`RemoteClient` の `RemoteTmuxCommand`) は、
+  argv ではなく Host のログインシェルへ渡す1行のコマンド文字列で、`LC_ALL=C` を付けず `-u` だけを付ける。
+  exec の環境には LANG も LC_* も無く、`-u` だけで UTF-8 を保持できた (#806 の計測2、tmux 3.8)。
+  この経路で解析する tmux の出力 (`list-sessions` の format と stderr) にはロケール依存の文言が無い。
 - 実行するバイナリの解決 (どの `tmux` / `git` を使うか) は Adapter に一元化し、
   呼び出し側のコードへ暗黙の `PATH` 依存を散らさない。
 

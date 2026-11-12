@@ -113,6 +113,8 @@ extension ShortcutAction {
     switch self {
     case .previousProject: "前のプロジェクト"
     case .nextProject: "次のプロジェクト"
+    case .collapseProject: "プロジェクトを閉じる"
+    case .expandProject: "プロジェクトを開く"
     case .previousSession: "前のセッション"
     case .nextSession: "次のセッション"
     case .newSessionWithAgent: "新規セッションで Agent を起動"

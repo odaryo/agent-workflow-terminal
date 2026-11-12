@@ -164,6 +164,41 @@ struct ShortcutBindingsPersistenceEdgeTests {
     #expect(result.bindings.isDefault(.previousProject))
   }
 
+  @Test(
+    "Projectの開閉の新しい既定と競合する保存済みの変更を1件破棄する",
+    arguments: [
+      (ShortcutAction.collapseProject, ShortcutKey.leftArrow),
+      (.expandProject, .rightArrow),
+    ])
+  func dropsOverrideConflictingWithProjectDisclosureDefault(
+    action: ShortcutAction, key: ShortcutKey
+  ) throws {
+    let combination = KeyCombination(key: key, modifiers: [.command])
+    let data = try JSONEncoder().encode(["previousSession": combination])
+    let result = ShortcutBindings.decoded(from: data)
+    #expect(result.droppedCount == 1)
+    #expect(result.bindings == ShortcutBindings())
+    #expect(result.bindings.isDefault(.previousSession))
+    #expect(result.bindings.isDefault(action))
+    #expect(
+      result.bindings.combination(for: .previousSession)
+        == KeyCombination(key: .upArrow, modifiers: [.command]))
+    #expect(result.bindings.combination(for: action) == combination)
+  }
+
+  @Test("Projectの開閉の新しい既定と競合しない保存済みの変更は保持する")
+  func preservesOverrideNotConflictingWithProjectDisclosureDefaults() throws {
+    let combination = KeyCombination(key: .leftArrow, modifiers: [.command, .option])
+    let data = try JSONEncoder().encode(["previousSession": combination])
+    let result = ShortcutBindings.decoded(from: data)
+    var expected = ShortcutBindings()
+    try expected.assign(combination, to: .previousSession)
+    #expect(result.droppedCount == 0)
+    #expect(result.bindings == expected)
+    #expect(!result.bindings.isDefault(.previousSession))
+    #expect(result.bindings.combination(for: .previousSession) == combination)
+  }
+
   @Test("重複の破棄で復活した既定との競合も再検査し2件破棄する")
   func rechecksConflictsAfterRestoringDefault() throws {
     let json = """

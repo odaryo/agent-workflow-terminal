@@ -26,7 +26,9 @@ public enum DiffSubject: Sendable, Equatable {
 }
 
 public struct DiffSectionTruncation: Sendable, Equatable {
+  /// バイト数。stdout と stderr を合わせた上限なので、patch そのものの大きさとは限らない。
   public let outputLimit: Int
+  /// `nil` は捨てたレコードの header を読めなかったこと。パスを推測で埋めない。
   public let firstOmittedPath: String?
 
   public init(outputLimit: Int, firstOmittedPath: String?) {

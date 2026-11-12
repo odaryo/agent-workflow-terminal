@@ -7,7 +7,9 @@ import Testing
 struct ProcessRunnerTruncationTests {
   private let runner = FoundationProcessRunner()
 
-  @Test("§7.2 上限までの連続した先頭バイトを返し子を1秒以内に停止・回収する")
+  // TERM も PIPE も無視して出力を止める子にする。`exec yes` のままだと読み口が閉じた時点の
+  // SIGPIPE で終わり、猶予の後に SIGKILL を送る経路を通らない (#212 のレビューで実測 6.6 ms)。
+  @Test("§7.2 上限までの連続した先頭バイトを返し、TERM を無視する子も1秒以内に停止・回収する")
   func truncatesPrefixAndReapsChild() async throws {
     let pidFile = FileManager.default.temporaryDirectory
       .appending(path: "awt-truncation-\(UUID().uuidString).pid")
@@ -18,7 +20,9 @@ struct ProcessRunnerTruncationTests {
       let output = try await runner.runTruncatingAtOutputLimit(
         executableURL: URL(fileURLWithPath: "/bin/sh"),
         arguments: [
-          "-c", "trap '' TERM; echo $$ > \"$1\"; exec /usr/bin/yes 0123456789",
+          "-c",
+          "trap '' TERM PIPE; echo $$ > \"$1\"; /usr/bin/yes 0123456789 | /usr/bin/head -c 70000;"
+            + " exec /bin/sleep 5",
           "awt-truncation", pidFile.path,
         ],
         environment: [:], timeout: .seconds(2), outputLimit: limit)
@@ -27,7 +31,9 @@ struct ProcessRunnerTruncationTests {
     } catch {
       Issue.record("打ち切り結果の代わりにエラー: \(error)")
     }
-    #expect(start.duration(to: ContinuousClock().now) < .seconds(1))
+    let elapsed = start.duration(to: ContinuousClock().now)
+    #expect(elapsed >= .milliseconds(100))
+    #expect(elapsed < .seconds(1))
     let contents = try String(contentsOf: pidFile, encoding: .utf8)
     let pid = try #require(pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)))
     errno = 0

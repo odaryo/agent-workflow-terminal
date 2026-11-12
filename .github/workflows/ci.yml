@@ -393,7 +393,8 @@ jobs:
             AgentWorkflowTerminal/Package.swift \
             App/Sources \
             App/Tests \
-            App/Package.swift
+            App/Package.swift \
+            iOS/Sources
 
       # SwiftLint はランナーイメージに同梱されていればそれを使い、
       # 同梱が外れた場合だけ brew で導入する (数分かかる)。
@@ -537,6 +538,19 @@ jobs:
           echo "::warning::復元した .build でビルドが落ちたので、.build を消してビルドし直す"
           rm -rf .build
           build_ios
+
+      # SwiftTerm 1.99.3 は tools version 6.2 を要求するため、この段だけ Xcode 26.3 を使う。
+      # ほかの段は既定の 16.4 のままにする (ユーザー決定 2026-11-12、#806)。
+      - name: Build (iPad app)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        env:
+          DEVELOPER_DIR: /Applications/Xcode_26.3.app
+        run: |
+          xcodebuild -version
+          swift --version
+          XCODEGEN="$(scripts/fetch-xcodegen.sh "$RUNNER_TEMP/xcodegen")"
+          XCODEGEN="$XCODEGEN" scripts/build-ios.sh
 
       # 保存の条件は build-and-test と同じ。
       - name: Save build cache

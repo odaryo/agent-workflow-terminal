@@ -1,0 +1,40 @@
+name: AgentWorkflowTerminalMobile
+options:
+  deploymentTarget:
+    iOS: "17.0"
+packages:
+  SwiftTerm:
+    url: https://github.com/migueldeicaza/SwiftTerm.git
+    exactVersion: 1.99.3
+  swift-nio-ssh:
+    url: https://github.com/apple/swift-nio-ssh.git
+    exactVersion: 0.15.1
+  swift-nio:
+    url: https://github.com/apple/swift-nio.git
+    exactVersion: 2.105.0
+targets:
+  AgentWorkflowTerminalMobile:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    dependencies:
+      - package: SwiftTerm
+        product: SwiftTerm
+      - package: swift-nio-ssh
+        product: NIOSSH
+      - package: swift-nio
+        product: NIOCore
+      - package: swift-nio
+        product: NIOPosix
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.odaryo.agentworkflowterminal.ios
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: "YES"
+        INFOPLIST_KEY_CFBundleDisplayName: AWT
+        INFOPLIST_KEY_UILaunchScreen_Generation: "YES"
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete

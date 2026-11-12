@@ -1,4 +1,5 @@
 import AppKit
+import GhosttyKit
 
 /// - Important: view を weak で保持する。強参照にすると `dismantleNSView` 後も view が生き残り、
 ///   surface を持ったまま tick の走査対象に残る。
@@ -41,6 +42,10 @@ final class GhosttySurfaceRegistry {
 
   func notifyEnvironmentMayHaveChanged() {
     for view in liveViews() { view.environmentMayHaveChanged() }
+  }
+
+  func applyColorScheme(_ scheme: ghostty_color_scheme_e) {
+    for view in liveViews() { view.applyColorScheme(scheme) }
   }
 
   func pollProcessExit() {

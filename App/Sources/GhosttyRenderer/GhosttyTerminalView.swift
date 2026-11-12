@@ -120,6 +120,25 @@ private func makeGhosttyRuntimeConfiguration() -> ghostty_runtime_config_s {
         } else {
           pendingAction = nil
         }
+      case GHOSTTY_ACTION_RELOAD_CONFIG:
+        // Why not hard reload: 設定ファイルは起動時に固定する設計であり、読み直さない
+        // (TerminalConfigurationFileURL.swift の注釈、設計書 §21.6)。
+        // soft は color scheme の切り替えが conditional state を変えたときの再適用要求である。
+        accepted = action.action.reload_config.soft
+        if accepted, target.tag == GHOSTTY_TARGET_SURFACE {
+          if let surface = target.target.surface,
+            let surfaceID = GhosttySurfaceIdentities.shared.id(
+              forAddress: UInt(bitPattern: surface))
+          {
+            pendingAction = .reloadSurfaceConfiguration(surfaceID: surfaceID)
+          } else {
+            pendingAction = nil
+          }
+        } else if accepted {
+          pendingAction = .reloadApplicationConfiguration
+        } else {
+          pendingAction = nil
+        }
       case GHOSTTY_ACTION_MOUSE_OVER_LINK:
         accepted = true
         pendingAction = .setLinkCursor(action.action.mouse_over_link.len > 0)
@@ -341,6 +360,8 @@ private final class GhosttyRuntime {
   private var configurationFileURL: URL?
   // Why not discard: NotificationCenter は token の解放時に observer を解除する。
   private var keyboardObserver: (any NSObjectProtocol)?
+  // Why not discard: NSKeyValueObservation は解放時に観測を解除する。
+  private var appearanceObservation: NSKeyValueObservation?
 
   private init() {}
 
@@ -378,6 +399,18 @@ private final class GhosttyRuntime {
     }
     app = newApp
     ghostty_app_set_focus(newApp, NSApp.isActive)
+    // Why 同期: 新しい surface は生成時に app の conditional state を継ぐ。非同期にすると、
+    // ダークで起動した直後の surface が light で始まる (App/vendor/ghostty/src/Surface.zig:606)。
+    ghostty_app_set_color_scheme(newApp, ghosttyColorScheme(for: NSApp.effectiveAppearance))
+    appearanceObservation = NSApplication.shared.observe(
+      \.effectiveAppearance,
+      options: [.new]
+    ) { _, _ in
+      // Why main queue へ移す: KVO の通知スレッドは変更を起こしたスレッドで、隔離を保証しない。
+      DispatchQueue.main.async {
+        MainActor.assumeIsolated { Self.shared.appearanceChanged() }
+      }
+    }
     keyboardObserver = NotificationCenter.default.addObserver(
       forName: NSTextInputContext.keyboardSelectionDidChangeNotification,
       object: nil,
@@ -401,6 +434,23 @@ private final class GhosttyRuntime {
   func setFocus(_ focused: Bool) {
     guard let app else { return }
     ghostty_app_set_focus(app, focused)
+  }
+
+  private func appearanceChanged() {
+    guard let app else { return }
+    let scheme = ghosttyColorScheme(for: NSApp.effectiveAppearance)
+    ghostty_app_set_color_scheme(app, scheme)
+    GhosttySurfaceRegistry.shared.applyColorScheme(scheme)
+  }
+
+  func reloadSurfaceConfiguration(_ surface: ghostty_surface_t) {
+    guard let config else { return }
+    ghostty_surface_update_config(surface, config)
+  }
+
+  func reloadApplicationConfiguration() {
+    guard let app, let config else { return }
+    ghostty_app_update_config(app, config)
   }
 
   func drainMailboxAfterSurfaceFree() {
@@ -505,6 +555,15 @@ private final class GhosttyRuntime {
       // Why not action を信用する: action は表示用の通知であり、届いた時点の surface の状態を
       // 保証しない。受け側で ghostty_surface_process_exited を読み直す。
       GhosttySurfaceRegistry.shared.view(for: surfaceID)?.pollProcessExit()
+    case .reloadSurfaceConfiguration(let surfaceID):
+      // Why 引き直す: surface ポインタを hop の向こうへ持ち越すと、解放後のアドレス再利用で
+      // 別の surface を指す (Issue #125)。
+      guard let surface = GhosttySurfaceRegistry.shared.view(for: surfaceID)?.surface else {
+        return
+      }
+      shared.reloadSurfaceConfiguration(surface)
+    case .reloadApplicationConfiguration:
+      shared.reloadApplicationConfiguration()
     case .setLinkCursor(let isLink):
       (isLink ? NSCursor.pointingHand : NSCursor.arrow).set()
     case .openURL(let value):
@@ -517,6 +576,8 @@ private final class GhosttyRuntime {
 private enum PendingGhosttyAction: Sendable {
   case setTitle(surfaceID: GhosttySurfaceID, title: String)
   case childExited(surfaceID: GhosttySurfaceID)
+  case reloadSurfaceConfiguration(surfaceID: GhosttySurfaceID)
+  case reloadApplicationConfiguration
   case setLinkCursor(Bool)
   case openURL(String)
 }
@@ -585,6 +646,8 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
   var stateChanged: ((TerminalRendererState) -> Void)?
   /// 最後に通知した状態。`lifecycle` の初期値と揃えておく。
   private var notifiedState = TerminalRendererState.notStarted
+  // Why not discard: NotificationCenter は token の解放時に observer を解除する。
+  var occlusionObserver: (any NSObjectProtocol)?
 
   init() {
     super.init(frame: .zero)
@@ -639,7 +702,9 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
 
   override public func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
+    observeWindowOcclusion()
     environmentMayHaveChanged()
+    applyOcclusion()
   }
 
   func environmentMayHaveChanged() {
@@ -891,6 +956,10 @@ public final class GhosttySurfaceView: NSView, TerminalRenderer {
       return
     }
     surfaceID = creatingID
+    // Why 生成直後に渡す: 隠れている間や appearance 変更後に作り直された surface が、
+    // 可視・light 扱いのまま残らないようにする。
+    applyOcclusion()
+    applyColorScheme()
 
     updateContentScaleFromWindow()
     updateSurfaceSize()

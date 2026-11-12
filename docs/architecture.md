@@ -974,7 +974,7 @@ PR、Issue、テスト結果、エラーをすべて専用UIへ変換する構�
 - 検索範囲は常に現在のworktree内だけとする。
 - 複数worktreeを横断する検索は提供しない。
 - 検索結果から該当ファイル／行を開ける。
-- 複数検索結果を選択し、ファイル、行番号、コード断片をfresh Agentへまとめて渡せる。
+- 複数の検索結果を選んでAgentへまとめて渡す機能は提供しない — 対象外(2026-11-12、ユーザー決定、Issue #195)。それまで確定としていた「複数検索結果を選択し、ファイル、行番号、コード断片をfresh Agentへまとめて渡せる」を撤回した。送信先(fresh Agentを起こすpane)を決めるには§10の相談用paneの設計が先に要るが、ユーザーがこの機能を不要と判断した。検索結果から該当ファイル／行を開く機能は変えない。
 
 ### 8.2 現在の推奨
 
@@ -1006,8 +1006,6 @@ ripgrepの`--json`は`--max-count`に達したことを出力しない。上限�
 検索は明示実行のみで、実行中の再実行は前回をキャンセルする。キャンセルは実際のripgrepプロセスの終了まで届かなければならない。`Task.detached`は新しいrootになりキャンセルを継承しないため使わない。
 
 ripgrepが未導入の場合は検索だけが使えず、他の機能は動く。実行ファイルは`/opt/homebrew/bin/rg`、`/usr/local/bin/rg`、`/usr/bin/rg`の順に探す。
-
-複数検索結果を選択してfresh Agentへまとめて渡す経路(§8.1)は未実装。
 
 ## 9. Diff Viewerとレビューsnapshot
 
@@ -1250,8 +1248,9 @@ Agentの実装サイクル、修正回、レビュー回の対応関係もTermin
 - Code Viewerの選択行／行範囲
 - Diffの選択範囲
 - Evidence画像または注釈
-- 複数の検索結果
 - 過去のCode／Diff履歴
+
+2026-11-12に「複数の検索結果」を起点から外した(§8.1)。
 
 ### 10.2 Consultation pane
 
@@ -3049,6 +3048,7 @@ PR_READY
 - [x] Code Viewerはread-only、自動更新、history／blameあり
 - [x] DiffはCommit／Base／Branchの3種
 - [x] Code／Diff／EvidenceはViewer Drawerで開き、別窓は設けない。Diffの比較元の指定はDrawer内で行う
+- [x] 検索結果を選んでAgentへまとめて渡す機能は提供しない(2026-11-12、§8.1。当初の確定を撤回)
 - [x] Code ViewerとDiffの`.html`／`.md`は、作業ツリーの今のファイルをOSの既定アプリで開ける(Mac専用。作業PCのClientでの扱いは2026-11-08から未確定)。アプリ内レンダリングはしない(2026-11-01)
 - [x] submodule内のuntrackedファイルはDiffで観測しない(`--ignore-submodules=untracked`を明示)
 - [x] Diffはsnapshot、Refreshで新snapshot

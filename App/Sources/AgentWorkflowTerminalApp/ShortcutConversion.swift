@@ -117,6 +117,7 @@ extension ShortcutAction {
     case .expandProject: "プロジェクトを開く"
     case .previousSession: "前のセッション"
     case .nextSession: "次のセッション"
+    case .newSessionWithAgent: "新規セッションで Agent を起動"
     case .toggleOverview: "Overview の表示切り替え"
     case .toggleCodeViewer: "Code Viewer の表示切り替え"
     case .toggleDiffViewer: "Diff Viewer の表示切り替え"

@@ -89,11 +89,16 @@
 
 ```text
 TerminalCore  ←  Adapters  ←  (将来) App / Host Core
+RemoteClient  ←  iOS/ の iPad アプリ
 ```
 
 - `TerminalCore`: ドメインモデル。**UI・外部プロセス・ネットワークに依存しない。**
   Foundation の値型 (`Date`、`URL` 等) までは許可する。
 - `Adapters`: 外部世界との境界の実装。`TerminalCore` にのみ依存する。
+- `RemoteClient`: モバイルクライアント (`iOS/`) のうち、UI とネットワークに依存しないロジック
+  (SSH の鍵と host key の表記、TOFU の判定、tmux の呼び出し文字列と出力の解析、attach の状態遷移)。
+  Foundation と CryptoKit だけを使い、今はどのターゲットにも依存しない。SSH の接続そのもの
+  (SwiftNIO SSH) と端末 (SwiftTerm) は `iOS/` の側に置く (#806)。
 - 依存は**一方向**。`TerminalCore` から `Adapters` を参照しない。
 - platform 依存の実装は同じターゲット内で `#if os(macOS)` により表現する。iOS 実装が載る
   設計書 §24 Gate 2 までは、platform を理由にターゲットを分割しない。

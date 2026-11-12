@@ -32,6 +32,7 @@ struct AgentWorkflowTerminalApp: App {
       ProjectNameMaskCommands(projects: projects)
       ProjectNavigationCommands(projects: projects, shortcuts: projects.shortcuts)
       SessionCyclingCommands(projects: projects, shortcuts: projects.shortcuts)
+      NewAgentSessionCommands(projects: projects, shortcuts: projects.shortcuts)
       ViewerCommands(projects: projects, shortcuts: projects.shortcuts)
       CommandGroup(after: .toolbar) {
         OverviewMenuItem(navigator: projects.navigator, shortcuts: projects.shortcuts)

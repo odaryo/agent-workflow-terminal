@@ -217,6 +217,14 @@ final class ProjectsModel: ObservableObject {
     save()
   }
 
+  func agentCommand(for project: WorktreeIdentity) -> String? {
+    guard
+      case .success(let command) = ProjectAgentCommand.normalized(
+        registry.project(project)?.agentCommand ?? "")
+    else { return nil }
+    return command
+  }
+
   func setAgentCommand(
     _ input: String, of commonDirectory: WorktreeIdentity
   ) -> ProjectAgentCommandSaveError? {

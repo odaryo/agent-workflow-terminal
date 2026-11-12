@@ -294,9 +294,12 @@ final class AppModel: ObservableObject {
       // Active の切り替えは await の間にも起こるので、`previous` は await の後に読む。
       // ID を増減させるのはスキャンだけなので、ID はここで取っても食い違わない。
       let knownIdentities = worktrees.map(\.identity)
+      let reusable = reusableObservations(isRequestedScan: !waiters.isEmpty)
       let mark = closeExecutionOverlap.mark()
       // 失敗を空の一覧として適用すると、全 worktree が消失扱いになる。
-      guard case .success(let scan) = await scan(with: detector, knownIdentities: knownIdentities)
+      guard
+        case .success(let scan) = await scan(
+          with: detector, knownIdentities: knownIdentities, reusableObservations: reusable)
       else {
         reconcileFailedScan()
         continue

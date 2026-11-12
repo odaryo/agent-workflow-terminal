@@ -5,10 +5,12 @@ import TerminalCore
 extension AppModel {
   func scan(
     with detector: GitWorktreeDetector,
-    knownIdentities: [WorktreeIdentity] = []
+    knownIdentities: [WorktreeIdentity] = [],
+    reusableObservations: [DetectedWorktree] = []
   ) async -> Result<GitWorktreeScanResult, GitWorktreeScanError> {
     do {
-      let scan = try await detector.scan(knownIdentities: knownIdentities)
+      let scan = try await detector.scan(
+        knownIdentities: knownIdentities, reusableObservations: reusableObservations)
       // 失敗した entry は `detected` に載らないため、呼び出し側が `unobserved` として渡す。
       // 原因の原文はバナーに載せきれないので、ここに残す。
       for failure in scan.failures {

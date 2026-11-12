@@ -343,23 +343,54 @@ public struct GitRunner: Sendable {
     return environment
   }
 
+  public func runTruncatingAtOutputLimit(
+    _ command: GitReadCommand,
+    timeout: Duration? = nil,
+    outputLimit: Int = Self.defaultOutputLimit
+  ) async throws(GitRunnerError) -> ProcessRunOutput {
+    try await execute(
+      command, timeout: timeout, outputLimit: outputLimit, truncatingAtOutputLimit: true)
+  }
+
   public func run(
     _ command: GitReadCommand,
     timeout: Duration? = nil,
     outputLimit: Int = Self.defaultOutputLimit
   ) async throws(GitRunnerError) -> ProcessRunResult {
-    let result: ProcessRunResult
+    switch try await execute(
+      command, timeout: timeout, outputLimit: outputLimit, truncatingAtOutputLimit: false)
+    {
+    case .completed(let result): return result
+    case .truncated(_, _, let limit): throw .process(.outputLimitExceeded(limit: limit))
+    }
+  }
+
+  private func execute(
+    _ command: GitReadCommand, timeout: Duration?, outputLimit: Int, truncatingAtOutputLimit: Bool
+  ) async throws(GitRunnerError) -> ProcessRunOutput {
+    let arguments =
+      ["--no-optional-locks", "-C", repositoryDirectory.path, "--no-pager"] + command.arguments
+    let timeout = timeout ?? Self.defaultTimeout
+    let output: ProcessRunOutput
     do {
-      result = try await processRunner.run(
-        executableURL: executableURL,
-        arguments: ["--no-optional-locks", "-C", repositoryDirectory.path, "--no-pager"]
-          + command.arguments,
-        environment: environment, timeout: timeout ?? Self.defaultTimeout,
-        outputLimit: outputLimit)
+      if truncatingAtOutputLimit {
+        output = try await processRunner.runTruncatingAtOutputLimit(
+          executableURL: executableURL, arguments: arguments,
+          environment: environment, timeout: timeout, outputLimit: outputLimit)
+      } else {
+        output = .completed(
+          try await processRunner.run(
+            executableURL: executableURL, arguments: arguments,
+            environment: environment, timeout: timeout, outputLimit: outputLimit))
+      }
     } catch { throw .process(error) }
+    if case .completed(let result) = output { try validateExitCode(result) }
+    return output
+  }
+
+  private func validateExitCode(_ result: ProcessRunResult) throws(GitRunnerError) {
     guard result.exitCode == 0 else {
       throw .commandFailed(exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr)
     }
-    return result
   }
 }

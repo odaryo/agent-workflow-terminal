@@ -109,7 +109,7 @@ extension DiffViewerModel {
   }
 
   nonisolated static func notices(for result: DiffSnapshotBuildResult) -> [String] {
-    var notices: [String] = []
+    var notices = truncationNotices(for: result.snapshot)
     if !result.patchFailures.isEmpty {
       notices.append("Diff の一部を解析できていません (\(result.patchFailures.count) 件)")
     }
@@ -121,6 +121,24 @@ extension DiffViewerModel {
         "untracked の内容を読めていません (\(result.unreadableUntrackedPaths.count) 件)")
     }
     return notices
+  }
+
+  nonisolated static func truncationNotices(for snapshot: DiffSnapshot) -> [String] {
+    snapshot.sections.compactMap { section in
+      guard let truncation = section.truncation else { return nil }
+      let mebibyte = 1024 * 1024
+      let limit =
+        truncation.outputLimit.isMultiple(of: mebibyte)
+        ? "\(truncation.outputLimit / mebibyte) MiB" : "\(truncation.outputLimit) バイト"
+      let last =
+        section.files.last.map { "表示した最後のファイル: \($0.path)。" }
+        ?? "表示できたファイルはありません。"
+      let omitted =
+        truncation.firstOmittedPath.map { "表示していない最初のファイル: \($0)。" }
+        ?? "表示していないファイルの名前は読めませんでした。"
+      return "\(section.origin.label) の Diff が上限 (\(limit)) を超えたため、途中までを表示しています。"
+        + last + omitted + "以降のファイルの変更は検知できません。"
+    }
   }
 }
 

@@ -168,15 +168,10 @@ private struct OverviewProjectSection: View {
       !OverviewProjectPreferences.collapsedProjects(storedValue: collapsedProjectsJSON)
         .contains(model.project.commonDirectory.rawValue)
     } set: { expanded in
-      var collapsedProjects = OverviewProjectPreferences.collapsedProjects(
-        storedValue: collapsedProjectsJSON)
-      let project = model.project.commonDirectory.rawValue
-      if expanded {
-        collapsedProjects.remove(project)
-      } else {
-        collapsedProjects.insert(project)
-      }
-      if let storedValue = OverviewProjectPreferences.storedValue(for: collapsedProjects) {
+      if let storedValue = OverviewProjectPreferences.storedValue(
+        collapsedProjectsJSON, settingCollapsed: !expanded,
+        for: model.project.commonDirectory.rawValue)
+      {
         collapsedProjectsJSON = storedValue
       }
     }

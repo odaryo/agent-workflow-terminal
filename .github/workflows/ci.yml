@@ -342,9 +342,13 @@ jobs:
   # になり、`!cancelled()` の段は続けて走る (#475 の計測、run 41343741887)。実測は各段 1〜17 秒
   # (ビルドのキャッシュが当たった回、run 42971839848) で、brew で導入しうる段は 10 分、それ以外は
   # 5 分、iOS のビルドは 15 分とする。
+  # このジョブだけ macos-26 で動かす。iPad アプリが依存する SwiftTerm 1.99.3 は tools version 6.2 を
+  # 要求し、macos-15 で選べる最新の Xcode 26.3 (Swift 6.2.4) ではそのソースをコンパイルできなかった
+  # (PowerlineRenderer.swift:386、run 43206688015)。macos-26 の既定は Xcode 26.6 (ユーザー決定
+  # 2026-11-12、#806)。ほかの2つのジョブは macos-15 のままなので、Xcode と Swift の版はジョブで違う。
   checks:
     name: Static checks & iOS build
-    runs-on: macos-15
+    runs-on: macos-26
     # SwiftLint / shellcheck が runner イメージから外れると brew で導入するため (数分)、
     # 段の合計 (実測 2 分前後) より大きく取る。
     timeout-minutes: 30
@@ -539,16 +543,11 @@ jobs:
           rm -rf .build
           build_ios
 
-      # SwiftTerm 1.99.3 は tools version 6.2 を要求するため、この段だけ Xcode 26.3 を使う。
-      # ほかの段は既定の 16.4 のままにする (ユーザー決定 2026-11-12、#806)。
+      # XcodeGen は runner イメージに無いので、リリースの zip を sha256 で固定して取る。
       - name: Build (iPad app)
         if: ${{ !cancelled() }}
         timeout-minutes: 20
-        env:
-          DEVELOPER_DIR: /Applications/Xcode_26.3.app
         run: |
-          xcodebuild -version
-          swift --version
           XCODEGEN="$(scripts/fetch-xcodegen.sh "$RUNNER_TEMP/xcodegen")"
           XCODEGEN="$XCODEGEN" scripts/build-ios.sh
 

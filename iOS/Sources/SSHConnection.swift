@@ -40,13 +40,10 @@ struct SSHConnection: SSHConnecting {
     let loop = group.next()
     let completion = loop.makePromise(of: Void.self)
     let attempt = try await loop.submit {
-      NIOLoopBound(SSHConnectionAttempt(completion: completion), eventLoop: loop)
+      let attempt = SSHConnectionAttempt(completion: completion)
+      attempt.startTimeout()
+      return NIOLoopBound(attempt, eventLoop: loop)
     }.get()
-    let timeout = loop.scheduleTask(in: .seconds(10)) {
-      attempt.value.fail(
-        SSHConnectionError.connectionFailed("SSH connection timed out (10 seconds)"))
-    }
-    defer { timeout.cancel() }
     let bootstrap = ClientBootstrap(group: loop)
       .connectTimeout(.seconds(10))
       .channelInitializer { channel in
@@ -60,7 +57,8 @@ struct SSHConnection: SSHConnecting {
               .init(
                 userAuthDelegate: SSHKeyAuthentication(
                   username: settings.user, privateKey: privateKey),
-                serverAuthDelegate: SSHHostKeyAuthentication(decision: hostKeyDecision))),
+                serverAuthDelegate: SSHHostKeyAuthentication(
+                  decision: hostKeyDecision, attempt: attempt))),
             allocator: channel.allocator, inboundChildChannelInitializer: nil)
           try channel.pipeline.syncOperations.addHandlers(
             handler, SSHParentHandler(attempt: attempt.value))
@@ -154,6 +152,9 @@ struct SSHConnection: SSHConnecting {
     timeout: TimeAmount?
   ) async throws -> SSHSession {
     try await channel.eventLoop.submit {
+      guard channel.isActive else {
+        throw SSHConnectionError.connectionFailed("SSH connection closed")
+      }
       let state = SSHSessionState(
         loop: channel.eventLoop, command: command, terminal: terminal,
         onOutput: onOutput, onClose: onClose)

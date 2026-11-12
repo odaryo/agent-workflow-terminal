@@ -29,6 +29,7 @@ final class SSHKeyAuthentication: NIOSSHClientUserAuthenticationDelegate {
 
 struct SSHHostKeyAuthentication: NIOSSHClientServerAuthenticationDelegate {
   let decision: @Sendable (SSHHostKeyFingerprint) async -> Bool
+  let attempt: NIOLoopBound<SSHConnectionAttempt>
 
   func validateHostKey(
     hostKey: NIOSSHPublicKey, validationCompletePromise: EventLoopPromise<Void>
@@ -40,12 +41,18 @@ struct SSHHostKeyAuthentication: NIOSSHClientServerAuthenticationDelegate {
       validationCompletePromise.fail(SSHConnectionError.connectionFailed("Invalid SSH host key"))
       return
     }
+    attempt.value.stopTimeout()
     let decision = decision
+    let attempt = attempt
     Task {
-      if await decision(fingerprint) {
-        validationCompletePromise.succeed(())
-      } else {
-        validationCompletePromise.fail(SSHConnectionError.hostKeyRejected(fingerprint))
+      let approved = await decision(fingerprint)
+      attempt.eventLoop.execute {
+        attempt.value.startTimeout()
+        if approved {
+          validationCompletePromise.succeed(())
+        } else {
+          validationCompletePromise.fail(SSHConnectionError.hostKeyRejected(fingerprint))
+        }
       }
     }
   }
@@ -58,14 +65,32 @@ final class SSHConnectionAttempt {
   private var firstError: SSHConnectionError?
   private var candidates: [any Channel] = []
   private var candidateErrors: [ObjectIdentifier: SSHConnectionError] = [:]
+  private var timeout: Scheduled<Void>?
 
   init(completion: EventLoopPromise<Void>) {
     self.completion = completion
   }
 
+  func startTimeout() {
+    guard !finished else { return }
+    stopTimeout()
+    let loop = completion.futureResult.eventLoop
+    let bound = NIOLoopBound(self, eventLoop: loop)
+    timeout = loop.scheduleTask(in: .seconds(10)) {
+      bound.value.fail(
+        SSHConnectionError.connectionFailed("SSH connection timed out (10 seconds)"))
+    }
+  }
+
+  func stopTimeout() {
+    timeout?.cancel()
+    timeout = nil
+  }
+
   func succeed() {
     guard !finished else { return }
     finished = true
+    stopTimeout()
     candidates.removeAll()
     candidateErrors.removeAll()
     completion.succeed(())
@@ -75,6 +100,7 @@ final class SSHConnectionAttempt {
     guard !finished else { return }
     if firstError == nil { firstError = SSHConnectionError.wrapping(error) }
     finished = true
+    stopTimeout()
     completion.fail(firstError ?? SSHConnectionError.wrapping(error))
     for candidate in candidates { candidate.close(promise: nil) }
     candidates.removeAll()

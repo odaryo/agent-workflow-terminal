@@ -129,7 +129,7 @@ final class SSHSessionState {
         fail(SSHConnectionError.connectionFailed("SSH session closed before exec was accepted"))
       }
     }
-    onClose?(exitStatus)
+    if accepted { onClose?(exitStatus) }
   }
 
   func fail(_ error: any Error) {

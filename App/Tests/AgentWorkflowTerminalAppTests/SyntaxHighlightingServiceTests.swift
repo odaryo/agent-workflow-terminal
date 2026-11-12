@@ -4,7 +4,11 @@ import Testing
 
 @testable import AgentWorkflowTerminalApp
 
-@Suite("§7.3 highlight.js のシンタックスハイライト")
+// テストごとにサービスを作るので、並行に回すと各テストが初回の NSFont(name:size:) を同時に呼ぶ。
+// hw.ncpu = 10 の機械 (macOS 27.0.1) では、Swift Concurrency の 10 本以上がそこで fontd の
+// 同期の返事を同時に待つと、返事が来ないまま止まった (#982。9 本以下や Thread からの
+// 呼び出しでは止まらなかった)。
+@Suite("§7.3 highlight.js のシンタックスハイライト", .serialized)
 struct SyntaxHighlightingServiceTests {
   private static let resourceDirectory = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()

@@ -51,12 +51,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # brew install tmux ripgrep は 24s で、起動 約 5s・bottle の取得 約 6s・pour 約 12s だった
+      # (run 43134188790)。起動と取得をビルドの裏へ回す。取得はリンクしないので、単体テストを CLI の
+      # 無い環境で回す前提は崩れない (Issue #1012)。
+      - name: Prefetch tmux and ripgrep
+        timeout-minutes: 2
+        run: |
+          "$GITHUB_WORKSPACE/scripts/ci-brew-prefetch.sh" start tmux ripgrep
+
+      # 版の取得は1回にする (xcodebuild -version は1回 1〜3 秒かかる)。key はファイルのバイト列の
+      # ハッシュで、以前の `{ ...; } 2>&1 | shasum` と同じ値になる (変えるとキャッシュが外れる)。
       - name: Show toolchain
         id: toolchain
         run: |
-          xcodebuild -version
-          swift --version
-          echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          { xcodebuild -version; swift --version; } > "$RUNNER_TEMP/toolchain.txt" 2>&1
+          cat "$RUNNER_TEMP/toolchain.txt"
+          echo "key=$(shasum -a 256 < "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       # `.build` を main の push で保存し、PR と後の push で復元する (Issue #851)。actions/checkout は
       # 全ファイルの mtime を checkout した時刻にし、swift-driver は mtime がビルド記録と違うソースを
@@ -137,19 +147,24 @@ jobs:
       # 単体テストの失敗と統合テストの結果を別々に得られており、それを失わないため。
       - name: Test (serial, timing sensitive)
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        # 経過時間を測るので、裏の brew fetch と重ねない。実際には取得はビルド中に終わっている。
         run: |
+          "$GITHUB_WORKSPACE/scripts/ci-brew-prefetch.sh" wait
           "$GITHUB_WORKSPACE/scripts/run-swift-test.sh" \
             --log "$RUNNER_TEMP/test-logs/build-and-test-serial.log" \
             --timeout 300 \
             -- swift test --no-parallel --filter AdaptersSerialTimingTests
 
       # tmux と ripgrep は runner イメージに無い (実測 2026-09-08: macos-15-arm64 の README に
-      # どちらも記載が無い)。tmux / ripgrep の導入は 13〜19 秒 (実測 2026-11-01)。
+      # どちらも記載が無い)。tmux / ripgrep の導入は 13〜19 秒 (実測 2026-11-01)。取得は
+      # Prefetch tmux and ripgrep が済ませている。
       - name: Install tmux and ripgrep
         id: install-clis
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         timeout-minutes: 10
-        run: brew install tmux ripgrep
+        run: |
+          "$GITHUB_WORKSPACE/scripts/ci-brew-prefetch.sh" wait
+          brew install tmux ripgrep
 
       # 版数は固定せず runner の既定を使い、ログに残す。サポート下限版数が未決 (Issue #16) の
       # 段階で pin すると、外界のドリフトを検出するというこの段の目的自体が消える。
@@ -159,14 +174,6 @@ jobs:
           tmux -V
           git --version
           rg --version
-
-      # 計測用の pane の後始末 (scripts/stop-tty-processes.sh、Issue #540) が、tty の持ち主を確かめずに
-      # 止めないことを、隔離 server を立てて検査する。tmux が要るのでこのジョブに置く (checks ジョブには
-      # tmux が無い)。後始末の残りは、後の Check for leftover servers and sockets が検出する。
-      - name: Stop tty processes - checks
-        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
-        timeout-minutes: 5
-        run: "$GITHUB_WORKSPACE/scripts/check-stop-tty-processes.sh"
 
       # 統合テストを有効にしたまま全体を通す。AdaptersSerialTimingTests を外すのは単体テストと
       # 同じ理由に加え、統合テスト有効時に時間予算を超える既知の問題 (Issue #176) を避けるため。
@@ -222,12 +229,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 方式は build-and-test の Prefetch tmux and ripgrep と同じ。
+      - name: Prefetch tmux, ripgrep and fish
+        timeout-minutes: 2
+        run: scripts/ci-brew-prefetch.sh start tmux ripgrep fish
+
+      # 版の取得は1回にする (xcodebuild -version は1回 1〜3 秒かかる)。key はファイルのバイト列の
+      # ハッシュで、以前の `{ ...; } 2>&1 | shasum` と同じ値になる (変えるとキャッシュが外れる)。
       - name: Show toolchain
         id: toolchain
         run: |
-          xcodebuild -version
-          swift --version
-          echo "key=$( { xcodebuild -version; swift --version; } 2>&1 | shasum -a 256 | cut -c1-16)" >> "$GITHUB_OUTPUT"
+          { xcodebuild -version; swift --version; } > "$RUNNER_TEMP/toolchain.txt" 2>&1
+          cat "$RUNNER_TEMP/toolchain.txt"
+          echo "key=$(shasum -a 256 < "$RUNNER_TEMP/toolchain.txt" | cut -c1-16)" >> "$GITHUB_OUTPUT"
 
       - name: Fetch GhosttyKit
         env:
@@ -291,7 +305,18 @@ jobs:
         id: install-clis
         if: ${{ !cancelled() }}
         timeout-minutes: 10
-        run: brew install tmux ripgrep fish
+        run: |
+          scripts/ci-brew-prefetch.sh wait
+          brew install tmux ripgrep fish
+
+      # 計測用の pane の後始末 (scripts/stop-tty-processes.sh、Issue #540) が、tty の持ち主を確かめずに
+      # 止めないことを、隔離 server を立てて検査する。tmux が要るので、tmux を入れるジョブに置く。
+      # 全体の長さを決める build-and-test から、こちらへ移した (Issue #1012)。後始末の残りは、後の
+      # Check for leftover servers and sockets が検出する。
+      - name: Stop tty processes - checks
+        if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}
+        timeout-minutes: 5
+        run: scripts/check-stop-tty-processes.sh
 
       - name: Handoff script - checks
         if: ${{ !cancelled() && steps.install-clis.outcome == 'success' }}

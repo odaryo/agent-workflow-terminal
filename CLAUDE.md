@@ -383,7 +383,7 @@ tmux server を起動した開発版のバンドルが対象だった。バン�
   (レビューアが再現し、再計測でも、A を止めている 0.2 秒後に立てた C が `ttys006` を受け取って
   SIGKILL された)。そのため KILL と最後の確認は、最初に数えたプロセスに限っている。
   拒否の各形と、正しく渡せば止まること、止めている途中の再利用で新しい持ち主を止めないこと
-  (`AWT_STOP_TTY_GRACE_SECONDS` で待ちを延ばして起こす) は、CI の `build-and-test` ジョブの `Stop tty processes - checks`
+  (`AWT_STOP_TTY_GRACE_SECONDS` で待ちを延ばして起こす) は、CI の `build-app` ジョブの `Stop tty processes - checks`
   (`scripts/check-stop-tty-processes.sh`) が隔離 server を立てて検査する。宛先の判定 (同じ pid でも
   開始時刻が違えば撃たない・別の group へ移ったものはその pid だけを撃つ、など) は
   `scripts/stop_tty_targets.py` に切り出してあり、pid の再利用や group の移動は実プロセスでは

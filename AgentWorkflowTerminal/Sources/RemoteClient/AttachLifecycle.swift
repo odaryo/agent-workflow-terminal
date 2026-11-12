@@ -82,7 +82,7 @@ public struct AttachLifecycle: Sendable, Equatable {
     switch state {
     case .attaching(let name):
       state = .attached(name)
-    case .suspended:
+    case .idle, .suspended:
       return [.disconnect(generation: generation)]
     default:
       break

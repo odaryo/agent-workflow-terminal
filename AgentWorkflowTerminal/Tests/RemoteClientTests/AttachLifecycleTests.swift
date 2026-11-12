@@ -73,7 +73,7 @@ struct AttachLifecycleTests {
       (
         .idle,
         [
-          .attachSucceeded(generation: 0), .attachFailed(generation: 0, retryable: true),
+          .attachFailed(generation: 0, retryable: true),
           .attachFailed(generation: 0, retryable: false),
           .channelClosed(generation: 0, exitStatus: nil),
           .channelClosed(generation: 0, exitStatus: 1), .enteredBackground, .enteredForeground,
@@ -202,6 +202,20 @@ struct AttachLifecycleTests {
     #expect(lifecycle.handle(.detachRequested) == [.disconnect(generation: 2)])
     #expect(lifecycle.state == .idle)
     #expect(lifecycle.generation == 2)
+  }
+
+  @Test("detach 後の idle で遅れて成功した同じ世代の接続を閉じる")
+  func delayedSuccessAfterDetach() {
+    var lifecycle = AttachLifecycle()
+    #expect(
+      lifecycle.handle(.attachRequested(Self.name)) == [.connectAndAttach(Self.name, generation: 1)]
+    )
+    #expect(lifecycle.handle(.detachRequested) == [.disconnect(generation: 1)])
+    #expect(lifecycle.state == .idle)
+    #expect(lifecycle.generation == 1)
+    #expect(lifecycle.handle(.attachSucceeded(generation: 1)) == [.disconnect(generation: 1)])
+    #expect(lifecycle.state == .idle)
+    #expect(lifecycle.generation == 1)
   }
 
   @Test("裏で遅れて成功した接続を閉じ、同じ名前へ新しい世代で戻る")

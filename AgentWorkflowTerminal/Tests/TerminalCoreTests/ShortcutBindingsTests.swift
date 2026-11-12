@@ -8,6 +8,8 @@ private enum ShortcutFixtures {
     (.nextProject, KeyCombination(key: .downArrow, modifiers: [.command, .option])),
     (.previousSession, KeyCombination(key: .upArrow, modifiers: [.command])),
     (.nextSession, KeyCombination(key: .downArrow, modifiers: [.command])),
+    (.collapseProject, KeyCombination(key: .leftArrow, modifiers: [.command])),
+    (.expandProject, KeyCombination(key: .rightArrow, modifiers: [.command])),
     (.toggleOverview, KeyCombination(key: .character("o"), modifiers: [.command, .shift])),
     (.toggleCodeViewer, KeyCombination(key: .character("c"), modifiers: [.command, .shift])),
     (.toggleDiffViewer, KeyCombination(key: .character("d"), modifiers: [.command, .shift])),

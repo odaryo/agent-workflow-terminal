@@ -84,7 +84,7 @@ public struct ProjectRegistry: Sendable, Hashable {
     return true
   }
 
-  /// 追加でも重複でも、その Project を選択する。重複のときは既存の `directory` を保つ。
+  /// 追加でも重複でも、その Project を選択する。重複のときは既存の Project を設定ごと保ち、渡された値は捨てる。
   @discardableResult
   public mutating func register(_ project: RegisteredProject) -> ProjectRegistration {
     let registration: ProjectRegistration =

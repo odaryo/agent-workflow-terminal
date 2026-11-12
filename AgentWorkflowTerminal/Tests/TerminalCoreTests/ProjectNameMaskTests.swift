@@ -72,6 +72,33 @@ struct ProjectNameMaskTests {
     #expect(registry == original)
   }
 
+  @Test("同じ common dir を登録し直しても、既存のマスク設定を保つ")
+  func duplicateRegistrationKeepsMasksName() throws {
+    var registry = ProjectRegistry()
+    registry.register(try project(masksName: true))
+
+    let registration = registry.register(try project(masksName: false))
+
+    #expect(registration == .alreadyRegistered)
+    #expect(registry.projects.map(\.masksName) == [true])
+  }
+
+  @Test("伏せる Project は masksName キーに true を保存し、そのキーから復元する")
+  func persistsMasksNameUnderFixedKey() throws {
+    var registry = ProjectRegistry()
+    registry.register(try project(masksName: true))
+    let data = try JSONEncoder().encode(PersistedProjectRegistry(registry))
+    let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let projects = try #require(json["projects"] as? [[String: Any]])
+    #expect(projects.first?["masksName"] as? Bool == true)
+
+    let saved =
+      #"{"schemaVersion":1,"projects":[{"commonDirectory":"/alpha/.git","directory":"/alpha","#
+      + #""masksName":true}],"selection":null}"#
+    let decoded = try JSONDecoder().decode(PersistedProjectRegistry.self, from: Data(saved.utf8))
+    #expect(ProjectRegistry(restoring: decoded).projects.map(\.masksName) == [true])
+  }
+
   @Test("永続化用の初期化ではマスク設定の既定値は nil")
   func persistedInitializerDefaultsToNil() throws {
     let alpha = try project()

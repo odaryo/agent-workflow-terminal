@@ -1,15 +1,17 @@
 import CryptoKit
 import Foundation
 
+public enum SSHKeyError: Error, Sendable, Equatable {
+  case invalidEd25519PublicKeyLength(Int)
+}
+
 public struct SSHEd25519PublicKey: Sendable, Hashable {
   private let rawRepresentation: Data
 
-  private enum ValidationError: Error {
-    case invalidLength
-  }
-
-  public init(rawRepresentation: Data) throws {
-    guard rawRepresentation.count == 32 else { throw ValidationError.invalidLength }
+  public init(rawRepresentation: Data) throws(SSHKeyError) {
+    guard rawRepresentation.count == 32 else {
+      throw .invalidEd25519PublicKeyLength(rawRepresentation.count)
+    }
     self.rawRepresentation = rawRepresentation
   }
 
@@ -27,6 +29,15 @@ public struct SSHEd25519PublicKey: Sendable, Hashable {
 
 public struct SSHHostKeyFingerprint: Sendable, Hashable, Codable {
   public let rawValue: String
+
+  public init(from decoder: any Decoder) throws {
+    rawValue = try decoder.singleValueContainer().decode(String.self)
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var container = encoder.singleValueContainer()
+    try container.encode(rawValue)
+  }
 
   public init(wireFormat: [UInt8]) {
     let digest = SHA256.hash(data: Data(wireFormat))

@@ -31,6 +31,10 @@ public struct RemoteTmuxSessionListParseFailure: Sendable, Equatable {
 }
 
 public struct RemoteTmuxSessionListParseResult: Sendable, Equatable {
+  public func session(named: String) -> RemoteTmuxSession? {
+    sessions.first { $0.name.utf8.elementsEqual(named.utf8) }
+  }
+
   public let sessions: [RemoteTmuxSession]
   public let failures: [RemoteTmuxSessionListParseFailure]
 
@@ -52,7 +56,7 @@ public enum RemoteTmuxSessionList {
     guard isDecimal(clients[...]), let attachedClients = Int(clients) else {
       throw .invalidAttachedClients(clients)
     }
-    // #806 計測2 (tmux 3.8): \ は出力で二重になるが、その出力名でのみ attach できた。
+    // #806 計測2 (tmux 3.8): \ は出力で二重になる。名前の照合には出力のままの表記を使う。
     return RemoteTmuxSession(id: id, attachedClients: attachedClients, name: String(fields[2]))
   }
 
@@ -80,13 +84,15 @@ public enum RemoteTmuxSessionList {
 
   public static func outcome(exitStatus: Int?, stdout: String, stderr: String) -> Outcome {
     if exitStatus == 0 { return .sessions(parse(output: stdout)) }
+    let message = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
     if exitStatus == 1,
-      stderr.hasPrefix("no server running on ") || stderr.hasPrefix("error connecting to ")
+      message.hasPrefix("no server running on ")
+        || (message.hasPrefix("error connecting to ")
+          && message.hasSuffix(" (No such file or directory)"))
     {
       return .noServer
     }
-    return .failed(
-      exitStatus: exitStatus, message: stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    return .failed(exitStatus: exitStatus, message: message)
   }
 
   private static func isDecimal(_ value: Substring) -> Bool {

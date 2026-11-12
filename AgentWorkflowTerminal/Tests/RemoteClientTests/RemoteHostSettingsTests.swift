@@ -7,8 +7,16 @@ struct RemoteHostSettingsTests {
   @Test("port の両境界と通常値は有効", arguments: [1, 22, 65535])
   func validSettings(port: Int) {
     let settings = RemoteHostSettings(
-      host: " mac.ts.net ", port: port, user: " user ", tmuxPath: "/opt/homebrew/bin/tmux")
+      host: "mac.ts.net", port: port, user: "user", tmuxPath: "/opt/homebrew/bin/tmux")
     #expect(settings.problems.isEmpty)
+  }
+
+  @Test("空でない host・user の前後の空白を拒否する", arguments: [" mac", "mac ", "\tmac\n"])
+  func surroundingWhitespace(value: String) {
+    let settings = RemoteHostSettings(host: value, port: 22, user: value, tmuxPath: "/tmux")
+    #expect(settings.problems.count == 2)
+    #expect(settings.problems.contains(.hostHasSurroundingWhitespace))
+    #expect(settings.problems.contains(.userHasSurroundingWhitespace))
   }
 
   @Test("範囲外 port は拒否する", arguments: [Int.min, -1, 0, 65536, Int.max])

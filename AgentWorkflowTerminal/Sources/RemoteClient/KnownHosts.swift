@@ -9,11 +9,41 @@ public struct KnownHosts: Sendable, Equatable, Codable {
 
   public init() {}
 
+  private struct Entry: Codable {
+    let host: String
+    let port: Int
+    let fingerprint: SSHHostKeyFingerprint
+  }
+
+  public init(from decoder: any Decoder) throws {
+    let entries = try decoder.singleValueContainer().decode([Entry].self)
+    for entry in entries {
+      trust(host: entry.host, port: entry.port, fingerprint: entry.fingerprint)
+    }
+  }
+
+  public func encode(to encoder: any Encoder) throws {
+    var entries: [Entry] = []
+    for host in fingerprints.keys.sorted() {
+      guard let ports = fingerprints[host] else { continue }
+      for port in ports.keys.sorted() {
+        guard let fingerprint = ports[port] else { continue }
+        entries.append(Entry(host: host, port: port, fingerprint: fingerprint))
+      }
+    }
+    var container = encoder.singleValueContainer()
+    try container.encode(entries)
+  }
+
   public func verdict(
     host: String, port: Int, fingerprint: SSHHostKeyFingerprint
   ) -> HostKeyVerdict {
-    guard let trusted = fingerprints[Self.normalized(host)]?[port] else { return .unknown }
+    guard let trusted = trustedFingerprint(host: host, port: port) else { return .unknown }
     return trusted == fingerprint ? .trusted : .mismatch(trusted: trusted)
+  }
+
+  public func trustedFingerprint(host: String, port: Int) -> SSHHostKeyFingerprint? {
+    fingerprints[Self.normalized(host)]?[port]
   }
 
   public mutating func trust(host: String, port: Int, fingerprint: SSHHostKeyFingerprint) {

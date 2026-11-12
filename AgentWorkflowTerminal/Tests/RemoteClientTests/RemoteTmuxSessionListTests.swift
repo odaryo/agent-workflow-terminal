@@ -31,14 +31,33 @@ struct RemoteTmuxSessionListTests {
     #expect(sessions.map(\.id) == ["$5", "$4", "$3", "$0", "$1", "$2"])
   }
 
-  @Test("解析した正式名を変換せず attach の宛先にする")
-  func attachesUsingMeasuredName() throws {
-    let sessions = RemoteTmuxSessionList.parse(output: try fixture("tmux-3.8-list-sessions"))
-      .sessions
-    let backslash = try #require(sessions.first { $0.id == "$3" })
+  @Test("fixture の正式名から現在の ID を引いて attach する")
+  func attachesUsingCurrentID() throws {
+    let result = RemoteTmuxSessionList.parse(output: try fixture("tmux-3.8-list-sessions"))
+    for expected in measuredSessions {
+      #expect(result.session(named: expected.name) == expected)
+    }
+    #expect(result.session(named: "missing") == nil)
+    #expect(result.session(named: "a|b  c") == nil)
+    let session = try #require(result.session(named: #"bs\\x"#))
     #expect(
-      RemoteTmuxCommand.attach(tmuxPath: "/opt/homebrew/bin/tmux", sessionName: backslash.name)
-        == #"'/opt/homebrew/bin/tmux' -u attach-session -t '=bs\\x'"#)
+      RemoteTmuxCommand.attach(tmuxPath: "/tmux", sessionID: session.id)
+        == "'/tmux' -u attach-session -t '$3'")
+  }
+
+  @Test("名前は正準等価でも UTF-8 のバイト列が違えば別名とする")
+  func exactNameBytes() throws {
+    let result = RemoteTmuxSessionList.parse(
+      output: "$1 0 é\n$3 0 e\u{301}\n$5 0 a:b\n$6 0 x.0\n$7 0 $0\n")
+    #expect(result.session(named: "é")?.id == "$1")
+    #expect(result.session(named: "e\u{301}")?.id == "$3")
+    #expect(result.session(named: "a:b")?.id == "$5")
+    #expect(result.session(named: "x.0")?.id == "$6")
+    #expect(result.session(named: "$0")?.id == "$7")
+    let single = RemoteTmuxSessionList.parse(output: "$9 0 é\n")
+    #expect(single.session(named: "e\u{301}") == nil)
+    let restarted = RemoteTmuxSessionList.parse(output: "$0 0 a:b\n")
+    #expect(restarted.session(named: "a:b")?.id == "$0")
   }
 
   @Test("異常行の行番号・原文・理由を残し、前後の正常行も保持する")
@@ -136,6 +155,9 @@ struct RemoteTmuxSessionListTests {
     let stderr = try fixture(name)
     #expect(
       RemoteTmuxSessionList.outcome(exitStatus: 1, stdout: "", stderr: stderr) == .noServer)
+    #expect(
+      RemoteTmuxSessionList.outcome(exitStatus: 1, stdout: "", stderr: " \t" + stderr + "\n ")
+        == .noServer)
   }
 
   @Test(
@@ -164,7 +186,15 @@ struct RemoteTmuxSessionListTests {
         1 as Int?, "prefix no server running on /tmp/socket",
         "prefix no server running on /tmp/socket"
       ),
-      (1 as Int?, " no server running on /tmp/socket", "no server running on /tmp/socket"),
+      (
+        1 as Int?, "error connecting to /tmp/socket (Permission denied)",
+        "error connecting to /tmp/socket (Permission denied)"
+      ),
+      (1 as Int?, "error connecting to /tmp/socket", "error connecting to /tmp/socket"),
+      (
+        1 as Int?, "error connecting to /tmp/socket (No such file or directory) extra",
+        "error connecting to /tmp/socket (No such file or directory) extra"
+      ),
     ]
   )
   func failedOutcome(status: Int?, stderr: String, message: String) {

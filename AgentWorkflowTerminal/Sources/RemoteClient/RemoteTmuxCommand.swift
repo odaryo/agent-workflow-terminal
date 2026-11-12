@@ -1,5 +1,6 @@
 import Foundation
 
+// Host のログインシェルは POSIX の単一引用を解釈する zsh・bash・sh を前提とする。
 public enum RemoteTmuxCommand {
   public static func shellQuote(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
@@ -11,7 +12,9 @@ public enum RemoteTmuxCommand {
       + " -u list-sessions -F '#{session_id} #{session_attached} #{session_name}'"
   }
 
-  public static func attach(tmuxPath: String, sessionName: String) -> String {
-    shellQuote(tmuxPath) + " -u attach-session -t " + shellQuote("=" + sessionName)
+  // #806 spec 2e の tmux 3.8 計測: 名前の : と . は target の区切りに解釈されるため ID で指す。
+  // server 再起動で ID が振り直されるので、呼び出し側は attach 直前に毎回 list-sessions から名前で ID を引く。
+  public static func attach(tmuxPath: String, sessionID: String) -> String {
+    shellQuote(tmuxPath) + " -u attach-session -t " + shellQuote(sessionID)
   }
 }

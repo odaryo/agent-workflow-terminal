@@ -14,6 +14,8 @@ public struct RemoteHostSettings: Sendable, Equatable, Codable {
   }
 
   public enum Problem: Sendable, Equatable {
+    case hostHasSurroundingWhitespace
+    case userHasSurroundingWhitespace
     case emptyHost
     case portOutOfRange
     case emptyUser
@@ -22,9 +24,19 @@ public struct RemoteHostSettings: Sendable, Equatable, Codable {
 
   public var problems: [Problem] {
     var problems: [Problem] = []
-    if host.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { problems.append(.emptyHost) }
+    let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmedHost.isEmpty {
+      problems.append(.emptyHost)
+    } else if trimmedHost != host {
+      problems.append(.hostHasSurroundingWhitespace)
+    }
     if !(1...65535).contains(port) { problems.append(.portOutOfRange) }
-    if user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { problems.append(.emptyUser) }
+    let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmedUser.isEmpty {
+      problems.append(.emptyUser)
+    } else if trimmedUser != user {
+      problems.append(.userHasSurroundingWhitespace)
+    }
     if !tmuxPath.hasPrefix("/") { problems.append(.tmuxPathNotAbsolute) }
     return problems
   }

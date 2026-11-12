@@ -1,12 +1,11 @@
 import RemoteClient
 import Testing
 
-@Suite("AttachLifecycle — 設計書 §20.6・§20.7")
+@Suite("AttachLifecycle — 設計書 §20.6・§20.7、spec 2e")
 struct AttachLifecycleTests {
   private typealias State = AttachLifecycle.State
   private typealias Event = AttachLifecycle.Event
   private typealias Effect = AttachLifecycle.Effect
-
   private static let name = "a|b  c "
 
   struct Transition: Sendable {
@@ -14,101 +13,109 @@ struct AttachLifecycleTests {
     let event: AttachLifecycle.Event
     let expected: AttachLifecycle.State
     let effects: [AttachLifecycle.Effect]
+    let generation: Int
   }
 
   private static var transitions: [Transition] {
     let name = Self.name
-    return [
-      Transition(
-        initial: .idle, event: .attachRequested(name),
-        expected: .attaching(name), effects: [.connectAndAttach(name)]),
-      Transition(
-        initial: .attaching(name), event: .attachSucceeded,
-        expected: .attached(name), effects: []),
-      Transition(
-        initial: .attaching(name), event: .enteredBackground,
-        expected: .suspended(name), effects: [.disconnect]),
-      Transition(
-        initial: .attached(name), event: .enteredBackground,
-        expected: .suspended(name), effects: [.disconnect]),
-      Transition(
-        initial: .suspended(name), event: .enteredForeground,
-        expected: .attaching(name), effects: [.connectAndAttach(name)]),
-      Transition(
-        initial: .disconnected(name), event: .reconnectRequested,
-        expected: .attaching(name), effects: [.connectAndAttach(name)]),
-      Transition(
-        initial: .disconnected(name), event: .enteredBackground,
-        expected: .suspended(name), effects: []),
-      Transition(
-        initial: .attaching(name), event: .detachRequested,
-        expected: .idle, effects: [.disconnect]),
-      Transition(
-        initial: .attached(name), event: .detachRequested,
-        expected: .idle, effects: [.disconnect]),
-      Transition(
-        initial: .disconnected(name), event: .detachRequested,
-        expected: .idle, effects: [.disconnect]),
-      Transition(
-        initial: .suspended(name), event: .detachRequested,
-        expected: .idle, effects: []),
+    var rows: [Transition] = [
+      .init(
+        initial: .idle, event: .attachRequested(name), expected: .attaching(name),
+        effects: [.connectAndAttach(name, generation: 1)], generation: 1),
+      .init(
+        initial: .attaching(name), event: .attachSucceeded(generation: 1),
+        expected: .attached(name), effects: [], generation: 1),
+      .init(
+        initial: .suspended(name), event: .attachSucceeded(generation: 1),
+        expected: .suspended(name), effects: [.disconnect(generation: 1)], generation: 1),
+      .init(
+        initial: .suspended(name), event: .enteredForeground, expected: .attaching(name),
+        effects: [.connectAndAttach(name, generation: 2)], generation: 2),
+      .init(
+        initial: .disconnected(name), event: .reconnectRequested, expected: .attaching(name),
+        effects: [.connectAndAttach(name, generation: 2)], generation: 2),
+      .init(
+        initial: .disconnected(name), event: .enteredBackground, expected: .suspended(name),
+        effects: [], generation: 1),
+      .init(
+        initial: .suspended(name), event: .detachRequested, expected: .idle,
+        effects: [], generation: 1),
     ]
-  }
-
-  private static var closureTransitions: [Transition] {
-    var transitions: [Transition] = []
-    for status: Int? in [nil, 0, 1, 127] {
-      for state: State in [.attaching(name), .attached(name)] {
-        transitions.append(
-          Transition(
-            initial: state, event: .channelClosed(exitStatus: status),
-            expected: status == nil ? .disconnected(name) : .idle, effects: []))
+    for state: State in [.attaching(name), .attached(name)] {
+      rows.append(
+        .init(
+          initial: state, event: .enteredBackground, expected: .suspended(name),
+          effects: [.disconnect(generation: 1)], generation: 1))
+      for retryable in [true, false] {
+        rows.append(
+          .init(
+            initial: state, event: .attachFailed(generation: 1, retryable: retryable),
+            expected: retryable ? .disconnected(name) : .idle, effects: [], generation: 1))
       }
-      transitions.append(
-        Transition(
-          initial: .suspended(name), event: .channelClosed(exitStatus: status),
-          expected: .suspended(name), effects: []))
+      for status: Int? in [nil, 0, 1, 127] {
+        rows.append(
+          .init(
+            initial: state, event: .channelClosed(generation: 1, exitStatus: status),
+            expected: status == nil ? .disconnected(name) : .idle, effects: [], generation: 1))
+      }
     }
-    return transitions
+    for state: State in [.attaching(name), .attached(name), .disconnected(name)] {
+      rows.append(
+        .init(
+          initial: state, event: .detachRequested, expected: .idle,
+          effects: [.disconnect(generation: 1)], generation: 1))
+    }
+    return rows
   }
 
   private static var ignoredTransitions: [Transition] {
-    let allEvents: [Event] = [
-      .attachRequested("sp 'q"), .attachSucceeded, .channelClosed(exitStatus: nil),
-      .channelClosed(exitStatus: 1), .enteredBackground, .enteredForeground,
-      .reconnectRequested, .detachRequested,
-    ]
     let ignored: [(State, [Event])] = [
       (
         .idle,
-        allEvents.filter {
-          if case .attachRequested = $0 { return false }
-          return true
-        }
+        [
+          .attachSucceeded(generation: 0), .attachFailed(generation: 0, retryable: true),
+          .attachFailed(generation: 0, retryable: false),
+          .channelClosed(generation: 0, exitStatus: nil),
+          .channelClosed(generation: 0, exitStatus: 1), .enteredBackground, .enteredForeground,
+          .reconnectRequested, .detachRequested,
+        ]
       ),
-      (.attaching(name), [.attachRequested("sp 'q"), .enteredForeground, .reconnectRequested]),
+      (.attaching(name), [.attachRequested("other"), .enteredForeground, .reconnectRequested]),
       (
         .attached(name),
         [
-          .attachRequested("sp 'q"), .attachSucceeded, .enteredForeground, .reconnectRequested,
+          .attachRequested("other"), .attachSucceeded(generation: 1),
+          .enteredForeground, .reconnectRequested,
         ]
       ),
       (
         .suspended(name),
         [
-          .attachRequested("sp 'q"), .attachSucceeded, .enteredBackground, .reconnectRequested,
+          .attachRequested("other"), .enteredBackground, .reconnectRequested,
+          .attachFailed(generation: 1, retryable: true),
+          .attachFailed(generation: 1, retryable: false),
+          .channelClosed(generation: 1, exitStatus: nil),
+          .channelClosed(generation: 1, exitStatus: 1),
         ]
       ),
       (
         .disconnected(name),
         [
-          .attachRequested("sp 'q"), .attachSucceeded, .channelClosed(exitStatus: nil),
-          .channelClosed(exitStatus: 1), .enteredForeground,
+          .attachRequested("other"), .attachSucceeded(generation: 1),
+          .attachFailed(generation: 1, retryable: true),
+          .attachFailed(generation: 1, retryable: false),
+          .channelClosed(generation: 1, exitStatus: nil),
+          .channelClosed(generation: 1, exitStatus: 1),
+          .enteredForeground,
         ]
       ),
     ]
     return ignored.flatMap { state, events in
-      events.map { Transition(initial: state, event: $0, expected: state, effects: []) }
+      let generation = state == .idle ? 0 : 1
+      return events.map {
+        Transition(
+          initial: state, event: $0, expected: state, effects: [], generation: generation)
+      }
     }
   }
 
@@ -121,83 +128,110 @@ struct AttachLifecycleTests {
       _ = lifecycle.handle(.attachRequested(name))
     case .attached(let name):
       _ = lifecycle.handle(.attachRequested(name))
-      _ = lifecycle.handle(.attachSucceeded)
+      _ = lifecycle.handle(.attachSucceeded(generation: 1))
     case .suspended(let name):
       _ = lifecycle.handle(.attachRequested(name))
       _ = lifecycle.handle(.enteredBackground)
     case .disconnected(let name):
       _ = lifecycle.handle(.attachRequested(name))
-      _ = lifecycle.handle(.channelClosed(exitStatus: nil))
+      _ = lifecycle.handle(.channelClosed(generation: 1, exitStatus: nil))
     }
     try #require(lifecycle.state == state)
     return lifecycle
   }
 
-  @Test("初期状態は idle")
-  func initiallyIdle() {
-    #expect(AttachLifecycle().state == .idle)
+  @Test("初期状態は idle、世代は0")
+  func initialState() {
+    let lifecycle = AttachLifecycle()
+    #expect(lifecycle.state == .idle)
+    #expect(lifecycle.generation == 0)
   }
 
-  @Test("表の接続・背景化・再接続・detach", arguments: transitions)
-  func specifiedTransitions(transition: Transition) throws {
-    var lifecycle = try lifecycle(in: transition.initial)
-    #expect(lifecycle.handle(transition.event) == transition.effects)
-    #expect(lifecycle.state == transition.expected)
+  @Test("表の全遷移と接続開始時だけの世代更新", arguments: transitions + ignoredTransitions)
+  func appliesTransition(row: Transition) throws {
+    var lifecycle = try lifecycle(in: row.initial)
+    #expect(lifecycle.handle(row.event) == row.effects)
+    #expect(lifecycle.state == row.expected)
+    #expect(lifecycle.generation == row.generation)
   }
 
   @Test(
-    "exit-status の有無で終了と通信切断を区別し、suspended では無視する",
-    arguments: closureTransitions)
-  func channelClosure(transition: Transition) throws {
-    var lifecycle = try lifecycle(in: transition.initial)
-    #expect(lifecycle.handle(transition.event) == transition.effects)
-    #expect(lifecycle.state == transition.expected)
+    "世代の違う成功は閉じ、失敗と切断は全状態で無視する",
+    arguments: [
+      AttachLifecycle.State.idle, .attaching(name), .attached(name), .suspended(name),
+      .disconnected(name),
+    ])
+  func obsoleteEvents(state: AttachLifecycle.State) throws {
+    let initial = try lifecycle(in: state)
+    let current = state == .idle ? 0 : 1
+    for generation in [current - 1, current + 1] {
+      for event: Event in [
+        .attachSucceeded(generation: generation),
+        .attachFailed(generation: generation, retryable: true),
+        .attachFailed(generation: generation, retryable: false),
+        .channelClosed(generation: generation, exitStatus: nil),
+        .channelClosed(generation: generation, exitStatus: 1),
+      ] {
+        var lifecycle = initial
+        let expected: [Effect]
+        if case .attachSucceeded = event {
+          expected = [.disconnect(generation: generation)]
+        } else {
+          expected = []
+        }
+        #expect(lifecycle.handle(event) == expected)
+        #expect(lifecycle.state == state)
+        #expect(lifecycle.generation == current)
+      }
+    }
   }
 
-  @Test("表に無いイベントは状態を変えず副作用も出さない", arguments: ignoredTransitions)
-  func unspecifiedTransitions(transition: Transition) throws {
-    var lifecycle = try lifecycle(in: transition.initial)
-    #expect(lifecycle.handle(transition.event).isEmpty)
-    #expect(lifecycle.state == transition.initial)
-  }
-
-  @Test("背景で disconnect した後の channelClosed では前景復帰先を失わない")
-  func backgroundDisconnectAndForeground() {
+  @Test(
+    "前景で接続開始後に古い channelClosed が届いても新しい接続は attached になる",
+    arguments: [nil, 1] as [Int?])
+  func delayedClosureAfterForeground(status: Int?) {
     var lifecycle = AttachLifecycle()
-    #expect(lifecycle.handle(.attachRequested("計測")) == [.connectAndAttach("計測")])
-    #expect(lifecycle.handle(.attachSucceeded).isEmpty)
-    #expect(lifecycle.handle(.enteredBackground) == [.disconnect])
-    #expect(lifecycle.handle(.channelClosed(exitStatus: 1)).isEmpty)
-    #expect(lifecycle.state == .suspended("計測"))
-    #expect(lifecycle.handle(.enteredForeground) == [.connectAndAttach("計測")])
+    #expect(lifecycle.handle(.attachRequested("計測")) == [.connectAndAttach("計測", generation: 1)])
+    #expect(lifecycle.handle(.attachSucceeded(generation: 1)).isEmpty)
+    #expect(lifecycle.handle(.enteredBackground) == [.disconnect(generation: 1)])
+    #expect(lifecycle.handle(.enteredForeground) == [.connectAndAttach("計測", generation: 2)])
+    #expect(lifecycle.handle(.channelClosed(generation: 1, exitStatus: status)).isEmpty)
     #expect(lifecycle.state == .attaching("計測"))
-    #expect(lifecycle.handle(.attachSucceeded).isEmpty)
+    #expect(lifecycle.handle(.attachSucceeded(generation: 2)).isEmpty)
     #expect(lifecycle.state == .attached("計測"))
+    #expect(lifecycle.handle(.detachRequested) == [.disconnect(generation: 2)])
+    #expect(lifecycle.state == .idle)
+    #expect(lifecycle.generation == 2)
   }
 
-  @Test("通信切断後に背景化した場合も同じ正式名に再接続する")
-  func disconnectedThenBackground() {
+  @Test("裏で遅れて成功した接続を閉じ、同じ名前へ新しい世代で戻る")
+  func delayedSuccessWhileSuspended() {
     var lifecycle = AttachLifecycle()
     let name = #"bs\\x"#
-    #expect(lifecycle.handle(.attachRequested(name)) == [.connectAndAttach(name)])
-    #expect(lifecycle.handle(.attachSucceeded).isEmpty)
-    #expect(lifecycle.handle(.channelClosed(exitStatus: nil)).isEmpty)
-    #expect(lifecycle.state == .disconnected(name))
-    #expect(lifecycle.handle(.enteredBackground).isEmpty)
-    #expect(lifecycle.handle(.channelClosed(exitStatus: nil)).isEmpty)
-    #expect(lifecycle.handle(.enteredForeground) == [.connectAndAttach(name)])
+    #expect(lifecycle.handle(.attachRequested(name)) == [.connectAndAttach(name, generation: 1)])
+    #expect(lifecycle.handle(.enteredBackground) == [.disconnect(generation: 1)])
+    #expect(lifecycle.handle(.attachSucceeded(generation: 1)) == [.disconnect(generation: 1)])
+    #expect(lifecycle.state == .suspended(name))
+    #expect(lifecycle.handle(.channelClosed(generation: 1, exitStatus: 1)).isEmpty)
+    #expect(lifecycle.handle(.enteredForeground) == [.connectAndAttach(name, generation: 2)])
+    #expect(lifecycle.handle(.attachSucceeded(generation: 1)) == [.disconnect(generation: 1)])
     #expect(lifecycle.state == .attaching(name))
+    #expect(lifecycle.handle(.attachSucceeded(generation: 2)).isEmpty)
+    #expect(lifecycle.state == .attached(name))
+    #expect(lifecycle.generation == 2)
   }
 
-  @Test("detach 後は前景イベントで再接続せず、別 session を指定できる")
-  func detachAndSelectAnotherSession() {
+  @Test("再接続と別 session の選択でも世代は単調に増える")
+  func reconnectAndSelectAnotherSession() {
     var lifecycle = AttachLifecycle()
-    #expect(lifecycle.handle(.attachRequested(Self.name)) == [.connectAndAttach(Self.name)])
-    #expect(lifecycle.handle(.enteredBackground) == [.disconnect])
-    #expect(lifecycle.handle(.detachRequested).isEmpty)
+    _ = lifecycle.handle(.attachRequested(Self.name))
+    _ = lifecycle.handle(.attachFailed(generation: 1, retryable: true))
+    #expect(lifecycle.state == .disconnected(Self.name))
+    #expect(lifecycle.handle(.reconnectRequested) == [.connectAndAttach(Self.name, generation: 2)])
+    _ = lifecycle.handle(.detachRequested)
     #expect(lifecycle.handle(.enteredForeground).isEmpty)
-    #expect(lifecycle.state == .idle)
-    #expect(lifecycle.handle(.attachRequested("sp 'q")) == [.connectAndAttach("sp 'q")])
-    #expect(lifecycle.state == .attaching("sp 'q"))
+    #expect(
+      lifecycle.handle(.attachRequested("sp 'q")) == [.connectAndAttach("sp 'q", generation: 3)])
+    #expect(lifecycle.generation == 3)
   }
 }

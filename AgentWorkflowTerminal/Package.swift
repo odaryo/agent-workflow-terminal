@@ -21,8 +21,8 @@ let package = Package(
     .library(name: "RemoteClient", targets: ["RemoteClient"]),
     .executable(name: "hostctl", targets: ["hostctl"]),
   ],
-  // 依存は TerminalCore ← Adapters の一方向だけに保つ。ビルドシステムは逆向きの依存を
-  // 検出しないため、ここを目視で守るしかない (docs/coding-guidelines.md §2.2)。
+  // 依存は TerminalCore ← Adapters の一方向だけに保ち、RemoteClient はどのターゲットにも依存させない。
+  // ビルドシステムは逆向きの依存を検出しないため、ここを目視で守るしかない (docs/coding-guidelines.md §2.2)。
   targets: [
     .target(
       name: "RemoteClient",

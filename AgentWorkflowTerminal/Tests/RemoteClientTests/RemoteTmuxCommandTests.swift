@@ -41,26 +41,19 @@ struct RemoteTmuxCommandTests {
   }
 
   @Test(
-    "名前に = を前置し完全一致の attach を生成する",
-    arguments: [
-      ("awt-repo-0123abcd-2", "'=awt-repo-0123abcd-2'"),
-      ("a|b  c ", "'=a|b  c '"),
-      (#"bs\\x"#, #"'=bs\\x'"#),
-      ("sp 'q", "'=sp '\\''q'"),
-      ("計測", "'=計測'"),
-      ("$HOME; `date`", "'=$HOME; `date`'"),
-    ]
+    "session ID を = なしで引用して attach する",
+    arguments: [("$0", "'$0'"), ("$1", "'$1'"), ("$3", "'$3'"), ("$5", "'$5'")]
   )
-  func attach(name: String, target: String) {
+  func attach(id: String, target: String) {
     #expect(
-      RemoteTmuxCommand.attach(tmuxPath: "/opt/homebrew/bin/tmux", sessionName: name)
+      RemoteTmuxCommand.attach(tmuxPath: "/opt/homebrew/bin/tmux", sessionID: id)
         == "'/opt/homebrew/bin/tmux' -u attach-session -t " + target)
   }
 
   @Test("attach も tmuxPath の空白と引用符を保護する")
   func quotedAttachPath() {
     #expect(
-      RemoteTmuxCommand.attach(tmuxPath: "/a b/'c/tmux", sessionName: "m806")
-        == "'/a b/'\\''c/tmux' -u attach-session -t '=m806'")
+      RemoteTmuxCommand.attach(tmuxPath: "/a b/'c/tmux", sessionID: "$12")
+        == "'/a b/'\\''c/tmux' -u attach-session -t '$12'")
   }
 }

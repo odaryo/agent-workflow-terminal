@@ -31,7 +31,7 @@ struct SSHKeyTests {
 
   @Test("32バイト以外は拒否する", arguments: [0, 1, 31, 33, 64])
   func rejectsInvalidLength(count: Int) {
-    #expect(throws: (any Error).self) {
+    #expect(throws: SSHKeyError.invalidEd25519PublicKeyLength(count)) {
       try SSHEd25519PublicKey(rawRepresentation: Data(repeating: 0, count: count))
     }
   }
@@ -77,6 +77,16 @@ struct SSHKeyTests {
   )
   func rejectsInvalidPublicKeyLine(line: String) {
     #expect(SSHHostKeyFingerprint(openSSHPublicKeyLine: line) == nil)
+  }
+
+  @Test("指紋の JSON は文字列1つに固定する")
+  func fingerprintJSON() throws {
+    let fingerprint = SSHHostKeyFingerprint(
+      wireFormat: try SSHKeyExamples.wire(SSHKeyExamples.hostKeyBase64))
+    let json = "\"" + SSHKeyExamples.hostKeyFingerprint + "\""
+    #expect(String(decoding: try JSONEncoder().encode(fingerprint), as: UTF8.self) == json)
+    #expect(
+      try JSONDecoder().decode(SSHHostKeyFingerprint.self, from: Data(json.utf8)) == fingerprint)
   }
 
   @Test("鍵と指紋の値等価性・Hashable・Codable")

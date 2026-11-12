@@ -222,6 +222,10 @@ Swift 6 toolchain に同梱されており、追加依存が不要なため。
   (git のメッセージ・日付書式) をパーサへ流さない。
 - tmux 3.4 は `LC_ALL=C` だけでは非 ASCII を `_` へ置換または削除するため、global option `-u` を
   サブコマンドより前へ併用する。`LC_ALL=C` と `-u` の併用で UTF-8 を保持できることを実測済み。
+- iPad アプリが SSH の exec で Host の tmux を呼ぶ経路 (`RemoteClient` の `RemoteTmuxCommand`) は、
+  argv ではなく Host のログインシェルへ渡す1行のコマンド文字列で、`LC_ALL=C` を付けず `-u` だけを付ける。
+  exec の環境には LANG も LC_* も無く、`-u` だけで UTF-8 を保持できた (#806 の計測2、tmux 3.8)。
+  この経路で解析する tmux の出力 (`list-sessions` の format と stderr) にはロケール依存の文言が無い。
 - 実行するバイナリの解決 (どの `tmux` / `git` を使うか) は Adapter に一元化し、
   呼び出し側のコードへ暗黙の `PATH` 依存を散らさない。
 

@@ -83,4 +83,57 @@ struct KnownHostsTests {
     #expect(copy != hosts)
     #expect(hosts.verdict(host: "mac", port: 22, fingerprint: original) == .trusted)
   }
+
+  @Test("trustedFingerprint は承認・置換・削除と host・port の区別を反映する")
+  func trustedFingerprint() throws {
+    let (original, changed) = try fingerprints()
+    var hosts = KnownHosts()
+    #expect(hosts.trustedFingerprint(host: "mac", port: 22) == nil)
+    hosts.trust(host: "Mac", port: 22, fingerprint: original)
+    #expect(hosts.trustedFingerprint(host: "mac", port: 22) == original)
+    #expect(hosts.trustedFingerprint(host: "MAC", port: 22) == original)
+    #expect(hosts.trustedFingerprint(host: "mac", port: 2222) == nil)
+    #expect(hosts.trustedFingerprint(host: "other", port: 22) == nil)
+    hosts.trust(host: "MAC", port: 22, fingerprint: changed)
+    #expect(hosts.trustedFingerprint(host: "mac", port: 22) == changed)
+    hosts.remove(host: "Mac", port: 22)
+    #expect(hosts.trustedFingerprint(host: "mac", port: 22) == nil)
+  }
+
+  @Test("保存 JSON は小文字 host・port 昇順の配列と文字列指紋に固定する")
+  func fixedPersistenceFormat() throws {
+    let (original, changed) = try fingerprints()
+    var hosts = KnownHosts()
+    hosts.trust(host: "Z.example", port: 22, fingerprint: changed)
+    hosts.trust(host: "Mac.Example", port: 2222, fingerprint: changed)
+    hosts.trust(host: "MAC.EXAMPLE", port: 22, fingerprint: original)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    let expected =
+      #"[{"fingerprint":"SHA256:acUiZchhzxDn9C0skQXmrQKnIs5+qPfoXBVG05mcgrM","host":"mac.example","port":22},"#
+      + #"{"fingerprint":"SHA256:BX8BtS8VKvswjsNTPShlwFaVHfO4DQiTFrPYgN7MI8A","host":"mac.example","port":2222},"#
+      + #"{"fingerprint":"SHA256:BX8BtS8VKvswjsNTPShlwFaVHfO4DQiTFrPYgN7MI8A","host":"z.example","port":22}]"#
+    #expect(String(decoding: try encoder.encode(hosts), as: UTF8.self) == expected)
+    let decoded = try JSONDecoder().decode(KnownHosts.self, from: Data(expected.utf8))
+    #expect(decoded == hosts)
+    #expect(String(decoding: try encoder.encode(KnownHosts()), as: UTF8.self) == "[]")
+    #expect(try JSONDecoder().decode(KnownHosts.self, from: Data("[]".utf8)) == KnownHosts())
+  }
+
+  @Test("保存データの host も decode 時に小文字へ正規化する")
+  func normalizesDecodedHost() throws {
+    let json = """
+      [{"host":"MAC.Example","port":22,"fingerprint":"SHA256:acUiZchhzxDn9C0skQXmrQKnIs5+qPfoXBVG05mcgrM"}]
+      """
+    let (fingerprint, _) = try fingerprints()
+    let hosts = try JSONDecoder().decode(KnownHosts.self, from: Data(json.utf8))
+    #expect(hosts.trustedFingerprint(host: "mac.example", port: 22) == fingerprint)
+    #expect(hosts.verdict(host: "MAC.EXAMPLE", port: 22, fingerprint: fingerprint) == .trusted)
+    var expected = KnownHosts()
+    expected.trust(host: "mac.example", port: 22, fingerprint: fingerprint)
+    #expect(hosts == expected)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    #expect(try encoder.encode(hosts) == encoder.encode(expected))
+  }
 }

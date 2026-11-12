@@ -64,7 +64,7 @@ struct DiffRangeSummary: Equatable {
       // merge commit は snapshot を作らない (`DiffSnapshotBuilderError.unsupportedMergeCommit`)
       // ので、ここへ来るのは親が 0 か 1 の commit だけ。
       origin = label?.parentCount == 0 ? "親の無い commit (空 tree)" : "その commit の親"
-      let count = snapshot.section(.committed)?.files.count ?? 0
+      let count = snapshot.section(.committed)?.displayedFileCount ?? "0"
       contents = "その commit と親の差分 \(count) ファイル。未commit 変更は含まない"
     }
   }
@@ -88,9 +88,15 @@ struct DiffRangeSummary: Equatable {
   /// 読まれないため。
   private static func worktreeContents(_ snapshot: DiffSnapshot) -> String {
     let counts = DiffChangeOrigin.allCases.map { origin in
-      "\(origin.shortLabel) \(snapshot.section(origin)?.files.count ?? 0)"
+      "\(origin.shortLabel) \(snapshot.section(origin)?.displayedFileCount ?? "0")"
     }
     return counts.joined(separator: "・") + " (ignored は含まない)"
+  }
+}
+
+extension DiffOriginSection {
+  var displayedFileCount: String {
+    "\(files.count)\(truncation == nil ? "" : "+")"
   }
 }
 

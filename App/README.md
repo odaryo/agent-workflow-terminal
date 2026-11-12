@@ -57,6 +57,37 @@ libghostty の bundle id はコンパイル時定数 `com.mitchellh.ghostty` な
 つまり本物の Ghostty.app 向けに書かれた設定 — が含まれ、別アプリであるこの端末へ
 keybind や `scrollback-limit` が黙って効いてしまうためです (設計書 §21.6)。
 
+## キー入力
+
+### ⌘ を伴う打鍵はメニューが先に受け取る
+
+端末 (`GhosttySurfaceView`) は `performKeyEquivalent` を実装していません。⌘ を伴う打鍵はまずアプリの
+メニューへ届き、どのメニュー項目にも当たらなかったものだけが `keyDown` から libghostty へ渡ります
+(設計書 §5.4)。
+
+⌘C / ⌘V / ⌘A はこの経路で端末へ届きます。端末にフォーカスがある間は Edit メニューの Copy / Paste /
+Select All が無効なので、メニューはこれらを取らず、libghostty の既定の keybind (`super+c` など) が
+コピーと貼り付けを行います (2026-11-12 に計測、Issue #103)。
+
+上流の Ghostty.app は、libghostty の keybind に当たる打鍵を `performKeyEquivalent` でメニューより先に
+端末へ渡します。この端末でそうしないのは、libghostty の macOS の既定 keybind に ⌘↑ / ⌘↓ / ⌘← / ⌘→
+(プロンプト間の移動・行頭／行末) があり、§5.4 でアプリのショートカットに割り当てたこれらのキーを端末が
+先に取ってしまうためです。その結果、設定ファイルに書いた ⌘ を伴う keybind も、アプリのメニュー項目と
+同じキーなら効きません。
+
+### Option を Alt として使う
+
+設定ファイルの `macos-option-as-alt` が効きます (`true` / `false` / `left` / `right`)。`true` なら
+Option+f は `ESC f` として端末へ届き、Option による合成文字 (`ƒ` など) とデッドキーは使えなくなります。
+未設定のときの既定はキーボードレイアウトで決まり、U.S. と U.S. International なら `true`、それ以外
+(ABC や日本語など) なら `false` です。
+
+### 左右の修飾キー
+
+修飾キーの左右を libghostty へ渡すので、`macos-option-as-alt = left` / `right` と、`key-remap` の左右の
+指定 (`left_control=...` など) が効きます。一方、`keybind = right_shift=...` のような修飾キー単独の
+keybind は発火しません。上流の Ghostty.app (1.4.0) でも同じでした (2026-11-12 に計測)。
+
 ## ripgrep
 
 Viewer Drawer の検索 (設計書 §8) は ripgrep CLI を外部プロセスとして呼びます。未導入の場合は

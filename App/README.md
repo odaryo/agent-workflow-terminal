@@ -79,14 +79,17 @@ Select All が無効なので、メニューはこれらを取らず、libghostt
 
 設定ファイルの `macos-option-as-alt` が効きます (`true` / `false` / `left` / `right`)。`true` なら
 Option+f は `ESC f` として端末へ届き、Option による合成文字 (`ƒ` など) とデッドキーは使えなくなります。
-未設定のときの既定はキーボードレイアウトで決まり、U.S. と U.S. International なら `true`、それ以外
-(ABC や日本語など) なら `false` です。
+未設定のときの既定は、そのときのキーボードレイアウトの ID で決まります。`com.apple.keylayout.US` と
+`com.apple.keylayout.USInternational` なら `true`、それ以外 (ABC など) なら `false` です。入力メソッドが
+有効な間は、その入力メソッドが使うレイアウトで決まります (Google 日本語入力が有効で、レイアウトが ABC の
+Mac では `false` でした)。
 
 ### 左右の修飾キー
 
 修飾キーの左右を libghostty へ渡すので、`macos-option-as-alt = left` / `right` と、`key-remap` の左右の
-指定 (`left_control=...` など) が効きます。一方、`keybind = right_shift=...` のような修飾キー単独の
-keybind は発火しません。上流の Ghostty.app (1.4.0) でも同じでした (2026-11-12 に計測)。
+指定 (`left_control=...` など) が効きます (`key-remap = right_shift=ctrl` で、右 Shift+a だけが `^A` に
+なることを計測)。一方、`keybind = right_shift=...` のような修飾キー単独の keybind は発火しません。
+左右を渡すようにする前のこの端末と、上流の Ghostty.app (1.4.0) で確かめました (2026-11-12)。
 
 ## ripgrep
 

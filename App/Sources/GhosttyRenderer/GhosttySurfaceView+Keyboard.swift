@@ -59,7 +59,7 @@ extension GhosttySurfaceView {
     let flags = GhosttyKeyModifiers.translationFlags(
       original: event.modifierFlags, translated: translated
     )
-    // Why not 常にイベントを再生成: 日本語・韓国語 IME は元イベントの同一性に依存する。
+    // Why not 常にイベントを再生成: 韓国語入力は元イベントの同一性に依存する (上流 Ghostty の知見)。
     guard flags != event.modifierFlags else { return event }
     return NSEvent.keyEvent(
       with: event.type,

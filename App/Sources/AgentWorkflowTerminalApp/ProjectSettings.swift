@@ -16,18 +16,41 @@ struct ProjectSettingsView: View {
         if projects.registry.projects.isEmpty {
           Text("登録済みの Project はありません。")
         } else {
-          ForEach(projects.registry.projects, id: \.commonDirectory) { project in
-            Toggle(
-              project.displayName,
-              isOn: Binding(
-                get: { projects.registry.project(project.commonDirectory)?.masksName ?? false },
-                set: { projects.setMasksName($0, of: project.commonDirectory) }))
+          ForEach(
+            Array(projects.registry.projects.enumerated()), id: \.element.commonDirectory
+          ) { index, project in
+            HStack {
+              Toggle(
+                project.displayName,
+                isOn: Binding(
+                  get: { projects.registry.project(project.commonDirectory)?.masksName ?? false },
+                  set: { projects.setMasksName($0, of: project.commonDirectory) }))
+              Button {
+                projects.moveProject(project.commonDirectory, to: index - 1)
+              } label: {
+                Image(systemName: "chevron.up")
+              }
+              .accessibilityLabel("「\(project.displayName)」を上へ移動")
+              .help("「\(project.displayName)」を上へ移動")
+              .disabled(index == 0)
+
+              Button {
+                projects.moveProject(project.commonDirectory, to: index + 1)
+              } label: {
+                Image(systemName: "chevron.down")
+              }
+              .accessibilityLabel("「\(project.displayName)」を下へ移動")
+              .help("「\(project.displayName)」を下へ移動")
+              .disabled(index == projects.registry.projects.count - 1)
+            }
           }
         }
       } header: {
-        Text("名前を伏せる Project")
+        Text("Project")
       } footer: {
-        Text("チェックした Project は Overview などで 1 文字目と伏字で表示します。")
+        Text(
+          "チェックした Project は Overview などで 1 文字目と伏字で表示します。"
+            + "上下のボタンで並べ替えた順を Overview と Project の移動に使います。")
       }
 
       Section("到達できない Project") {

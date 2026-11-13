@@ -246,6 +246,15 @@ final class ProjectsModel: ObservableObject {
     save()
   }
 
+  func moveProject(_ commonDirectory: WorktreeIdentity, to destination: Int) {
+    guard canSave else {
+      warning = "Project の一覧を読み込めていないので保存できません"
+      return
+    }
+    guard registry.moveProject(commonDirectory, to: destination) else { return }
+    save()
+  }
+
   /// 一覧から外すだけで、repository・tmux session・アプリ内データには触れない (設計書 §16.1)。
   /// その Project の端末は view ごと破棄され、tmux client が detach する。
   func unregister(_ commonDirectory: WorktreeIdentity) {

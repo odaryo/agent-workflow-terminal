@@ -171,7 +171,7 @@ public func makeTabSummaries(_ tabs: [OverviewWorktreeInput]) -> [TabSummary] {
   }
 }
 
-/// 状態の変化で見ている場所が動かないよう、入力は Project を登録順、session を開いた順、
+/// 状態の変化で見ている場所が動かないよう、入力は Project をユーザーが並べ替えた順、session を開いた順、
 /// pane を tmux 上の順で渡す。Project Root は Task と混ぜず別枠に置く (設計書 §13)。
 public func makeAgentPaneOverview(_ projects: [OverviewProjectInput]) -> [OverviewProject] {
   projects.map { project in

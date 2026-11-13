@@ -93,7 +93,7 @@ public struct ProjectRegistry: Sendable, Hashable {
     return registration
   }
 
-  /// destination は移動後の index。SwiftUI の onMove の削除前オフセットではない (設計書 §13)。
+  /// destination は移動後の index。SwiftUI の onMove の削除前オフセットではない。
   @discardableResult
   public mutating func moveProject(
     _ commonDirectory: WorktreeIdentity, to destination: Int

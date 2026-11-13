@@ -74,7 +74,8 @@ struct ProjectRegistryReorderTests {
     var registry = self.registry([alpha, beta, gamma])
     let original = registry
 
-    let changed = registry.moveProject(alpha.commonDirectory, to: destination)
+    // 中ほどの Project を動かす。端を動かすと、範囲内へ丸める実装でも同じ位置への移動になり false が返る。
+    let changed = registry.moveProject(beta.commonDirectory, to: destination)
 
     #expect(changed == false)
     #expect(registry == original)

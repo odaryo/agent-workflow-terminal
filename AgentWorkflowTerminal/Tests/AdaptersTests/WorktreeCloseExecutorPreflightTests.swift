@@ -28,6 +28,9 @@ struct WorktreeCloseExecutorPreflightTests {
   private static let mismatches: [Mismatch] = [
     Mismatch(gitStub(head: gitNotFound), [], .detachedHead),
     Mismatch(
+      gitStub(head: gitNotFound), ["\(administrativeDirectory)/rebase-merge"],
+      .operationInProgress([.rebase])),
+    Mismatch(
       gitStub(head: headOnBranch("other")), [], .branchChanged(planned: "topic", current: "other")),
     Mismatch(gitStub(references: ["MERGE_HEAD": gitSuccess]), [], .operationInProgress([.merge])),
     Mismatch(
@@ -88,10 +91,10 @@ struct WorktreeCloseExecutorPreflightTests {
       "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
     ]
     let commands: [[String]] = [
-      ["symbolic-ref", "--quiet", "HEAD"],
       ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
       ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
       ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
+      ["symbolic-ref", "--quiet", "HEAD"],
       ["rev-parse", "--verify", "--quiet", "refs/heads/topic"],
     ]
     let expected: [[String]] = commands.map { prefix + $0 }

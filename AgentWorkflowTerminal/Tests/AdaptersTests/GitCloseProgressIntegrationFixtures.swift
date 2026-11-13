@@ -9,12 +9,14 @@ enum PostPlanChange: CaseIterable, Sendable {
   case detach
   case switchBranch
   case conflictedMerge
+  case stoppedRebase
 
   var expectedRefusal: WorktreeClosePreflightRefusal {
     switch self {
     case .detach: .detachedHead
     case .switchBranch: .branchChanged(planned: "topic", current: "other")
     case .conflictedMerge: .operationInProgress([.merge])
+    case .stoppedRebase: .operationInProgress([.rebase])
     }
   }
 
@@ -28,6 +30,12 @@ enum PostPlanChange: CaseIterable, Sendable {
       try await repository.commitConflictingSide()
       try await repository.commit(file: "f.txt", contents: "ours", in: worktree)
       #expect(try await repository.gitExitCode(["merge", "side"], in: worktree).exitCode == 1)
+    case .stoppedRebase:
+      try await repository.commit(file: "rebase.txt", contents: "topic", in: worktree)
+      try await repository.expectFailure(["rebase", "--exec", "false", "main"], in: worktree)
+      #expect(
+        try await repository.gitExitCode(["symbolic-ref", "-q", "HEAD"], in: worktree).exitCode
+          == 1)
     }
   }
 }

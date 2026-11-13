@@ -170,7 +170,7 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/"])
   }
 
-  /// `--count` は symref も数えるため、上限は symref を除いた表示側で扱う (§3.4)。
+  /// `--count` は symref も数えるため、上限は symref を除いた表示側で扱う。
   public static func remoteBranchesContainingHead() -> Self {
     Self(arguments: ["for-each-ref", "--contains", "HEAD", "--format=%(refname)", "refs/remotes/"])
   }

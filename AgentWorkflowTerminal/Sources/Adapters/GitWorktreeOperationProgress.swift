@@ -274,22 +274,24 @@ public enum WorktreeClosePreflightRefusal: Sendable, Equatable {
 extension GitWorktreeProgressReader {
   /// branch 名はバイト列で比べる (`String` の `==` は正準等価な別表記を等しいと答える)。
   /// 削除しない計画では HEAD の変化は拒否理由にならず、途中状態だけを問う (§3.4)。
+  /// 途中状態を HEAD より先に読むのは、停止中の rebase と bisect が HEAD を detach するため。
+  /// 計画段階と同じ `.operationInProgress` を返し、操作の完了・中止の案内に繋げる (§3.4)。
   /// `plannedTip` は branch 削除を含む計画でだけ渡す。
   func preflightRefusal(
     plannedBranch: String?, plannedTip: CommitObjectID?, removesWorktree: Bool
   ) async -> WorktreeClosePreflightRefusal? {
     do {
-      guard removesWorktree else {
+      guard removesWorktree || plannedTip != nil else {
         let inProgress = try await operations()
         return inProgress.isEmpty ? nil : .operationInProgress(inProgress)
       }
       guard let plannedBranch else { return .detachedHead }
+      let inProgress = try await operations()
+      guard inProgress.isEmpty else { return .operationInProgress(inProgress) }
       guard case .branch(let current) = try await head() else { return .detachedHead }
       guard current.utf8.elementsEqual(plannedBranch.utf8) else {
         return .branchChanged(planned: plannedBranch, current: current)
       }
-      let inProgress = try await operations()
-      guard inProgress.isEmpty else { return .operationInProgress(inProgress) }
       if let refusal = try await removalObstaclesRefusal() { return refusal }
       guard let plannedTip else { return nil }
       let currentTip = try await tip(ofBranch: plannedBranch)

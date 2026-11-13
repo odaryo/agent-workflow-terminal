@@ -196,11 +196,12 @@ public struct WorktreeCloseExecutor: Sendable {
     }
   }
 
-  /// 最初の step を撃つ前に、対象の HEAD と途中状態を読み直す (§3.4、Issue #354)。branch 削除を
-  /// 含む計画では branch の先端も読み直す (Issue #359)。detached、計画時と別の branch、作業途中、
-  /// 先端の移動のいずれか —— または読み直せなかった —— なら何も撃たずに `.abandoned` を返す。
-  /// worktree 削除を含む計画では lock と submodule も読み直し、session 終了後に削除だけが
-  /// 拒否されたり、`--force` で submodule ごと消えたりするのを防ぐ (§3.4)。
+  /// 計画段階の拒否を、最初の step を撃つ前にもう一度判定する (§3.4、Issue #354)。worktree を
+  /// 削除しない計画 (選択肢2) は途中状態だけを読み直し、detached や計画時と別の branch では中止
+  /// しない —— 何も消さないため (§3.4、2026-11-13)。worktree 削除を含む計画では HEAD・lock・
+  /// submodule も読み直し、計画から実行までの間に detached になった worktree の削除や、session
+  /// 終了後の削除失敗、`--force` で submodule ごと消えることを防ぐ。branch 削除を含む計画では
+  /// 先端も照合し、判定後に積まれた commit を巻き込まない (Issue #359)。
   ///
   /// - Note: 空の計画 (選択肢1) では読み直さない。撃つものが無く、中止しても止める操作が無い。
   ///   §3.4 の拒否は計画段階 (`planWorktreeClose`) で選択肢1にも掛かっている。

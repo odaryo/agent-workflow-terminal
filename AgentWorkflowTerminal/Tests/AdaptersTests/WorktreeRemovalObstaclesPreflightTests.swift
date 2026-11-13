@@ -89,8 +89,8 @@ struct WorktreeRemovalObstaclesPreflightTests {
     let prefix: [String] = [
       "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
     ]
+    // 2は HEAD も読まない (§3.4: 1と2は detached・別 branch を中止の理由にしない)。
     let queries: [[String]] = [
-      ["symbolic-ref", "--quiet", "HEAD"],
       ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
       ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
       ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],

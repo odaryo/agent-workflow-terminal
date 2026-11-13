@@ -181,20 +181,17 @@ struct WorktreeClosePlanTests {
     }
   }
 
-  /// 選択肢4 だけを拒否しても足りない。1 (UI 上の Inactive 化) と 2 (session 終了) は検査も確認も
-  /// 要求せず、3 は `worktree remove` を撃つ —— git 2.50.1 実測では、detached HEAD に commit を
-  /// 積んだ worktree への `worktree remove -- <path>` は `--force` 無しで rc=0 になる。
+  /// `--force` 無しでも detached の commit は削除されるため、git 自身の拒否には任せられない (§3.4)。
   @Test(
-    "detached HEAD の Close は選択肢1〜4のすべてで拒否する (設計書 §3.4)",
+    "detached HEAD の削除は選択肢3・4で拒否する (設計書 §3.4)",
     arguments: [
-      WorktreeCloseChoice.hideFromUI, .terminateSession(.keepWorktree),
-      .terminateSession(.removeWorktree(.keepBranch)),
+      WorktreeCloseChoice.terminateSession(.removeWorktree(.keepBranch)),
       .terminateSession(.removeWorktree(.deleteBranch)),
     ])
-  func planRejectsEveryChoiceForDetachedHead(choice: WorktreeCloseChoice) throws {
+  func planRejectsRemovalForDetachedHead(choice: WorktreeCloseChoice) throws {
     let target = try worktree(branch: nil)
 
-    #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
+    #expect(throws: WorktreeClosePlanError.detachedHeadIsNotRemovable) {
       try planWorktreeClose(
         worktree: target, progress: idle(target), choice: choice,
         confirmation: confirmation(for: target, merge: .unknown))

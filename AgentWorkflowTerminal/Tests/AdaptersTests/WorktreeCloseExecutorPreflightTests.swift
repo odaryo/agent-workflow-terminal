@@ -61,7 +61,7 @@ struct WorktreeCloseExecutorPreflightTests {
       let harness = try WorktreeCloseHarness(git: git)
 
       let execution = try await harness.executor.execute(
-        try harness.plan(.terminateSession(.keepWorktree)))
+        try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
       #expect(
         execution
@@ -224,7 +224,7 @@ struct WorktreeCloseExecutorPreflightTests {
     let harness = try WorktreeCloseHarness(git: gitStub(head: headOnBranch("cafe\u{0301}")))
 
     let execution = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.keepWorktree), worktree: planned))
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch)), worktree: planned))
 
     #expect(
       execution == .abandoned(.branchChanged(planned: "caf\u{00E9}", current: "cafe\u{0301}")))

@@ -250,12 +250,13 @@ struct GitWorktreeProgressReader: Sendable {
 /// 計画から実行までの間に Agent が rebase を始めた場合や、保存から復元した陳腐化した branch で
 /// 計画を作った場合に、detached HEAD の worktree が消えるのを止める —— detached には
 /// `worktree remove` が `--force` 無しでも成功し、積んだ commit は gc 後に失われる (git 2.50.1 実測)。
+/// 削除しない計画では途中状態だけを読み、HEAD の変化では拒否しない (§3.4)。
 /// HEAD と途中状態は、読み直しから worktree 削除までの窓を残存リスクとして受け入れている。先端は
 /// `branch -D` の直前にもう一度確かめる (`WorktreeCloseStepFailure.Reason.branchTipMoved`)。
 public enum WorktreeClosePreflightRefusal: Sendable, Equatable {
+  /// worktree 削除を含む計画でだけ拒否する (§3.4)。
   case detachedHead
-  /// HEAD が計画時 (`WorktreeClosePlan.branch`) と別の branch を指している。`current` は
-  /// `refs/heads/` を除いた値。
+  /// worktree 削除を含む計画でだけ照合する (§3.4)。`current` は `refs/heads/` を除いた値。
   case branchChanged(planned: String, current: String)
   case operationInProgress(Set<WorktreeInProgressOperation>)
   /// §3.4。session 終了後の削除失敗を避け、理由を示して shell での unlock を促す。
@@ -271,39 +272,46 @@ public enum WorktreeClosePreflightRefusal: Sendable, Equatable {
 }
 
 extension GitWorktreeProgressReader {
-  /// branch 名はバイト列で比べる (`WorktreeIdentity` と同じ理由。`String` の `==` は正準等価な
-  /// 別表記を等しいと答える)。HEAD を先に読むのは、停止中の rebase では HEAD が detach しており
-  /// (git 2.50.1 実測)、計画段階と同じ `detachedHead` を返すためである。
-  ///
-  /// `plannedTip` は branch 削除を含む計画でだけ渡す。先端を読むのは HEAD が計画どおりの branch を
-  /// 指していると確かめた後なので、読むのは計画時と同じ名前の branch である。
+  /// branch 名はバイト列で比べる (`String` の `==` は正準等価な別表記を等しいと答える)。
+  /// 削除しない計画では HEAD の変化は拒否理由にならず、途中状態だけを問う (§3.4)。
+  /// `plannedTip` は branch 削除を含む計画でだけ渡す。
   func preflightRefusal(
-    plannedBranch: String, plannedTip: CommitObjectID?, removesWorktree: Bool
+    plannedBranch: String?, plannedTip: CommitObjectID?, removesWorktree: Bool
   ) async -> WorktreeClosePreflightRefusal? {
     do {
+      guard removesWorktree else {
+        let inProgress = try await operations()
+        return inProgress.isEmpty ? nil : .operationInProgress(inProgress)
+      }
+      guard let plannedBranch else { return .detachedHead }
       guard case .branch(let current) = try await head() else { return .detachedHead }
       guard current.utf8.elementsEqual(plannedBranch.utf8) else {
         return .branchChanged(planned: plannedBranch, current: current)
       }
       let inProgress = try await operations()
       guard inProgress.isEmpty else { return .operationInProgress(inProgress) }
-      if removesWorktree {
-        switch try await removalObstacles() {
-        case .unknown:
-          return .observationFailed(.removalObstaclesUnknown)
-        case .observed(let reason, let paths, let hasModules):
-          if let reason { return .worktreeLocked(reason: reason) }
-          if !paths.isEmpty || hasModules {
-            return .worktreeContainsSubmodules(paths: paths, hasAdministrativeModules: hasModules)
-          }
-        }
-      }
+      if let refusal = try await removalObstaclesRefusal() { return refusal }
       guard let plannedTip else { return nil }
       let currentTip = try await tip(ofBranch: plannedBranch)
       return currentTip == plannedTip
         ? nil : .branchTipMoved(planned: plannedTip, current: currentTip)
     } catch {
       return .observationFailed(error)
+    }
+  }
+
+  private func removalObstaclesRefusal() async throws(GitWorktreeProgressReadError)
+    -> WorktreeClosePreflightRefusal?
+  {
+    switch try await removalObstacles() {
+    case .unknown:
+      return .observationFailed(.removalObstaclesUnknown)
+    case .observed(let reason, let paths, let hasModules):
+      if let reason { return .worktreeLocked(reason: reason) }
+      guard paths.isEmpty, !hasModules else {
+        return .worktreeContainsSubmodules(paths: paths, hasAdministrativeModules: hasModules)
+      }
+      return nil
     }
   }
 }

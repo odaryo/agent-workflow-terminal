@@ -4,8 +4,8 @@ import Testing
 
 @testable import Adapters
 
-/// 実 git に対して §3.4 の「detached HEAD の worktree では Close そのものを拒否する」
-/// (確定 2026-09-08) を固定する。
+/// §3.4。削除を伴わない1・2と、detached の commit を失う3・4の境界は、
+/// 途中の rebase では全選択肢を拒否する規則とは別に確かめる。
 ///
 /// fixture では固定できない。detached HEAD が無警告で通っていた原因は、`worktree list` が
 /// `branch` 行を吐かず `status --porcelain=v2` の entries も 0 件になるという**実 git の
@@ -19,8 +19,8 @@ struct GitDetachedHeadCloseIntegrationTests {
     .terminateSession(.removeWorktree(.deleteBranch)),
   ]
 
-  @Test("detached HEAD に積んだ commit を持つ worktree は、どの選択肢でも Close できない")
-  func rejectsCloseForDetachedHeadWithCommits() async throws {
+  @Test("detached HEAD に積んだ commit を持つ worktree は、1・2を許し3・4を拒否する")
+  func permitsOnlyNonRemovalForDetachedHeadWithCommits() async throws {
     try await withGitRepository { repository in
       try await repository.git(["worktree", "add", "-q", "--detach", "../wt-detached", "HEAD"])
       let lost = repository.root.appending(path: "wt-detached/lost.txt")
@@ -49,9 +49,17 @@ struct GitDetachedHeadCloseIntegrationTests {
         report: result.report, continuation: .forcingAcknowledgedWarnings)
       let progress = try await repository.progressReport(for: target)
       for choice in Self.everyChoice {
-        #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
-          try planWorktreeClose(
+        switch choice {
+        case .hideFromUI, .terminateSession(.keepWorktree):
+          let plan = try planWorktreeClose(
             worktree: target, progress: progress, choice: choice, confirmation: confirmation)
+          #expect(plan.branch == nil)
+          #expect(plan.steps == (choice == .hideFromUI ? [] : [.terminateSession]))
+        case .terminateSession(.removeWorktree):
+          #expect(throws: WorktreeClosePlanError.detachedHeadIsNotRemovable) {
+            try planWorktreeClose(
+              worktree: target, progress: progress, choice: choice, confirmation: confirmation)
+          }
         }
       }
 
@@ -92,7 +100,7 @@ struct GitDetachedHeadCloseIntegrationTests {
         report: result.report, continuation: .forcingAcknowledgedWarnings)
       let progress = try await repository.progressReport(for: target)
       for choice in Self.everyChoice {
-        #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
+        #expect(throws: WorktreeClosePlanError.operationInProgress([.rebase])) {
           try planWorktreeClose(
             worktree: target, progress: progress, choice: choice, confirmation: confirmation)
         }

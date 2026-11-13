@@ -51,9 +51,20 @@ public struct GitCloseSafetyInspectionFailure: Error, Sendable, Equatable {
   public let reason: Reason
 }
 
+public enum GitRemoteBranchesContainingHead: Sendable, Equatable {
+  /// HEAD が branch を指している。問わない。
+  case notApplicable
+  /// `refs/remotes/` を除いた名前を git の出力順で保持する。空なら該当 branch は無い。
+  case observed([String])
+  /// 問えなかった。「無い」へ丸めない。
+  case unknown(GitRunnerError)
+}
+
 public struct GitCloseSafetyInspectionResult: Sendable, Equatable {
   public let report: WorktreeCloseInspectionReport
   public let failures: [GitCloseSafetyInspectionFailure]
+  /// 表示専用。remote branch の有無を削除許可の根拠にしない (設計書 §3.4、§25)。
+  public let remoteBranchesContainingHead: GitRemoteBranchesContainingHead
 }
 
 public struct GitCloseSafetyInspector: Sendable {
@@ -126,7 +137,8 @@ public struct GitCloseSafetyInspector: Sendable {
             branchMerge: .unknown,
             undeterminedStashCount: stashCheck.undeterminedCount),
           defaultBranch: .unresolved(reason: .detachedHead)),
-        failures: failures)
+        failures: failures,
+        remoteBranchesContainingHead: await inspectRemoteBranchesContainingHead())
     }
 
     let defaultBranchResult = await judge.resolveDefaultBranch(
@@ -153,7 +165,20 @@ public struct GitCloseSafetyInspector: Sendable {
           branchMerge: branchMerge,
           undeterminedStashCount: stashCheck.undeterminedCount),
         defaultBranch: defaultBranchResult.resolution),
-      failures: failures)
+      failures: failures, remoteBranchesContainingHead: .notApplicable)
+  }
+
+  private func inspectRemoteBranchesContainingHead() async -> GitRemoteBranchesContainingHead {
+    do {
+      let output = try await runner.run(.remoteBranchesContainingHead()).stdout
+      let branches = output.split(separator: "\n").compactMap { line -> String? in
+        guard case .remote(let name) = GitBranchRef(fullName: String(line)) else { return nil }
+        return name
+      }
+      return .observed(branches)
+    } catch {
+      return .unknown(error)
+    }
   }
 
   private func inspectStatus(

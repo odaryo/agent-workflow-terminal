@@ -88,9 +88,9 @@ struct WorktreeCloseRefusalText {
     removalObstaclesFailure: GitWorktreeProgressReadError? = nil
   ) {
     switch error {
-    case .detachedHeadIsNotClosable:
+    case .detachedHeadIsNotRemovable:
       reason = "HEAD が branch を指していません (detached HEAD)。"
-      guidance = "branch を作るか、進行中の rebase / merge を完了してから Close してください。"
+      guidance = "worktree を削除するには、shell で git switch -c <名前> を実行して branch を作ってから Close してください。"
     case .operationInProgress(let operations):
       reason = "作業の途中です: \(describe(operations))"
       guidance = "途中の操作を完了または中止してから Close してください。"

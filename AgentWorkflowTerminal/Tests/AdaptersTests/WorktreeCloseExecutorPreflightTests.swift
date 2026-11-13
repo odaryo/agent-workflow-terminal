@@ -28,6 +28,9 @@ struct WorktreeCloseExecutorPreflightTests {
   private static let mismatches: [Mismatch] = [
     Mismatch(gitStub(head: gitNotFound), [], .detachedHead),
     Mismatch(
+      gitStub(head: gitNotFound), ["\(administrativeDirectory)/rebase-merge"],
+      .operationInProgress([.rebase])),
+    Mismatch(
       gitStub(head: headOnBranch("other")), [], .branchChanged(planned: "topic", current: "other")),
     Mismatch(gitStub(references: ["MERGE_HEAD": gitSuccess]), [], .operationInProgress([.merge])),
     Mismatch(
@@ -61,7 +64,7 @@ struct WorktreeCloseExecutorPreflightTests {
       let harness = try WorktreeCloseHarness(git: git)
 
       let execution = try await harness.executor.execute(
-        try harness.plan(.terminateSession(.keepWorktree)))
+        try harness.plan(.terminateSession(.removeWorktree(.keepBranch))))
 
       #expect(
         execution
@@ -88,10 +91,10 @@ struct WorktreeCloseExecutorPreflightTests {
       "--no-optional-locks", "-C", Self.administrativeDirectory, "--no-pager",
     ]
     let commands: [[String]] = [
-      ["symbolic-ref", "--quiet", "HEAD"],
       ["rev-parse", "--verify", "--quiet", "MERGE_HEAD"],
       ["rev-parse", "--verify", "--quiet", "CHERRY_PICK_HEAD"],
       ["rev-parse", "--verify", "--quiet", "REVERT_HEAD"],
+      ["symbolic-ref", "--quiet", "HEAD"],
       ["rev-parse", "--verify", "--quiet", "refs/heads/topic"],
     ]
     let expected: [[String]] = commands.map { prefix + $0 }
@@ -224,7 +227,7 @@ struct WorktreeCloseExecutorPreflightTests {
     let harness = try WorktreeCloseHarness(git: gitStub(head: headOnBranch("cafe\u{0301}")))
 
     let execution = try await harness.executor.execute(
-      try harness.plan(.terminateSession(.keepWorktree), worktree: planned))
+      try harness.plan(.terminateSession(.removeWorktree(.keepBranch)), worktree: planned))
 
     #expect(
       execution == .abandoned(.branchChanged(planned: "caf\u{00E9}", current: "cafe\u{0301}")))

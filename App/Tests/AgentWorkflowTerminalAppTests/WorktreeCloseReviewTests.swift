@@ -20,11 +20,68 @@ struct WorktreeCloseReviewTests {
     #expect(text.guidance.contains("完了または中止"))
   }
 
-  @Test("detached HEAD は選択肢1〜4のすべてを拒否する")
-  func refusesDetachedHead() async throws {
+  @Test("detached HEAD は選択肢1・2を許可し、3・4には branch の作成を案内する")
+  func disablesRemovalForDetachedHead() async throws {
     let review = try await review(CloseGit(), branch: nil)
 
-    #expect(review.refusal == .detachedHeadIsNotClosable)
+    #expect(review.refusal == nil)
+    #expect(review.unavailability(of: .hideFromUI) == nil)
+    #expect(review.unavailability(of: .terminateSession) == nil)
+    #expect(try review.plan(.hideFromUI, acknowledged: false).steps == [])
+    #expect(try review.plan(.terminateSession, acknowledged: false).steps == [.terminateSession])
+    for option in [WorktreeCloseOption.removeWorktree, .deleteBranch] {
+      let text = try #require(review.unavailability(of: option))
+      #expect(text.contains("HEAD が branch を指していません (detached HEAD)。"))
+      #expect(text.contains("shell で git switch -c <名前>"))
+      #expect(!text.contains("rebase"))
+      #expect(!text.contains("merge"))
+    }
+  }
+
+  @Test("detached の削除拒否は HEAD を含む remote branch を git の順で5件まで出す", arguments: [2, 5, 7])
+  func showsRemoteBranchesContainingDetachedHead(count: Int) async throws {
+    let branches = (1...count).reversed().map { "origin/topic-\($0)" }
+    let review = try await review(
+      CloseGit(remoteBranchesOutput: branches.map { "refs/remotes/\($0)\n" }.joined()),
+      branch: nil)
+
+    for option in [WorktreeCloseOption.removeWorktree, .deleteBranch] {
+      let text = try #require(review.unavailability(of: option))
+      let listed = branches.prefix(5).joined(separator: "、")
+      #expect(text.contains("HEAD を含む remote branch (最後に fetch した時点): \(listed)"))
+      #expect(text.contains("ほか \(count - 5) 件") == (count > 5))
+      for branch in branches.dropFirst(5) {
+        #expect(!text.contains(branch))
+      }
+    }
+  }
+
+  @Test("HEAD を含む remote branch が無いことと確認できないことを区別する", arguments: [false, true])
+  func distinguishesAbsentAndUnknownRemoteBranches(fails: Bool) async throws {
+    let review = try await review(
+      CloseGit(remoteBranchesExitCode: fails ? 128 : 0), branch: nil)
+
+    for option in [WorktreeCloseOption.removeWorktree, .deleteBranch] {
+      let text = try #require(review.unavailability(of: option))
+      if fails {
+        #expect(
+          text.contains(
+            "HEAD を含む remote branch を確認できませんでした: git が失敗しました (exit 128): refs unavailable"))
+        #expect(!text.contains("remote branch はありません"))
+      } else {
+        #expect(text.contains("HEAD を含む remote branch はありません (最後に fetch した時点)。"))
+      }
+    }
+  }
+
+  @Test("計画失敗の detached の案内も branch の作成だけを促す")
+  func describesDetachedRemovalRefusal() {
+    let text = WorktreeCloseRefusalText(.detachedHeadIsNotRemovable, progressFailure: nil)
+
+    #expect(text.reason == "HEAD が branch を指していません (detached HEAD)。")
+    #expect(text.guidance.contains("shell で git switch -c <名前>"))
+    #expect(!text.description.contains("rebase"))
+    #expect(!text.description.contains("merge"))
   }
 
   @Test("未commit の変更は選択肢3で警告し、確認すると --force で削除する計画になる")
@@ -306,6 +363,8 @@ private struct CloseGit: ProcessRunning {
   var submodulePaths: [String] = []
   var stashOutput = ""
   var stashExitCode: Int32 = 0
+  var remoteBranchesOutput = ""
+  var remoteBranchesExitCode: Int32 = 0
 
   func run(
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
@@ -348,8 +407,22 @@ private struct CloseGit: ProcessRunning {
         exitCode: 0, stdout: squashMerged || isBranchChange ? "same-change" : "other-change",
         stderr: "")
     default:
+      return try remoteBranchesResult(command: command, executableURL: executableURL)
+    }
+  }
+
+  private func remoteBranchesResult(
+    command: [String], executableURL: URL
+  ) throws(ProcessRunnerError) -> ProcessRunResult {
+    let expected = [
+      "for-each-ref", "--contains", "HEAD", "--format=%(refname)", "refs/remotes/",
+    ]
+    guard command == expected else {
       throw .launchFailed(executableURL: executableURL, message: "unexpected: \(command)")
     }
+    return .init(
+      exitCode: remoteBranchesExitCode, stdout: remoteBranchesOutput,
+      stderr: remoteBranchesExitCode == 0 ? "" : "refs unavailable")
   }
 
   private func revParse(_ revision: String?) -> ProcessRunResult {

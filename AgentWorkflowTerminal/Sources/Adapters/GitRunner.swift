@@ -170,6 +170,11 @@ public struct GitReadCommand: Sendable, Equatable {
     Self(arguments: ["for-each-ref", "--format=%(refname)", "refs/heads/", "refs/remotes/"])
   }
 
+  /// `--count` は symref も数えるため、上限は symref を除いた表示側で扱う。
+  public static func remoteBranchesContainingHead() -> Self {
+    Self(arguments: ["for-each-ref", "--contains", "HEAD", "--format=%(refname)", "refs/remotes/"])
+  }
+
   /// 最後の行は、destination から first-parent を辿って tip の祖先に当たる直前の commit とその親。
   /// destination が tip の祖先なら出力は空。tip の祖先に当たらないまま root まで辿ると親の無い行で
   /// 終わるが、これは tip が destination の祖先でないことを意味しない (無関係な履歴の merge や

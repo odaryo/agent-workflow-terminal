@@ -39,7 +39,7 @@ struct WorktreeCloseReview: Sendable {
   /// `false` なら session を終了する手段が無く、選択肢2〜4を出さない。
   let canTerminateSessions: Bool
 
-  /// 選択肢1〜4のすべてを拒否する理由 (§3.4 の detached HEAD・作業途中)。`nil` なら拒否しない。
+  /// 選択肢1〜4のすべてを拒否する理由 (§3.4 の作業途中)。`nil` なら拒否しない。
   var refusal: WorktreeClosePlanError? {
     do {
       _ = try planWorktreeClose(
@@ -61,6 +61,9 @@ struct WorktreeCloseReview: Sendable {
       return nil
     } catch {
       switch error {
+      case .detachedHeadIsNotRemovable:
+        return WorktreeCloseRefusalText(error, progressFailure: progress.failure).description
+          + remoteBranchesContainingHeadDescription
       case .worktreeLocked, .worktreeContainsSubmodules, .removalObstaclesUnknown:
         return WorktreeCloseRefusalText(
           error, progressFailure: progress.failure,
@@ -69,6 +72,22 @@ struct WorktreeCloseReview: Sendable {
       default:
         return option == .deleteBranch ? branchDeletionUnavailability : nil
       }
+    }
+  }
+
+  private var remoteBranchesContainingHeadDescription: String {
+    switch safety.remoteBranchesContainingHead {
+    case .notApplicable:
+      return ""
+    case .observed(let branches):
+      guard !branches.isEmpty else {
+        return "HEAD を含む remote branch はありません (最後に fetch した時点)。"
+      }
+      let listed = branches.prefix(5).joined(separator: "、")
+      let remainder = branches.count > 5 ? "、ほか \(branches.count - 5) 件" : ""
+      return "HEAD を含む remote branch (最後に fetch した時点): \(listed)\(remainder)"
+    case .unknown(let error):
+      return "HEAD を含む remote branch を確認できませんでした: \(error.closeDescription)"
     }
   }
 

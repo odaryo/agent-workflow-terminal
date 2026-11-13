@@ -164,19 +164,16 @@ public struct WorktreeClosePlan: Sendable, Hashable {
   ///   対象に依存するのは `.deleteBranch(name:tip:)` だけで、それは同じ安定 ID の
   ///   `DetectedWorktree.branch` から来ている。
   public let worktree: WorktreeIdentity
-  /// 計画を立てた時点で HEAD が指していた branch (`DetectedWorktree.branch`)。detached HEAD は
-  /// 計画段階で拒否するので常にある。
-  ///
-  /// 実行層は step を撃つ前に HEAD を読み直し、これと違えば何もせずに中止する (§3.4、Issue #354)。
-  /// 計画と実行の間に Agent が branch を切り替えた場合や、`DetectedWorktree` が保存から復元した
-  /// 陳腐化した値だった場合に、`.deleteBranch` が今の HEAD とは別の branch を消しにいくのを止める。
-  public let branch: String
+  /// `nil` は detached HEAD。削除を伴わないため、このとき `steps` は `[]` または
+  /// `[.terminateSession]` に限る (設計書 §3.4)。
+  /// worktree を削除する計画だけは実行前に HEAD を照合し、別 branch の削除を防ぐ。
+  public let branch: String?
   public let steps: [WorktreeCloseStep]
 
   // 明示的な access level が「検査を通っていない branch 削除を実行層へ渡せない」保証そのものになる。
   // `.deleteBranch` は `git branch -D` になり、git 側に未merge を拒否する防波堤は無い (Issue #359)。
   // swiftlint:disable:next unneeded_synthesized_initializer
-  init(worktree: WorktreeIdentity, branch: String, steps: [WorktreeCloseStep]) {
+  init(worktree: WorktreeIdentity, branch: String?, steps: [WorktreeCloseStep]) {
     self.worktree = worktree
     self.branch = branch
     self.steps = steps
@@ -201,28 +198,12 @@ public enum WorktreeClosePlanError: Error, Sendable, Hashable {
   /// `terminateSession` を撃った**後**である。Project Root の常設 session (§2.3) を落として
   /// から失敗するのでは遅い。
   case projectRootIsNotClosable
-  /// HEAD が branch を指していない (detached HEAD) worktree を Close しようとした
-  /// (`DetectedWorktree.branch` が `nil`)。
-  ///
-  /// §3.4 が detached HEAD の Close を**選択肢1〜4のすべてで拒否する**と確定している
-  /// (2026-09-08)。下の3検査が「警告して続行可」なのに対しこれだけが拒否なのは、失われるのが
-  /// 到達不能になる commit と中断中の rebase／merge であり、復旧手段が reflog しか無いため。
-  /// 呼び出し側は、branch を作るか進行中の rebase／merge を完了するようユーザーへ促す。
-  ///
-  /// **`projectRootIsNotClosable` と同じく計画段階で弾く。** 選択肢1・2 には git の操作が無く、
-  /// 3・4 でも git は止めない (git 2.50.1 実測: detached HEAD に commit を積んだ worktree への
-  /// `worktree remove -- <path>` は `--force` 無しで rc=0、その commit は `branch --contains` の
-  /// どこにも現れず、`reflog expire --expire=now --all && gc --prune=now` の後は object ごと
-  /// 消える。中断中の rebase を持つ worktree も同じく rc=0 で `rebase-merge` ごと消える)。
-  /// つまり下の層には止める機会が無い。
-  case detachedHeadIsNotClosable
-  /// 作業途中 (merge／cherry-pick／revert／rebase／bisect など) の worktree を Close しようとした
-  /// (§3.4、確定 2026-10-08)。detached HEAD と同じく選択肢1〜4のすべてで拒否する。呼び出し側は
-  /// 途中の操作を完了または中止するよう促す。
-  ///
-  /// detached と別の理由にするのは、merge・cherry-pick の衝突中は HEAD が branch を指したままで
-  /// detached の条件では捕まらず、未commit変更の警告を承諾すれば `--force` 付きで削除されるため
-  /// である (git 2.50.1 実測)。種類を持つのは UI が操作名を出せるようにするため。
+  /// §3.4。detached HEAD の選択肢3・4は `worktree remove` が `--force` 無しでも成功し、
+  /// commit が gc 後に失われるため拒否する。1・2は何も消さないので拒否しない。
+  case detachedHeadIsNotRemovable
+  /// §3.4。途中状態は選択肢1〜4のすべてで拒否する。merge・cherry-pick の衝突中は
+  /// HEAD が branch を指したままで、detached の条件では捕まらない。未commit変更の
+  /// 警告を承諾すれば `--force` 付きで途中の作業ごと消えるため、独立した拒否条件にする。
   case operationInProgress(Set<WorktreeInProgressOperation>)
   /// 作業途中かどうかを観測できなかった。「途中の作業は無い」へ丸めず拒否する。
   case operationProgressUnknown
@@ -263,18 +244,16 @@ public func planWorktreeClose(
   confirmation: WorktreeRemovalConfirmation?
 ) throws(WorktreeClosePlanError) -> WorktreeClosePlan {
   guard !worktree.isProjectRoot else { throw .projectRootIsNotClosable }
-  // 4択のすべてがここを通り、`WorktreeClosePlan` は他に作れない。選択肢1・2 は検査も確認も
-  // 要求しない (下の `case .terminateSession(.removeWorktree)` だけが確認を読む) ので、
-  // 検査層で detached HEAD を判定不能として返すだけでは 1・2 が素通りする。
-  guard let branch = worktree.branch else { throw .detachedHeadIsNotClosable }
   let identity = worktree.identity
   try requireNoOperationInProgress(progress, target: identity)
   switch choice {
   case .hideFromUI:
-    return WorktreeClosePlan(worktree: identity, branch: branch, steps: [])
+    return WorktreeClosePlan(worktree: identity, branch: worktree.branch, steps: [])
   case .terminateSession(.keepWorktree):
-    return WorktreeClosePlan(worktree: identity, branch: branch, steps: [.terminateSession])
+    return WorktreeClosePlan(
+      worktree: identity, branch: worktree.branch, steps: [.terminateSession])
   case .terminateSession(.removeWorktree(let afterRemoval)):
+    guard let branch = worktree.branch else { throw .detachedHeadIsNotRemovable }
     try requireNoRemovalObstacles(progress.removalObstacles)
     guard let confirmation else { throw .removalNotConfirmed }
     // 対象の一致を問うのは確認を読むここだけである。§3.4 が検査と確認を課すのは選択肢3・4 だけで、

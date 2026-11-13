@@ -139,7 +139,12 @@ private struct WorktreeCloseOptions: View {
     case .hideFromUI: "1. Inactive にするだけ (tmux session と worktree は残す)"
     case .terminateSession: "2. Inactive にし、tmux session を終了する"
     case .removeWorktree: "3. 2 に加えて、worktree を削除する"
-    case .deleteBranch: "4. 3 に加えて、branch「\(review.target.branch ?? "")」を削除する"
+    case .deleteBranch:
+      if let branch = review.target.branch {
+        "4. 3 に加えて、branch「\(branch)」を削除する"
+      } else {
+        "4. 3 に加えて、branch を削除する"
+      }
     }
   }
 }

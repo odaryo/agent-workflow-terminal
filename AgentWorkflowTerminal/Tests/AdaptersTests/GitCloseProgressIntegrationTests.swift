@@ -83,11 +83,9 @@ struct GitCloseProgressIntegrationTests {
     }
   }
 
-  /// 停止中の rebase は HEAD を detach する (git 2.50.1 実測) ので、計画は detached として
-  /// 拒否する。途中状態の観測が rebase を見ていることは別に確かめる —— HEAD を branch に
-  /// 戻した rebase (`rebase --apply` でも `git am` でも) が素通りしないため。
-  @Test("rebase の途中の worktree は detached として拒否し、観測は rebase を返す")
-  func rejectsCloseForInterruptedRebase() async throws {
+  /// 停止中の rebase は HEAD を detach するため、branch の有無だけでは拒否理由を案内できない (§3.4)。
+  @Test("rebase の途中の worktree は全選択肢で途中状態として拒否する")
+  func rejectsEveryChoiceForInterruptedRebase() async throws {
     try await withGitRepository { repository in
       try await repository.addWorktree("wt", commits: ["t.txt"])
       #expect(
@@ -100,7 +98,7 @@ struct GitCloseProgressIntegrationTests {
       let progress = try await repository.progressReport(for: target)
       #expect(progress.progress == .observed([.rebase]))
       for choice in Self.everyChoice {
-        #expect(throws: WorktreeClosePlanError.detachedHeadIsNotClosable) {
+        #expect(throws: WorktreeClosePlanError.operationInProgress([.rebase])) {
           try planWorktreeClose(
             worktree: target, progress: progress, choice: choice, confirmation: nil)
         }

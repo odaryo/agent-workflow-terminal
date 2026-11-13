@@ -77,7 +77,7 @@ struct GitCloseHistoryRewriteIntegrationTests {
 }
 
 // public init が親環境から組み立てた履歴設定は保ち、開発者の gitconfig だけを隔離する。
-private struct ConfigIsolatedGitProcessRunner: ProcessRunning {
+struct ConfigIsolatedGitProcessRunner: ProcessRunning {
   func run(
     executableURL: URL, arguments: [String], environment: [String: String], timeout: Duration,
     outputLimit: Int

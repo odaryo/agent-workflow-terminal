@@ -176,7 +176,10 @@ struct GitCloseSafetyInspectorTests {
   func reportsBranchChecksAsUnknownForDetachedHead() async throws {
     let stub = CloseInspectionProcessStub { arguments in
       // detached でも branch を特定できない stash は数えるので `stash list` は読む (#640)。
-      if commandArguments(arguments) == GitReadCommand.stashList().arguments {
+      if [
+        GitReadCommand.stashList().arguments,
+        GitReadCommand.remoteBranchesContainingHead().arguments,
+      ].contains(commandArguments(arguments)) {
         return .success(.init(exitCode: 0, stdout: "", stderr: ""))
       }
       #expect(

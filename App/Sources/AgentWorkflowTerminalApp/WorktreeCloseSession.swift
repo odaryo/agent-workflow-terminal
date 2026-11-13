@@ -131,10 +131,9 @@ final class WorktreeCloseSession: ObservableObject {
       review.unavailability(of: option) == nil,
       !review.requiresAcknowledgement(option) || acknowledged
     else { return }
-    // 検査の後に移動・切り替えられた worktree へ、検査した値のまま撃たない。
-    guard let current = context.currentTarget(), current.isReachable,
-      current.worktreePath.utf8.elementsEqual(target.worktreePath.utf8),
-      current.branch?.utf8.elementsEqual((target.branch ?? "").utf8) == true
+    // §3.4: 選択肢1・2は何も削除しないため、branch が切り替わっていても中止しない。
+    guard let current = context.currentTarget(),
+      Self.matchesInspectedTarget(current: current, target: target, option: option)
     else {
       phase = .finished(
         .init(
@@ -175,6 +174,19 @@ final class WorktreeCloseSession: ObservableObject {
         phase = .finished(result)
       }
     }
+  }
+
+  nonisolated static func matchesInspectedTarget(
+    current: DetectedWorktree, target: DetectedWorktree, option: WorktreeCloseOption
+  ) -> Bool {
+    guard current.isReachable,
+      current.worktreePath.utf8.elementsEqual(target.worktreePath.utf8)
+    else { return false }
+    guard option.removesWorktree else { return true }
+    guard let plannedBranch = target.branch, let currentBranch = current.branch else {
+      return false
+    }
+    return currentBranch.utf8.elementsEqual(plannedBranch.utf8)
   }
 
   nonisolated private static func runInspection(

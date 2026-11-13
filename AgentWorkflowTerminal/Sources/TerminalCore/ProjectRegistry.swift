@@ -33,7 +33,7 @@ public enum ProjectRegistration: Sendable, Equatable {
 ///   一時的に到達できない Project を一覧から落とすと、戻ってきたときに登録し直しになる。
 ///   選べるかどうかは呼び出し側が `reselect(selectable:)` に渡す。
 public struct ProjectRegistry: Sendable, Hashable {
-  /// 登録順。
+  /// ユーザーが並べ替えた順 (設計書 §13)。
   public private(set) var projects: [RegisteredProject]
   /// 一覧が空でない限り、`unregister` と復元はこれを `nil` のままにしない。`nil` になるのは
   /// 一覧が空のときと、`reselect(selectable:)` が選べる Project を見つけられなかったときだけ。
@@ -93,6 +93,20 @@ public struct ProjectRegistry: Sendable, Hashable {
     return registration
   }
 
+  /// destination は移動後の index。SwiftUI の onMove の削除前オフセットではない (設計書 §13)。
+  @discardableResult
+  public mutating func moveProject(
+    _ commonDirectory: WorktreeIdentity, to destination: Int
+  ) -> Bool {
+    guard projects.indices.contains(destination),
+      let source = projects.firstIndex(where: { $0.commonDirectory == commonDirectory }),
+      source != destination
+    else { return false }
+    let project = projects.remove(at: source)
+    projects.insert(project, at: destination)
+    return true
+  }
+
   /// 一覧から外すだけで、repository と tmux session には触れない (設計書 §16.1)。
   public mutating func unregister(_ commonDirectory: WorktreeIdentity) {
     guard contains(commonDirectory) else { return }
@@ -115,7 +129,7 @@ public struct ProjectRegistry: Sendable, Hashable {
     selection = projects.first { selectable($0.commonDirectory) }?.commonDirectory
   }
 
-  /// 設計書 §5.4 / §13 (登録順)。選択中以外に選べる候補がなければ nil。
+  /// 設計書 §5.4 / §13 (ユーザーが並べ替えた順)。選択中以外に選べる候補がなければ nil。
   public func adjacentSelection(
     forward: Bool, selectable: (WorktreeIdentity) -> Bool
   ) -> WorktreeIdentity? {

@@ -181,7 +181,8 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
         LocatedPaneSummaryReadings(
           readings: PaneSummaryReadingsSnapshot(
             pane: pane.snapshot(listedAt: listing.listedAt), readings: $0),
-          location: PaneLocation(windowIndex: pane.windowIndex, paneIndex: pane.paneIndex))
+          location: PaneLocation(windowIndex: pane.windowIndex, paneIndex: pane.paneIndex),
+          isFocused: pane.isFocused)
       }
     }
   }
@@ -236,4 +237,5 @@ public struct TmuxWorktreePaneSource: WorktreePaneSource, Sendable {
 public struct LocatedPaneSummaryReadings: Sendable, Hashable {
   public let readings: PaneSummaryReadingsSnapshot
   public let location: PaneLocation
+  public let isFocused: Bool
 }

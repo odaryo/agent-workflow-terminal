@@ -6,15 +6,18 @@ import Testing
 @Suite("tmux list-panes 出力のパース")
 struct TmuxListPanesTests {
 
-  @Test("フォーマットは pane 状態の取得に必要な14フィールドを Unit Separator で区切る")
+  @Test("フォーマットは pane 状態の取得に必要な15フィールドを Unit Separator で区切る")
   func formatContainsRequiredFields() {
     #expect(
       TmuxListPanes.format
         // tmux へ渡す format と1文字も違わないことの検証。分割・連結で組み立てると
         // フォーマットの再実装になり検証の意味が消えるため、原文のまま1行で置く。
         // swiftlint:disable:next line_length
-        == "#{pane_id}\u{1F}#{s/\\\\/\\\\\\\\/:session_name}\u{1F}#{window_index}\u{1F}#{window_id}\u{1F}#{pane_index}\u{1F}#{pane_pid}\u{1F}#{pane_active}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_command}\u{1F}#{pane_dead}\u{1F}#{pane_dead_status}\u{1F}#{pane_dead_signal}\u{1F}#{s/\\\\/\\\\\\\\/:pane_tty}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_path}\u{1F}#{s/\\\\/\\\\\\\\/:pane_title}"
+        == "#{pane_id}\u{1F}#{s/\\\\/\\\\\\\\/:session_name}\u{1F}#{window_index}\u{1F}#{window_id}\u{1F}#{pane_index}\u{1F}#{pane_pid}\u{1F}#{pane_active}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_command}\u{1F}#{pane_dead}\u{1F}#{pane_dead_status}\u{1F}#{pane_dead_signal}\u{1F}#{s/\\\\/\\\\\\\\/:pane_tty}\u{1F}#{s/\\\\/\\\\\\\\/:pane_current_path}\u{1F}#{s/\\\\/\\\\\\\\/:pane_title}\u{1F}#{window_active}"
     )
+    let fields = TmuxListPanes.format.split(separator: "\u{1F}", omittingEmptySubsequences: false)
+    #expect(fields.count == 15)
+    #expect(fields.last == "#{window_active}")
   }
 
   @Test("区切り表現と日本語・絵文字を含む path と title を真の値へ戻す")
@@ -150,7 +153,7 @@ struct TmuxListPanesTests {
     )
 
     #expect(result.panes.isEmpty)
-    #expect(result.failures.map(\.error) == [.invalidFieldCount(actual: 15)])
+    #expect(result.failures.map(\.error) == [.invalidFieldCount(actual: 16)])
   }
 
   @Test("hostile な session 名を新 format の実出力から保持する")
@@ -347,10 +350,10 @@ struct TmuxListPanesTests {
 
   @Test("値末尾の単独バックスラッシュを trap せず parse error にする")
   func rejectsTrailingBackslash() {
-    // 末尾フィールド以外に置くと、その `\` が直後の区切り `\037` と `\\` の対を作って
-    // splitter が分割せず、復号へ届く前に invalidFieldCount になる。
+    // 生 0x1F なら title 末尾の奇数 backslash が区切りを飲み込まず、復号の失敗を検証できる。
     #expect(throws: TmuxListPanesParseError.invalidRawFieldEscape(#"\"#)) {
-      try TmuxListPanes.parse(line: encodedLine(title: #"\"#))
+      try TmuxListPanes.parse(
+        line: encodedLine(title: #"\"#).replacingOccurrences(of: #"\037"#, with: "\u{1F}"))
     }
   }
 
@@ -361,7 +364,7 @@ struct TmuxListPanesTests {
     }
   }
 
-  @Test("フィールド数が14でなければ拒否する")
+  @Test("フィールド数が15でなければ拒否する")
   func rejectsInvalidFieldCount() {
     #expect(throws: TmuxListPanesParseError.invalidFieldCount(actual: 2)) {
       try TmuxListPanes.parse(line: "%0\\037session")
@@ -385,6 +388,33 @@ struct TmuxListPanesTests {
     }
   }
 
+  @Test(
+    "pane と window の active が両方1のときだけフォーカスがある",
+    arguments: [("0", "0", false), ("0", "1", false), ("1", "0", false), ("1", "1", true)])
+  func derivesFocus(paneActive: String, windowActive: String, expected: Bool) throws {
+    let pane = try TmuxListPanes.parse(
+      line: encodedLine(paneActive: paneActive, windowActive: windowActive))
+
+    #expect(pane.isActive == (paneActive == "1"))
+    #expect(pane.isWindowActive == (windowActive == "1"))
+    #expect(pane.isFocused == expected)
+  }
+
+  @Test("window_active の空文字と0・1以外は行の failure にする", arguments: ["", "2", "true"])
+  func rejectsInvalidWindowActive(value: String) {
+    let invalid = encodedLine(paneID: "%1", windowActive: value)
+    let result = TmuxListPanes.parse(
+      output: [encodedLine(paneID: "%0"), invalid, encodedLine(paneID: "%2")]
+        .joined(separator: "\n"))
+
+    #expect(result.panes.map(\.paneID.rawValue) == ["%0", "%2"])
+    #expect(
+      result.failures == [
+        TmuxListPanesParseFailure(
+          lineNumber: 2, line: invalid, error: .invalidWindowActive(value))
+      ])
+  }
+
   private func encodedLine(
     paneID: String = "%0",
     sessionName: String = "session",
@@ -399,11 +429,12 @@ struct TmuxListPanesTests {
     deadSignal: String = "",
     tty: String = "/dev/ttys000",
     currentPath: String = "/tmp",
-    title: String = "title"
+    title: String = "title",
+    windowActive: String = "1"
   ) -> String {
     [
       paneID, sessionName, windowIndex, windowID, paneIndex, panePID, paneActive,
-      currentCommand, paneDead, deadStatus, deadSignal, tty, currentPath, title,
+      currentCommand, paneDead, deadStatus, deadSignal, tty, currentPath, title, windowActive,
     ].joined(separator: "\\037")
   }
 

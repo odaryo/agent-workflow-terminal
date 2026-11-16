@@ -109,7 +109,7 @@ struct TmuxListPanesRawSeparatorTests {
     )
 
     #expect(result.panes.isEmpty)
-    #expect(result.failures.map(\.error) == [.invalidFieldCount(actual: 15)])
+    #expect(result.failures.map(\.error) == [.invalidFieldCount(actual: 16)])
   }
 
   @Test("生 0x1F 区切りでも直前の二重化 backslash をフィールドの値として残す")
@@ -121,9 +121,9 @@ struct TmuxListPanesRawSeparatorTests {
     #expect(pane.currentCommand == #"cmd\"#)
   }
 
-  @Test("生 0x1F 区切りは先頭・末尾・連続でも空フィールドを保つ")
+  @Test("生 0x1F 区切りは先頭・連続と window_active 直前の空フィールドを保つ")
   func rawSeparatorKeepsEmptyFields() throws {
-    // dead_status / dead_signal が連続する空フィールドで、tty が空、title が行末の空。
+    // dead_status / dead_signal が連続する空フィールドで、tty が空、title が空。
     let pane = try TmuxListPanes.parse(
       line: rawSeparatorLine(tty: "", title: "")
     )
@@ -143,7 +143,7 @@ struct TmuxListPanesRawSeparatorTests {
     // 版の混在は実出力には現れないが、片方の受理がもう片方を弱めていないことをここで固定する。
     let fields = [
       "%0", "session", "0", "@0", "0", "123", "1", "zsh", "0", "", "", "/dev/ttys000",
-      "/tmp", "title",
+      "/tmp", "title", "1",
     ]
     var mixed = fields[0]
     for (offset, field) in fields.dropFirst().enumerated() {
@@ -159,9 +159,9 @@ struct TmuxListPanesRawSeparatorTests {
     let pane = try TmuxListPanes.parse(line: encodedLine(currentCommand: #"zsh\\"#))
     #expect(pane.currentCommand == #"zsh\"#)
 
-    // 奇数列で終わる値は直後の区切りと `\\` の対を作り、区切りが1つ消えて13フィールドになる。
+    // 奇数列で終わる値は直後の区切りと `\\` の対を作り、区切りが1つ消えて14フィールドになる。
     // 実出力でこの形になるのは値が実 0x1F を含むときだけで、その pane は failure に落ちる。
-    #expect(throws: TmuxListPanesParseError.invalidFieldCount(actual: 13)) {
+    #expect(throws: TmuxListPanesParseError.invalidFieldCount(actual: 14)) {
       try TmuxListPanes.parse(line: encodedLine(currentCommand: #"zsh\"#))
     }
   }
@@ -184,7 +184,7 @@ struct TmuxListPanesRawSeparatorTests {
   ) -> String {
     [
       paneID, "session", "0", "@0", "0", "123", "1", currentCommand, "0", "", "",
-      tty, "/tmp", title,
+      tty, "/tmp", title, "1",
     ].joined(separator: "\u{1F}")
   }
 
@@ -192,7 +192,7 @@ struct TmuxListPanesRawSeparatorTests {
   private func encodedLine(currentCommand: String) -> String {
     [
       "%0", "session", "0", "@0", "0", "123", "1", currentCommand, "0", "", "",
-      "/dev/ttys000", "/tmp", "title",
+      "/dev/ttys000", "/tmp", "title", "1",
     ].joined(separator: "\\037")
   }
 

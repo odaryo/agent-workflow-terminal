@@ -355,7 +355,7 @@ private actor CompletionObservationRunner: ProcessRunning {
       for await _ in summaryGate {}
       let fields = [
         "%2", sessionName, "0", "@1", "0", "100", "1", "codex", "0", "", "",
-        "/dev/ttys002", "/repo", "", "v", "v200 turn=\(turnStartMilliseconds) done",
+        "/dev/ttys002", "/repo", "", "1", "v", "v200 turn=\(turnStartMilliseconds) done",
         "vunobservable-\(processFailureCount)",
       ]
       return .init(exitCode: 0, stdout: fields.joined(separator: "\u{1F}") + "\n", stderr: "")

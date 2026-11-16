@@ -70,27 +70,30 @@ public struct OverviewWorktreeInput: Sendable {
   public var details: [PaneID: OverviewPaneDetail]
   public var mainPane: PaneID?
   public var isObserved: Bool
+  /// `nil` はフォーカスのある pane をまだ観測できていないことを表す (設計書 §13)。
+  public var focusedPane: PaneID?
 
   public init(
     session: TerminalSessionKey, paneStates: [PaneDisplayState],
     details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil,
-    isObserved: Bool = true
+    isObserved: Bool = true, focusedPane: PaneID? = nil
   ) {
     self.session = session
     self.paneStates = paneStates
     self.details = details
     self.mainPane = mainPane
     self.isObserved = isObserved
+    self.focusedPane = focusedPane
   }
 
   public init(
     worktree: WorktreeIdentity, paneStates: [PaneDisplayState],
     details: [PaneID: OverviewPaneDetail] = [:], mainPane: PaneID? = nil,
-    isObserved: Bool = true
+    isObserved: Bool = true, focusedPane: PaneID? = nil
   ) {
     self.init(
       session: .primary(worktree), paneStates: paneStates, details: details, mainPane: mainPane,
-      isObserved: isObserved)
+      isObserved: isObserved, focusedPane: focusedPane)
   }
 }
 
@@ -147,6 +150,15 @@ public struct OverviewWorktree: Sendable, Hashable {
   public var worktree: WorktreeIdentity { session.identity }
   /// 空にならない。未観測は `[.notObserved]`、観測済みで Agent pane が無ければ `[.noAgentPane]`。
   public let rows: [OverviewRow]
+  public let focusedPane: PaneID?
+
+  public func showsDisplayedMark(on row: OverviewRow, isDisplayed: Bool) -> Bool {
+    guard isDisplayed else { return false }
+    switch row {
+    case .pane(let pane): return pane.paneID == focusedPane
+    case .noAgentPane, .notObserved: return true
+    }
+  }
 }
 
 public struct OverviewProject: Sendable, Hashable {
@@ -184,7 +196,8 @@ public func makeAgentPaneOverview(_ projects: [OverviewProjectInput]) -> [Overvi
 
 private func overviewWorktree(_ input: OverviewWorktreeInput) -> OverviewWorktree {
   guard input.isObserved else {
-    return OverviewWorktree(session: input.session, rows: [.notObserved])
+    return OverviewWorktree(
+      session: input.session, rows: [.notObserved], focusedPane: input.focusedPane)
   }
   let panes = input.paneStates.map { state in
     OverviewRow.pane(
@@ -193,5 +206,7 @@ private func overviewWorktree(_ input: OverviewWorktreeInput) -> OverviewWorktre
         detail: input.details[state.paneID] ?? OverviewPaneDetail(),
         isMain: state.paneID == input.mainPane))
   }
-  return OverviewWorktree(session: input.session, rows: panes.isEmpty ? [.noAgentPane] : panes)
+  return OverviewWorktree(
+    session: input.session, rows: panes.isEmpty ? [.noAgentPane] : panes,
+    focusedPane: input.focusedPane)
 }

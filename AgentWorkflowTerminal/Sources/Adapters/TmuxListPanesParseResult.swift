@@ -6,6 +6,7 @@ public enum TmuxListPanesParseError: Error, Sendable, Equatable {
   case invalidPaneIndex(String)
   case invalidPanePID(String)
   case invalidPaneActive(String)
+  case invalidWindowActive(String)
   case invalidPaneDead(String)
   case invalidPaneDeadStatus(String)
   case invalidPaneTermination(status: String, signal: String)

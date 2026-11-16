@@ -8,6 +8,51 @@ import Testing
 @MainActor
 @Suite("Issue #387 初回の観測完了")
 struct PaneObservationStoreTests {
+  @Test(
+    "Issue #1025 link された同じ PaneID の全行からフォーカスを集計する",
+    arguments: [
+      [("%2", false), ("%2", true)],
+      [("%2", true), ("%2", true)],
+      [("%2", false)],
+      [("%2", true), ("%3", true)],
+    ])
+  func observesFocusedPane(rows: [(String, Bool)]) async throws {
+    let fixture = try CompletionObservationFixture(focusedRows: rows)
+    defer { fixture.stop() }
+    fixture.summaryGate.continuation.finish()
+    try await waitUntil { fixture.store.observed[fixture.session]?.details[fixture.pane] != nil }
+    let focused = Set(rows.filter { $0.1 }.map { PaneID(rawValue: $0.0) })
+    #expect(
+      fixture.store.observed[fixture.session]?.focusedPane
+        == (focused.count == 1 ? focused.first : nil))
+  }
+
+  @Test("Issue #1025 pane 選択の成功時だけ観測を待たずにフォーカスを変える", arguments: [true, false])
+  func selectsFocusImmediately(succeeds: Bool) async throws {
+    let fixture = try CompletionObservationFixture(selectionSucceeds: succeeds)
+    defer { fixture.stop() }
+    let pane = fixture.pane
+    let state = PaneAgentState(id: pane, state: .working, lastUpdatedAt: .distantPast)
+    fixture.states.continuation.yield(.init(panes: [state], isComplete: true))
+    try await waitUntil {
+      fixture.store.observed[fixture.session]?.displayStates.first?.paneID == pane
+    }
+    let error = await fixture.store.reveal(pane)
+    #expect((error == nil) == succeeds)
+    #expect(fixture.store.observed[fixture.session]?.focusedPane == (succeeds ? pane : nil))
+  }
+
+  @Test("Issue #1025 非 Agent pane も詳細に含まれれば選択直後のフォーカスを反映する")
+  func selectsPaneFromDetails() async throws {
+    let fixture = try CompletionObservationFixture(focusedRows: [("%2", false), ("%3", true)])
+    defer { fixture.stop() }
+    fixture.summaryGate.continuation.finish()
+    try await waitUntil { fixture.store.observed[fixture.session]?.details[fixture.pane] != nil }
+    #expect(fixture.store.observed[fixture.session]?.focusedPane == PaneID(rawValue: "%3"))
+    #expect(await fixture.store.reveal(fixture.pane) == nil)
+    #expect(fixture.store.observed[fixture.session]?.focusedPane == fixture.pane)
+  }
+
   // 配信された Completed の時刻 (1794187510) でも Working の観測時刻 (1794187520) でもなく、Working が運ぶ
   // 応答終了の最終観測時刻 (1794187516) で判定することを、その前後に始まったターンで固定する。
   @Test(
@@ -296,7 +341,10 @@ private struct CompletionObservationFixture {
         lastTurnEndObservedAt: firstTurnEnd))
   }
 
-  init(turnStartMilliseconds: Int = 1_794_187_511_000) throws {
+  init(
+    turnStartMilliseconds: Int = 1_794_187_511_000,
+    focusedRows: [(String, Bool)] = [("%2", true)], selectionSucceeds: Bool = true
+  ) throws {
     let identity = try #require(WorktreeIdentity(rawValue: "/repo/.git"))
     session = TerminalSessionKey.primary(identity)
     let states = AsyncStream<WorktreePaneAgentStates>.makeStream()
@@ -304,7 +352,8 @@ private struct CompletionObservationFixture {
     summaryGate = AsyncStream<Void>.makeStream()
     processRunner = CompletionObservationRunner(
       sessionName: TmuxSessionName(key: session).rawValue, summaryGate: summaryGate.stream,
-      turnStartMilliseconds: turnStartMilliseconds)
+      turnStartMilliseconds: turnStartMilliseconds, focusedRows: focusedRows,
+      selectionSucceeds: selectionSucceeds)
     let executable = URL(fileURLWithPath: "/usr/bin/true")
     let runner = try TmuxRunner(
       server: .userDefault, processRunner: processRunner, executableCandidates: [executable])
@@ -334,13 +383,20 @@ private actor CompletionObservationRunner: ProcessRunning {
   let sessionName: String
   let summaryGate: AsyncStream<Void>
   let turnStartMilliseconds: Int
+  let focusedRows: [(String, Bool)]
+  let selectionSucceeds: Bool
   private var processObservable = true
   private var processFailureCount = 0
 
-  init(sessionName: String, summaryGate: AsyncStream<Void>, turnStartMilliseconds: Int) {
+  init(
+    sessionName: String, summaryGate: AsyncStream<Void>, turnStartMilliseconds: Int,
+    focusedRows: [(String, Bool)], selectionSucceeds: Bool
+  ) {
     self.sessionName = sessionName
     self.summaryGate = summaryGate
     self.turnStartMilliseconds = turnStartMilliseconds
+    self.focusedRows = focusedRows
+    self.selectionSucceeds = selectionSucceeds
   }
 
   func makeProcessUnobservable() {
@@ -353,12 +409,18 @@ private actor CompletionObservationRunner: ProcessRunning {
   ) async throws(ProcessRunnerError) -> ProcessRunResult {
     if arguments.contains("list-panes") {
       for await _ in summaryGate {}
-      let fields = [
-        "%2", sessionName, "0", "@1", "0", "100", "1", "codex", "0", "", "",
-        "/dev/ttys002", "/repo", "", "1", "v", "v200 turn=\(turnStartMilliseconds) done",
-        "vunobservable-\(processFailureCount)",
-      ]
-      return .init(exitCode: 0, stdout: fields.joined(separator: "\u{1F}") + "\n", stderr: "")
+      let lines = focusedRows.enumerated().map { index, row in
+        let fields = [
+          row.0, sessionName, String(index), "@1", "0", "100", "1", "codex", "0", "", "",
+          "/dev/ttys002", "/repo", "", row.1 ? "1" : "0", "v",
+          "v200 turn=\(turnStartMilliseconds) done", "vunobservable-\(processFailureCount)",
+        ]
+        return fields.joined(separator: "\u{1F}") + "\n"
+      }
+      return .init(exitCode: 0, stdout: lines.joined(), stderr: "")
+    }
+    if arguments.contains("select-window") {
+      return .init(exitCode: selectionSucceeds ? 0 : 1, stdout: "", stderr: "")
     }
     if !processObservable {
       processFailureCount += 1

@@ -217,7 +217,7 @@ private struct OverviewProjectSection: View {
       sessionHeading(worktree, title: title, isDisplayed: isDisplayed)
     }
     ForEach(worktree.rows, id: \.rowID) { row in
-      let showsDisplayedMark = isDisplayed && row == worktree.rows.first
+      let showsDisplayedMark = worktree.showsDisplayedMark(on: row, isDisplayed: isDisplayed)
       switch row {
       case .pane(let pane):
         OverviewPaneRow(

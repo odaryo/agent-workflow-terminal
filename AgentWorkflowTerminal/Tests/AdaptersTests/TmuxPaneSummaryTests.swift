@@ -105,10 +105,10 @@ struct TmuxListPanesSummaryTests {
     #expect(TmuxListPanes.parse(output: summaryOutput).panes.isEmpty)
     #expect(
       TmuxListPanes.parse(output: summaryOutput).failures.map(\.error)
-        == Array(repeating: .invalidFieldCount(actual: 17), count: 6))
+        == Array(repeating: .invalidFieldCount(actual: 18), count: 6))
     #expect(
       TmuxListPanes.parseWithSummary(output: plainOutput).failures.map(\.error)
-        == [.invalidFieldCount(actual: 14)])
+        == [.invalidFieldCount(actual: 15)])
   }
 
   @Test(
@@ -134,6 +134,25 @@ struct TmuxListPanesSummaryTests {
     #expect(pane.paneID == PaneID(rawValue: "%0"))
     #expect(pane.summaryReadings?.status == .value("4242 設計｜相談中"))
     #expect(pane.summaryReadings?.purpose == expected)
+  }
+
+  @Test("18フィールドの概要行から window_active と連携変数を読む", arguments: ["0", "1"])
+  func parsesWindowActiveWithSummary(windowActive: String) throws {
+    let fields = [
+      "%9", "session", "1", "@1", "0", "123", "1", "sh", "0", "", "",
+      "/dev/ttys000", "/tmp", "title", windowActive, "v123 作業中", "v", "v目的",
+    ]
+    let result = TmuxListPanes.parseWithSummary(output: fields.joined(separator: "\u{1F}"))
+    let pane = try #require(result.panes.first)
+
+    #expect(fields.count == 18)
+    #expect(result.failures.isEmpty)
+    #expect(result.panes.count == 1)
+    #expect(pane.isWindowActive == (windowActive == "1"))
+    #expect(
+      pane.summaryReadings
+        == PaneSummaryReadings(
+          status: .value("123 作業中"), completion: .value(""), purpose: .value("目的")))
   }
 
   private func fixture(named name: String) throws -> String {

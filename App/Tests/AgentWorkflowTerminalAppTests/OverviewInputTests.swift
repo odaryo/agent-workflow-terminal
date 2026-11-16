@@ -88,13 +88,14 @@ struct OverviewInputTests {
       session: .primary(identity),
       observation: .init(
         paneStates: [PaneAgentState(id: pane, state: .working, lastUpdatedAt: Date())],
-        displayStates: [display], details: [pane: detail]),
+        displayStates: [display], details: [pane: detail], focusedPane: pane),
       mainPane: pane)
 
     #expect(input.isObserved)
     #expect(input.paneStates == [display])
     #expect(input.details == [pane: detail])
     #expect(input.mainPane == pane)
+    #expect(input.focusedPane == pane)
     let row = try #require(makeTabSummaries([input]).first?.rows.first?.pane)
     #expect(row.isMain)
   }

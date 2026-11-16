@@ -391,6 +391,58 @@ struct AgentPaneOverviewTests {
     #expect(overview.tasks.map(\.worktree) == [task.worktree])
   }
 
+  @Test("両方の入力 init の focusedPane を概要へ渡す (設計書 §13)")
+  func passesFocusedPaneThroughBothInitializers() throws {
+    let key = try session("/a/.git/worktrees/t", 2)
+    let focused = PaneID(rawValue: "%2")
+    let inputs = [
+      OverviewWorktreeInput(session: key, paneStates: [], focusedPane: focused),
+      OverviewWorktreeInput(worktree: key.identity, paneStates: [], focusedPane: focused),
+    ]
+    let overview = try #require(
+      makeAgentPaneOverview([try project("/a/.git", tasks: inputs)]).first)
+
+    #expect(inputs.map(\.focusedPane) == [focused, focused])
+    #expect(overview.tasks.map(\.focusedPane) == [focused, focused])
+    #expect(OverviewWorktreeInput(session: key, paneStates: []).focusedPane == nil)
+    #expect(OverviewWorktreeInput(worktree: key.identity, paneStates: []).focusedPane == nil)
+  }
+
+  @Test(
+    "表示中の印はフォーカスのある Agent pane 行にだけ付ける (設計書 §13)",
+    arguments: ["%1", "%2", "%99", Optional<String>.none], [true, false])
+  func marksOnlyFocusedPane(focusedID: String?, isDisplayed: Bool) throws {
+    var input = try task("/a/.git/worktrees/t", [pane("%1", .working), pane("%2", .idle)])
+    input.focusedPane = focusedID.map { PaneID(rawValue: $0) }
+    let overview = try #require(
+      makeAgentPaneOverview([try project("/a/.git", tasks: [input])]).first)
+    let worktree = try #require(overview.tasks.first)
+
+    #expect(worktree.focusedPane == input.focusedPane)
+    #expect(worktree.rows.count == 2)
+    #expect(
+      worktree.rows.map { worktree.showsDisplayedMark(on: $0, isDisplayed: isDisplayed) }
+        == [isDisplayed && focusedID == "%1", isDisplayed && focusedID == "%2"])
+  }
+
+  @Test(
+    "Agent 不在と未観測の行はフォーカスによらず表示中なら印を付ける (設計書 §13)",
+    arguments: [true, false], ["%99", Optional<String>.none])
+  func marksPlaceholderRows(isObserved: Bool, focusedID: String?) throws {
+    let input = OverviewWorktreeInput(
+      session: try session("/a/.git/worktrees/t", 2), paneStates: [],
+      isObserved: isObserved, focusedPane: focusedID.map { PaneID(rawValue: $0) })
+    let overview = try #require(
+      makeAgentPaneOverview([try project("/a/.git", tasks: [input])]).first)
+    let worktree = try #require(overview.tasks.first)
+
+    #expect(worktree.focusedPane == input.focusedPane)
+    #expect(worktree.rows == (isObserved ? [.noAgentPane] : [.notObserved]))
+    let row = try #require(worktree.rows.first)
+    #expect(worktree.showsDisplayedMark(on: row, isDisplayed: true))
+    #expect(!worktree.showsDisplayedMark(on: row, isDisplayed: false))
+  }
+
   private func session(_ path: String, _ index: Int) throws -> TerminalSessionKey {
     let identity = try #require(WorktreeIdentity(rawValue: path))
     return try #require(TerminalSessionKey(identity: identity, index: index))

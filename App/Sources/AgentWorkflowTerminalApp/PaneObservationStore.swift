@@ -27,6 +27,42 @@ final class PaneObservationStore: ObservableObject {
     /// `#{pane_pid}`。メイン pane の登録 (`MainPaneRegistration`) が今もその pane を指すかの照合に
     /// 使う — `%N` だけで照合すると、server の再起動で振り直された別の pane に印が付く。
     var processIDs: [PaneID: Int32] = [:]
+    /// `nil` はフォーカスのある pane をまだ観測できていない状態。
+    var focusedPane: PaneID?
+    var focusSelection: FocusSelection?
+
+    struct FocusSelection: Equatable {
+      let pane: PaneID
+      let selectedAt: ContinuousClock.Instant
+    }
+
+    mutating func selectFocus(_ pane: PaneID, at instant: ContinuousClock.Instant) {
+      focusedPane = pane
+      focusSelection = FocusSelection(pane: pane, selectedAt: instant)
+    }
+
+    mutating func receiveFocus(_ located: [LocatedPaneSummaryReadings]) {
+      // 同じ window を重ねて link すると同じ PaneID が複数行に現れ、isFocused は行ごとに違う。
+      // PaneID の辞書へ畳んでから調べると、後ろの link のフォーカスを取りこぼす。
+      receiveFocusedPanes(
+        Set(located.filter(\.isFocused).map { $0.readings.pane.id }),
+        listedAt: located.compactMap { $0.readings.pane.listedAt }.max())
+    }
+
+    mutating func receiveFocusedPanes(
+      _ panes: Set<PaneID>, listedAt: ContinuousClock.Instant?
+    ) {
+      let focused = panes.count == 1 ? panes.first : nil
+      if let selection = focusSelection, focused != selection.pane {
+        // 選択前に tmux が処理した一覧でも、読了だけは選択後になり得る。読了時刻が
+        // 選択より後というだけでは解除せず、1回の list-panes より長い猶予を置く (§13)。
+        guard let listedAt, listedAt > selection.selectedAt.advanced(by: .seconds(1)) else {
+          return
+        }
+      }
+      focusedPane = focused
+      focusSelection = nil
+    }
 
     mutating func receivePaneStates(_ snapshot: WorktreePaneAgentStates) {
       latestPaneStates = snapshot.panes
@@ -152,6 +188,13 @@ final class PaneObservationStore: ObservableObject {
     guard let paneOperations else { return nil }
     do {
       try await paneOperations.selectWindowAndPane(pane: pane)
+      let selectedAt = clock.now
+      for (session, current) in observed
+      where current.details[pane] != nil
+        || current.displayStates.contains(where: { $0.paneID == pane })
+      {
+        observed[session]?.selectFocus(pane, at: selectedAt)
+      }
       return nil
     } catch {
       return error
@@ -307,6 +350,7 @@ final class PaneObservationStore: ObservableObject {
         title: OverviewPaneDetail.displayTitle(fromPaneTitle: snapshot.pane.title))
     }
     guard !Task.isCancelled, var current = observed[session] else { return }
+    current.receiveFocus(located)
     logNewDiagnostics(for: summaries, of: session)
     let rawStates = Dictionary(
       (current.latestPaneStates ?? []).map { ($0.id, $0.state) },

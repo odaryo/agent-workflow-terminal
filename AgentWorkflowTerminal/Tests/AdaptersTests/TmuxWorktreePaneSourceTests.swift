@@ -331,6 +331,30 @@ struct TmuxWorktreePaneSourceTests {
     #expect(byWorktree == first)
   }
 
+  @Test("複数 window の active pane のうち active window の pane だけにフォーカスがある")
+  func locatedSummaryReadingsCarrySessionFocus() async throws {
+    let worktree = try #require(WorktreeIdentity(rawValue: "/repo/.git/worktrees/focus"))
+    let session = TerminalSessionKey.primary(worktree)
+    let name = TmuxSessionName(key: session).rawValue
+    let output = [
+      [
+        "%0", name, "0", "@0", "0", "100", "1", "sh", "0", "", "", "", "/tmp", "",
+        "0", "v", "v", "v",
+      ],
+      [
+        "%1", name, "1", "@1", "0", "101", "1", "sh", "0", "", "", "", "/tmp", "",
+        "1", "v", "v", "v",
+      ],
+    ].map { $0.joined(separator: "\u{1F}") }.joined(separator: "\n")
+    let spy = WorktreePaneProcessSpy(result: .init(exitCode: 0, stdout: output, stderr: ""))
+
+    let located = try await makeSource(spy).locatedSummaryReadings(of: session)
+
+    #expect(located.map(\.readings.pane.id.rawValue) == ["%0", "%1"])
+    #expect(located.map(\.location.windowIndex) == [0, 1])
+    #expect(located.map(\.isFocused) == [false, true])
+  }
+
   /// 同じ worktree の番号 1・2 と別の worktree の番号 1・2 を交互に並べ、番号 2 の名前に
   /// 前方一致する番号 20 の session も混ぜる。
   private func mixedOutput(_ sessions: SessionsOfTwoWorktrees) throws -> String {

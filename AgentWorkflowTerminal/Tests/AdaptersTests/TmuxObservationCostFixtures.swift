@@ -201,13 +201,13 @@ func makeTmuxRunner(
   )
 }
 
-/// `TmuxListPanes.formatWithSummary` の17フィールドを、区切りに生 0x1F を使って組み立てた1行。
+/// `TmuxListPanes.formatWithSummary` の18フィールドを、区切りに生 0x1F を使って組み立てた1行。
 /// tmux 3.7c の非 control-mode 出力がこの形で、parser は両版を受理する。末尾3つは連携変数が
 /// 未設定の形 (旗 `v` だけ)。
 func makeListPanesLine(session: String, paneID: String, panePID: Int32) -> String {
   [
     paneID, session, "0", "@0", "0", String(panePID), "1", "sh", "0", "", "",
-    "/dev/ttys000", "/tmp", "title", "v", "v", "v",
+    "/dev/ttys000", "/tmp", "title", "1", "v", "v", "v",
   ].joined(separator: "\u{1F}") + "\n"
 }
 

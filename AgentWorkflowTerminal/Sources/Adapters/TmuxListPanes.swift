@@ -17,6 +17,7 @@ public struct TmuxPane: Sendable, Hashable, Codable {
   public let panePID: Int32
   /// tmux `#{pane_active}` の `0` / `1` だけを Bool へ変換した値。
   public let isActive: Bool
+  public let isWindowActive: Bool
   public let currentCommand: String
   /// `nil` は live pane を表し、観測失敗はこの型にせず parse failure として分離する。
   public let termination: ProcessTermination?
@@ -35,6 +36,7 @@ public struct TmuxPane: Sendable, Hashable, Codable {
     paneIndex: Int,
     panePID: Int32,
     isActive: Bool,
+    isWindowActive: Bool,
     currentCommand: String,
     termination: ProcessTermination?,
     tty: String,
@@ -49,6 +51,7 @@ public struct TmuxPane: Sendable, Hashable, Codable {
     self.paneIndex = paneIndex
     self.panePID = panePID
     self.isActive = isActive
+    self.isWindowActive = isWindowActive
     self.currentCommand = currentCommand
     self.termination = termination
     self.tty = tty
@@ -56,6 +59,8 @@ public struct TmuxPane: Sendable, Hashable, Codable {
     self.title = title
     self.summaryReadings = summaryReadings
   }
+
+  public var isFocused: Bool { isActive && isWindowActive }
 
   public var snapshot: PaneSnapshot { snapshot(listedAt: nil) }
 
@@ -140,6 +145,7 @@ public enum TmuxListPanes {
     #"#{s/\\/\\\\/:pane_tty}"#,
     #"#{s/\\/\\\\/:pane_current_path}"#,
     #"#{s/\\/\\\\/:pane_title}"#,
+    "#{window_active}",
   ].joined(separator: formatSeparator)
 
   /// `display-message` の Unit Separator も list-panes と同じ見え方をする (3.4 は `\037`、
@@ -176,7 +182,7 @@ public enum TmuxListPanes {
     return try parse(paneFields: encodedFields, summaryReadings: nil)
   }
 
-  static let paneFieldCount = 14
+  static let paneFieldCount = 15
 
   static func parse(
     paneFields encodedFields: [String], summaryReadings: PaneSummaryReadings?
@@ -207,6 +213,7 @@ public enum TmuxListPanes {
     }
 
     let isActive = try parsePaneActive(encodedFields[6])
+    let isWindowActive = try parseWindowActive(encodedFields[14])
     let isDead = try parsePaneDead(encodedFields[8])
     let termination = try parseTermination(
       isDead: isDead,
@@ -222,6 +229,7 @@ public enum TmuxListPanes {
       paneIndex: paneIndex,
       panePID: panePID,
       isActive: isActive,
+      isWindowActive: isWindowActive,
       currentCommand: try decodeRawField(encodedFields[7]),
       termination: termination,
       tty: try decodeRawField(encodedFields[11]),
@@ -302,6 +310,16 @@ public enum TmuxListPanes {
     case "0": false
     case "1": true
     default: throw .invalidPaneActive(field)
+    }
+  }
+
+  private static func parseWindowActive(
+    _ field: String
+  ) throws(TmuxListPanesParseError) -> Bool {
+    switch field {
+    case "0": false
+    case "1": true
+    default: throw .invalidWindowActive(field)
     }
   }
 

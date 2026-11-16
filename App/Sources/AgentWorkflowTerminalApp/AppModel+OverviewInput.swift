@@ -24,6 +24,7 @@ extension OverviewWorktreeInput {
       session: session, paneStates: displayStates,
       details: observation?.details ?? [:], mainPane: mainPane,
       isObserved: observation?.paneStates != nil
-        && !(observation?.isPaneListUnavailable == true && displayStates.isEmpty))
+        && !(observation?.isPaneListUnavailable == true && displayStates.isEmpty),
+      focusedPane: observation?.focusedPane)
   }
 }

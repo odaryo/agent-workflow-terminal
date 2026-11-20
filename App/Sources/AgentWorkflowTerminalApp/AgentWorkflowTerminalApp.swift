@@ -84,8 +84,12 @@ struct ProjectView: View {
         WarningBar(text: scanFailureWarning) { model.dismissScanFailureWarning() }
         Divider()
       }
-      WorktreeClosePanelHost(closing: model.closing, masksProjectName: masksProjectName)
-      TerminalSessionClosePanelHost(closing: model.sessionClosing) { model.confirmCloseSession() }
+      WorktreeClosePanelHost(
+        closing: model.closing, masksProjectName: masksProjectName,
+        selectedIdentity: model.selectedIdentity, sessionKeys: model.sessionKeys)
+      TerminalSessionClosePanelHost(
+        closing: model.sessionClosing, displayedSession: model.displayedSession
+      ) { model.confirmCloseSession() }
 
       if let message = model.message ?? model.emptyStateMessage {
         ContentUnavailableView(
@@ -125,9 +129,7 @@ struct ProjectView: View {
       }
     }
     .onAppear {
-      var restored = ViewerArrangementPreferences.restoredLayout()
-      if let content = model.viewerDrawerLayout.content { restored.open(content) }
-      model.viewerDrawerLayout = restored
+      model.reloadViewerArrangements()
     }
     // Project の切替前に出た要求は、新しい view では初回値になる。dropFirst すると失われる。
     .onReceive(model.paneObservations.$terminalFocusRequest) { _ in

@@ -6,9 +6,14 @@ import TerminalCore
 struct WorktreeClosePanelHost: View {
   @ObservedObject var closing: WorktreeClosing
   let masksProjectName: Bool
+  let selectedIdentity: WorktreeIdentity?
+  let sessionKeys: [TerminalSessionKey]
 
   var body: some View {
-    if let session = closing.session {
+    if let session = closing.session,
+      ClosePanelVisibility.showsWorktreeClose(
+        for: session.target.identity, selected: selectedIdentity, sessionKeys: sessionKeys)
+    {
       WorktreeClosePanel(session: session, masksProjectName: masksProjectName)
         .id(ObjectIdentifier(session))
       Divider()

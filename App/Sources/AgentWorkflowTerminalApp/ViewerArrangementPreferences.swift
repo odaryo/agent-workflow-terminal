@@ -4,10 +4,6 @@ import TerminalCore
 enum ViewerArrangementPreferences {
   static let key = "viewerDrawer.contentArrangements"
 
-  static func restoredLayout() -> ViewerDrawerLayout {
-    ViewerDrawerLayout(arrangements: load())
-  }
-
   static func load(from defaults: UserDefaults = .standard) -> ViewerContentArrangements {
     guard let data = defaults.data(forKey: key) else { return .defaults }
     return (try? JSONDecoder().decode(ViewerContentArrangements.self, from: data)) ?? .defaults
@@ -21,8 +17,9 @@ enum ViewerArrangementPreferences {
 }
 
 extension AppModel {
-  func saveViewerArrangements(replacing old: ViewerDrawerLayout) {
-    guard viewerDrawerLayout.arrangements != old.arrangements else { return }
-    ViewerArrangementPreferences.save(viewerDrawerLayout.arrangements)
+  func saveViewerArrangements(replacing old: ViewerContentArrangements) {
+    let arrangements = viewerDrawerStates.arrangements
+    guard arrangements != old else { return }
+    ViewerArrangementPreferences.save(arrangements)
   }
 }

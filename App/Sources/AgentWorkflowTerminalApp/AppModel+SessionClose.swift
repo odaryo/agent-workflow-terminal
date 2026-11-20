@@ -12,6 +12,7 @@ extension AppModel {
     guard canCloseSession(key), !sessionClosing.isTerminating else { return }
     if let session = closing.session, case .executing = session.phase { return }
     if sessionLayout.tabs(in: key.identity).count == 1 {
+      select(key)
       requestClose(of: key.identity)
       return
     }
@@ -24,6 +25,7 @@ extension AppModel {
       if activity == .shellOnly {
         self.terminateSession(key)
       } else {
+        self.select(key)
         self.sessionClosing.showConfirmation(
           key, title: self.sessionDisplayTitle(key), activity: activity)
       }

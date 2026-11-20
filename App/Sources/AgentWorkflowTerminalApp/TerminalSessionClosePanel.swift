@@ -1,11 +1,15 @@
 import SwiftUI
+import TerminalCore
 
 struct TerminalSessionClosePanelHost: View {
   @ObservedObject var closing: TerminalSessionClosing
+  let displayedSession: TerminalSessionKey?
   let confirm: () -> Void
 
   var body: some View {
-    if let confirmation = closing.confirmation {
+    if let confirmation = closing.confirmation,
+      ClosePanelVisibility.showsSessionClose(for: confirmation.key, displayed: displayedSession)
+    {
       VStack(alignment: .leading, spacing: 8) {
         Text("セッションを閉じる: \(confirmation.title)").font(.headline)
         Text(

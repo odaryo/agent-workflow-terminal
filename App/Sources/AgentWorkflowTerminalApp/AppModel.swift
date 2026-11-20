@@ -6,10 +6,10 @@ import TerminalCore
 @MainActor
 final class AppModel: ObservableObject {
   @Published private(set) var projectRoot: DetectedWorktree? {
-    didSet { paneObservations.observe(inventory, sessions: sessionKeys) }
+    didSet { worktreeInventoryChanged() }
   }
   @Published private(set) var worktrees: [TaskWorktree] = [] {
-    didSet { paneObservations.observe(inventory, sessions: sessionKeys) }
+    didSet { worktreeInventoryChanged() }
   }
   @Published var displayedSession: TerminalSessionKey?
   @Published var openedSessions: Set<TerminalSessionKey> = []
@@ -20,8 +20,10 @@ final class AppModel: ObservableObject {
   var newlyAddedSessions: Set<TerminalSessionKey> = []
   var restoredSessions: Set<TerminalSessionKey> = []
 
-  @Published var viewerDrawerLayout = ViewerArrangementPreferences.restoredLayout() {
-    didSet { saveViewerArrangements(replacing: oldValue) }
+  @Published var viewerDrawerStates = ViewerDrawerStates(
+    arrangements: ViewerArrangementPreferences.load()
+  ) {
+    didSet { saveViewerArrangements(replacing: oldValue.arrangements) }
   }
   /// 印を出す worktree。`MergedWorktreeMarkRefresher` が通知した順に MainActor で代入する。
   @Published private(set) var mergedWorktrees: Set<WorktreeIdentity> = []
@@ -118,9 +120,15 @@ final class AppModel: ObservableObject {
 
   var selectedIdentity: WorktreeIdentity? { displayedSession?.identity }
 
-  var sessionKeys: [TerminalSessionKey] {
-    sessionLayout.tabs(
-      directories: [projectRoot?.identity].compactMap { $0 } + sessionWorktrees.map(\.identity))
+  private var sessionDirectories: [WorktreeIdentity] {
+    [projectRoot?.identity].compactMap { $0 } + sessionWorktrees.map(\.identity)
+  }
+
+  var sessionKeys: [TerminalSessionKey] { sessionLayout.tabs(directories: sessionDirectories) }
+
+  private func worktreeInventoryChanged() {
+    viewerDrawerStates.retainContents(for: Set(sessionDirectories))
+    paneObservations.observe(inventory, sessions: sessionKeys)
   }
 
   func selectNewSession(
